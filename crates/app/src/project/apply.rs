@@ -465,6 +465,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         }
         file.version = 48;
     }
+    if file.version == 48 {
+        // v48 -> v49: the strategy grammar grows one word (M11.4 C,
+        // `offset_rings` - the pre-C Adaptive ring tiling kept as a
+        // choice) that a v48 file cannot contain (the arrival law).
+        // No row seats or moves, so the pins stand: pure step-up.
+        // A v48 `adaptive` reads as the HSM plan it now names; its
+        // stamp digest changed, so it regenerates once, saying so.
+        file.version = 49;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

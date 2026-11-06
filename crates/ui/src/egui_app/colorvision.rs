@@ -1,8 +1,10 @@
 //! The ColorVision layer (M13.4, DONE M6.1's named follow-on): protan,
 //! deutan and tritan remaps of the colours that CARRY MEANING - the
 //! Deviate verdict classes (clean / rest / gouge / unjudged), the
-//! toolpath move kinds (feed / rapid / plunge) and the viewport's
-//! selection lift - applied on top of whatever theme is live. The
+//! toolpath move kinds (feed / rapid / plunge), the viewport's
+//! selection lift and the pages' warning / error / missing text inks
+//! (per panel ground, gated against the body text and the panel
+//! itself), applied on top of whatever theme is live. The
 //! chrome tokens are not remapped: they are a blue-on-neutral
 //! luminance design every dichromacy already reads, and the gate below
 //! proves that per mode instead of trusting it.
@@ -57,6 +59,35 @@ pub struct Semantic {
     pub bound_include: [f32; 3],
     pub bound_exclude: [f32; 3],
     pub bound_open: [f32; 3],
+    /// The page's meaning-carrying TEXT inks (M13.4 owed item), one set
+    /// per ground: a remap picks by the panel's luminance, since no one
+    /// ink reads at 4.5:1 on both a dark and a light panel.
+    pub text_dark: TextInks,
+    pub text_light: TextInks,
+}
+
+/// The warning / error / missing-reference text inks of the op page,
+/// the status refusals and the boundary notes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextInks {
+    /// Warnings (egui's `warn_fg_color` slot: preview refusals, the
+    /// not-judged header line).
+    pub warn: Color32,
+    /// Refusals (the status-line red of a refused command).
+    pub error: Color32,
+    /// A geometry chip whose feature no longer resolves.
+    pub missing: Color32,
+}
+
+impl TextInks {
+    /// The house inks, exactly what the pages drew before: egui's own
+    /// dark-visuals warning (the theme builds on `Visuals::dark()` and
+    /// never respells it), the page red and the chip grey.
+    pub const HOUSE: TextInks = TextInks {
+        warn: Color32::from_rgb(255, 143, 0),
+        error: Color32::from_rgb(0xFF, 0x59, 0x59),
+        missing: Color32::from_rgb(0xB8, 0xB8, 0xC8),
+    };
 }
 
 /// The unselected edge inks the selection must stand off from: the
@@ -80,6 +111,8 @@ impl Semantic {
         bound_include: [0.20, 0.75, 0.95],
         bound_exclude: [0.92, 0.25, 0.60],
         bound_open: [0.98, 0.62, 0.12],
+        text_dark: TextInks::HOUSE,
+        text_light: TextInks::HOUSE,
     };
 
     /// Protan and deutan share the red-green confusion line, so one
@@ -101,6 +134,18 @@ impl Semantic {
         bound_include: [0.25, 0.45, 1.00],
         bound_exclude: [0.95, 0.90, 0.30],
         bound_open: [0.95, 0.95, 0.95],
+        // Warning on the yellow end, refusal on the violet end of the
+        // surviving blue-yellow axis; the missing chip reads as a warning.
+        text_dark: TextInks {
+            warn: Color32::from_rgb(255, 230, 51),
+            error: Color32::from_rgb(204, 140, 255),
+            missing: Color32::from_rgb(255, 230, 51),
+        },
+        text_light: TextInks {
+            warn: Color32::from_rgb(140, 77, 0),
+            error: Color32::from_rgb(140, 0, 217),
+            missing: Color32::from_rgb(140, 77, 0),
+        },
     };
 
     /// Tritan loses blue-yellow: rest moves to pink (red-cyan survives),
@@ -119,6 +164,17 @@ impl Semantic {
         bound_include: [0.10, 0.70, 0.75],
         bound_exclude: [0.90, 0.15, 0.20],
         bound_open: [0.95, 0.95, 0.95],
+        // Red-cyan survives: warning goes cyan, refusal stays red.
+        text_dark: TextInks {
+            warn: Color32::from_rgb(77, 217, 217),
+            error: Color32::from_rgb(255, 128, 128),
+            missing: Color32::from_rgb(77, 217, 217),
+        },
+        text_light: TextInks {
+            warn: Color32::from_rgb(0, 107, 107),
+            error: Color32::from_rgb(179, 0, 26),
+            missing: Color32::from_rgb(0, 107, 107),
+        },
     };
 
     /// The pairs whose difference IS the message (the boundary roles since
@@ -145,7 +201,31 @@ impl Semantic {
             ("exclude/open boundary", self.bound_exclude, self.bound_open),
         ]
     }
+
+    /// The text inks for a panel ground: the light set on a light
+    /// panel, the dark set otherwise (WCAG luminance past mid-grey).
+    #[must_use]
+    pub fn text_on(&self, ground: Color32) -> TextInks {
+        if contrast::luma(ground) > LIGHT_GROUND { self.text_light } else { self.text_dark }
+    }
+
+    /// The text pairs that must stay apart on this theme's panel:
+    /// error, warning and the body text, each against the others.
+    #[must_use]
+    pub fn text_pairs(&self, t: &Tokens) -> [(&'static str, Color32, Color32); 4] {
+        let i = self.text_on(t.ink);
+        [
+            ("error/warning text", i.error, i.warn),
+            ("error/body text", i.error, t.text),
+            ("warning/body text", i.warn, t.text),
+            ("missing/body text", i.missing, t.text),
+        ]
+    }
 }
+
+/// The luminance past which a panel counts as light for [`Semantic::text_on`]
+/// (dark's ink is 0.02, light's 0.85; mid-grey sits at 0.18).
+const LIGHT_GROUND: f64 = 0.18;
 
 /// The palette a mode wears.
 #[must_use]
@@ -172,6 +252,25 @@ pub fn ink(c: [f32; 3]) -> Color32 {
     Color32::from_rgb(u(c[0]), u(c[1]), u(c[2]))
 }
 
+/// The page text inks the world's colour-vision mode gives for this
+/// panel (the live ground is the visuals' panel fill, the theme's ink).
+#[must_use]
+pub fn text_inks(ui: &Ui, world: &flecs_ecs::prelude::World) -> TextInks {
+    palette_of(world).text_on(ui.visuals().panel_fill)
+}
+
+fn rgb(c: Color32) -> [f64; 3] {
+    [f64::from(c.r()) / 255.0, f64::from(c.g()) / 255.0, f64::from(c.b()) / 255.0]
+}
+
+/// One ink as the given eye sees it, back on the 8-bit grid.
+#[must_use]
+pub fn seen_ink(c: Color32, mode: ColorVision) -> Color32 {
+    let v = cvd::simulate(rgb(c), mode);
+    let u = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Color32::from_rgba_unmultiplied(u(v[0]), u(v[1]), u(v[2]), c.a())
+}
+
 fn wide(c: [f32; 3]) -> [f64; 3] {
     [f64::from(c[0]), f64::from(c[1]), f64::from(c[2])]
 }
@@ -181,11 +280,7 @@ fn wide(c: [f32; 3]) -> [f64; 3] {
 /// gate reads under a remap.
 #[must_use]
 pub fn seen_tokens(t: &Tokens, mode: ColorVision) -> Tokens {
-    let s = |c: Color32| {
-        let v = cvd::simulate([f64::from(c.r()) / 255.0, f64::from(c.g()) / 255.0, f64::from(c.b()) / 255.0], mode);
-        let u = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-        Color32::from_rgba_unmultiplied(u(v[0]), u(v[1]), u(v[2]), c.a())
-    };
+    let s = |c: Color32| seen_ink(c, mode);
     Tokens {
         ink: s(t.ink),
         ink_alt: s(t.ink_alt),
@@ -231,8 +326,43 @@ pub fn gate(mode: ColorVision, tokens: &Tokens) -> Option<String> {
                 mode.label()
             ));
         }
+        if let Some(why) = text_gate(mode, tokens) {
+            return Some(why);
+        }
     }
     contrast::readable(&seen_tokens(tokens, mode)).map(|why| format!("{}: {why}", mode.label()))
+}
+
+/// The text half of a remap's gate: on this theme's panel, every
+/// warning/error/missing ink reads at body contrast against both
+/// grounds the pages sit on, and the text pairs keep the floor - all as
+/// the mode's eye sees them. `None` = admitted.
+#[must_use]
+pub fn text_gate(mode: ColorVision, tokens: &Tokens) -> Option<String> {
+    let p = palette(mode);
+    let inks = p.text_on(tokens.ink);
+    for (role, c) in [("error", inks.error), ("warning", inks.warn), ("missing", inks.missing)] {
+        for (ground, bg) in [("ink", tokens.ink), ("ink_alt", tokens.ink_alt)] {
+            let r = contrast::ratio(seen_ink(c, mode), seen_ink(bg, mode));
+            if r < contrast::BODY {
+                return Some(format!(
+                    "{role} text on {ground} reads {r:.1}:1 for {}, under the {}:1 floor",
+                    mode.label(),
+                    contrast::BODY
+                ));
+            }
+        }
+    }
+    for (name, a, b) in p.text_pairs(tokens) {
+        let d = cvd::seen_apart(rgb(a), rgb(b), mode);
+        if d < MIN_DE00 {
+            return Some(format!(
+                "{name} sits {d:.1} apart (CIEDE2000) for {} - under the {MIN_DE00} floor",
+                mode.label()
+            ));
+        }
+    }
+    None
 }
 
 /// The picker beside the theme switcher: a combo of the four modes,

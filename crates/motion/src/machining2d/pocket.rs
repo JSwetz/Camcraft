@@ -17,21 +17,25 @@ use super::fillet_tally::{FilletTally, fillet_floor};
 use super::ring::ring_is_circular;
 use super::waterscan::{scan_row, waterline_passes};
 use super::slots::chord_clears;
+use super::pocket_hsm::adaptive_passes;
 /// How a pocket is filled: straight rows back and forth, or closed rings
 /// marching inward.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PocketStrategy {
     Zigzag,
     Waterline,
-    /// Constant-engagement rings (M2.1c's law, real for the planar
-    /// pocket since M5.1 H): the same ring tiling as Waterline, but
-    /// spaced at the params' `optimal_load` x D (M11.4 B: the radial
-    /// width as a fraction of the diameter; the contact angle
-    /// `acos(1 - 2 ae/D)` is derived from it, `crate::load`) instead of
-    /// a free stepover, so every pass bites the wall by the same bound.
-    /// Until H this was Waterline's geometry at the stated stepover - a
-    /// documented alias; the law runs here and in the 3-D ladder alike.
+    /// HSM adaptive clearing (M11.4 C, `adaptive`): a spiral out of
+    /// the entry bore, then engagement fronts against the in-process
+    /// stock with smooth stay-down links and trochoidal arcs in narrow
+    /// channels, every cut measured to hold the `optimal_load` (ae/D,
+    /// `crate::load`). The 3-D ladder still plans this as
+    /// [`PocketStrategy::OffsetRings`] (its per-level port is owed).
     Adaptive,
+    /// The pre-M11.4 C adaptive (M2.1c's law, planar since M5.1 H):
+    /// the Waterline ring tiling spaced at `optimal_load` x D instead
+    /// of a free stepover - concentric rings, kept as an explicit
+    /// choice so every program it posted stays byte-identical.
+    OffsetRings,
     /// Waterline where the pocket's outer boundary is round enough for
     /// rings to be the honest shape, Zigzag otherwise. The resolution is
     /// [`PocketStrategy::resolve`] - the panel quotes it verbatim, so an
@@ -163,7 +167,9 @@ impl PocketParams {
             // bound keeps their innermost ring honest. The law's step
             // is at most one radius for any angle in the door, so
             // beyond it the door is the check.
-            PocketStrategy::Waterline | PocketStrategy::Adaptive => self.tool_diameter * 0.5,
+            PocketStrategy::Waterline | PocketStrategy::Adaptive | PocketStrategy::OffsetRings => {
+                self.tool_diameter * 0.5
+            }
         };
         if self.tiling_step() > reach {
             return Err(GenError::Invalid(
@@ -194,7 +200,7 @@ impl PocketParams {
                 ));
             }
         }
-        if self.strategy == PocketStrategy::Adaptive {
+        if matches!(self.strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
             // The law's own bounds, same as the 3-D ladder's door: a
             // zero load is a zero step (an infinite ladder), and past
             // half the diameter (90 degrees of contact) the step passes
@@ -214,7 +220,9 @@ impl PocketParams {
     /// `Pocket3DParams::tiling_step` (M5.1 H).
     fn tiling_step(&self) -> f64 {
         match self.strategy {
-            PocketStrategy::Adaptive => load_step(self.tool_diameter, self.optimal_load),
+            PocketStrategy::Adaptive | PocketStrategy::OffsetRings => {
+                load_step(self.tool_diameter, self.optimal_load)
+            }
             _ => self.stepover,
         }
     }
@@ -262,21 +270,32 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         s => s,
     };
-    let passes = plan_passes(&center, p.tiling_step(), p.climb, strategy)?;
-    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    // The HSM plan may choose where its entry stands (`pocket_hsm`).
+    let (passes, strategy, room) = match strategy {
+        PocketStrategy::Adaptive => {
+            let (passes, notes, s, room) = adaptive_passes(&center, p)?;
+            notes.into_iter().for_each(|n| b.note(n));
+            (passes, s, room)
+        }
+        s => (plan_passes(&center, p.tiling_step(), p.climb, s)?, s, None),
+    };
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     // Waterline rings circle around material, so they get the arc fitter
     // (rings straight enough to be lines stay exactly that); zigzag rows
     // are straight by construction and keep the plain walk.
+    // The HSM plan is walked as planned (`adaptive`: sub-micron chords;
+    // a 10 um arc fit could cross a neighbouring turn or leave a wall).
     let fit = match strategy {
-        PocketStrategy::Zigzag | PocketStrategy::Auto => None,
-        PocketStrategy::Waterline | PocketStrategy::Adaptive => Some(ARC_FIT_TOL),
+        PocketStrategy::Zigzag | PocketStrategy::Auto | PocketStrategy::Adaptive => None,
+        PocketStrategy::Waterline | PocketStrategy::OffsetRings => Some(ARC_FIT_TOL),
     };
+    // The HSM plan's entry may orbit a narrowed helix (`pocket_hsm`).
+    let helix_r = room.as_ref().map_or(p.helix_radius, |e| e.helix_r);
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
-        .with_entry(p.entry, p.helix_radius)
+        .with_entry(p.entry, helix_r)
         .with_arc_radius(p.tool_diameter)
-        .with_links(p.links, p.helix_radius)
+        .with_links(p.links, helix_r)
         .with_top(p.top_z);
     // The walks: fitted where the strategy fits, then - opted in - the
     // corner fillets, proved inside the cutter-center area. Passes are
@@ -306,13 +325,24 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     } else {
         fit.map(|tol| passes.iter().map(|p| fit_arcs(p, tol)).collect())
     };
+    // The entry room: the plan's spot as a zero-length stadium (its disc
+    // certifies the chords, its triangle is where `dive_room` finds it).
+    // The entry and a "same as entry" level change are planned by the
+    // shared descents (`descent::plan`: one entry per level, plunge
+    // height, centre cutting) against it - the helix closes on the pass
+    // start exactly around the spot the plan bored. Keep-down links and
+    // a user-set transition are proved against the whole center area.
+    let cert = match &room {
+        Some(e) => Cert::Stadium { a: e.seed, b: e.seed, h: e.clear, tess: &e.tess },
+        None => Cert::Region(&center),
+    };
     run_level_walks(
         &mut b,
         &passes,
         &zs,
         &motion,
         runs.as_deref(),
-        Some(&Cert::Region(&center)),
+        Some(&cert),
         Some(&Cert::Region(&center)),
     );
     let cur = b.at();
@@ -393,9 +423,10 @@ pub(crate) fn plan_passes(
 ) -> Result<Vec<Vec<Point2>>, GenError> {
     match strategy {
         PocketStrategy::Zigzag | PocketStrategy::Auto => zigzag_passes(center, stepover, climb),
-        // Adaptive is ring tiling; who chose the step is the caller's
-        // law (3-D: the engagement bound; here: the plain stepover).
-        PocketStrategy::Waterline | PocketStrategy::Adaptive => {
+        // Offset rings are ring tiling at the caller's step; the 3-D
+        // ladder's Adaptive still plans rings here (the planar HSM
+        // plan is `pocket`'s own, `pocket_hsm.rs`).
+        PocketStrategy::Waterline | PocketStrategy::Adaptive | PocketStrategy::OffsetRings => {
             waterline_passes(center, stepover, climb)
         }
     }

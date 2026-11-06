@@ -1420,6 +1420,9 @@ pub enum StrategyDto {
     /// waterline alias - the geometry family has no engagement field to
     /// feed it).
     Adaptive,
+    /// Added at v49 (M11.4 C): the pre-C Adaptive ring tiling, kept
+    /// as an explicit choice when `adaptive` became the HSM plan.
+    OffsetRings,
 }
 
 /// Which side of its geometry a contour runs, on the wire. Added at v7

@@ -9750,3 +9750,52 @@ heights can't see a gouge under an overhang that a tilted tool reaches.
 
 (8) **Found: rotary ops can't post** (verify convicts hundreds of
 shank/sweep hits on box/cylinder stock) - under investigation.
+
+## M11.4 C - the HSM adaptive, merged (round 2 + rebase): seven decisions (2026-11-06)
+
+(1) **Acceptance met where the spiral runs.** Bore R12.5, rectangle
+60x40 and the L-pocket: peak load 15.4% (target <= 16.1% = 14.64% +
+10%), 0 direction changes over 5 deg in cut, no slotting, one descent
+per level, no self-crossing, clean under the exact solid-law verifier.
+Island and narrow-slot pockets fall back to Offset rings by name.
+
+(2) **One engagement law for planning and measuring** (D/120 grid,
+same rim, 360 samples, same wall rule), with a +5% planning margin;
+Adaptive passes are posted unfitted (sub-micron chords), because a 10 um
+arc fit made spiral turns cross and ride off walls.
+
+(3) **Morph spiral for star-shaped areas** (Held & Spielberger 2009;
+Bieterman & Sandstrom 2003; Serra's opening; Stori & Wright 2000 per
+revolution), with the entry spot in the area's kernel (Lee & Preparata
+1979) and the helix narrowed to fit, named. A corner scallop at
+R = 0.5r is left and named for finishing.
+
+(4) **A crossing guard refuses any self-crossing plan** and Offset rings
+cut instead, named. Dropped: retract hops with fronts, and an annulus
+spiral around islands (both crossed or overloaded).
+
+(5) **The entry goes through the shared descent** (M11.3), so one entry
+per level, the 2 mm plunge height and centre cutting apply to Adaptive
+too; the helix closes exactly on the spiral's start.
+
+(6) **The old rings stay as `PocketStrategy::OffsetRings`.**
+PROJECT_VERSION 48 -> 49 with a migration; existing Adaptive ops go
+Stale once and regenerate as the spiral.
+
+(7) **Owed:** islands and channels without fallback (medial-axis cells
+or true trochoids), an achievable air target (2x the rings looks
+unreachable with climb-only constant engagement - the rings' low air
+comes from slotting at 100% load), and the Pocket3D per-level port.
+Slow generation tests were shrunk or moved to the heavy lane, none
+dropped.
+
+## Small owed UI items: two decisions (2026-11-06)
+
+(1) **Warning and error text follow the colour-vision setting**, with
+one ink set per panel lightness (no single colour reads 4.5:1 on both
+panels). Under protan/deutan, meaning moves to blue-yellow (yellow
+warning, violet error); under tritan to red-cyan. Off stays exempt and
+pixel-identical.
+
+(2) **Height-relationship notes resolve Selection heights** through the
+op's source, and an unresolved one says why instead of staying silent.

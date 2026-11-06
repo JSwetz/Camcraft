@@ -35,7 +35,10 @@ use super::*;
 /// (the partition law wants contiguous sections, so the 5-Axis Contour
 /// and everything after it slide +1): a v47 file cannot contain the
 /// new variant (arrival law) and its pins name a table that moved.
-pub const PROJECT_VERSION: u32 = 48;
+/// v49: the pure step-up (M11.4 C) - the strategy grammar grows
+/// `offset_rings`; no row moves, no pin shifts, absent words read as
+/// before (the arrival law).
+pub const PROJECT_VERSION: u32 = 49;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

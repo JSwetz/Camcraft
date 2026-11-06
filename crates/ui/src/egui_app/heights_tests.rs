@@ -130,3 +130,69 @@ fn the_combo_offers_selection_and_a_bottom_row_takes_the_low_end() {
     // Offset 5 from the block's lowest Z (5): the echo is the resolver's.
     assert!(harness.query_by_label("(= Z 10.000)").is_some(), "offset 5 above Z 5");
 }
+
+fn with_retract(mut p: OpParams, r: Height) -> OpParams {
+    if let OpParams::Pocket { retract_z, .. } = &mut p {
+        *retract_z = Some(r);
+    }
+    p
+}
+
+/// M11.3 A owed item: the retract-vs-clearance note resolves through the
+/// op's own source, so a Selection-referenced clearance under a fixed
+/// retract speaks with the selection's resolved Z (block top 9 + 1).
+#[test]
+fn a_selection_clearance_under_the_retract_names_its_resolved_z() {
+    let params = with_retract(
+        pocket(Height::of(R::TopOfSelection, 1.0), Height::fixed(9.0), Height::fixed(5.0)),
+        Height::fixed(12.0),
+    );
+    let mut harness = heights_tab(opened(params));
+    harness.run();
+    let note = "above clearance - the hop travels at 10.000 (min of the two)";
+    assert!(harness.query_by_label(note).is_some(), "the note names the Selection Z");
+}
+
+/// The mirror: a Selection-referenced retract (9 + 6 = 15) above a fixed
+/// clearance of 11 - the old `Height::z` read None here and said nothing.
+/// Under a clearance of 20 the relation is healthy and the page is quiet.
+#[test]
+fn a_selection_retract_above_clearance_produces_the_note() {
+    let params = with_retract(
+        pocket(Height::fixed(11.0), Height::fixed(9.0), Height::fixed(5.0)),
+        Height::of(R::TopOfSelection, 6.0),
+    );
+    let mut harness = heights_tab(opened(params));
+    harness.run();
+    let note = "above clearance - the hop travels at 11.000 (min of the two)";
+    assert!(harness.query_by_label(note).is_some(), "the Selection retract speaks");
+    let quiet = with_retract(
+        pocket(Height::fixed(20.0), Height::fixed(9.0), Height::fixed(5.0)),
+        Height::of(R::TopOfSelection, 6.0),
+    );
+    let mut harness = heights_tab(opened(quiet));
+    harness.run();
+    assert!(harness.query_by_label_contains("above clearance -").is_none(), "15 under 20 is healthy");
+    assert!(harness.query_by_label_contains("unresolved").is_none(), "and it resolved");
+}
+
+/// Unresolved is said, never guessed: with no op source in hand a
+/// Selection height cannot resolve, and the note names the reason.
+#[test]
+fn an_unresolved_relation_says_why_never_a_number() {
+    let state = State::new();
+    let note = crate::operations::retract_note(
+        &state.world,
+        None,
+        None,
+        &Height::of(R::TopOfSelection, 6.0),
+        &Height::fixed(11.0),
+    );
+    assert_eq!(
+        note.as_deref(),
+        Some("retract vs clearance unresolved: no operation selection in this context")
+    );
+    let corner =
+        crate::operations::corner_note(&state.world, None, None, &Height::of(R::TopOfSelection, 0.0), 1.0);
+    assert_eq!(corner, "the corner is unresolved: no operation selection in this context");
+}

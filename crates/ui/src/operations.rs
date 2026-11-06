@@ -27,7 +27,9 @@ use camcraft_app::verify::Warning;
 /// [`camcraft_app::machining2d::PocketStrategy::resolve`] answers which
 /// path it cuts at generate.
 pub fn strategy_names() -> &'static [&'static str] {
-    &["Zigzag", "Waterline", "Adaptive", "Auto"]
+    // M11.4 C: "Offset rings" is the pre-C Adaptive ring tiling, kept
+    // as a choice; appended so stored indices never move.
+    &["Zigzag", "Waterline", "Adaptive", "Auto", "Offset rings"]
 }
 /// The 3-D pocket's Strategy combo, in index order. Adaptive joins the
 /// family (M2.1c); Auto stays last, the same shape as
@@ -97,6 +99,64 @@ pub(crate) fn height_echo(
             "(unresolved: {})",
             operation::missing_source(world, setup, src, h.reference).unwrap_or("source missing")
         ),
+    }
+}
+
+/// The first unresolved reason of a set of heights, phrased for a note:
+/// `Err(reason)` when any fails, else every Z in order.
+fn resolve_all<const N: usize>(
+    world: &World,
+    setup: Option<&str>,
+    src: Option<&SrcRef>,
+    hs: [&Height; N],
+) -> Result<[f64; N], &'static str> {
+    let mut out = [0.0; N];
+    for (slot, h) in out.iter_mut().zip(hs) {
+        *slot = operation::resolve_height(world, setup, src, *h).ok_or_else(|| {
+            operation::missing_source(world, setup, src, h.reference).unwrap_or("source missing")
+        })?;
+    }
+    Ok(out)
+}
+
+/// The retract-above-clearance note (M11.3 A owed item): both heights
+/// resolve through the op's own source, as the row echo does, so a
+/// Selection-referenced height speaks too. `None` when the relation is
+/// healthy; an unresolved height says why - never a wrong number.
+pub(crate) fn retract_note(
+    world: &World,
+    setup: Option<&str>,
+    src: Option<&SrcRef>,
+    retract: &Height,
+    clearance: &Height,
+) -> Option<String> {
+    match resolve_all(world, setup, src, [retract, clearance]) {
+        Ok([rz, cz]) => (rz > cz).then(|| {
+            format!(
+                "above clearance - the hop travels at {} (min of the two)",
+                units::len(cz, units::of(world), 3)
+            )
+        }),
+        Err(why) => Some(format!("retract vs clearance unresolved: {why}")),
+    }
+}
+
+/// The chamfer's derived corner Z (width x tan(angle) below the top),
+/// resolved through the op's source like [`retract_note`].
+pub(crate) fn corner_note(
+    world: &World,
+    setup: Option<&str>,
+    src: Option<&SrcRef>,
+    top: &Height,
+    drop: f64,
+) -> String {
+    match resolve_all(world, setup, src, [top]) {
+        Ok([tz]) if (tz - drop).is_finite() => format!(
+            "the corner stands at {} - derived: width x tan(angle) below the top plane",
+            units::len(tz - drop, units::of(world), 3)
+        ),
+        Ok(_) => "the corner is unresolved: width x tan(angle) is not finite".to_owned(),
+        Err(why) => format!("the corner is unresolved: {why}"),
     }
 }
 

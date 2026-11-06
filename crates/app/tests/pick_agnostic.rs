@@ -189,12 +189,26 @@ fn every_pick_of_the_bore_cuts_the_same_bytes_under_every_strategy() {
     assert!(labels.contains(&"wall patch"), "{labels:?}");
     assert_eq!(labels.iter().filter(|l| l.starts_with("chain")).count(), 2, "{labels:?}");
     for params in [
-        pocket(PocketStrategy::Adaptive, 20.0, 0.0),
         pocket(PocketStrategy::Zigzag, 20.0, 0.0),
         pocket(PocketStrategy::Waterline, 20.0, 0.0),
         pocket(PocketStrategy::Auto, 20.0, 0.0),
-        adaptive2d(20.0, 0.0),
+        pocket(PocketStrategy::OffsetRings, 20.0, 0.0),
     ] {
+        all_identical(&world, &name, &picks, &params);
+    }
+}
+
+/// The same pick law under the HSM plan (M11.4 C): Adaptive and the 2D
+/// Adaptive kind plan by measuring every cut against the stock - eight
+/// plans of the user's bore, minutes in debug, so this half of the law
+/// rides the heavy lane.
+#[test]
+#[ignore = "heavy lane: HSM adaptive generation"]
+fn every_pick_of_the_bore_cuts_the_same_bytes_under_hsm_adaptive() {
+    let (world, name) = user_part();
+    let picks = bore_picks(&world, &name);
+    assert_eq!(picks.len(), 4);
+    for params in [pocket(PocketStrategy::Adaptive, 20.0, 0.0), adaptive2d(20.0, 0.0)] {
         all_identical(&world, &name, &picks, &params);
     }
 }
@@ -209,16 +223,44 @@ fn the_chosen_strategy_runs_on_the_round_region_never_a_substitute() {
     let picks = bore_picks(&world, &name);
     let floor = picks.iter().find(|(l, _)| l.starts_with("face")).map(|(_, s)| *s).expect("floor face");
     let cut = |p: &OpParams| generate(&world, &name, &[floor], p).expect("generates").0;
-    // Adaptive: rings stepped by the optimal load, 14.64% of D = 1.464 mm.
-    let a = cut(&pocket(PocketStrategy::Adaptive, 20.0, 0.0));
+    // Offset rings (the pre-M11.4 C adaptive, kept by name): rings
+    // stepped by the optimal load, 14.64% of D = 1.464 mm.
+    let o = cut(&pocket(PocketStrategy::OffsetRings, 20.0, 0.0));
     let mut radii: Vec<f64> =
-        level_feeds(&a, 15.0).iter().map(|m| (m.to.x.hypot(m.to.y) * 100.0).round() / 100.0).collect();
+        level_feeds(&o, 15.0).iter().map(|m| (m.to.x.hypot(m.to.y) * 100.0).round() / 100.0).collect();
     radii.dedup();
     assert!(radii.len() >= 4, "{radii:?}");
     let step = camcraft_app::load::DEFAULT_OPTIMAL_LOAD * 10.0;
     for w in radii.windows(2) {
         assert!((w[1] - w[0] - step).abs() < 0.02, "ring spacing {radii:?} must be ae = {step}");
     }
+    // Adaptive (M11.4 C) is the HSM plan on the very same round floor:
+    // a spiral whose cut points sweep the radii continuously - never a
+    // handful of concentric ring radii (the user's "just because it's a
+    // round hole doesn't mean it needs to be circular paths").
+    // (A helix entry: the HSM spiral opens from its bore; out of a
+    // tool-size plunge it cannot hold the load and says so by falling
+    // back to the rings.)
+    let mut hp = pocket(PocketStrategy::Adaptive, 20.0, 0.0);
+    if let OpParams::Pocket { entry, helix_radius, .. } = &mut hp {
+        *entry = Entry3D::Helix;
+        *helix_radius = 2.0;
+    }
+    // The depth-aware verifier is silent on it (M11.4 C round 2: the
+    // HSM spiral never crosses itself, never leaves the floor's area).
+    let (a, warns) = generate(&world, &name, &[floor], &hp).expect("generates");
+    assert_eq!(warns, 0, "the user's bore under HSM verifies clean: {:?}", a.notes);
+    assert!(
+        !a.notes.iter().any(|n| n.contains("Offset rings cut this pocket instead")),
+        "the HSM plan runs on the user's bore: {:?}",
+        a.notes
+    );
+    let mut ar: Vec<f64> =
+        level_feeds(&a, 15.0).iter().map(|m| (m.to.x.hypot(m.to.y) * 100.0).round() / 100.0).collect();
+    ar.sort_by(f64::total_cmp);
+    ar.dedup();
+    assert!(ar.len() > 4 * radii.len(), "a spiral, not rings: {} radii vs the rings' {}", ar.len(), radii.len());
+    assert_ne!(common::gen_to_cltext(&a), common::gen_to_cltext(&o));
     // Zigzag on the same round floor stays rows: straight, no ring arcs.
     let z = cut(&pocket(PocketStrategy::Zigzag, 20.0, 0.0));
     let zf = level_feeds(&z, 15.0);

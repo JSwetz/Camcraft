@@ -2044,8 +2044,9 @@ fn trace_is_deterministic() {
 
 
 #[test]
-fn adaptive_is_the_engagement_law_on_the_plane() {
-    // Since M5.1 H the planar pocket's Adaptive rings march inward at
+fn offset_rings_are_the_engagement_law_on_the_plane() {
+    // Since M5.1 H the planar pocket's engagement rings (Adaptive until
+    // M11.4 C, Offset rings since - Adaptive is the HSM plan) march at
     // the engagement step r (1 - cos theta), not at a free stepover -
     // the alias is gone. The law's closed end is the equality check:
     // 90 degrees gives step = r exactly, the tiling a Waterline run at
@@ -2054,7 +2055,7 @@ fn adaptive_is_the_engagement_law_on_the_plane() {
     let mut w = pp();
     w.strategy = PocketStrategy::Waterline;
     let mut a = pp();
-    a.strategy = PocketStrategy::Adaptive;
+    a.strategy = PocketStrategy::OffsetRings;
     a.optimal_load = 0.5;
     a.stepover = 9.0; // the ignored field, deliberately out of reach
     let tw = pocket(&region, &w).expect("waterline valid");
@@ -2066,7 +2067,7 @@ fn adaptive_is_the_engagement_law_on_the_plane() {
     // Below the closed end the angle, not the field, spaces the rings:
     // a 45 budget bites at r(1 - cos 45) ~ 1.46 and rings far denser.
     let mut s = pp();
-    s.strategy = PocketStrategy::Adaptive;
+    s.strategy = PocketStrategy::OffsetRings;
     s.optimal_load = camcraft_motion::load::DEFAULT_OPTIMAL_LOAD;
     let ts = pocket(&region, &s).expect("adaptive at 45 valid");
     assert!(

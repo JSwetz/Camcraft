@@ -120,10 +120,8 @@ const FINISH_PATTERNS: [&str; 18] = [
     "Flow",
 ];
 
-/// The pane's amber for a chip whose feature id no longer resolves.
-const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
-/// The status-line red for a refused command (imgui's [1.0,0.35,0.35]).
-const RED: Color32 = Color32::from_rgb(0xFF, 0x59, 0x59);
+// The refusal red and the missing-chip ink ride the colour-vision
+// palette (`colorvision::TextInks`; Off is the old literals exactly).
 /// The note gray imgui's geometry notes use ([0.62,0.66,0.72]).
 const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 
@@ -182,7 +180,7 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
 
 fn setup_error(ui: &mut Ui, state: &State) {
     if let Some(msg) = state.error_for(ErrorScope::Setup).map(str::to_owned) {
-        ui.colored_label(RED, msg);
+        ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
     }
 }
 
@@ -416,7 +414,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
                 let remove = ui
                     .horizontal(|ui| {
                         let resp = if missing {
-                            ui.colored_label(AMBER, &label)
+                            ui.colored_label(super::colorvision::text_inks(ui, &state.world).missing, &label)
                         } else {
                             ui.label(&label)
                         };
@@ -473,7 +471,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
             .filter(|m| m.starts_with("geometry selection not updated") || m.starts_with("links not updated"))
             .map(str::to_owned);
         if let Some(msg) = refusal.or(door) {
-            ui.colored_label(RED, msg);
+            ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
         }
         if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
             let n = state.op_ui.src_name.clone();
@@ -549,7 +547,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
         ui.label(why);
     }
     if let Some(msg) = state.error_for(ErrorScope::Operation).map(str::to_owned) {
-        ui.colored_label(RED, msg);
+        ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
     }
 }
 
@@ -610,14 +608,7 @@ fn roughing2d_pane(
         if let Some(r) = retract_z {
             field(ui, "Retract Z");
             height_editor(ui, world, op_ctx, r, &format!("{tag}.retract"));
-            if let (Some(rz), Some(cz)) = (r.z(world), clearance_z.z(world))
-                && rz > cz
-            {
-                ui.label(format!(
-                    "above clearance - the hop travels at {} (min of the two)",
-                    units::len(cz, u, 3)
-                ));
-            }
+            retract_note(ui, world, op_ctx, r, clearance_z);
         }
         field(ui, "Top Z");
         height_editor(ui, world, op_ctx, top_z, &format!("{tag}.top"));
@@ -896,15 +887,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     retract_z,
                     "contour.retract",
                 );
-                if let (Some(rz), Some(cz)) =
-                    (retract_z.z(&state.world), clearance_z.z(&state.world))
-                    && rz > cz
-                {
-                    ui.label(format!(
-                        "above clearance - the hop travels at {} (min of the two)",
-                        units::len(cz, u, 3)
-                    ));
-                }
+                retract_note(ui, &state.world, op_ctx.as_deref(), retract_z, clearance_z);
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "contour.top");
                 field(ui, "Bottom Z");
@@ -1027,14 +1010,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "pocket.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "pocket.top");
@@ -1067,6 +1043,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
+                    PocketStrategy::OffsetRings => 4,
                 };
                 let names = strategy_names();
                 let before = st_idx;
@@ -1076,10 +1053,11 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         1 => PocketStrategy::Waterline,
                         2 => PocketStrategy::Adaptive,
                         3 => PocketStrategy::Auto,
+                        4 => PocketStrategy::OffsetRings,
                         _ => PocketStrategy::Zigzag,
                     };
                 }
-                if matches!(strategy, PocketStrategy::Adaptive) {
+                if matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 if let Some(note) = &auto_note {
@@ -1289,14 +1267,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "trace.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "trace.top");
@@ -1384,24 +1355,11 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "chamfer.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "chamfer.top");
-                if let Some(tz) = top_z.z(&state.world) {
-                    let corner = tz - *width * angle_deg.to_radians().tan();
-                    ui.label(format!(
-                        "the corner stands at {} - derived: width x tan(angle) below the top plane",
-                        units::len(corner, u, 3)
-                    ));
-                }
+                corner_note(ui, &state.world, op_ctx.as_deref(), top_z, *width * angle_deg.to_radians().tan());
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));
@@ -1518,14 +1476,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "circ.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "circ.top");
@@ -1631,14 +1582,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "drill.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Depth");
                 let mut over = bottom_z.is_some();
@@ -1761,14 +1705,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "bore.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "R plane (feed starts here)");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "bore.top");
@@ -1868,14 +1805,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "thread.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "R plane (feed starts here)");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "thread.top");
@@ -1955,14 +1885,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "pocket3d.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "pocket3d.top");
@@ -1988,6 +1911,8 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
+                    // The 3-D ladder plans both as rings (M11.4 C).
+                    PocketStrategy::OffsetRings => 2,
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
@@ -2058,14 +1983,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "finish3d.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "finish3d.top");
@@ -2308,14 +2226,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "contour5d.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "contour5d.top");
@@ -2381,14 +2292,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "parallel5d.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "parallel5d.top");
@@ -2473,14 +2377,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "flow5d.retract");
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "flow5d.top");
@@ -2571,14 +2468,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         r,
                         "multi_axis_contour.retract",
                     );
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(
@@ -2826,6 +2716,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
+                    PocketStrategy::OffsetRings => 2,
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
@@ -2913,14 +2804,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         r,
                         "multiaxis_rough.retract",
                     );
-                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                        && rz > cz
-                    {
-                        ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)",
-                            units::len(cz, u, 3)
-                        ));
-                    }
+                    retract_note(ui, &state.world, op_ctx.as_deref(), r, clearance_z);
                 }
                 field(ui, "Top Z");
                 height_editor(
@@ -2952,6 +2836,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
+                    PocketStrategy::OffsetRings => 2,
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
@@ -3718,14 +3603,7 @@ fn swarf_editor(
         if let Some(r) = retract_z {
             field(ui, "Retract Z");
             height_editor(ui, world, setup, r, "swarf.retract");
-            if let (Some(rz), Some(cz)) = (r.z(world), clearance_z.z(world))
-                && rz > cz
-            {
-                ui.label(format!(
-                    "above clearance - the hop travels at {} (min of the two)",
-                    units::len(cz, u, 3)
-                ));
-            }
+            retract_note(ui, world, setup, r, clearance_z);
         }
         field(ui, "Top Z");
         height_editor(ui, world, setup, top_z, "swarf.top");
@@ -3815,14 +3693,7 @@ fn rotary_editor(
         if let Some(r) = retract_z {
             field(ui, "Retract Z");
             height_editor(ui, world, setup, r, "rotary.retract");
-            if let (Some(rz), Some(cz)) = (r.z(world), clearance_z.z(world))
-                && rz > cz
-            {
-                ui.label(format!(
-                    "above clearance - the hop travels at {} (min of the two)",
-                    units::len(cz, u, 3)
-                ));
-            }
+            retract_note(ui, world, setup, r, clearance_z);
         }
         field(ui, "Top Z");
         height_editor(ui, world, setup, top_z, "rotary.top");
@@ -4008,6 +3879,27 @@ fn height_editor(
     ui.push_id(tag, |ui| {
         height_editor_inner(ui, world, setup, h, height_tag_is_bottom(tag));
     });
+}
+
+/// The height-relationship notes under the Heights rows, resolved through
+/// the edited op's own source (the same frame-temp the echo reads), so a
+/// Selection-referenced height speaks too (M11.3 A owed item).
+fn retract_note(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    retract: &Height,
+    clearance: &Height,
+) {
+    let src: Option<SrcRef> = ui.data(|d| d.get_temp(egui::Id::new(HEIGHT_SRC_ID)));
+    if let Some(note) = crate::operations::retract_note(world, setup, src.as_ref(), retract, clearance) {
+        ui.label(note);
+    }
+}
+
+fn corner_note(ui: &mut Ui, world: &flecs_ecs::prelude::World, setup: Option<&str>, top: &Height, drop: f64) {
+    let src: Option<SrcRef> = ui.data(|d| d.get_temp(egui::Id::new(HEIGHT_SRC_ID)));
+    ui.label(crate::operations::corner_note(world, setup, src.as_ref(), top, drop));
 }
 
 /// The frame-temp key `params_fields` stores the edited op's source under,
@@ -4867,7 +4759,7 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         actions::open_tool_editor(state, "");
     }
     if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
-        ui.colored_label(RED, msg);
+        ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
     }
     ui.separator();
     ui.heading("Catalog");
@@ -4930,6 +4822,7 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
         .unwrap_or("program")
         .to_owned();
     let mut open = view.open;
+    let warn_ink = super::colorvision::palette_of(&state.world).text_on(super::theme::current().ink).warn;
     // Disjoint field borrows: the closure writes `line` and reads
     // `program` at once, and `open` is a copy resolved after the pass.
     let PostView {
@@ -4966,7 +4859,7 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
                     ui.add(
                         Label::new(
                             egui::RichText::new(format!("WARNING: {line}"))
-                                .color(ui.visuals().warn_fg_color),
+                                .color(warn_ink),
                         )
                         .truncate(),
                     )
@@ -5331,7 +5224,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                 }
             }
             if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
-                ui.colored_label(RED, msg);
+                ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
             }
         });
     if !open {

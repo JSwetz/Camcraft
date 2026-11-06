@@ -55,6 +55,14 @@ fn add_tool(world: &World, history: &mut History, name: &str) {
 /// region is the stock's own silhouette, so no model feature can make
 /// the twins and the pocket disagree about anything but their name.
 fn job(tag: &str, params: OpParams) -> (World, History, Toolpath) {
+    job_on(tag, params, 60.0)
+}
+
+/// [`job`] on a `side` x `side` box: the HSM plan (M11.4 C) the
+/// Adaptive kind now runs measures every cut against the stock, so its
+/// equivalence laws ride a smaller footprint to stay in the debug lane -
+/// the same laws, the same tool, a quarter of the area or less.
+fn job_on(tag: &str, params: OpParams, side: f64) -> (World, History, Toolpath) {
     let world = new_world();
     let mut history = History::default();
     history.execute(
@@ -62,8 +70,8 @@ fn job(tag: &str, params: OpParams) -> (World, History, Toolpath) {
         SetStock::new(
             &world,
             StockShape::Box {
-                dx: 60.0,
-                dy: 60.0,
+                dx: side,
+                dy: side,
                 dz: 20.0,
             },
             Location::default(),
@@ -86,6 +94,14 @@ fn job(tag: &str, params: OpParams) -> (World, History, Toolpath) {
 
 fn text(params: OpParams, tag: &str) -> String {
     let (_w, _h, path) = job(tag, params);
+    gen_to_cltext(&path)
+}
+
+/// The side the Adaptive (HSM) equivalence laws run on - see [`job_on`].
+const HSM_SIDE: f64 = 24.0;
+
+fn text_hsm(params: OpParams, tag: &str) -> String {
+    let (_w, _h, path) = job_on(tag, params, HSM_SIDE);
     gen_to_cltext(&path)
 }
 
@@ -158,12 +174,12 @@ fn adaptive_kind_is_the_pockets_engagement_ladder() {
     // Two worlds, the same job: the catalog name and the pocket set
     // to Adaptive cut the same program byte for byte - the pin in
     // generate.rs is the only thing the name changes.
-    let (_w, _h, t) = job("ADP", adaptive(45.0));
+    let (_w, _h, t) = job_on("ADP", adaptive(45.0), HSM_SIDE);
     assert!(t.is_chained() && t.all_finite(), "a real engagement ladder");
     assert!(!t.moves.is_empty(), "and not an empty one");
     assert_eq!(
-        text(adaptive(45.0), "ADP2"),
-        text(pocket(PocketStrategy::Adaptive, 45.0), "PKT"),
+        text_hsm(adaptive(45.0), "ADP2"),
+        text_hsm(pocket(PocketStrategy::Adaptive, 45.0), "PKT"),
         "the name must not move the G-code"
     );
 }
@@ -186,11 +202,11 @@ fn the_engagement_door_is_live_on_adaptive_only() {
     // 30° and 90° cut different ladders, and each equals the pocket
     // set to the same angle - so it is the number flowing, not a
     // constant wearing the field's name.
-    let a30 = text(adaptive(30.0), "A30");
-    let a90 = text(adaptive(90.0), "A90");
+    let a30 = text_hsm(adaptive(30.0), "A30");
+    let a90 = text_hsm(adaptive(90.0), "A90");
     assert_ne!(a30, a90, "the door bites or the kind is a lie");
-    assert_eq!(a90, text(pocket(PocketStrategy::Adaptive, 90.0), "P90"));
-    assert_eq!(a30, text(pocket(PocketStrategy::Adaptive, 30.0), "P30"));
+    assert_eq!(a90, text_hsm(pocket(PocketStrategy::Adaptive, 90.0), "P90"));
+    assert_eq!(a30, text_hsm(pocket(PocketStrategy::Adaptive, 30.0), "P30"));
 }
 
 #[test]

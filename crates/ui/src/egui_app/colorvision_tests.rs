@@ -111,3 +111,61 @@ fn switching_is_a_command_with_undo() {
     run(&mut state, CommandKind::Undo);
     assert_eq!(color_vision_of(&state.world), ColorVision::Off, "the refused re-pick pushed nothing");
 }
+
+fn rgb(c: egui::Color32) -> [f64; 3] {
+    [f64::from(c.r()) / 255.0, f64::from(c.g()) / 255.0, f64::from(c.b()) / 255.0]
+}
+
+/// The M13.4 owed item: the page's warning / error / missing text inks
+/// are remapped too. Under each remap, on each built-in table, every ink
+/// reads at body contrast on both page grounds as that eye sees them,
+/// and error vs warning vs body text keep the separation floor.
+#[test]
+fn every_remap_keeps_warning_and_error_text_readable_and_apart() {
+    for mode in REMAPS {
+        for (col, t) in [("dark", Tokens::DARK), ("light", Tokens::LIGHT)] {
+            assert_eq!(colorvision::text_gate(mode, &t), None, "{mode:?} {col}");
+            let inks = colorvision::palette(mode).text_on(t.ink);
+            for c in [inks.warn, inks.error, inks.missing] {
+                for bg in [t.ink, t.ink_alt] {
+                    let r = contrast::ratio(colorvision::seen_ink(c, mode), colorvision::seen_ink(bg, mode));
+                    assert!(r >= contrast::BODY, "{mode:?} {col}: {c:?} on {bg:?} reads {r:.2}:1");
+                }
+            }
+            for (name, a, b) in colorvision::palette(mode).text_pairs(&t) {
+                let d = cvd::seen_apart(rgb(a), rgb(b), mode);
+                assert!(d >= MIN_DE00, "{mode:?} {col} {name}: CIEDE2000 {d:.1}");
+            }
+        }
+    }
+}
+
+/// The text remap is not decoration either: the house warning orange and
+/// refusal red sit under the floor for the red-green eyes.
+#[test]
+fn the_house_text_inks_need_the_remap() {
+    let h = colorvision::TextInks::HOUSE;
+    for mode in [ColorVision::Protan, ColorVision::Deutan] {
+        let d = cvd::seen_apart(rgb(h.warn), rgb(h.error), mode);
+        assert!(d < MIN_DE00, "{mode:?}: house warn/error reads {d:.1}");
+    }
+}
+
+/// Off keeps every text pixel: the house inks are egui's own warning
+/// (what both tables' visuals carry), the page red and the chip grey, on
+/// either ground; and a remap picks its set by the panel's lightness.
+#[test]
+fn off_text_inks_are_the_house_literals() {
+    let off = colorvision::palette(ColorVision::Off);
+    assert_eq!(off.text_dark, colorvision::TextInks::HOUSE);
+    assert_eq!(off.text_light, colorvision::TextInks::HOUSE);
+    for t in [Tokens::DARK, Tokens::LIGHT] {
+        assert_eq!(off.text_on(t.ink), colorvision::TextInks::HOUSE);
+        assert_eq!(t.visuals().warn_fg_color, colorvision::TextInks::HOUSE.warn, "warn_fg is the house warn");
+    }
+    assert_eq!(colorvision::TextInks::HOUSE.error, egui::Color32::from_rgb(0xFF, 0x59, 0x59));
+    assert_eq!(colorvision::TextInks::HOUSE.missing, egui::Color32::from_rgb(0xB8, 0xB8, 0xC8));
+    let rg = colorvision::palette(ColorVision::Deutan);
+    assert_eq!(rg.text_on(Tokens::DARK.ink), rg.text_dark);
+    assert_eq!(rg.text_on(Tokens::LIGHT.ink), rg.text_light);
+}

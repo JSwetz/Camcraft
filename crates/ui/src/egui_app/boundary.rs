@@ -101,7 +101,7 @@ fn body(ui: &mut Ui, state: &mut State, u: camcraft_app::units::Unit) {
     if let Some(p) = &state.boundary_view.preview
         && let Some(why) = &p.refusal
     {
-        ui.colored_label(ui.visuals().warn_fg_color, why);
+        ui.colored_label(super::colorvision::text_inks(ui, &state.world).warn, why);
     }
     if ui.small_button("Reset boundary").clicked() {
         acts.push(Act::Reset);
@@ -204,7 +204,7 @@ fn entry_row(ui: &mut Ui, state: &State, n: usize, e: &Entry, acts: &mut Vec<Act
         }
     });
     if let Some(issue) = &e.issue {
-        ui.colored_label(ui.visuals().warn_fg_color, issue);
+        ui.colored_label(super::colorvision::text_inks(ui, &state.world).warn, issue);
     }
 }
 

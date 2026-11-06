@@ -15,6 +15,8 @@
 
 use thiserror::Error;
 
+mod sweep;
+
 use clipper2_rust::{
     EndType, FillRule, JoinType, Path64, Paths64, Point64, inflate_paths_64, intersect_64,
     difference_64, union_64, union_subjects_64,
@@ -31,12 +33,12 @@ pub(crate) const COORD_LIMIT: f64 = 1e12;
 /// Round-join arc flattening: maximum radial error in units. 5e3 = 5 um -
 /// finer than CAM gouge tolerances, coarse enough that a full circle at
 /// tool radius stays in the dozens of segments.
-const ARC_TOL_UNITS: f64 = 5e3;
+pub(crate) const ARC_TOL_UNITS: f64 = 5e3;
 
 /// Miter limit of [`Region::offset_sharp`] (Clipper's default): a corner
 /// sharper than ~60 degrees is squared off at twice the offset instead of
 /// running a spike out to infinity.
-const MITER_LIMIT: f64 = 2.0;
+pub(crate) const MITER_LIMIT: f64 = 2.0;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum GeoError {
@@ -746,7 +748,7 @@ fn to_paths(loops: &[Loop]) -> Result<Paths64, GeoError> {
     Ok(paths)
 }
 
-fn quantize(mm: f64) -> Result<i64, GeoError> {
+pub(crate) fn quantize(mm: f64) -> Result<i64, GeoError> {
     if !mm.is_finite() {
         return Err(GeoError::Invalid("non-finite coordinate".into()));
     }

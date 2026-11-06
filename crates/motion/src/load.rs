@@ -73,3 +73,21 @@ pub fn load_step(diameter: f64, load: f64) -> f64 {
 pub fn load_in_door(load: f64) -> bool {
     load.is_finite() && load > 0.0 && load <= MAX_OPTIMAL_LOAD
 }
+
+/// The straight-wall load (ae/D) a contact angle `deg` read on a rim of
+/// radius `rim` stands for: the wall that rim meets at that angle sits
+/// `rim cos(deg)` from the center, so `ae = r - rim cos(deg)`. Clamped
+/// to `[0, 1]` (a buried tool reads a full diameter).
+#[must_use]
+pub fn load_at_rim(deg: f64, diameter: f64, rim: f64) -> f64 {
+    let r = diameter * 0.5;
+    ((r - rim * deg.min(180.0).to_radians().cos()) / diameter).clamp(0.0, 1.0)
+}
+
+/// The inverse: the contact angle a straight wall at `load` reads on a
+/// rim of radius `rim` (degrees; 0 when the wall is beyond the rim).
+#[must_use]
+pub fn deg_at_rim(load: f64, diameter: f64, rim: f64) -> f64 {
+    let r = diameter * 0.5;
+    ((r - load * diameter) / rim.max(1e-12)).clamp(-1.0, 1.0).acos().to_degrees()
+}

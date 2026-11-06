@@ -118,7 +118,7 @@ impl OpParams {
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
                     && (optimal_load.is_finite()
-                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                        && (!matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings)
                             || crate::load::load_in_door(*optimal_load)))
             }
             // The twins' doors are the pocket's, read with the
@@ -292,7 +292,7 @@ impl OpParams {
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
                     && (optimal_load.is_finite()
-                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                        && (!matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings)
                             || crate::load::load_in_door(*optimal_load)))
             }
             OpParams::Finish3D {
@@ -539,7 +539,7 @@ impl OpParams {
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
                     && (optimal_load.is_finite()
-                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                        && (!matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings)
                             || crate::load::load_in_door(*optimal_load)))
                     && angle(lead_deg)
                     && angle(lag_deg)
@@ -584,7 +584,7 @@ impl OpParams {
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
                     && (optimal_load.is_finite()
-                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                        && (!matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings)
                             || crate::load::load_in_door(*optimal_load)))
                     && angle(lead_deg)
                     && angle(lag_deg)

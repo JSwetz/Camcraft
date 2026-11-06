@@ -233,7 +233,11 @@ impl OpParams {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
-                    PocketStrategy::Adaptive => 3,
+                    // M11.4 C: the HSM plan is a new generation of the
+                    // word (old Adaptive ops go Stale once); the rings
+                    // keep the byte they always digested under.
+                    PocketStrategy::Adaptive => 4,
+                    PocketStrategy::OffsetRings => 3,
                 });
                 h.write_u8(match entry {
                     Entry3D::Plunge => 0,
@@ -288,6 +292,9 @@ impl OpParams {
                 });
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);
+                // M11.4 C: the kind now runs the HSM plan, not rings -
+                // a generation word so every pre-C op goes Stale once.
+                h.write_u8(0xA4);
             }
             OpParams::Offset2D {
                 links: _,
@@ -356,7 +363,7 @@ impl OpParams {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
-                    PocketStrategy::Adaptive => 3,
+                    PocketStrategy::Adaptive | PocketStrategy::OffsetRings => 3,
                 });
                 h.write_u8(match entry {
                     Entry3D::Plunge => 0,
@@ -682,7 +689,7 @@ impl OpParams {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
-                    PocketStrategy::Adaptive => 3,
+                    PocketStrategy::Adaptive | PocketStrategy::OffsetRings => 3,
                 });
                 h.write_u8(match entry {
                     Entry3D::Plunge => 0,
@@ -736,7 +743,7 @@ impl OpParams {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
-                    PocketStrategy::Adaptive => 3,
+                    PocketStrategy::Adaptive | PocketStrategy::OffsetRings => 3,
                 });
                 h.write_u8(match entry {
                     Entry3D::Plunge => 0,

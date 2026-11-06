@@ -26,6 +26,7 @@ pub mod load;
 pub mod finishing3d;
 pub mod machining2d;
 pub mod machining3d;
+pub mod quality;
 pub mod multiaxis;
 pub mod turning;
 

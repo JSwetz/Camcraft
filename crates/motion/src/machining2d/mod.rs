@@ -44,6 +44,8 @@ mod lead_fit;
 mod ladder_links;
 mod levels;
 mod pocket;
+mod pocket_hsm;
+mod adaptive;
 mod ring;
 mod slots;
 mod waterscan;

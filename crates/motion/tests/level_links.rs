@@ -548,9 +548,14 @@ fn nonsense_link_numbers_refuse_by_name() {
 /// last ended, Z monotone, the drop per turn constant; it lands on the
 /// level and links onto the first cut. (The flat look was the viewport
 /// drawing every arc chord at its start Z - fixed in the UI overlay.)
+///
+/// The law is the helix's, not the pocket's size: since the HSM plan
+/// (M11.4 C) measures every cut, the debug lane holds it on a 30 x 20
+/// pocket; the user's 60 x 40 rides the heavy lane in `adaptive_hsm`
+/// (`a_small_helix_rectangle_never_crosses_itself`).
 #[test]
 fn the_helix_entry_is_one_continuous_descent() {
-    let r = rect(0.0, 0.0, 60.0, 40.0);
+    let r = rect(0.0, 0.0, 30.0, 20.0);
     let mut p = pp(Entry3D::Helix, Links::PLANAR);
     p.tool_diameter = 10.0;
     p.stepover = 4.0;

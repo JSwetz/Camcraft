@@ -1087,8 +1087,8 @@ fn geometry_notes_report_through_the_panel_seam() {
 fn strategy_combo_offers_auto() {
     assert_eq!(
         camcraft_ui::operations::strategy_names(),
-        &["Zigzag", "Waterline", "Adaptive", "Auto"],
-        "the combo offers Adaptive and Auto beside the explicit choices"
+        &["Zigzag", "Waterline", "Adaptive", "Auto", "Offset rings"],
+        "the combo offers Adaptive, Auto and (M11.4 C) the pre-HSM Offset rings beside the explicit choices"
     );
 }
 

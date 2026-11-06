@@ -121,6 +121,7 @@ impl ParamsDto {
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                     PocketStrategy::Auto => StrategyDto::Auto,
                     PocketStrategy::Adaptive => StrategyDto::Adaptive,
+                    PocketStrategy::OffsetRings => StrategyDto::OffsetRings,
                 },
                 // Absent means the hop-to-clearance every pre-step-5
                 // pocket performed; a set plane round-trips exactly.
@@ -345,6 +346,7 @@ impl ParamsDto {
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                     PocketStrategy::Auto => StrategyDto::Auto,
                     PocketStrategy::Adaptive => StrategyDto::Adaptive,
+                    PocketStrategy::OffsetRings => StrategyDto::OffsetRings,
                 },
                 retract_z: (*retract_z).map(Into::into),
                 entry: match entry {
@@ -643,6 +645,7 @@ impl ParamsDto {
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                     PocketStrategy::Auto => StrategyDto::Auto,
                     PocketStrategy::Adaptive => StrategyDto::Adaptive,
+                    PocketStrategy::OffsetRings => StrategyDto::OffsetRings,
                 },
                 entry: match entry {
                     Entry3D::Plunge => EntryDto::Plunge,
@@ -700,6 +703,7 @@ impl ParamsDto {
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                     PocketStrategy::Auto => StrategyDto::Auto,
                     PocketStrategy::Adaptive => StrategyDto::Adaptive,
+                    PocketStrategy::OffsetRings => StrategyDto::OffsetRings,
                 },
                 entry: match entry {
                     Entry3D::Plunge => EntryDto::Plunge,
@@ -1295,6 +1299,7 @@ impl ParamsDto {
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
                     StrategyDto::Adaptive => PocketStrategy::Adaptive,
+                    StrategyDto::OffsetRings => PocketStrategy::OffsetRings,
                 },
                 // Absent keys ride the DTO defaults: the dive, the
                 // seed's 1 mm helix, the law's 45 degrees (M5.1 H).
@@ -1514,6 +1519,7 @@ impl ParamsDto {
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
                     StrategyDto::Adaptive => PocketStrategy::Adaptive,
+                    StrategyDto::OffsetRings => PocketStrategy::OffsetRings,
                 },
                 entry: match entry {
                     EntryDto::Plunge => Entry3D::Plunge,
@@ -1793,6 +1799,7 @@ impl ParamsDto {
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
                     StrategyDto::Adaptive => PocketStrategy::Adaptive,
+                    StrategyDto::OffsetRings => PocketStrategy::OffsetRings,
                 },
                 entry: match entry {
                     EntryDto::Plunge => Entry3D::Plunge,
@@ -1848,6 +1855,7 @@ impl ParamsDto {
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
                     StrategyDto::Adaptive => PocketStrategy::Adaptive,
+                    StrategyDto::OffsetRings => PocketStrategy::OffsetRings,
                 },
                 entry: match entry {
                     EntryDto::Plunge => Entry3D::Plunge,
