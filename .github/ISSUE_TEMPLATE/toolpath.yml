@@ -1,0 +1,99 @@
+name: Toolpath / path planning bug
+description: A generated toolpath is wrong, unsafe, refused when it should work, or missing material
+labels: [bug, toolpath]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything about the motion the machine would make: gouges, collisions, air cutting, wrong area, wrong heights, refusals.
+        **Safety first:** if the path would hit the part, a fixture or the holder and the app did NOT warn you, please mark it below - those are the most important bugs we get.
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation
+      options:
+        - Face
+        - 2D Contour
+        - 2D Pocket
+        - 2D Adaptive
+        - Slot / Trace / Engrave
+        - Circular / Bore / Thread mill
+        - Drilling cycles
+        - 3D Pocket / Adaptive rough
+        - 3D finish (Waterline, Parallel, Scallop, Pencil, ...)
+        - Multi-axis / Rotary / Swarf
+        - Turning
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong
+      multiple: true
+      options:
+        - The path gouges the part or cuts where it should not (no warning shown)
+        - The path collides with a fixture, the holder or the stock (no warning shown)
+        - Material is left that should be machined
+        - The machined area ignores my selection / boundary / containment
+        - Heights (top, bottom, clearance, retract) are wrong
+        - Entry, lead or link moves are wrong (plunges, ramps, retracts)
+        - Generation refuses with an error I don't think it should
+        - Generation hangs or is very slow
+        - The verify / simulation result disagrees with what I see
+        - The posted G-code differs from the path shown
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: Paste the exact status-line or error text if there was one.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup and parameters
+      description: Tool (type, diameter, corner radius), stock, what you selected (faces / edges / model), boundary and containment settings, and any non-default parameters.
+      placeholder: |
+        Tool: Ø9 bull nose, r1
+        Selection: Faces - shoulder face at Z-5
+        Boundary: Containment Outside, offset 0
+        Heights: Bottom = selection bottom
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import part.step, set stock as box +2 mm
+        2. Create 2D Adaptive, pick the shoulder face
+        3. Generate
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: Attach the project (`.camproj`) and the model if you can share them, or a small part that shows the same problem. Posted G-code helps for post issues. Leave out anything private.
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots
+      description: The viewport with the path visible, and the operation's properties panel.
+  - type: input
+    id: version
+    attributes:
+      label: camcraft version and OS
+      placeholder: 0.8.0, Windows 11
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: The app showed no warning, but this path would damage the part, the tool or the machine.

@@ -1,0 +1,74 @@
+name: UI / UX bug
+description: Something in the interface is broken, confusing, hard to read, or works differently than expected
+labels: [bug, ui]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For the interface itself: dialogs, panels, picking, the viewport, keyboard and mouse, readability and workflow. For a wrong toolpath, use **Toolpath / path planning bug** instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      options:
+        - Operation dialog (properties panel, tabs, fields)
+        - Selection / picking (models, faces, edges, vertices)
+        - Boundary group
+        - Viewport (view, navigation, display modes)
+        - Simulation / playback
+        - Browser tree
+        - Ribbon / toolbar
+        - Setup, stock, origin, machine, post
+        - Tool library / tool editor
+        - Undo / redo
+        - Theme, colours, fonts, readability
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - Something does not work (broken)
+        - Hard to understand or to find
+        - Hard to read or crowded
+        - Inconsistent with the rest of the app, or with how other CAM tools do it
+        - Slow, laggy or freezes
+        - Crash
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a 2D Adaptive operation
+        2. Switch Click selects to Edges
+        3. Click one rim edge, then try to add the next
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots or recording
+      description: A screenshot with the area circled, or a short screen recording, helps the most.
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: How it should work (optional)
+      description: If another CAM tool does this well, describe how it behaves there.
+  - type: input
+    id: version
+    attributes:
+      label: camcraft version, OS and screen
+      description: Display scaling matters for layout issues.
+      placeholder: 0.8.0, Windows 11, 2560x1440 at 150 %
+    validations:
+      required: true
