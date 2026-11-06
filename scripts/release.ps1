@@ -1,0 +1,174 @@
+# Release cut (Release train, 0.8.0): automates the 0.7.0 recipe from
+# RECOMMENDED.md ("Release 0.7.0", "The release train"); the zip layout
+# mirrors .github/workflows/release.yml. Never pushes.
+param(
+    [Parameter(Mandatory = $true)][string]$Version,
+    [string]$Title = "release",
+    [switch]$SkipGate,
+    [switch]$SkipBuild,
+    [switch]$DryRun
+)
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location $root
+
+$allCrates = @("camcraft-app", "camcraft-cl", "camcraft-geometry", "camcraft-kernel",
+    "camcraft-motion", "camcraft-post", "camcraft-sim", "camcraft-tools", "camcraft-ui")
+$nonUi = $allCrates | Where-Object { $_ -ne "camcraft-ui" }
+$tag = "v$Version"
+$coAuthor = "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+
+function Banner([string]$text) {
+    Write-Host ""
+    Write-Host "=== $text ==="
+}
+function Fail([string]$msg) {
+    Write-Host "RELEASE FAILED: $msg"
+    exit 1
+}
+function Pkgs([string[]]$names) {
+    $out = @()
+    foreach ($n in $names) { $out += @("-p", $n) }
+    return $out
+}
+# Run a native command; in dry-run print it instead. Stops on non-zero.
+function Run([string]$exe, [string[]]$arguments, [string]$cwd = "") {
+    $line = "$exe $($arguments -join ' ')"
+    if ($cwd) { $line = "(cd $cwd) $line" }
+    if ($DryRun) { Write-Host "[dry-run] $line"; return }
+    Write-Host "> $line"
+    if ($cwd) { Push-Location $cwd }
+    try { & $exe @arguments } finally { if ($cwd) { Pop-Location } }
+    if ($LASTEXITCODE -ne 0) { Fail "'$line' exited with $LASTEXITCODE" }
+}
+
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { Fail "-Version must be X.Y.Z, got '$Version'" }
+if ($DryRun) { Write-Host "DRY RUN: nothing below changes state." }
+
+# ---- 1. Preflight -------------------------------------------------------
+Banner "Phase 1/8: preflight"
+$allowed = @("RELEASE_NOTES.md", "TESTING.md", "Cargo.toml", "Cargo.lock", "RECOMMENDED.md")
+$status = @(git status --porcelain)
+if ($LASTEXITCODE -ne 0) { Fail "git status failed" }
+$dirty = @()
+foreach ($l in $status) {
+    if (-not $l) { continue }
+    $p = $l.Substring(3).Trim('"')
+    if ($allowed -notcontains $p) { $dirty += $p }
+}
+if ($dirty.Count -gt 0) {
+    Write-Host "Unexpected changes:"
+    $dirty | ForEach-Object { Write-Host "  $_" }
+    if ($DryRun) { Write-Host "[dry-run] would fail here" } else { Fail "working tree not clean" }
+} else { Write-Host "tree clean (ignoring release files)" }
+$existing = git tag --list $tag
+if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
+if ($existing) { Fail "tag $tag already exists" }
+Write-Host "tag $tag is free"
+
+# ---- 2. Gate ------------------------------------------------------------
+Banner "Phase 2/8: gate"
+if ($SkipGate) { Write-Host "skipped (-SkipGate)" } else {
+    Run "cargo" (@("test", "-j", "6") + (Pkgs $nonUi) + @("--no-fail-fast", "--", "--test-threads=6"))
+    Run "cargo" @("test", "-j", "6", "-p", "camcraft-ui", "--", "--test-threads=6") (Join-Path $root "crates/ui")
+    Run "cargo" (@("clippy", "-j", "6") + (Pkgs $allCrates) + @("--tests", "--", "-D", "warnings"))
+    foreach ($c in @("camcraft-motion", "camcraft-sim", "camcraft-app")) {
+        $a = @("test", "-j", "6", "--release", "--no-fail-fast", "-p", $c, "--", "--ignored")
+        if ($c -ne "camcraft-app") { $a += @("--skip", "hsm_one") }
+        $a += "--test-threads=6"
+        Run "cargo" $a
+    }
+}
+
+# ---- 3. Bump ------------------------------------------------------------
+Banner "Phase 3/8: version bump"
+$tomlPath = Join-Path $root "Cargo.toml"
+$toml = [System.IO.File]::ReadAllText($tomlPath)
+$m = [regex]::Match($toml, '(?s)(\[workspace\.package\].*?\r?\nversion\s*=\s*")([^"]+)(")')
+if (-not $m.Success) { Fail "no version in [workspace.package]" }
+$old = $m.Groups[2].Value
+Write-Host "workspace version: $old -> $Version"
+if ($DryRun) {
+    Write-Host "[dry-run] would rewrite Cargo.toml version"
+    Write-Host "[dry-run] cargo update -w -q"
+    Write-Host "[dry-run] would assert Cargo.lock diff touches only version lines"
+} else {
+    $new = $toml.Substring(0, $m.Groups[2].Index) + $Version + $toml.Substring($m.Groups[2].Index + $m.Groups[2].Length)
+    [System.IO.File]::WriteAllText($tomlPath, $new, (New-Object System.Text.UTF8Encoding($false)))
+    Run "cargo" @("update", "-w", "-q")
+    $lockDiff = git diff Cargo.lock
+    if ($LASTEXITCODE -ne 0) { Fail "git diff Cargo.lock failed" }
+    $changed = @($lockDiff | Where-Object { $_ -match '^[-+][^-+]' })
+    $verLines = @($lockDiff | Select-String '^[-+]version')
+    if ($changed.Count -ne $verLines.Count) { Fail "Cargo.lock changed beyond version lines" }
+    Write-Host "Cargo.lock: $($verLines.Count) version lines changed, nothing else"
+}
+
+# ---- 4. Commit and tag --------------------------------------------------
+Banner "Phase 4/8: commit and tag"
+$msg1 = "chore(release): $Version - $Title`n`n$coAuthor"
+$msg2 = "chore(release): sync Cargo.lock to $Version`n`n$coAuthor"
+if ($DryRun) {
+    Write-Host "[dry-run] git add Cargo.toml RELEASE_NOTES.md TESTING.md RECOMMENDED.md (if changed)"
+    Write-Host "[dry-run] git commit -m 'chore(release): $Version - $Title' (+ Co-Authored-By)"
+    Write-Host "[dry-run] git add Cargo.lock; git commit -m 'chore(release): sync Cargo.lock to $Version'"
+    Write-Host "[dry-run] git tag -a $tag -m 'CamCraft $Version'"
+} else {
+    foreach ($f in @("Cargo.toml", "RELEASE_NOTES.md", "TESTING.md", "RECOMMENDED.md")) {
+        if (git status --porcelain -- $f) { git add -- $f; if ($LASTEXITCODE -ne 0) { Fail "git add $f" } }
+    }
+    Run "git" @("commit", "-m", $msg1)
+    Run "git" @("add", "Cargo.lock")
+    Run "git" @("commit", "-m", $msg2)
+    Run "git" @("tag", "-a", $tag, "-m", "CamCraft $Version")
+}
+
+# ---- 5. Build -----------------------------------------------------------
+Banner "Phase 5/8: release build"
+if ($SkipBuild) { Write-Host "skipped (-SkipBuild)" } else {
+    Run "cargo" @("build", "-j", "6", "--release")
+}
+
+# ---- 6. Verify binary version --------------------------------------------
+Banner "Phase 6/8: verify post.exe version"
+$postExe = Join-Path $root "target/release/post.exe"
+if ($DryRun) {
+    Write-Host "[dry-run] $postExe --version must report $Version"
+} else {
+    if (-not (Test-Path $postExe)) { Fail "post.exe missing (run without -SkipBuild)" }
+    $out = (& $postExe --version)
+    if ($LASTEXITCODE -ne 0) { Fail "post.exe --version failed" }
+    $reported = ($out -split '\s+')[1]
+    if ($reported -ne $Version) { Fail "post.exe reports '$reported', expected $Version" }
+    Write-Host "post.exe reports $reported"
+}
+
+# ---- 7. Assemble --------------------------------------------------------
+Banner "Phase 7/8: assemble zip"
+$stage = Join-Path $root "dist/camcraft-$Version-win-x64"
+$zip = Join-Path $root "dist/camcraft-$Version-win-x64.zip"
+if ($DryRun) {
+    Write-Host "[dry-run] stage $stage : exes (camcraft-ui, camcraft-cli, post), assets/{posts,machines,ui,scripts,themes}, RELEASE_NOTES.md, TESTING.md"
+    Write-Host "[dry-run] Compress-Archive -Path $stage -DestinationPath $zip -Force"
+} else {
+    if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+    $dirs = @("assets/posts", "assets/machines", "assets/ui", "assets/scripts", "assets/themes") | ForEach-Object { Join-Path $stage $_ }
+    New-Item -ItemType Directory -Force $dirs | Out-Null
+    foreach ($e in @("camcraft-ui.exe", "camcraft-cli.exe", "post.exe")) {
+        Copy-Item (Join-Path $root "target/release/$e") $stage
+    }
+    Copy-Item "assets/posts/*" (Join-Path $stage "assets/posts")
+    Copy-Item "assets/machines/*" (Join-Path $stage "assets/machines")
+    Copy-Item "assets/ui/*" (Join-Path $stage "assets/ui") -Recurse
+    Copy-Item "assets/scripts/*" (Join-Path $stage "assets/scripts")
+    Copy-Item "assets/themes/*" (Join-Path $stage "assets/themes")
+    Copy-Item "RELEASE_NOTES.md", "TESTING.md" $stage
+    Compress-Archive -Path $stage -DestinationPath $zip -Force
+}
+
+# ---- 8. Summary ---------------------------------------------------------
+Banner "Phase 8/8: done"
+Write-Host "Zip: $zip"
+Write-Host "To publish: git push origin main && git push origin $tag"
+Write-Host "NOTHING WAS PUSHED. Pushing is left to you."
+exit 0
