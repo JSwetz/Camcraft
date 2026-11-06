@@ -165,7 +165,7 @@ Banner "Phase 8/10: assemble zip"
 $stage = Join-Path $root "dist/camcraft-$Version-win-x64"
 $zip = Join-Path $root "dist/camcraft-$Version-win-x64.zip"
 if ($DryRun) {
-    Write-Host "[dry-run] stage $stage : exes (camcraft-ui, camcraft-cli, post), assets/{posts,machines,ui,scripts,themes}, RELEASE_NOTES.md, TESTING.md"
+    Write-Host "[dry-run] stage $stage : exes (camcraft-ui, camcraft-cli, post), assets/{posts,machines,ui,scripts,themes}, RELEASE_NOTES.md, TESTING.md, LICENSE"
     Write-Host "[dry-run] Compress-Archive -Path $stage -DestinationPath $zip -Force"
 } else {
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
@@ -179,7 +179,7 @@ if ($DryRun) {
     Copy-Item "assets/ui/*" (Join-Path $stage "assets/ui") -Recurse
     Copy-Item "assets/scripts/*" (Join-Path $stage "assets/scripts")
     Copy-Item "assets/themes/*" (Join-Path $stage "assets/themes")
-    Copy-Item "RELEASE_NOTES.md", "TESTING.md" $stage
+    Copy-Item "RELEASE_NOTES.md", "TESTING.md", "LICENSE" $stage
     Compress-Archive -Path $stage -DestinationPath $zip -Force
 }
 

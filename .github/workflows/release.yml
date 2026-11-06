@@ -65,7 +65,7 @@ jobs:
           Copy-Item assets/ui/* "$stage/assets/ui"
           Copy-Item assets/scripts/* "$stage/assets/scripts"
           Copy-Item assets/themes/* "$stage/assets/themes"
-          Copy-Item RELEASE_NOTES.md, TESTING.md $stage
+          Copy-Item RELEASE_NOTES.md, TESTING.md, LICENSE $stage
           Compress-Archive -Path $stage -DestinationPath "dist/camcraft-$ver-win-x64.zip" -Force
           Get-ChildItem dist
       - name: Build installer (Inno Setup, same staged tree as the zip)

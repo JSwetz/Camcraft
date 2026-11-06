@@ -1,3 +1,20 @@
+# CamCraft 0.8.1 (clean-room implementation)
+
+A packaging release on top of 0.8.0 - the program is unchanged.
+
+- The repository and the release now carry the project's MIT `LICENSE`.
+- New issue templates on GitHub: **Toolpath / path planning bug** and
+  **UI / UX bug**.
+- The repository no longer carries local tooling, agent settings or
+  research material.
+
+The 0.8.0 notes below still describe everything in this build. Fixes for
+the bugs reported against 0.8.0 (edge-loop picking, face heights and
+Outside containment in 2D Adaptive, Circular following the selection) are
+in progress for the next release.
+
+---
+
 # CamCraft 0.8.0 (clean-room implementation)
 
 Eighth public release, cut early (2026-11-06) to park a stable build. It
