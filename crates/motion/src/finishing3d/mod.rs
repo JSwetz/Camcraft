@@ -83,6 +83,7 @@
 //! The machinery lives in the per-domain files below; the M5.0.1 split is
 //! structure only - behaviour is byte-identical to the flat file it replaces.
 
+mod center_cut;
 mod crease;
 mod deburr;
 mod drape;
@@ -103,6 +104,7 @@ mod support;
 pub use params::{
     scallop_stepdown, scallop_stepover, Finish3DParams, FinishPattern,
 };
+pub use center_cut::guard as center_cut_guard;
 pub use deburr::{deburr, DeburrParams};
 pub use flat::flat;
 pub use geodesic::geodesic;

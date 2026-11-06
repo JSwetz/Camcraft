@@ -1420,7 +1420,7 @@ we choose to? keepdown is a common strategy we should honor and make definable."
 **Goal: every entry, lead and engagement choice a CAM user expects is a
 parameter on the operation, grouped under its own "Lead in / Lead out"
 section, and every height can be measured from the operation's own
-selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, plunge checks in finishing3d/drilling/face - see the Owed bullet below)
+selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, Face entry fallback, 5-axis plunge guards - see the Owed bullet below)
 
 (User review, 2026-11-05: "All heights should have the option Selection ...
 Entry - Arc should have an option of setting radius and length of the arc.
@@ -1457,7 +1457,9 @@ handle engagement.")
       first-stretch-only engagement slowing on 3D ops (planar ladders
       done, 515525c); the 3D ladder's and the contour bore side's named
       second dives; the centre-cutting plunge check in finishing3d,
-      drilling and face. Done and dropped from this list:
+      drilling and face - DONE 2026-11-06 (RECOMMENDED "M11.3: the centre-cutting
+      law in finish, drilling and face"); still owed from it: a Face entry fallback
+      out past the stock, 5-axis Contour/Parallel plunge guards. Done and dropped from this list:
       between-pass centre-cutting checks (`plunge_law`, 515525c),
       wall-start zigzag/slot second dives (none exist, test-pinned),
       Selection heights in the clearance notes ("Small owed UI items" (2)).
@@ -1831,7 +1833,7 @@ the heavy lane green.
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
-| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, plunge checks in finishing3d/drilling/face (-> M11.3 Owed bullet) | ⚠️ |
+| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, Face entry fallback, 5-axis plunge guards (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; owed: C - HSM adaptive round 2 (round 1 held back: self-crossing, extra descents, load/air targets unmet, island/slot fall back to rings, Pocket3D port) (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; owed: open boundary on Contour, boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |

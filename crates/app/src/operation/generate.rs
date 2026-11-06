@@ -165,6 +165,13 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 },
             )?;
             let path = boundary_turn::turn_path(path, -turn)?;
+            // M11.3 owed: the facer enters a radius off the footprint -
+            // from air over the stock's edge, or refused by name.
+            if !tool.center_cutting {
+                let (top, fp) = super::plunge_solid::plunge_solid(stock_facets.as_deref(), m_gen, frame.as_ref());
+                let solid = camcraft_motion::plunge_law::Solid { top, footprint: fp.as_ref() };
+                camcraft_motion::plunge_law::audit(&path, false, d * 0.5, &solid, "the facing entry")?;
+            }
             (region, path)
         }
         OpParams::Contour {
@@ -601,27 +608,35 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // same ladder, and the border law inside `emit_rings`
             // that keeps the rings off shallow tangency - which is
             // the whole difference, and it lives in the pattern.
-            let path = match pattern {
+            // M11.3 owed: the centre-cutting law judges the finished
+            // path (read only for a tool that is not centre-cutting).
+            let (solid_top, solid_fp) = if tool.center_cutting {
+                (f64::INFINITY, None)
+            } else {
+                super::plunge_solid::plunge_solid(stock_facets.as_deref(), m_gen, frame.as_ref())
+            };
+            let solid = camcraft_motion::plunge_law::Solid { top: solid_top, footprint: solid_fp.as_ref() };
+            let run = |fp: &Finish3DParams| -> Result<Toolpath, GenError> { Ok(match fp.pattern {
                 finishing3d::FinishPattern::Waterline => {
-                    finishing3d::waterline(&material.facets, &fp)?
+                    finishing3d::waterline(&material.facets, fp)?
                 }
                 finishing3d::FinishPattern::Parallel
                 | finishing3d::FinishPattern::ParallelMulti
                 | finishing3d::FinishPattern::Scallop
                 | finishing3d::FinishPattern::SteepShallow => {
-                    finishing3d::parallel(&material.facets, &fp)?
+                    finishing3d::parallel(&material.facets, fp)?
                 }
-                finishing3d::FinishPattern::Radial => finishing3d::radial(&material.facets, &fp)?,
-                finishing3d::FinishPattern::Spiral => finishing3d::spiral(&material.facets, &fp)?,
-                finishing3d::FinishPattern::Contour => finishing3d::contour(&material.facets, &fp)?,
-                finishing3d::FinishPattern::Project => finishing3d::project(&material.facets, &fp)?,
-                finishing3d::FinishPattern::Flat => finishing3d::flat(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Radial => finishing3d::radial(&material.facets, fp)?,
+                finishing3d::FinishPattern::Spiral => finishing3d::spiral(&material.facets, fp)?,
+                finishing3d::FinishPattern::Contour => finishing3d::contour(&material.facets, fp)?,
+                finishing3d::FinishPattern::Project => finishing3d::project(&material.facets, fp)?,
+                finishing3d::FinishPattern::Flat => finishing3d::flat(&material.facets, fp)?,
                 // The crease pair (M2.5 B): the same locus walk in
                 // pencil.rs, and the band filter's reference is the
                 // only thing that differs - Corner asks its own
                 // ball's band, Pencil the stated reference's.
-                finishing3d::FinishPattern::Pencil => finishing3d::pencil(&material.facets, &fp)?,
-                finishing3d::FinishPattern::Corner => finishing3d::corner(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Pencil => finishing3d::pencil(&material.facets, fp)?,
+                finishing3d::FinishPattern::Corner => finishing3d::corner(&material.facets, fp)?,
                 // M2.5 C. Ramp is Parallel's twin with the sloped
                 // laws always on - the diagonal chains (M2.2e) and
                 // the ramped ring entries (M8.2 B) are the two
@@ -632,17 +647,17 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // Geodesic marches the iso contours of the open
                 // boundary's distance field.
                 finishing3d::FinishPattern::Ramp => {
-                    let mut q = fp;
+                    let mut q = *fp;
                     q.pattern = finishing3d::FinishPattern::Parallel;
                     q.ramp = true;
                     q.entry_ramp = true;
                     finishing3d::parallel(&material.facets, &q)?
                 }
                 finishing3d::FinishPattern::MorphSpiral => {
-                    finishing3d::morphed_spiral(&material.facets, &fp)?
+                    finishing3d::morphed_spiral(&material.facets, fp)?
                 }
                 finishing3d::FinishPattern::Geodesic => {
-                    finishing3d::geodesic(&material.facets, &fp)?
+                    finishing3d::geodesic(&material.facets, fp)?
                 }
                 // M2.5 D. Blend is Parallel's raster plus the ring
                 // ladder reading the border at the BAND line: the
@@ -650,7 +665,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // the seam's staircase is shaved, per `blend`'s own
                 // note - the difference lives in `emit_rings`.
                 finishing3d::FinishPattern::Blend => {
-                    finishing3d::blend(&material.facets, &fp)?
+                    finishing3d::blend(&material.facets, fp)?
                 }
                 // M2.5 D. Morph is the waterline ladder PLUS the
                 // ruled lofts between its levels: the ring part is
@@ -658,7 +673,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // nor band there), and `morph` adds one column-
                 // grounded interpolated guide per paired level gap.
                 finishing3d::FinishPattern::Morph => {
-                    finishing3d::morph(&material.facets, &fp)?
+                    finishing3d::morph(&material.facets, fp)?
                 }
                 // M2.5 E. Flow is the 5-axis kind's field law asked
                 // of a 3-axis machine: the host lives in
@@ -667,9 +682,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // grain lives once and the two entries can never
                 // drift.
                 finishing3d::FinishPattern::Flow => {
-                    crate::multiaxis::flow3d(&material.facets, &fp)?
+                    crate::multiaxis::flow3d(&material.facets, fp)?
                 }
-            };
+            })};
+            let path = finishing3d::center_cut_guard(tool.center_cutting, &solid, &fp, run)?;
             (region, path)
         }
         // Deburr (M2.5 E B): the cone stands OVER each exposed edge -

@@ -10102,3 +10102,36 @@ The 120/96 px label columns fit the default ~280 px properties pane.
 (5) **The viewport fills the area actually swept** (`operation::machined_footprint`). For Face this is the band the passes sweep, laid along the open edge and widened by the tool overrun. Every other kind shows its existing machined region. Open edges are drawn dashed.
 
 pages.rs went from 5,556 to 1,707 lines, split into page modules of about 390 lines or fewer. The tab bar stays.
+
+## M11.3: the centre-cutting law in finish, drilling and face: four decisions (2026-11-06)
+
+(1) **Audit the finished path, not the generator's internals.** Finish3D and
+Face do not carry the approach model, so `plunge_law::audit` reads the path
+they emit. It looks for the first axial plunge into solid onto a column the
+path has not already cut. Solid means below the material top and, when the
+stock's XY outline is known, inside it. Unseen stock counts as solid.
+
+(2) **Finishes retry once with sloped entries, then refuse by name**
+(`finishing3d::center_cut_guard`):
+- a centre-cutting tool runs once and is unchanged;
+- a non-centre-cutting tool that plunges is regenerated with ramp + entry_ramp
+  forced on (the finishes have no helix);
+- if it still plunges, it is refused.
+
+Accepted cost: with unseen stock counted as solid, most such finishes below the
+stock top refuse. This is conservative and cannot gouge, and ball and flat end
+mills are centre-cutting.
+
+(3) **Drill cycles that cut solid (Spot/Drill/Peck/Deep) refuse a
+non-centre-cutting tool.** The M10.1 tool law checks only the tool family and
+did not catch this. Tap, Bore and BackBore read the hole as already drilled and
+pass.
+
+(4) **A Face entry is judged against the stock outline.** Facing the stock's own
+footprint enters tangent to its edge, which is air and passes; this is pinned.
+Facing an inner patch of a wider stock is refused by name.
+
+Owed:
+- a Face fallback that moves the entry out past the stock instead of refusing;
+- guards for 5-axis Contour/Parallel (tilted descents);
+- counting stock that earlier ops already cleared.

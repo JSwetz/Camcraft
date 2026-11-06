@@ -77,6 +77,7 @@ pub fn drill(p: &CycleParams) -> Result<Toolpath, GenError> {
             CycleChoice::Auto => auto_kind(p.tool.kind, p.r_z - bottom, d),
             _ => resolve_choice(p),
         };
+        refuse_solid_cycle(p.tool, kind, h.xy.x, h.xy.y)?;
         // The bore door (M8.3): the slide's whole cutting diameter
         // travels inside the hole's wall, so a tool wider than the
         // wall's radius is a wall-cutting plunge. And a stepped hole
@@ -174,6 +175,22 @@ pub fn drill(p: &CycleParams) -> Result<Toolpath, GenError> {
         return Err(GenError::Invalid("drill chain self-check failed".into()));
     }
     Ok(t)
+}
+
+/// The centre-cutting law on a hole (M11.3 owed (5)): spot, drill and
+/// peck cycles feed the tool's whole end axially into solid, so a tool
+/// that is not centre-cutting is refused there by definition. Tap, bore
+/// and back-bore cycles open a hole that is already drilled - the cycle
+/// itself says so - and pass.
+pub(super) fn refuse_solid_cycle(tool: &crate::tools::Tool, kind: CycleKind, x: f64, y: f64) -> Result<(), GenError> {
+    if tool.center_cutting || matches!(kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {
+        return Ok(());
+    }
+    Err(GenError::Invalid(format!(
+        "{} - a {kind:?} cycle at ({x}, {y}) plunges into solid; drill the hole with a centre-cutting tool \
+         (a tap or bore cycle reads it as pre-drilled)",
+        crate::approach::CENTER_CUT_REFUSAL
+    )))
 }
 
 pub(super) fn resolve_choice(p: &CycleParams) -> CycleKind {

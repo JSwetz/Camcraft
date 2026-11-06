@@ -25,8 +25,9 @@
 //! is this crate's own geometry. No vendor material consulted.
 
 use crate::approach::CENTER_CUT_REFUSAL;
-use crate::cl::{Move, MoveKind, PathBuilder};
-use crate::geo2d::Point2;
+use crate::cl::{Move, MoveKind, PathBuilder, Toolpath};
+use crate::geo2d::{Point2, Region};
+use crate::machining2d::GenError;
 
 /// The uncut core of a non-centre-cutting end mill, as a fraction of its
 /// radius: half the radius (a quarter of the diameter) - wider than the
@@ -98,4 +99,60 @@ fn seg_dist(p: Point2, a: Point2, b: Point2) -> f64 {
     let dd = dx * dx + dy * dy;
     let t = if dd > 0.0 && dd.is_finite() { (((p.x - a.x) * dx + (p.y - a.y) * dy) / dd).clamp(0.0, 1.0) } else { 0.0 };
     (p.x - a.x - t * dx).hypot(p.y - a.y - t * dy)
+}
+
+/// What the after-the-fact audit reads as solid (M11.3 owed (5)): the
+/// generators that carry no [`crate::approach::Approach`] - the 3-D
+/// finishes and the facer - are judged on their finished path. `top` is
+/// the material's top; `footprint` the stock's XY outline when it is
+/// known. A plunge whose tool disc stays clear of the footprint falls
+/// through air; with no footprint, everything under `top` is solid.
+#[derive(Clone, Copy, Debug)]
+pub struct Solid<'a> {
+    pub top: f64,
+    pub footprint: Option<&'a Region>,
+}
+
+impl Solid<'_> {
+    /// Does a tool disc of radius `tool_r` at `xy` overlap the stock?
+    fn under(&self, xy: Point2, tool_r: f64) -> bool {
+        let Some(f) = self.footprint else { return true };
+        if f.contains(xy) {
+            return true;
+        }
+        f.loops().iter().any(|l| {
+            let pts = l.points();
+            pts.iter().zip(pts.iter().cycle().skip(1)).any(|(a, b)| seg_dist(xy, *a, *b) < tool_r - Z_EPS)
+        })
+    }
+}
+
+/// The first axial descent of `t` into solid: a cutting move with no XY
+/// run going down below `solid.top`, over the stock, onto a column no
+/// earlier cut of the path has cleared. `Some((xy, z))` names it.
+#[must_use]
+pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(Point2, f64)> {
+    t.moves.iter().enumerate().find_map(|(i, m)| {
+        let axial = m.kind != MoveKind::Rapid
+            && (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS
+            && m.to.z < m.from.z - Z_EPS
+            && m.to.z < solid.top - Z_EPS;
+        let xy = Point2::new(m.to.x, m.to.y);
+        (axial && solid.under(xy, tool_r) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r))
+            .then_some((xy, m.to.z))
+    })
+}
+
+/// The audit's verdict: a centre-cutting tool always passes; otherwise
+/// the first plunge into solid refuses the operation by name
+/// ([`CENTER_CUT_REFUSAL`]), `site` naming the motion.
+pub fn audit(t: &Toolpath, center_cutting: bool, tool_r: f64, solid: &Solid, site: &str) -> Result<(), GenError> {
+    match first_solid_plunge(t, tool_r, solid).filter(|_| !center_cutting) {
+        None => Ok(()),
+        Some((xy, z)) => Err(GenError::Invalid(format!(
+            "{CENTER_CUT_REFUSAL} - {site} at ({:.3}, {:.3}) would plunge axially into solid down to Z {z:.3}; \
+             pick a centre-cutting tool or an entry that starts outside the stock",
+            xy.x, xy.y
+        ))),
+    }
 }
