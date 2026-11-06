@@ -56,7 +56,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 );
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "slot.top");
                 height_editor(ui, "Bottom Z", world, op_ctx.as_deref(), bottom_z, "slot.bottom");
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown)));
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
@@ -104,19 +104,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     &format!("{tg}.clearance"),
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "trace.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "trace.top");
                 height_editor(
                     ui,
@@ -126,7 +113,10 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     bottom_z,
                     "trace.bottom",
                 );
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "trace.retract");
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                });
             }
             if tab == SEC_FEEDS {
                 prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));
@@ -157,20 +147,19 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 prop_row(ui, "Chamfer width", |ui| num(ui, u, width));
                 prop_row(ui, "Chamfer angle", |ui| num_unit(ui, angle_deg, "°"));
                 hint(ui, "the face's slope off the top plane; the depth follows as width x tan(angle) - authored here, never second-guessed by a depth field");
-                field(ui, "Side");
                 let mut s_idx = match side {
                     Side::Auto => 0,
                     Side::Inside => 1,
                     Side::Outside => 2,
                 };
-                combo(ui, "ch_side", &mut s_idx, side_names());
+                prop_row(ui, "Side", |ui| combo(ui, "ch_side", &mut s_idx, side_names()));
                 *side = match s_idx {
                     1 => Side::Inside,
                     2 => Side::Outside,
                     _ => Side::Auto,
                 };
                 if let Some(note) = &side_note {
-                    ui.label(note.clone());
+                    consequence(ui, note);
                 }
                 prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));
             }
@@ -184,21 +173,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "chamfer.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "chamfer.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "chamfer.top");
                 corner_note(ui, world, op_ctx.as_deref(), top_z, *width * angle_deg.to_radians().tan());
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "chamfer.retract");
+                });
             }
             if tab == SEC_FEEDS {
                 prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));
@@ -293,22 +272,12 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "circ.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "circ.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "circ.top");
                 height_editor(ui, "Bottom Z", world, op_ctx.as_deref(), bottom_z, "circ.bottom");
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "circ.retract");
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));

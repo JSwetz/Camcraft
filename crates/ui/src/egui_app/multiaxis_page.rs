@@ -44,19 +44,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "contour5d.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "contour5d.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "contour5d.top");
                 height_editor(
                     ui,
@@ -67,6 +54,9 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "contour5d.bottom",
                 );
                 hint(ui, "Top is the first ring's plane, Bottom the last level's");
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "contour5d.retract");
+                });
             }
             if tab == SEC_PASSES {
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
@@ -105,19 +95,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "parallel5d.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "parallel5d.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "parallel5d.top");
                 height_editor(
                     ui,
@@ -128,23 +105,15 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "parallel5d.bottom",
                 );
                 hint(ui, "Top is the first line's plane, Bottom the last one's");
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "parallel5d.retract");
+                });
             }
             if tab == SEC_PASSES {
-                field(ui, "Stepover");
-                let mut over = stepover.is_some();
-                if check_row(ui, "Set line spacing", &mut over).changed() {
-                    *stepover = if over {
-                        Some((24.0 * tolerance.max(1e-9)).sqrt())
-                    } else {
-                        None
-                    };
-                }
-                if let Some(s) = stepover {
-                    num(ui, u, s);
-                    hint(ui, "flat-ground spacing; on a slope it follows the terrain's cosine");
-                } else {
-                    hint(ui, "from tolerance and tool by the scallop law, times the slope's cosine");
-                }
+                auto_opt(ui, "Stepover", "Auto", stepover, "scallop law", (24.0 * tolerance.max(1e-9)).sqrt(), |ui, s| {
+                    num(ui, u, s)
+                });
+                hint(ui, "Auto: from tolerance and tool by the scallop law, times the slope's cosine. Stated: flat-ground spacing; on a slope it follows the terrain's cosine");
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
                 shank_avoid_editor(ui, shank_avoid);
                 prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));
@@ -183,19 +152,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "flow5d.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "flow5d.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "flow5d.top");
                 height_editor(
                     ui,
@@ -206,23 +162,15 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "flow5d.bottom",
                 );
                 hint(ui, "Top is the first line's plane, Bottom the last one's");
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "flow5d.retract");
+                });
             }
             if tab == SEC_PASSES {
-                field(ui, "Stepover");
-                let mut over = stepover.is_some();
-                if check_row(ui, "Set line spacing", &mut over).changed() {
-                    *stepover = if over {
-                        Some((24.0 * tolerance.max(1e-9)).sqrt())
-                    } else {
-                        None
-                    };
-                }
-                if let Some(s) = stepover {
-                    num(ui, u, s);
-                    hint(ui, "flat-ground spacing; on a slope it follows the terrain's cosine");
-                } else {
-                    hint(ui, "from tolerance and tool by the scallop law, times the slope's cosine");
-                }
+                auto_opt(ui, "Stepover", "Auto", stepover, "scallop law", (24.0 * tolerance.max(1e-9)).sqrt(), |ui, s| {
+                    num(ui, u, s)
+                });
+                hint(ui, "Auto: from tolerance and tool by the scallop law, times the slope's cosine. Stated: flat-ground spacing; on a slope it follows the terrain's cosine");
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
                 shank_avoid_editor(ui, shank_avoid);
                 prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));
@@ -261,26 +209,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "multi_axis_contour.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(
-                        ui,
-                        "Retract Z",
-                        world,
-                        op_ctx.as_deref(),
-                        r,
-                        "multi_axis_contour.retract",
-                    );
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(
                     ui,
                     "Top Z",
@@ -298,6 +226,9 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "multi_axis_contour.bottom",
                 );
                 hint(ui, "the machining window: a picked chain standing outside it is refused by name, never clipped");
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "multi_axis_contour.retract");
+                });
             }
             if tab == SEC_PASSES {
                 hint(ui, "no pattern - the picked edge chains are the path, machined where they stand; see Geometry");

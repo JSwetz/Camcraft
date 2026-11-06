@@ -86,36 +86,10 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "drill.clearance",
                 );
                 height_editor(ui, "R plane (feed starts here)", world, op_ctx.as_deref(), top_z, "drill.top");
-                field(ui, "Retract plane (between holes)");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "drill.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
-                field(ui, "Depth");
-                let mut over = bottom_z.is_some();
-                if check_row(ui, "Override the hole floors", &mut over).changed() {
-                    *bottom_z = if over {
-                        Some(Height::of(top_z.reference, top_z.offset - 1.0))
-                    } else {
-                        None
-                    };
-                }
-                match bottom_z {
-                    Some(b) => {
-                        height_editor(ui, "Bottom Z", world, op_ctx.as_deref(), b, "drill.bottom")
-                    }
-                    None => {
-                        hint(ui, "every hole stops at its own floor from the model");
-                    }
-                }
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "drill.retract");
+                    hole_floor(ui, world, op_ctx.as_deref(), bottom_z, top_z, "drill.bottom");
+                });
             }
             if tab == SEC_PASSES {
                 let mut c_idx = cycle_index(cycle);
@@ -133,11 +107,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     };
                 }
                 if let Some(note) = &cycle_note {
-                    ui.label(note.clone());
+                    consequence(ui, note);
                 }
-                prop_row(ui, "Peck depth", |ui| num(ui, u, peck));
-                hint(ui, "0 lets the cycle size itself: 3 x dia chip-break, 1 x dia full-retract");
-                prop_row(ui, "Dwell at bottom", |ui| num(ui, u, dwell));
+                auto_value(ui, "Peck depth", "Auto", peck, "by the cycle", PECK_SEED, |ui, v| num(ui, u, v));
+                hint(ui, "Auto lets the cycle size itself: 3 x dia chip-break, 1 x dia full-retract");
+                prop_row(ui, "Dwell at bottom", |ui| num_unit(ui, dwell, "s"));
                 hint(ui, "seconds held at the bottom; honored on the cycles that dwell");
             }
             if tab == SEC_FEEDS {
@@ -204,38 +178,12 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "bore.clearance",
                 );
-                field(ui, "Retract plane (between holes)");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "bore.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "R plane (feed starts here)", world, op_ctx.as_deref(), top_z, "bore.top");
-                field(ui, "Depth");
-                let mut over = bottom_z.is_some();
-                if check_row(ui, "Override the hole floors", &mut over).changed() {
-                    *bottom_z = if over {
-                        Some(Height::of(top_z.reference, top_z.offset - 1.0))
-                    } else {
-                        None
-                    };
-                }
-                match bottom_z {
-                    Some(b) => {
-                        height_editor(ui, "Bottom Z", world, op_ctx.as_deref(), b, "bore.bottom")
-                    }
-                    None => {
-                        hint(ui, "every hole stops at its own floor from the model");
-                    }
-                }
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "bore.retract");
+                    hole_floor(ui, world, op_ctx.as_deref(), bottom_z, top_z, "bore.bottom");
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
@@ -298,37 +246,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "thread.clearance",
                 );
-                field(ui, "Retract plane (between holes)");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "thread.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "R plane (feed starts here)", world, op_ctx.as_deref(), top_z, "thread.top");
-                field(ui, "Depth");
-                let mut over = bottom_z.is_some();
-                if check_row(ui, "Override the hole floors", &mut over).changed() {
-                    *bottom_z = if over {
-                        Some(Height::of(top_z.reference, top_z.offset - 1.0))
-                    } else {
-                        None
-                    };
-                }
-                match bottom_z {
-                    Some(b) => {
-                        height_editor(ui, "Bottom Z", world, op_ctx.as_deref(), b, "thread.bottom")
-                    }
-                    None => {
-                        hint(ui, "every hole stops at its own floor from the model");
-                    }
-                }
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "thread.retract");
+                    hole_floor(ui, world, op_ctx.as_deref(), bottom_z, top_z, "thread.bottom");
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Radial infeed per pass", |ui| num(ui, u, infeed));
@@ -341,5 +263,22 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             }
         }
         _ => {}
+    }
+}
+
+/// The peck depth an un-Auto'd field starts from, mm: a modest bite the
+/// user then sizes to the drill (Auto's own law is 3 x / 1 x diameter).
+const PECK_SEED: f64 = 2.0;
+
+/// The hole kinds' depth override, inside the Levels group: off, every
+/// hole stops at its own floor from the model; on, one Bottom Z for all.
+fn hole_floor(ui: &mut Ui, world: &World, setup: Option<&str>, bottom_z: &mut Option<Height>, top_z: &Height, tag: &str) {
+    let mut over = bottom_z.is_some();
+    if check_row(ui, "Override the hole floors", &mut over).changed() {
+        *bottom_z = if over { Some(Height::of(top_z.reference, top_z.offset - 1.0)) } else { None };
+    }
+    match bottom_z {
+        Some(b) => height_editor(ui, "Bottom Z", world, setup, b, tag),
+        None => hint(ui, "every hole stops at its own floor from the model"),
     }
 }

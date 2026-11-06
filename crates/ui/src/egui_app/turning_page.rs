@@ -44,7 +44,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 height_editor(ui, "Top of Part Z", world, op_ctx.as_deref(), top_z, "facing.top");
                 height_editor(ui, "Facing Plane Z", world, op_ctx.as_deref(), bottom_z, "facing.face");
                 hint(ui, "the bar faces the spindle: stock is read between the facing plane and the part top; the ladder steps down from the top, one stepdown per rung");
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown)));
                 hint(ui, "axial infeed per rung - the kernel refuses past twice the insert nose radius, the ridge it would leave");
             }
             if tab == SEC_PASSES {
@@ -99,7 +99,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "profile_rough.bottom",
                 );
                 hint(ui, "the rungs ride the bar between these heights; the window's ends are where the tool plunges in and slides out");
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown)));
                 hint(ui, "radial shell one rung eats - the kernel refuses past twice the insert nose radius, the sheet the next rung in would miss");
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
                 hint(ui, "the wall the last rung stands off the skin - the finish pass takes it off");
@@ -200,7 +200,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "groove_rough.bottom",
                 );
                 hint(ui, "the band's axial ends: the kerfs tile between these heights, one blade width apart, and the window must be at least a blade wide");
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown)));
                 hint(ui, "radial infeed per rung - each center's ladder steps from the window's shell down to the leave line under it");
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
                 hint(ui, "the skin the floor stands off - the finish groove takes it off");
@@ -291,7 +291,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 );
                 height_editor(ui, "Parting Plane Z", world, op_ctx.as_deref(), bottom_z, "part.plane");
                 hint(ui, "where a part gets cut off from the bar it was turned on: the blade stands one center deep at this plane and its kerf falls through the model's whole column");
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown)));
                 hint(ui, "radial infeed per rung of the ladder down through the bar - the last rung severs, tip on the axis");
             }
             if tab == SEC_PASSES {
@@ -311,15 +311,17 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             if tab == SEC_MACHINE {
                 check_row(ui, "Load bar before the cut", bar_load);
                 if *bar_load {
-                    prop_row(ui, "Bar advance", |ui| num(ui, u, bar_advance));
-                    hint(ui, "how far the feeder pushes the bar past the previous part's stub - 0 says the act alone, no measured advance");
+                    auto_value(ui, "Bar advance", "Feeder stop", bar_advance, "no measured advance", 10.0, |ui, v| {
+                        num(ui, u, v)
+                    });
+                    hint(ui, "how far the feeder pushes the bar past the previous part's stub - Feeder stop posts the act alone and lets the feeder index by its own stops");
                 }
                 check_row(ui, "Unload part after the cut", bar_unload);
                 hint(ui, "the signals post as stream events around this section - a script voices them for the machine, M-code or comment, and silence posts silence");
                 check_row(ui, "Transfer to sub-spindle", bar_transfer);
                 hint(ui, "the handoff step (M5.3 C): after the last cut, the part moves to the machine's second spindle - check the program gate, it names a machine that states no second spindle");
-                prop_row(ui, "Probe budget", |ui| num(ui, u, inspect_tol));
-                hint(ui, "the measurement ask (M5.3 D): 0 asks no probe; above 0 the program posts its PROBE intent and the post measures the part as machined - every blade's cut composed into one - against this bar; what stands above the model past it holds the post and names the pass to re-run (0.1 um is the least any probe measures)");
+                auto_value(ui, "Probe budget", "Off", inspect_tol, "no probe", 0.02, |ui, v| num(ui, u, v));
+                hint(ui, "the measurement ask (M5.3 D): Off asks no probe; with a budget the program posts its PROBE intent and the post measures the part as machined - every blade's cut composed into one - against this bar; what stands above the model past it holds the post and names the pass to re-run (0.1 um is the least any probe measures)");
             }
         }
         _ => {}

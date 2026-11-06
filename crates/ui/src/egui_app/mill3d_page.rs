@@ -47,19 +47,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "pocket3d.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "pocket3d.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "pocket3d.top");
                 height_editor(
                     ui,
@@ -69,12 +56,14 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     bottom_z,
                     "pocket3d.bottom",
                 );
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "pocket3d.retract");
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stepover", |ui| num(ui, u, stepover));
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
-                field(ui, "Strategy");
                 let mut st_idx = match strategy {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
@@ -85,7 +74,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
-                combo(ui, "p3_strat", &mut st_idx, names);
+                prop_row(ui, "Strategy", |ui| combo(ui, "p3_strat", &mut st_idx, names));
                 if st_idx != before {
                     *strategy = match st_idx {
                         1 => PocketStrategy::Waterline,
@@ -138,19 +127,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "finish3d.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "finish3d.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "finish3d.top");
                 height_editor(
                     ui,
@@ -161,9 +137,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "finish3d.bottom",
                 );
                 hint(ui, "Top is the first ring's plane, Bottom the last level's");
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "finish3d.retract");
+                });
             }
             if tab == SEC_PASSES {
-                field(ui, "Pattern");
                 let mut pat_idx = match pattern {
                     camcraft_app::finishing3d::FinishPattern::Waterline => 0,
                     camcraft_app::finishing3d::FinishPattern::Parallel => 1,
@@ -185,7 +163,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     camcraft_app::finishing3d::FinishPattern::Flow => 17,
                 };
                 let before = pat_idx;
-                combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
+                prop_row(ui, "Pattern", |ui| combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS));
                 if pat_idx != before {
                     *pattern = match pat_idx {
                         1 => camcraft_app::finishing3d::FinishPattern::Parallel,
@@ -210,24 +188,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 }
                 hint(ui, "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette, and every closed edge the part itself carries - a trim's rim, a hole's edge - XY kept and Z grounded, cut exactly where the model's facets end rather than where their shadow falls (a closed solid has no open edge, so its path is what it always was). Then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink. Pencil and Corner read the bends instead of the slope: each rides the line of centres tangent to both faces of every concave corner, Corner with the op's own ball and Pencil with a fatter reference ball, cleaning only what that pen leaves standing. Ramp is Parallel with the sloped entries always on. The morphed spiral keeps one in-winding curve but spaces its turns by the ground's own cosine under them. Geodesic rings start at the model's open edge and march outward by distance ALONG the surface, so one loop can run floor, wall and rim together; a closed shell with no open edge is refused by name. Blend rides the slope from both directions: the parallel lines keep the flat ground, and the rings keep every run touching ground past thirty degrees, so the transition band is cut twice and the border's staircase is shaved away. Morph joins the ladder's levels: the rings ride as Waterline places them, and between each two successive rings that pair as one feature a middle guide is laid halfway between the loops and grounded on the surface - half the spacing along the wall, a quarter of the cusp. Flow traces the surface's own grain: each line starts where the ground is widest and runs along the direction that curves least under it, the field the Flow5D operation reads - so on a blade the passes lie WITH it; on ground that claims no direction the lines degrade to the straight raster and still cover, and the rings take the flanks as always.");
                 if !matches!(pattern, camcraft_app::finishing3d::FinishPattern::Waterline) {
-                    field(ui, "Stepover");
-                    let mut over = stepover.is_some();
-                    if check_row(ui, "Set line spacing", &mut over).changed() {
-                        *stepover = if over {
-                            // The scallop law on the reference R3
-                            // ball - sqrt(8 r tol) - as a starting
-                            // figure; the field is then free.
-                            Some((24.0 * tolerance.max(1e-9)).sqrt())
-                        } else {
-                            None
-                        };
-                    }
-                    if let Some(s) = stepover {
-                        num(ui, u, s);
-                        hint(ui, "flat-ground spacing; on a slope it follows the terrain's cosine");
-                    } else {
-                        hint(ui, "from tolerance and tool by the scallop law, times the slope's cosine");
-                    }
+                    // The scallop law on the reference R3 ball -
+                    // sqrt(8 r tol) - seeds the stated spacing.
+                    let seed = (24.0 * tolerance.max(1e-9)).sqrt();
+                    auto_opt(ui, "Stepover", "Auto", stepover, "scallop law", seed, |ui, s| num(ui, u, s));
+                    hint(ui, "Auto: from tolerance and tool by the scallop law, times the slope's cosine. Stated: the flat-ground spacing; on a slope it follows the terrain's cosine");
                     // M2.5 C honesty: Geodesic carries no chord march
                     // to floor, and rides neither chain-ramp nor
                     // entry-ramp law - every loop enters by its own
@@ -242,28 +207,13 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                         camcraft_app::finishing3d::FinishPattern::Ramp
                     );
                     if !geodesic_pat {
-                    field(ui, "Minimum step");
-                    let mut floored = min_step.is_some();
-                    if ui
-                        .checkbox(&mut floored, "Floor the march's refinement")
-                        .changed()
-                    {
-                        *min_step = if floored {
-                            // A tenth of the march's own coarse step
-                            // - the scallop law's 2·√(r·tol) on the
-                            // reference R3 ball: the refinement
-                            // stays alive, it just stops here.
-                            Some(0.1 * (12.0 * tolerance.max(1e-9)).sqrt())
-                        } else {
-                            None
-                        };
-                    }
-                    if let Some(s) = min_step {
-                        num(ui, u, s);
-                        hint(ui, "no cut segment shorter than this; run edges still land where the material says");
-                    } else {
-                        hint(ui, "the march's own resolution floor");
-                    }
+                        // A tenth of the march's own coarse step - the
+                        // scallop law's 2·√(r·tol) on the reference R3
+                        // ball: the refinement stays alive, it just
+                        // stops here.
+                        let seed = 0.1 * (12.0 * tolerance.max(1e-9)).sqrt();
+                        auto_opt(ui, "Minimum step", "Auto", min_step, "march's own", seed, |ui, s| num(ui, u, s));
+                        hint(ui, "Auto: the march's own resolution floor. Stated: no cut segment shorter than this; run edges still land where the material says");
                     }
                     if ramp_pat {
                         hint(ui, "the diagonal chains between lines and the ramped ring entries are this pattern's whole story - always on, whatever the boxes below would say");
@@ -283,45 +233,22 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                         pattern,
                         camcraft_app::finishing3d::FinishPattern::SteepShallow
                     ) {
-                        field(ui, "Steep stepover");
-                        let mut authored = steep_stepover.is_some();
-                        if check_row(ui, "Space the rings", &mut authored).changed() {
-                            // The scallop law's own figure on the
-                            // reference R3 ball - 2 x sqrt(r tol) -
-                            // as a starting value; the field is then
-                            // free. The envelope verdict, not the
-                            // number, is what keeps the promise.
-                            *steep_stepover = if authored {
-                                Some((12.0 * tolerance.max(1e-9)).sqrt())
-                            } else {
-                                None
-                            };
-                        }
-                        if let Some(s) = steep_stepover {
-                            num(ui, u, s);
-                            hint(ui, "the flank's own level spacing - state it and the ladder obeys; the cusp it leaves is still measured, never assumed");
-                        } else {
-                            hint(ui, "from tolerance and tool by the scallop law, 2 x sqrt(r x tolerance)");
-                        }
+                        // The scallop law's own figure on the reference
+                        // R3 ball - 2 x sqrt(r tol) - as a starting
+                        // value. The envelope verdict, not the number,
+                        // is what keeps the promise.
+                        let seed = (12.0 * tolerance.max(1e-9)).sqrt();
+                        auto_opt(ui, "Steep stepover", "Auto", steep_stepover, "scallop law", seed, |ui, s| num(ui, u, s));
+                        hint(ui, "Auto: from tolerance and tool by the scallop law, 2 x sqrt(r x tolerance). Stated: the flank's own level spacing - the ladder obeys; the cusp it leaves is still measured, never assumed");
                     }
                     if matches!(
                         pattern,
                         camcraft_app::finishing3d::FinishPattern::Pencil
                     ) {
-                        field(ui, "Reference ball");
-                        let mut named = pencil_reference.is_some();
-                        if check_row(ui, "Name a fatter pen", &mut named).changed() {
-                            // Four times the reference R3 ball's own
-                            // diameter - a pen a band can hide under
-                            // is no reference; the field is then free.
-                            *pencil_reference = if named { Some(24.0) } else { None };
-                        }
-                        if let Some(d) = pencil_reference {
-                            num(ui, u, d);
-                            hint(ui, "the pen whose leftovers this op cleans - it must be fatter than the op's ball, and the path names it if it is not");
-                        } else {
-                            hint(ui, "no pen named: every concave corner whose locus rests on the solid is cleaned");
-                        }
+                        // Four times the reference R3 ball's own diameter
+                        // - a pen a band can hide under is no reference.
+                        auto_opt(ui, "Reference ball", "None", pencil_reference, "every corner", 24.0, |ui, d| num(ui, u, d));
+                        hint(ui, "None: every concave corner whose locus rests on the solid is cleaned. Stated: the pen whose leftovers this op cleans - it must be fatter than the op's ball, and the path names it if it is not");
                     }
                 }
                 prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));

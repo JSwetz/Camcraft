@@ -20,9 +20,9 @@ pub(super) use crate::operations::{
 };
 pub(super) use crate::state::State;
 
-pub(super) use super::heights_page::{HEIGHT_SRC_ID, corner_note, height_editor, retract_note};
+pub(super) use super::heights_page::{HEIGHT_SRC_ID, LEVELS, corner_note, height_editor, retract_hop, retract_note};
 pub(super) use super::kind_editors::*;
-pub(super) use super::layout::{CTRL_W, check_row, group, hint, prop_row};
+pub(super) use super::layout::{CTRL_W, auto_opt, auto_value, check_row, consequence, group, hint, prop_row};
 pub(super) use super::lead_page;
 pub(super) use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_HEIGHTS, SEC_LEADS, SEC_MACHINE, SEC_PASSES};
 pub(super) use super::params_page::Cx;

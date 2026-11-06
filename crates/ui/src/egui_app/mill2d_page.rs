@@ -38,31 +38,32 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "face.clearance",
                 );
                 height_editor(ui, "Cut Z", world, op_ctx.as_deref(), cut_z, "face.cut");
-                field(ui, "Depth staging");
-                let mut staged = top_z.is_some();
-                if check_row(ui, "Stage down to Cut Z", &mut staged).changed() {
+                group(ui, LEVELS, None, |ui| {
+                    let mut staged = top_z.is_some();
+                    if check_row(ui, "Stage down to Cut Z", &mut staged).changed() {
+                        if staged {
+                            let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
+                            *top_z = Some(seed);
+                            *stepdown = Some(1.0);
+                        } else {
+                            *top_z = None;
+                            *stepdown = None;
+                        }
+                    }
+                    hint(ui, "depth staging: off faces in one pass at Cut Z; on steps down from Top Z");
                     if staged {
                         let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                        *top_z = Some(seed);
-                        *stepdown = Some(1.0);
-                    } else {
-                        *top_z = None;
-                        *stepdown = None;
+                        height_editor(
+                            ui,
+                            "Top Z (first cut level)",
+                            world,
+                            op_ctx.as_deref(),
+                            top_z.get_or_insert(seed),
+                            "face.top",
+                        );
+                        prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown.get_or_insert(1.0)));
                     }
-                }
-                if staged {
-                    field(ui, "Top Z (first cut level)");
-                    let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                    height_editor(
-                        ui,
-                        "Top Z",
-                        world,
-                        op_ctx.as_deref(),
-                        top_z.get_or_insert(seed),
-                        "face.top",
-                    );
-                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown.get_or_insert(1.0)));
-                }
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stepover (Y spacing)", |ui| num(ui, u, stepover));
@@ -99,20 +100,19 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             tilt,
         } => {
             if tab == SEC_GEO {
-                field(ui, "Side");
                 let mut s_idx = match side {
                     Side::Auto => 0,
                     Side::Inside => 1,
                     Side::Outside => 2,
                 };
-                combo(ui, "c_side", &mut s_idx, side_names());
+                prop_row(ui, "Side", |ui| combo(ui, "c_side", &mut s_idx, side_names()));
                 *side = match s_idx {
                     1 => Side::Inside,
                     2 => Side::Outside,
                     _ => Side::Auto,
                 };
                 if let Some(note) = &side_note {
-                    ui.label(note.clone());
+                    consequence(ui, note);
                 }
                 prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));
             }
@@ -144,7 +144,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     bottom_z,
                     "contour.bottom",
                 );
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown)));
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
@@ -154,7 +154,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 check_row(ui, "Arc turns at corners", blend_turns);
             }
             if tab == SEC_LEADS {
-                field(ui, "Lead in/out");
                 let mut l_idx = match lead {
                     Lead::None => 0,
                     Lead::Linear { .. } => 1,
@@ -163,7 +162,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     Lead::Perpendicular { .. } => 4,
                 };
                 let before = l_idx;
-                combo(ui, "c_lead", &mut l_idx, &LEADS);
+                prop_row(ui, "Lead in/out", |ui| combo(ui, "c_lead", &mut l_idx, &LEADS));
                 if l_idx != before {
                     *lead = match l_idx {
                         1 => Lead::Linear { length: 8.0 },
@@ -233,19 +232,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "pocket.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "pocket.retract");
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "pocket.top");
                 height_editor(
                     ui,
@@ -255,7 +241,10 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     bottom_z,
                     "pocket.bottom",
                 );
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "pocket.retract");
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stepover", |ui| num(ui, u, stepover));
@@ -263,7 +252,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 // M11.1 C: pass corners and row-to-row links round on
                 // one arc inside the cleared area where it is legal.
                 check_row(ui, "Arc turns at corners and links", blend_turns);
-                field(ui, "Strategy");
                 // M5.1 H: the 2-D combo offers Adaptive beside the 3-D
                 // one's - the law runs on the plane now, so hiding the
                 // choice would make a file that carries it display a
@@ -277,7 +265,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 };
                 let names = strategy_names();
                 let before = st_idx;
-                combo(ui, "p_strat", &mut st_idx, names);
+                prop_row(ui, "Strategy", |ui| combo(ui, "p_strat", &mut st_idx, names));
                 if st_idx != before {
                     *strategy = match st_idx {
                         1 => PocketStrategy::Waterline,
@@ -291,7 +279,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 if let Some(note) = &auto_note {
-                    ui.label(note.clone());
+                    consequence(ui, note);
                 }
             }
             if tab == SEC_FEEDS {

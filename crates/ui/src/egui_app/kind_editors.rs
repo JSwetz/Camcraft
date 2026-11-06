@@ -43,22 +43,12 @@ pub(super) fn roughing2d_pane(
     if tab == SEC_HEIGHTS {
         orientation_editor(ui, u, tilt);
         height_editor(ui, "Clearance Z", world, op_ctx, clearance_z, &format!("{tag}.clearance"));
-        field(ui, "Retract plane");
-        let mut hop = retract_z.is_some();
-        if check_row(ui, "Hop below clearance", &mut hop).changed() {
-            *retract_z = if hop {
-                Some(Height::of(top_z.reference, top_z.offset + 1.0))
-            } else {
-                None
-            };
-        }
-        if let Some(r) = retract_z {
-            height_editor(ui, "Retract Z", world, op_ctx, r, &format!("{tag}.retract"));
-            retract_note(ui, world, op_ctx, r, clearance_z);
-        }
         height_editor(ui, "Top Z", world, op_ctx, top_z, &format!("{tag}.top"));
         height_editor(ui, "Bottom Z", world, op_ctx, bottom_z, &format!("{tag}.bottom"));
-        prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+        group(ui, LEVELS, None, |ui| {
+            retract_hop(ui, world, op_ctx, retract_z, top_z, clearance_z, &format!("{tag}.retract"));
+            prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+        });
     }
     if tab == SEC_PASSES {
         prop_row(ui, "Stepover", |ui| num(ui, u, stepover));
@@ -105,7 +95,6 @@ pub(super) fn axis_editor(ui: &mut Ui, lead_deg: &mut f64, lag_deg: &mut f64, ma
 /// and where no angle inside the cone clears, the operation refuses
 /// by name rather than post a path the verifier would warn on.
 pub(super) fn shank_avoid_editor(ui: &mut Ui, shank_avoid: &mut bool) {
-    field(ui, "Shank avoidance");
     check_row(ui, "Avoid shank collisions", shank_avoid);
     hint(ui, "tilt the spindle off a leaning pose that would rub the shank; positions never move, and a wall no tilt clears refuses the job");
 }
@@ -137,39 +126,18 @@ pub(super) fn swarf_editor(
 ) {
     if tab == SEC_HEIGHTS {
         height_editor(ui, "Clearance Z", world, setup, clearance_z, "swarf.clearance");
-        field(ui, "Retract plane");
-        let mut hop = retract_z.is_some();
-        if check_row(ui, "Hop below clearance", &mut hop).changed() {
-            *retract_z = if hop {
-                Some(Height::of(top_z.reference, top_z.offset + 1.0))
-            } else {
-                None
-            };
-        }
-        if let Some(r) = retract_z {
-            height_editor(ui, "Retract Z", world, setup, r, "swarf.retract");
-            retract_note(ui, world, setup, r, clearance_z);
-        }
         height_editor(ui, "Top Z", world, setup, top_z, "swarf.top");
         height_editor(ui, "Bottom Z", world, setup, bottom_z, "swarf.bottom");
         hint(ui, "Top is the first line's plane, Bottom the last one's");
+        group(ui, LEVELS, None, |ui| {
+            retract_hop(ui, world, setup, retract_z, top_z, clearance_z, "swarf.retract");
+        });
     }
     if tab == SEC_PASSES {
-        field(ui, "Stepover");
-        let mut over = stepover.is_some();
-        if check_row(ui, "Set line spacing", &mut over).changed() {
-            *stepover = if over {
-                Some((24.0 * tolerance.max(1e-9)).sqrt())
-            } else {
-                None
-            };
-        }
-        if let Some(s) = stepover {
-            num(ui, u, s);
-            hint(ui, "spacing ACROSS the ruling; along it the lines never part - the surface's own direction spaces them");
-        } else {
-            hint(ui, "from tolerance and tool by the scallop law, across the ruling");
-        }
+        auto_opt(ui, "Stepover", "Auto", stepover, "scallop law", (24.0 * tolerance.max(1e-9)).sqrt(), |ui, s| {
+            num(ui, u, s)
+        });
+        hint(ui, "Auto: from tolerance and tool by the scallop law, across the ruling. Stated: spacing ACROSS the ruling; along it the lines never part - the surface's own direction spaces them");
         // The ladder's rung count, the rung-count law: a plain number
         // clamped into the generator's named range at the draft, so
         // no panel edit ever holds a 0 or a 9. Named "Pass count" - a
@@ -219,40 +187,19 @@ pub(super) fn rotary_editor(
 ) {
     if tab == SEC_HEIGHTS {
         height_editor(ui, "Clearance Z", world, setup, clearance_z, "rotary.clearance");
-        field(ui, "Retract plane");
-        let mut hop = retract_z.is_some();
-        if check_row(ui, "Hop below clearance", &mut hop).changed() {
-            *retract_z = if hop {
-                Some(Height::of(top_z.reference, top_z.offset + 1.0))
-            } else {
-                None
-            };
-        }
-        if let Some(r) = retract_z {
-            height_editor(ui, "Retract Z", world, setup, r, "rotary.retract");
-            retract_note(ui, world, setup, r, clearance_z);
-        }
         height_editor(ui, "Top Z", world, setup, top_z, "rotary.top");
         height_editor(ui, "Bottom Z", world, setup, bottom_z, "rotary.bottom");
         hint(ui, "the world planes map onto stations along the fitted axis - Top where the run starts, Bottom where it ends");
+        group(ui, LEVELS, None, |ui| {
+            retract_hop(ui, world, setup, retract_z, top_z, clearance_z, "rotary.retract");
+        });
     }
     if tab == SEC_PASSES {
         if let Some(stepover) = stepover {
-            field(ui, "Stepover");
-            let mut over = stepover.is_some();
-            if check_row(ui, "Set line spacing", &mut over).changed() {
-                *stepover = if over {
-                    Some((24.0 * tolerance.max(1e-9)).sqrt())
-                } else {
-                    None
-                };
-            }
-            if let Some(s) = stepover {
-                num(ui, u, s);
-                hint(ui, "spacing AROUND the turn; along the axis the lines never part - the cylinder's own direction spaces them");
-            } else {
-                hint(ui, "from tolerance and tool by the scallop law, around the turn");
-            }
+            auto_opt(ui, "Stepover", "Auto", stepover, "scallop law", (24.0 * tolerance.max(1e-9)).sqrt(), |ui, s| {
+                num(ui, u, s)
+            });
+            hint(ui, "Auto: from tolerance and tool by the scallop law, around the turn. Stated: spacing AROUND the turn; along the axis the lines never part - the cylinder's own direction spaces them");
         }
         rotary_axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
         prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));

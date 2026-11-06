@@ -225,6 +225,34 @@ pub fn auto_value(
     *v != before
 }
 
+/// [`auto_value`] for a field the model keeps as an `Option`: `None` is
+/// the derived figure. Auto on writes `None`; off seeds `Some(seed)` for
+/// `edit` to draw. Returns whether the value moved this frame.
+pub fn auto_opt(
+    ui: &mut Ui,
+    label: &str,
+    toggle: &str,
+    v: &mut Option<f64>,
+    derived: &str,
+    seed: f64,
+    edit: impl FnOnce(&mut Ui, &mut f64),
+) -> bool {
+    let before = *v;
+    prop_row(ui, label, |ui| {
+        let mut auto = v.is_none();
+        if ui.checkbox(&mut auto, toggle).changed() {
+            *v = if auto { None } else { Some(seed) };
+        }
+        match v {
+            Some(x) => edit(ui, x),
+            None => {
+                ui.add_enabled(false, Label::new(RichText::new(derived).weak()));
+            }
+        }
+    });
+    *v != before
+}
+
 /// How a status banner reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {

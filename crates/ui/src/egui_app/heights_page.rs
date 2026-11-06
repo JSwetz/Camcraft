@@ -19,7 +19,7 @@ use camcraft_app::units;
 use crate::operations::{height_echo, offset_label};
 
 use super::fields::{combo, num};
-use super::layout::{consequence, group, prop_row};
+use super::layout::{check_row, consequence, group, hint, prop_row};
 
 /// The frame-temp key `params_fields` stores the edited op's source under,
 /// for the height editors' From: Selection echo (M11.3 A).
@@ -66,6 +66,34 @@ pub(super) fn retract_note(
 pub(super) fn corner_note(ui: &mut Ui, world: &flecs_ecs::prelude::World, setup: Option<&str>, top: &Height, drop: f64) {
     let src = op_src(ui);
     consequence(ui, &crate::operations::corner_note(world, setup, src.as_ref(), top, drop));
+}
+
+/// The Heights tab's group for the cut's levels - the retract plane's
+/// hop, the depth staging, the stepdown (user review 2026-11-06: the
+/// loose rows under the heights get a titled home).
+pub(super) const LEVELS: &str = "Levels";
+
+/// The optional retract plane, inside the Levels group: off, every link
+/// climbs to Clearance Z; on, links hop at a Retract Z (seeded 1 above
+/// Top Z) with the retract-vs-clearance note under it.
+pub(super) fn retract_hop(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    retract_z: &mut Option<Height>,
+    top_z: &Height,
+    clearance_z: &Height,
+    tag: &str,
+) {
+    let mut hop = retract_z.is_some();
+    if check_row(ui, "Hop below clearance", &mut hop).changed() {
+        *retract_z = if hop { Some(Height::of(top_z.reference, top_z.offset + 1.0)) } else { None };
+    }
+    hint(ui, "the retract plane: on, links hop at Retract Z; off, every link climbs to Clearance Z");
+    if let Some(r) = retract_z {
+        height_editor(ui, "Retract Z", world, setup, r, tag);
+        retract_note(ui, world, setup, r, clearance_z);
+    }
 }
 
 /// Whether a height editor's tag names a floor - the last level, the cut

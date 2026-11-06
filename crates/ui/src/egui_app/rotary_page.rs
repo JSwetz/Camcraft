@@ -138,7 +138,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     "rotary_offset.bottom",
                 );
                 hint(ui, "the world planes map onto stations along the fitted axis - the ladder roughs the bar only between them (inert on a bar lying flat)");
-                prop_row(ui, "Stepdown (radial)", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| prop_row(ui, "Stepdown (radial)", |ui| num(ui, u, stepdown)));
                 hint(ui, "the radial infeed: what one wrap level peels off the skin");
             }
             if tab == SEC_PASSES {
@@ -146,7 +146,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 hint(ui, "spacing around the bar, in developed arc length - the wrap's own ruler");
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
                 hint(ui, "the shelf the finishing kind is asked to take off");
-                field(ui, "Strategy");
                 let mut st_idx = match strategy {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
@@ -156,7 +155,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
-                combo(ui, "ro_strat", &mut st_idx, names);
+                prop_row(ui, "Strategy", |ui| combo(ui, "ro_strat", &mut st_idx, names));
                 if st_idx != before {
                     *strategy = match st_idx {
                         1 => PocketStrategy::Waterline,
@@ -216,26 +215,6 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     clearance_z,
                     "multiaxis_rough.clearance",
                 );
-                field(ui, "Retract plane");
-                let mut hop = retract_z.is_some();
-                if check_row(ui, "Hop below clearance", &mut hop).changed() {
-                    *retract_z = if hop {
-                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                    } else {
-                        None
-                    };
-                }
-                if let Some(r) = retract_z {
-                    height_editor(
-                        ui,
-                        "Retract Z",
-                        world,
-                        op_ctx.as_deref(),
-                        r,
-                        "multiaxis_rough.retract",
-                    );
-                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
-                }
                 height_editor(
                     ui,
                     "Top Z",
@@ -252,12 +231,14 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     bottom_z,
                     "multiaxis_rough.bottom",
                 );
-                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                group(ui, LEVELS, None, |ui| {
+                    retract_hop(ui, world, op_ctx.as_deref(), retract_z, top_z, clearance_z, "multiaxis_rough.retract");
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+                });
             }
             if tab == SEC_PASSES {
                 prop_row(ui, "Stepover", |ui| num(ui, u, stepover));
                 prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
-                field(ui, "Strategy");
                 let mut st_idx = match strategy {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
@@ -267,7 +248,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
-                combo(ui, "ma_strat", &mut st_idx, names);
+                prop_row(ui, "Strategy", |ui| combo(ui, "ma_strat", &mut st_idx, names));
                 if st_idx != before {
                     *strategy = match st_idx {
                         1 => PocketStrategy::Waterline,

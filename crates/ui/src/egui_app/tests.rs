@@ -745,7 +745,7 @@ fn every_field_lives_on_exactly_one_section() {
             "Face",
             vec![
                 ("Geometry", vec!["Click selects:"]),
-                ("Heights", vec!["Clearance Z", "Cut Z", "Depth staging"]),
+                ("Heights", vec!["Clearance Z", "Cut Z", "Levels"]),
                 ("Passes", vec!["Stepover (Y spacing)"]),
                 ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
@@ -773,7 +773,7 @@ fn every_field_lives_on_exactly_one_section() {
             "Pocket",
             vec![
                 ("Geometry", vec!["Click selects:"]),
-                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Heights", vec!["Clearance Z", "Levels", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Passes", vec!["Stepover", "Stock to leave", "Strategy"]),
                 ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes", "Plunge", "Ramp / helix / arc feed", "Entry plunge feed", "Lead-in feed", "Engagement", "Minimum radius", "Helix pitch"]),
                 ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
@@ -793,7 +793,7 @@ fn every_field_lives_on_exactly_one_section() {
             "Trace",
             vec![
                 ("Geometry", vec!["Click selects:"]),
-                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Heights", vec!["Clearance Z", "Levels", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
@@ -813,7 +813,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:"]),
                 (
                     "Heights",
-                    vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
+                    vec!["Clearance Z", "Levels", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stepover", "Stock to leave", "Optimal load (% of D)"]),
                 ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
@@ -826,7 +826,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:"]),
                 (
                     "Heights",
-                    vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
+                    vec!["Clearance Z", "Levels", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stepover", "Stock to leave"]),
                 ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
@@ -841,7 +841,7 @@ fn every_field_lives_on_exactly_one_section() {
             "Engrave",
             vec![
                 ("Geometry", vec!["Click selects:"]),
-                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Heights", vec!["Clearance Z", "Levels", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
@@ -859,7 +859,7 @@ fn every_field_lives_on_exactly_one_section() {
                     "Geometry",
                     vec!["Click selects:", "Chamfer width", "Chamfer angle", "Side", "Tolerance"],
                 ),
-                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z"]),
+                ("Heights", vec!["Clearance Z", "Levels", "Top Z"]),
                 ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
@@ -879,7 +879,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ),
                 (
                     "Heights",
-                    vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
+                    vec!["Clearance Z", "Levels", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stock to leave", "Stepover"]),
                 ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
@@ -900,9 +900,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec![
                         "Clearance Z",
                         "R plane (feed starts here)",
-                        "Retract plane (between holes)",
+                        "Levels",
                         "Hop below clearance",
-                        "Depth",
                         "Override the hole floors",
                     ],
                 ),
@@ -922,9 +921,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec![
                         "Clearance Z",
                         "R plane (feed starts here)",
-                        "Retract plane (between holes)",
+                        "Levels",
                         "Hop below clearance",
-                        "Depth",
                         "Override the hole floors",
                     ],
                 ),
@@ -945,9 +943,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec![
                         "Clearance Z",
                         "R plane (feed starts here)",
-                        "Retract plane (between holes)",
+                        "Levels",
                         "Hop below clearance",
-                        "Depth",
                         "Override the hole floors",
                         "Stepdown",
                     ],
@@ -972,7 +969,7 @@ fn every_field_lives_on_exactly_one_section() {
                     "Heights",
                     vec![
                         "Clearance Z",
-                        "Retract plane",
+                        "Levels",
                         "Hop below clearance",
                         "Top Z",
                         "Bottom Z",
@@ -1005,7 +1002,7 @@ fn every_field_lives_on_exactly_one_section() {
                     "Heights",
                     vec![
                         "Clearance Z",
-                        "Retract plane",
+                        "Levels",
                         "Hop below clearance",
                         "Top Z",
                         "Bottom Z",
@@ -1014,8 +1011,6 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Passes", vec![
                     "Pattern",
                     "Stepover",
-                    "Set line spacing",
-                    "Floor the march's refinement",
                     "Minimum step",
                     "Ramp between lines",
                     "Tolerance",
@@ -3433,9 +3428,11 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     // returns the march to its own 1/4096 right.
     harness.state_mut().state.sync_ops_ui();
     harness.run();
-    harness.get_by_label("Floor the march's refinement").scroll_to_me();
+    // The Passes tab's Auto toggles in row order: Stepover, then
+    // Minimum step - unticking the second states the floor.
+    harness.get_all_by_label("Auto").nth(1).expect("Minimum step's Auto").scroll_to_me();
     harness.run();
-    harness.get_by_label("Floor the march's refinement").click();
+    harness.get_all_by_label("Auto").nth(1).expect("Minimum step's Auto").click();
     harness.run();
     let staged = match &harness.state().state.op_ui.params {
         OpParams::Finish3D { min_step, .. } => *min_step,

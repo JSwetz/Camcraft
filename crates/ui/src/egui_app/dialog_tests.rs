@@ -300,3 +300,58 @@ fn the_status_banner_is_one_line() {
     assert_eq!(line, "Status: never generated");
     assert!(details.is_empty());
 }
+
+/// Retype the open draft into the kind labelled `label` (the retype
+/// menu's own law), on tab `tab`.
+fn retyped(label: &str, tab: usize) -> Harness<'static, State> {
+    let mut state = opened(pocket(Entry3D::Plunge));
+    let k = camcraft_app::operation::KindInfo::ALL.iter().position(|k| k.label == label).expect("the kind");
+    state.op_ui.params = crate::operations::retype(&state.op_ui.params, k);
+    state.op_tab = tab;
+    let mut harness = page(state);
+    harness.run();
+    harness
+}
+
+#[test]
+fn contour_side_is_a_same_row_field() {
+    let harness = retyped("2D Contour", super::op_tabs::SEC_GEO);
+    let lab = harness.get_by_label("Side").rect();
+    let combo = on_row(&harness, "Side", Role::ComboBox).rect();
+    assert!(combo.left() > lab.right(), "the Side combo sits right of its label, not under it");
+}
+
+#[test]
+fn heights_loose_rows_live_in_the_levels_group() {
+    let mut state = opened(pocket(Entry3D::Plunge));
+    state.op_tab = super::op_tabs::SEC_HEIGHTS;
+    let mut harness = page(state);
+    harness.run();
+    let levels = harness.get_by_label("Levels").rect();
+    for row in ["Hop below clearance", "Stepdown"] {
+        let r = harness.get_by_label(row).rect();
+        assert!(r.top() > levels.bottom(), "{row} draws inside Levels, under its header");
+    }
+    assert!(harness.query_by_label("Retract plane").is_none(), "no caption over the hop row");
+}
+
+#[test]
+fn drill_peck_auto_writes_zero_and_off_seeds_a_bite() {
+    let mut harness = retyped("Drill", super::op_tabs::SEC_PASSES);
+    if let OpParams::Drill { peck, .. } = &mut harness.state_mut().op_ui.params {
+        *peck = 1.5;
+    }
+    harness.run();
+    let peck = |h: &Harness<'static, State>| match &h.state().op_ui.params {
+        OpParams::Drill { peck, .. } => *peck,
+        _ => f64::NAN,
+    };
+    assert!(harness.query_by_label_contains("0 lets").is_none(), "no sentinel wording");
+    harness.get_by_label("Auto").click();
+    harness.run();
+    assert_eq!(peck(&harness), 0.0, "Auto writes the model's 0");
+    assert!(harness.query_by_label("by the cycle").is_some(), "the derived figure shows in place of the number");
+    harness.get_by_label("Auto").click();
+    harness.run();
+    assert_eq!(peck(&harness), 2.0, "Auto off seeds the starting bite");
+}
