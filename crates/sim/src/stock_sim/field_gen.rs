@@ -145,7 +145,7 @@ impl SdfField {
             cell,
             cap,
             mesh: Arc::new(facets.to_vec()),
-            bricks: HashMap::new(),
+            bricks: Arc::new(HashMap::new()),
             cuts: HashMap::new(),
             cut_ups: HashMap::new(),
             cost: Box::default(),

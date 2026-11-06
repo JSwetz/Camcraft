@@ -85,6 +85,13 @@ impl SdfField {
     pub fn reset_cut_stats(&mut self) {
         self.cost.stats = CutStats::default();
     }
+
+    /// Bytes a clone of this field copies: the cut layers' bricks (the
+    /// mesh layer is shared) - a playback snapshot's price, measured.
+    #[must_use]
+    pub fn cut_layer_bytes(&self) -> usize {
+        (self.cuts.len() + self.cut_ups.len()).saturating_mul(BRICK3 * std::mem::size_of::<f64>())
+    }
 }
 
 /// The cell box a cut can matter in: the allocated band's bricks and

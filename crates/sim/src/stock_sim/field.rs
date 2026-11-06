@@ -83,7 +83,9 @@ pub struct SdfField {
     /// Magnitudes beyond the band answer `sign * cap`.
     pub(crate) cap: f64,
     pub(crate) mesh: Arc<Vec<Triangle>>,
-    pub(crate) bricks: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
+    /// Shared on clone (the mesh layer is written only while seeding),
+    /// so a playback snapshot copies the cut layers, never this one.
+    pub(crate) bricks: Arc<HashMap<[i32; 3], Box<[f64; BRICK3]>>>,
     /// M7.1 B's subtraction layer: per cell, the running max of the
     /// negated swept-tool distances; NaN cells and absent bricks say
     /// "no tool has claimed this cell".
@@ -281,7 +283,7 @@ impl SdfField {
 
     /// The band cell's storage slot, allocating its brick.
     pub(crate) fn brick_mut(&mut self, key: [i32; 3]) -> &mut [f64; BRICK3] {
-        self.bricks
+        Arc::make_mut(&mut self.bricks)
             .entry(brick_of(key))
             .or_insert_with(|| Box::new([f64::NAN; BRICK3]))
     }

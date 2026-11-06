@@ -90,7 +90,7 @@ fn the_eye_lands_on_the_faced_floor_and_names_its_class() {
         let (world, _h) = faced_doc(Point3::ZERO, model_top);
         let v = field_view_with(&world, COARSE).expect("a faced box draws");
         assert!(v.target.is_some(), "a closed model box signs: {:?}", v.target_note);
-        let pv = v.stock.preview(v.target.as_ref(), &look_down(Point3::ZERO), W, W, DEV_TOL).expect("frame");
+        let pv = v.stock.preview(v.target.as_deref(), &look_down(Point3::ZERO), W, W, DEV_TOL).expect("frame");
         let z = 60.0 - pv.depth[CENTRE];
         assert!((z - 18.0).abs() <= v.cell.max(0.25), "the faced floor stands at 18, the eye saw {z} (cell {})", v.cell);
         assert_eq!(pv.class[CENTRE], class, "model top {model_top} reads {word}");
@@ -102,7 +102,7 @@ fn the_stock_stands_where_the_entity_stands() {
     let at = Point3::new(100.0, 50.0, 0.0);
     let (world, _h) = faced_doc(at, 18.0);
     let v = field_view_with(&world, COARSE).expect("a placed box draws");
-    let pv = v.stock.preview(v.target.as_ref(), &look_down(at), W, W, DEV_TOL).expect("frame");
+    let pv = v.stock.preview(v.target.as_deref(), &look_down(at), W, W, DEV_TOL).expect("frame");
     assert!(pv.depth[CENTRE].is_finite(), "the eye finds the stock at its placement");
     let away = v.stock.preview(None, &look_down(Point3::ZERO), W, W, DEV_TOL).expect("frame");
     assert!(away.depth[CENTRE].is_nan(), "and nothing where it used to be");

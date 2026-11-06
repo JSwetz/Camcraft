@@ -154,16 +154,26 @@ pub fn pack_field(f: &SdfField) -> Option<FieldLattice> {
     let mesh = fill(&meta, |cols, key| {
         signed(f.mag_at(key), parity(cols, f, key, meta.cell))
     });
+    let cut = pack_cut(f, &meta);
+    Some(FieldLattice { meta, mesh, cut })
+}
+
+/// The cut layer alone over `meta`'s extent - what playback re-packs
+/// per published frame: the mesh layer (the parity scans) never moves
+/// while a program cuts, so only this layer is re-made and re-sent.
+/// `meta` must be the field's own (`pack_field`'s); cuts cannot move
+/// the region, which is the shell's box.
+#[must_use]
+pub fn pack_cut(f: &SdfField, meta: &LatticeMeta) -> Vec<f32> {
     let floor = -4.0 * f.cap();
-    let cut = fill(&meta, |_, key| {
+    fill(meta, |_, key| {
         let c = f.cut_at(key);
         if c == f64::NEG_INFINITY {
             floor
         } else {
             c
         }
-    });
-    Some(FieldLattice { meta, mesh, cut })
+    })
 }
 
 /// The deviation target: signed distance per cell, mesh layer only

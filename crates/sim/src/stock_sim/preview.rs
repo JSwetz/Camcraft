@@ -43,7 +43,7 @@ pub mod pack;
 
 mod march;
 
-pub use pack::{pack_field, pack_target, DistanceLattice, FieldLattice, LatticeMeta};
+pub use pack::{pack_cut, pack_field, pack_target, DistanceLattice, FieldLattice, LatticeMeta};
 
 use std::collections::HashMap;
 

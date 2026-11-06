@@ -22,6 +22,8 @@ mod law_tests;
 mod helix_view_tests;
 #[cfg(test)]
 mod field_view_tests;
+#[cfg(test)]
+mod play_bench_tests;
 
 /// Entry point used by `main.rs`; returns the process exit code. The egui
 /// shell is the shell: `--headless` runs its no-window proof, anything else

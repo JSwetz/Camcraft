@@ -762,9 +762,10 @@ fn viewport_panel(
     viewport_points: &mut [f32; 2],
     left_press: &mut Option<[f32; 2]>,
 ) {
-    // M1.7c move simulation: the timeline is rebuilt from the world every
-    // frame (`sim_script` below), which is why a document switch needs no
-    // reset - the playhead simply indexes the new program. The transport
+    // M1.7c move simulation: the timeline is rebuilt from the world on
+    // every document change (`cached_script` below, keyed on
+    // `doc_version`), which is why a document switch needs no reset -
+    // the playhead simply indexes the new program. The transport
     // bar takes its strip BEFORE the image so `avail` measures what the 3D
     // view actually gets. Like the view cube and the hover hint, all of it
     // draws only while the ribbon cell is armed: a snapshot with no
@@ -772,7 +773,7 @@ fn viewport_panel(
     // view state (AGENTS.md's explicit exemption), never a command.
     let mut sim_marker: Option<([f64; 3], [f64; 3])> = None;
     if state.sim.is_some() {
-        let sc = sim_script(state);
+        let sc = cached_script(state);
         let total = sc.total.max(0.0);
         let unit = camcraft_app::units::of(&state.world);
         if let Some(sim) = state.sim.as_mut() {
@@ -1230,7 +1231,22 @@ pub(crate) fn sim_readout(
     format!("{op} · {verb}{pose} · {t:.1}/{:.1} s", sc.total.max(0.0))
 }
 
-/// Rebuild the timeline from the live world, every frame: the same
+/// The timeline for this document version: `sim_script` once per
+/// `doc_version` bump, shared by the transport and the traced
+/// playback, so no frame re-walks (or re-clones) every op's path.
+pub(crate) fn cached_script(state: &mut State) -> std::sync::Arc<camcraft_app::sim::Script> {
+    if let Some((v, sc)) = &state.sim_script_cache
+        && *v == state.doc_version
+    {
+        return std::sync::Arc::clone(sc);
+    }
+    let sc = std::sync::Arc::new(sim_script(state));
+    state.sim_script_cache = Some((state.doc_version, std::sync::Arc::clone(&sc)));
+    sc
+}
+
+/// Rebuild the timeline from the live world (`cached_script` is the
+/// per-frame door): the same
 /// tree-order walk the post takes (hidden paths included - hidden is
 /// display, not suppression; the law stands on `State::has_toolpaths`),
 /// so the transport clock and the posted program count the same moves.

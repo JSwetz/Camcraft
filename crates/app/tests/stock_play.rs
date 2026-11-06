@@ -6,7 +6,9 @@
 //! name. Provenance: our own fixtures over the M7.1 field engine;
 //! nothing from vendor binaries.
 //!
-//! Gate map (M4.4): covers app::stock_play, app::stock_view (display_parts, display_target), app::sim seam.
+//! Gate map (M4.4): covers app::stock_play, app::stock_play_worker, app::stock_view (display_parts, display_target), app::sim seam.
+
+use std::time::{Duration, Instant};
 
 use flecs_ecs::prelude::World;
 
@@ -17,7 +19,8 @@ use camcraft_app::operation::{Height, OpParams, SrcRef};
 use camcraft_app::schema::Location;
 use camcraft_app::sim;
 use camcraft_app::stock::StockShape;
-use camcraft_app::stock_play::{progress, FieldPlay, Progress, MAX_CHECKPOINTS};
+use camcraft_app::stock_play::{progress, FieldPlay, PlaySeed, Progress, MAX_CHECKPOINTS};
+use camcraft_app::stock_play_worker::{PlayFrame, PlayWorker};
 use camcraft_app::stock_sim::{Preview, PreviewCamera, Stock, DEV_TOL};
 use camcraft_app::stock_view::field_view_with;
 use camcraft_app::tools::catalog;
@@ -129,4 +132,74 @@ fn the_transport_maps_onto_the_plan_by_name() {
     let ghost = Progress { op: "NoSuchOp".into(), segs_done: 3, span: 9 };
     assert_eq!(play.index_at(&ghost), None, "an op the plan lacks is a refusal, not a skip");
     assert!(progress(&sim::Script::default(), 1.0).is_none(), "an empty timeline has no position");
+}
+
+/// Drain the worker until a frame cut by `k` moves shows (or a minute
+/// passes): every frame seen, in order.
+fn frames_until(w: &PlayWorker, k: usize) -> Vec<PlayFrame> {
+    let (mut seen, mut out) = (w.published(), Vec::new());
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_secs(60) {
+        if let Some(f) = w.take() {
+            let f = f.expect("the worker cuts the face program");
+            let done = f.at == k;
+            out.push(f);
+            if done {
+                break;
+            }
+        }
+        seen = w.wait_published(seen, Duration::from_millis(200));
+    }
+    out
+}
+
+#[test]
+fn the_worker_publishes_a_model_that_follows_the_cutter() {
+    let world = faced_doc();
+    let w = PlayWorker::spawn(PlaySeed::gather(&world, false, COARSE).expect("seed")).expect("worker");
+    let total = w.index().total();
+    assert!(total > 4, "rows to play: {total}");
+    let first = frames_until(&w, 0);
+    assert_eq!(first.last().map(|f| f.at), Some(0), "the uncut stock is published first");
+    let uncut = frame(&first[0].view.stock);
+    // The playhead advances in steps; each published picture is cut by
+    // no fewer moves than the one before, and the end is the end.
+    let mut ats = vec![0usize];
+    let mut last_pic = uncut;
+    let mut changed = 0;
+    for k in [total / 4, total / 2, 3 * total / 4, total] {
+        w.request(k);
+        let fr = frames_until(&w, k);
+        assert_eq!(fr.last().map(|f| f.at), Some(k), "the worker reaches the playhead");
+        for f in &fr {
+            assert!(f.at >= *ats.last().unwrap_or(&0), "published views advance monotonically: {ats:?} then {}", f.at);
+            ats.push(f.at);
+        }
+        let pic = frame(&fr.last().expect("a frame").view.stock);
+        changed += usize::from(!same(&pic, &last_pic));
+        last_pic = pic;
+    }
+    assert!(changed >= 2, "the model visibly updates as the cutter moves ({changed} of 4 steps)");
+    let full = field_view_with(&world, COARSE).expect("deviate view");
+    assert!(same(&last_pic, &frame(&full.stock)), "the worker's last frame IS the Deviate picture");
+    // A backward request is followed, and the published lattice rides
+    // one shared base the whole session.
+    w.request(total / 2);
+    let back = frames_until(&w, total / 2);
+    let f = back.last().expect("a frame");
+    assert_eq!(f.at, total / 2);
+    let p = f.view.packed.as_ref().expect("a field view is packed on the worker");
+    let p0 = first[0].view.packed.as_ref().expect("packed");
+    assert!(std::sync::Arc::ptr_eq(&p.base, &p0.base), "the mesh layer is packed once per session");
+    assert_eq!(p.cut.len(), p.base.mesh.len(), "the cut layer covers the base's extent");
+}
+
+#[test]
+fn a_worker_refusal_is_said_by_name_and_drop_joins() {
+    // An empty document has no program: the seed itself refuses.
+    assert!(PlaySeed::gather(&new_world(), false, COARSE).is_err());
+    let world = faced_doc();
+    let w = PlayWorker::spawn(PlaySeed::gather(&world, false, COARSE).expect("seed")).expect("worker");
+    w.request(usize::MAX); // clamps to the end
+    drop(w); // stops mid-cut and joins: no thread outlives the handle
 }

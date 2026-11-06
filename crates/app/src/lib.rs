@@ -38,6 +38,7 @@ pub use camcraft_geometry::geometry::stock;
 pub mod stock_sim;
 pub mod stock_export;
 pub mod stock_play;
+pub mod stock_play_worker;
 pub mod stock_view;
 pub mod tool_list;
 pub use camcraft_tools::tools;

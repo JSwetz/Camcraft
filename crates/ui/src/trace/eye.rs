@@ -16,7 +16,9 @@
 //!   the status line is not spammed every frame, and the log names it.
 //! - **Nothing stale.** The field the GPU holds is the `Arc` the state
 //!   holds; a different (or absent) field view clears the resident
-//!   lattice and the cached frame before anything else happens.
+//!   lattice and the cached frame before anything else happens - except
+//!   a playback frame of the same packed session, which rewrites only
+//!   its cut layer in place (and still drops the cached frame).
 
 use std::sync::Arc;
 
@@ -138,9 +140,16 @@ impl StockEye {
             return Ok(false);
         };
         if !self.source.as_ref().is_some_and(|s| Arc::ptr_eq(s, fv)) {
-            self.clear();
-            self.source = Some(Arc::clone(fv));
-            self.gpu_scene = self.upload(device, fv);
+            if self.rewrite_cut(queue, fv) {
+                // Same playback session: the cut layer moved, nothing else.
+                self.source = Some(Arc::clone(fv));
+                self.frame = None;
+                self.refused = None;
+            } else {
+                self.clear();
+                self.source = Some(Arc::clone(fv));
+                self.gpu_scene = self.upload(device, fv);
+            }
         }
         let pcam = preview_camera(cam).ok_or("the camera basis is degenerate")?;
         let key = Key { cam: cam_bits(&pcam), view };
@@ -183,10 +192,31 @@ impl StockEye {
         }
     }
 
+    /// A playback frame of the resident session (the same packed base)
+    /// only re-sends its cut layer: true when that is done.
+    fn rewrite_cut(&self, queue: &wgpu::Queue, fv: &FieldView) -> bool {
+        let held = self.source.as_ref().and_then(|s| s.packed.as_ref());
+        let (Some(held), Some(next), Some(trace)) = (held, fv.packed.as_ref(), self.trace.as_ref()) else {
+            return false;
+        };
+        self.gpu_scene && Arc::ptr_eq(&held.base, &next.base) && trace.write_cut(queue, &next.cut).is_ok()
+    }
+
     /// Put `fv`'s lattices on the GPU; false (and a log line) when the
-    /// pass is absent or refuses them - the CPU marches instead.
+    /// pass is absent or refuses them - the CPU marches instead. A view
+    /// packed off-thread (playback) is sent as packed; any other is
+    /// packed here.
     fn upload(&mut self, device: &wgpu::Device, fv: &FieldView) -> bool {
         let Some(trace) = self.trace.as_mut() else { return false };
+        if let Some(p) = &fv.packed {
+            return match trace.upload_layers(device, &p.base.meta, &p.base.mesh, &p.cut, p.base.target.as_ref()) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("stock eye: {e} - the CPU march stands in");
+                    false
+                }
+            };
+        }
         let Some(stock) = fv.stock.field().and_then(pack_field) else {
             eprintln!("stock eye: the stock field would not pack - the CPU march stands in");
             return false;

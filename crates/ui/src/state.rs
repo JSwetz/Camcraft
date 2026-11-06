@@ -971,8 +971,12 @@ pub struct State {
     /// computed once per arming, retired with `program_sim`.
     pub field_view: Option<Result<std::sync::Arc<camcraft_app::stock_view::FieldView>, String>>,
     /// M7.2 C: the playback field while the transport is up - the stock
-    /// cut to the playhead, feeding `field_view` frame by frame.
-    pub field_play: Option<camcraft_app::stock_play::FieldPlay>,
+    /// cut to the playhead on a worker thread, its newest picture
+    /// feeding `field_view` (dropping it stops and joins the worker).
+    pub field_play: Option<camcraft_app::stock_play_worker::PlayWorker>,
+    /// The transport's timeline, built once per `doc_version` (never
+    /// per frame: it walks every op's path) - see `shell::cached_script`.
+    pub sim_script_cache: Option<(u64, std::sync::Arc<camcraft_app::sim::Script>)>,
     /// What `field_view` was walked for: (transport up, Deviate armed,
     /// the document version a playback plan was frozen at). A change
     /// retires the view and the playback - never a stale picture.
@@ -1198,6 +1202,7 @@ impl State {
             program_sim: None,
             field_view: None,
             field_play: None,
+            sim_script_cache: None,
             field_mode: None,
             stock_mesh: camcraft_app::stock_export::MeshCache::default(),
             ribbon_more: None,

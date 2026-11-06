@@ -1,0 +1,246 @@
+//! Traced playback off the UI thread (2026-11 perf fix): one worker
+//! owns the `FieldPlay`, cuts toward the newest requested move, and
+//! publishes the newest view through a latest-only slot. Provenance:
+//! the plain latest-wins mailbox pattern (a mutex-guarded target plus
+//! a condvar, a single-item output slot) over std threads; nothing
+//! from vendor binaries.
+//!
+//! ## The laws here
+//!
+//! - **The UI never waits on a cut.** `request` overwrites the target
+//!   (coalescing every request the worker has not reached yet) and
+//!   `take` empties the slot without blocking; whatever is newest is
+//!   what shows.
+//! - **Long jumps stay live.** The worker cuts in chunks sized to a
+//!   frame's worth of work, re-reading the target between chunks, so
+//!   a scrub turned around mid-jump is followed at once and a jump to
+//!   the end publishes its progress as it goes.
+//! - **Publication is throttled.** A view is snapshotted (cut layers
+//!   cloned, cut lattice packed) at most every `MIN_PUBLISH`, or when
+//!   the worker catches up - the per-frame clone is bounded by time.
+//! - **Refuse, never crash.** A build or cut failure is published as
+//!   `Err` and the worker ends; a poisoned lock reads as a lost worker
+//!   by name. Dropping the handle stops and joins the thread: no
+//!   playback outlives its document.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use crate::stock_play::{FieldPlay, PlayIndex, PlaySeed};
+use crate::stock_view::{FieldView, Packed, PackedBase};
+use crate::stock_sim::preview::pack_cut;
+
+/// The publication floor: at most ~20 views a second while cutting.
+pub const MIN_PUBLISH: Duration = Duration::from_millis(50);
+
+/// The chunk's time target: a chunk this long between target checks.
+const CHUNK_TARGET: Duration = Duration::from_millis(15);
+
+/// Chunk bounds, in moves (the upper one is the field's own batch).
+const CHUNK_MIN: usize = 1;
+const CHUNK_MAX: usize = 1024;
+
+/// One published picture: the view and the moves it is cut by.
+#[derive(Clone, Debug)]
+pub struct PlayFrame {
+    pub at: usize,
+    pub view: Arc<FieldView>,
+}
+
+#[derive(Default)]
+struct Req {
+    target: usize,
+    stop: bool,
+}
+
+#[derive(Default)]
+struct Slot {
+    latest: Option<Result<PlayFrame, String>>,
+    /// Publications so far (a test's progress counter).
+    count: u64,
+}
+
+#[derive(Default)]
+struct Shared {
+    req: Mutex<Req>,
+    wake: Condvar,
+    out: Mutex<Slot>,
+    published: Condvar,
+}
+
+/// The playback worker's handle (see the module law).
+pub struct PlayWorker {
+    shared: Arc<Shared>,
+    index: PlayIndex,
+    handle: Option<JoinHandle<()>>,
+    /// Moves cut in the newest frame `take` handed out (`usize::MAX`:
+    /// none yet).
+    shown: AtomicUsize,
+}
+
+fn lock<T>(m: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    m.lock().ok()
+}
+
+impl PlayWorker {
+    /// Start a worker over `seed` (the fields are built on the worker,
+    /// so the call returns at once). `Err` only when no thread spawns.
+    pub fn spawn(seed: PlaySeed) -> Result<Self, String> {
+        let index = seed.index();
+        let shared = Arc::new(Shared::default());
+        let inner = Arc::clone(&shared);
+        let handle = std::thread::Builder::new()
+            .name("camcraft-playback".into())
+            .spawn(move || run(&inner, seed))
+            .map_err(|e| format!("playback worker would not start: {e}"))?;
+        Ok(PlayWorker { shared, index, handle: Some(handle), shown: AtomicUsize::new(usize::MAX) })
+    }
+
+    /// The move table the playhead maps onto.
+    #[must_use]
+    pub fn index(&self) -> &PlayIndex {
+        &self.index
+    }
+
+    /// Ask for the stock cut to `k` moves; the newest request wins.
+    pub fn request(&self, k: usize) {
+        if let Some(mut g) = lock(&self.shared.req)
+            && g.target != k
+        {
+            g.target = k;
+            self.shared.wake.notify_one();
+        }
+    }
+
+    /// The newest publication since the last take, never blocking.
+    /// A lost worker (poisoned slot, or a thread that ended without a
+    /// word) answers `Err` by name.
+    pub fn take(&self) -> Option<Result<PlayFrame, String>> {
+        match lock(&self.shared.out) {
+            Some(mut g) => {
+                let r = g.latest.take().or_else(|| self.lost());
+                if let Some(Ok(f)) = &r {
+                    self.shown.store(f.at, Ordering::Relaxed);
+                }
+                r
+            }
+            None => Some(Err("the playback worker lost its output slot".into())),
+        }
+    }
+
+    fn lost(&self) -> Option<Result<PlayFrame, String>> {
+        self.handle
+            .as_ref()
+            .filter(|h| h.is_finished())
+            .map(|_| Err("the playback worker stopped".into()))
+    }
+
+    /// Wait up to `timeout` for a publication newer than `seen` (the
+    /// count `published` last answered); tests and benches only - the
+    /// UI never waits.
+    pub fn wait_published(&self, seen: u64, timeout: Duration) -> u64 {
+        let Some(g) = lock(&self.shared.out) else { return seen };
+        match self.shared.published.wait_timeout_while(g, timeout, |s| s.count <= seen) {
+            Ok((g, _)) => g.count,
+            Err(_) => seen,
+        }
+    }
+
+    /// Moves cut in the newest frame `take` handed out.
+    #[must_use]
+    pub fn shown_at(&self) -> Option<usize> {
+        Some(self.shown.load(Ordering::Relaxed)).filter(|&a| a != usize::MAX)
+    }
+
+    /// Publications so far.
+    #[must_use]
+    pub fn published(&self) -> u64 {
+        lock(&self.shared.out).map_or(0, |g| g.count)
+    }
+}
+
+impl Drop for PlayWorker {
+    fn drop(&mut self) {
+        if let Some(mut g) = lock(&self.shared.req) {
+            g.stop = true;
+        }
+        self.shared.wake.notify_all();
+        if let Some(h) = self.handle.take()
+            && h.join().is_err()
+        {
+            eprintln!("playback worker: the thread ended abnormally");
+        }
+    }
+}
+
+fn publish(shared: &Shared, r: Result<PlayFrame, String>) {
+    if let Some(mut g) = lock(&shared.out) {
+        g.latest = Some(r);
+        g.count = g.count.saturating_add(1);
+    }
+    shared.published.notify_all();
+}
+
+/// The next target, or `None` to stop; waits while there is nothing
+/// to do (the cut stands at the target and that state was published).
+fn next_target(shared: &Shared, at: usize, published: Option<usize>, total: usize) -> Option<usize> {
+    let mut g = lock(&shared.req)?;
+    loop {
+        if g.stop {
+            return None;
+        }
+        let k = g.target.min(total);
+        if k != at || published != Some(at) {
+            return Some(k);
+        }
+        g = shared.wake.wait(g).ok()?;
+    }
+}
+
+fn snapshot(play: &FieldPlay, base: Option<&Arc<PackedBase>>) -> PlayFrame {
+    let mut view = play.view();
+    if let (Some(base), Some(f)) = (base, view.stock.field()) {
+        let cut = Arc::new(pack_cut(f, &base.meta));
+        view.packed = Some(Packed { base: Arc::clone(base), cut });
+    }
+    PlayFrame { at: play.at(), view: Arc::new(view) }
+}
+
+fn run(shared: &Shared, seed: PlaySeed) {
+    let mut play = match FieldPlay::from_seed(seed) {
+        Ok(p) => p,
+        Err(e) => return publish(shared, Err(e)),
+    };
+    let base = {
+        let v = play.view();
+        PackedBase::of(&v.stock, v.target.as_deref()).map(|(b, _)| Arc::new(b))
+    };
+    let (mut published, mut last, mut chunk) = (None, None::<Instant>, 64usize);
+    while let Some(k) = next_target(shared, play.at(), published, play.total()) {
+        // A backward target restores its checkpoint first (no cutting),
+        // then walks forward in chunks like any other.
+        let step = if k < play.at() {
+            play.floor_checkpoint(k)
+        } else {
+            k.min(play.at().saturating_add(chunk))
+        };
+        let t0 = Instant::now();
+        if let Err(e) = play.seek(step) {
+            return publish(shared, Err(e));
+        }
+        let dt = t0.elapsed();
+        if dt < CHUNK_TARGET / 2 {
+            chunk = chunk.saturating_mul(2).min(CHUNK_MAX);
+        } else if dt > CHUNK_TARGET * 2 {
+            chunk = (chunk / 2).max(CHUNK_MIN);
+        }
+        let due = last.is_none_or(|t| t.elapsed() >= MIN_PUBLISH);
+        if published != Some(play.at()) && (play.at() == k || due) {
+            publish(shared, Ok(snapshot(&play, base.as_ref())));
+            published = Some(play.at());
+            last = Some(Instant::now());
+        }
+    }
+}

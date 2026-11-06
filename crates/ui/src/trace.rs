@@ -142,12 +142,25 @@ impl TracePass {
         stock: &FieldLattice,
         target: Option<&DistanceLattice>,
     ) -> Result<(), String> {
+        self.upload_layers(device, &stock.meta, &stock.mesh, &stock.cut, target)
+    }
+
+    /// `upload` from loose layers (playback's pre-packed views share
+    /// the mesh layer across frames and carry only their own cut).
+    pub fn upload_layers(
+        &mut self,
+        device: &wgpu::Device,
+        meta: &LatticeMeta,
+        mesh: &[f32],
+        cut: &[f32],
+        target: Option<&DistanceLattice>,
+    ) -> Result<(), String> {
         let limit = device.limits().max_storage_buffer_binding_size;
         let texels = |m: &LatticeMeta| {
             m.dims.iter().try_fold(1usize, |n, &d| n.checked_mul(d as usize))
         };
-        let n = texels(&stock.meta).ok_or("trace pass: the stock lattice extent overflows")?;
-        if stock.mesh.len() != n || stock.cut.len() != n {
+        let n = texels(meta).ok_or("trace pass: the stock lattice extent overflows")?;
+        if mesh.len() != n || cut.len() != n {
             return Err("trace pass: the stock lattice layers disagree with its extent".into());
         }
         if (n as u64).saturating_mul(4) > limit {
@@ -165,28 +178,43 @@ impl TracePass {
                 return Err("trace pass: the target lattice exceeds the device's storage limit".into());
             }
         }
-        let init = |label: &str, bytes: &[u8]| {
+        let init = |label: &str, bytes: &[u8], extra: wgpu::BufferUsages| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: bytes,
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | extra,
             })
         };
-        let mesh = init("trace-mesh", &f32_bytes(&stock.mesh));
-        let cut = init("trace-cut", &f32_bytes(&stock.cut));
+        let none = wgpu::BufferUsages::empty();
+        let mesh = init("trace-mesh", &f32_bytes(mesh), none);
+        // The cut layer is the one playback rewrites in place.
+        let cut = init("trace-cut", &f32_bytes(cut), wgpu::BufferUsages::COPY_DST);
         // A storage binding cannot be empty: no target binds one zero
         // texel the kernel never reads (has_target = 0).
         let target_buf = match target {
-            Some(t) => init("trace-target", &f32_bytes(&t.d)),
-            None => init("trace-target", &f32_bytes(&[0.0])),
+            Some(t) => init("trace-target", &f32_bytes(&t.d), none),
+            None => init("trace-target", &f32_bytes(&[0.0]), none),
         };
         self.scene = Some(Scene {
             mesh,
             cut,
             target: target_buf,
-            meta: stock.meta.clone(),
+            meta: meta.clone(),
             t_meta: target.map(|t| t.meta.clone()),
         });
+        Ok(())
+    }
+
+    /// Rewrite the resident cut layer in place (playback: the mesh and
+    /// target layers stand). Refuses a layer of the wrong extent, or no
+    /// scene, by name - the caller then uploads whole.
+    pub fn write_cut(&self, queue: &wgpu::Queue, cut: &[f32]) -> Result<(), String> {
+        let scene = self.scene.as_ref().ok_or("trace pass: no lattice to rewrite")?;
+        let n = scene.meta.dims.iter().try_fold(1usize, |n, &d| n.checked_mul(d as usize));
+        if n != Some(cut.len()) {
+            return Err("trace pass: the cut layer disagrees with the resident extent".into());
+        }
+        queue.write_buffer(&scene.cut, 0, &f32_bytes(cut));
         Ok(())
     }
 

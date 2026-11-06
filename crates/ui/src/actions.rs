@@ -186,25 +186,30 @@ fn walk_whole_program(state: &mut State) {
     }
 }
 
-/// Cut the playback field to the transport's playhead; a new picture
-/// only when the cut changed.
+/// Point the playback worker at the transport's playhead and show its
+/// newest picture. Never waits: the worker cuts (and packs) off this
+/// thread, and until its first publication the sheet stands.
 fn follow_playhead(state: &mut State, judged: bool) -> Result<(), String> {
-    use camcraft_app::stock_play::{progress, FieldPlay};
+    use camcraft_app::stock_play::{progress, PlaySeed};
+    use camcraft_app::stock_play_worker::PlayWorker;
+    use camcraft_app::stock_view::DEFAULT_TEXELS;
     if state.field_play.is_none() {
-        state.field_play = Some(FieldPlay::new(&state.world, judged)?);
+        let seed = PlaySeed::gather(&state.world, judged, DEFAULT_TEXELS)?;
+        state.field_play = Some(PlayWorker::spawn(seed)?);
     }
-    let sc = crate::egui_app::shell::sim_script(state);
+    let sc = crate::egui_app::shell::cached_script(state);
     let t = state.sim.as_ref().map_or(0.0, |s| s.t);
-    let play = state.field_play.as_mut().ok_or("playback was not built")?;
+    let play = state.field_play.as_ref().ok_or("playback was not built")?;
     let k = match progress(&sc, t) {
         None => 0,
         Some(p) => play
+            .index()
             .index_at(&p)
             .ok_or_else(|| format!("{} is on the timeline but not in the posting plan", p.op))?,
     };
-    let changed = play.seek(k)?;
-    if changed || state.field_view.is_none() {
-        state.field_view = Some(Ok(std::sync::Arc::new(play.view())));
+    play.request(k);
+    if let Some(frame) = play.take() {
+        state.field_view = Some(Ok(frame?.view));
     }
     Ok(())
 }

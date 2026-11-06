@@ -24,7 +24,10 @@
 
 use crate::geometry::{transform_point, IDENTITY_Q, Point3, Triangle};
 use crate::model;
+use std::sync::Arc;
+
 use crate::stock_sim::preview::pack::MAX_TEXELS;
+use crate::stock_sim::preview::{pack_field, pack_target, DistanceLattice, LatticeMeta};
 use crate::stock_sim::{auto_cell, part_facets, plan_program, Backend, SimOp, Stock, FIELD_BAND};
 
 /// The texels the stock's display cell is sized for by default: a
@@ -47,10 +50,46 @@ const MAX_ROUNDS: u32 = 6;
 #[derive(Debug)]
 pub struct FieldView {
     pub stock: Stock,
-    pub target: Option<Stock>,
+    /// Shared, never re-cloned: the model does not move while a
+    /// program plays.
+    pub target: Option<Arc<Stock>>,
     /// Why `target` is empty, said so the status line can repeat it.
     pub target_note: Option<String>,
     pub cell: f64,
+    /// The GPU lattice already packed off the UI thread (playback):
+    /// `None` and the eye packs `stock` itself.
+    pub packed: Option<Packed>,
+}
+
+/// A view's lattice, packed where the cutting ran: the session's
+/// constant layers behind one `Arc` (an eye holding the same `base`
+/// re-sends only `cut`), and this frame's cut layer.
+#[derive(Clone, Debug)]
+pub struct Packed {
+    pub base: Arc<PackedBase>,
+    /// The cut layer over `base.meta`'s extent.
+    pub cut: Arc<Vec<f32>>,
+}
+
+/// What a playback session never re-packs: the stock's mesh layer
+/// (parity-signed) and the model's distance lattice.
+#[derive(Debug)]
+pub struct PackedBase {
+    pub meta: LatticeMeta,
+    pub mesh: Vec<f32>,
+    pub target: Option<DistanceLattice>,
+}
+
+impl PackedBase {
+    /// Pack the session's constant layers; `None` when the stock is
+    /// not a field or will not pack (the eye then packs, or marches
+    /// on the CPU, as before).
+    #[must_use]
+    pub fn of(stock: &Stock, target: Option<&Stock>) -> Option<(Self, Vec<f32>)> {
+        let lat = stock.field().and_then(pack_field)?;
+        let target = target.and_then(Stock::field).and_then(pack_target);
+        Some((PackedBase { meta: lat.meta, mesh: lat.mesh, target }, lat.cut))
+    }
 }
 
 /// Walk the document's program through the field arm, at the default
@@ -71,7 +110,7 @@ pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result
             .map_err(|e| format!("the field view could not cut the program: {e}"))?;
     }
     let (target, target_note) = display_target(world, cell);
-    Ok(FieldView { stock, target, target_note, cell })
+    Ok(FieldView { stock, target: target.map(Arc::new), target_note, cell, packed: None })
 }
 
 /// The uncut display stock, the plan it will be cut by, and its cell:
@@ -80,6 +119,16 @@ pub(crate) fn display_parts(
     world: &flecs_ecs::prelude::World,
     texels: f64,
 ) -> Result<(Stock, Vec<crate::stock_sim::Planned>, f64), String> {
+    let (facets, planned, cell) = display_inputs(world, texels)?;
+    Ok((build_stock(&facets, cell)?, planned, cell))
+}
+
+/// `display_parts`' world half: the stock's world facets, the plan
+/// and the cell - plain data a worker can build the field from.
+pub(crate) fn display_inputs(
+    world: &flecs_ecs::prelude::World,
+    texels: f64,
+) -> Result<(Vec<Triangle>, Vec<crate::stock_sim::Planned>, f64), String> {
     if !(texels.is_finite() && texels >= 1.0) {
         return Err(format!("the field view needs a positive texel budget, not {texels}"));
     }
@@ -98,19 +147,27 @@ pub(crate) fn display_parts(
     if !(cell.is_finite() && cell > 0.0) {
         return Err(format!("the stock's extent gives no sane display cell ({cell})"));
     }
+    Ok((stock_facets, planned, cell))
+}
+
+/// `display_parts`' build half: the uncut display field (no world).
+pub(crate) fn build_stock(stock_facets: &[Triangle], cell: f64) -> Result<Stock, String> {
     let backend = Backend::Field { band: FIELD_BAND };
-    let stock = Stock::from_facets(backend, &subdivide(&stock_facets, cell), cell)
-        .map_err(|e| format!("the field view could not build the stock: {e}"))?;
-    Ok((stock, planned, cell))
+    Stock::from_facets(backend, &subdivide(stock_facets, cell), cell)
+        .map_err(|e| format!("the field view could not build the stock: {e}"))
 }
 
 /// The model as a field at `cell`, or why it cannot be one.
 pub(crate) fn display_target(world: &flecs_ecs::prelude::World, cell: f64) -> (Option<Stock>, Option<String>) {
-    let part = part_facets(world);
+    build_target(&part_facets(world), cell)
+}
+
+/// `display_target`'s build half, from the model's world facets.
+pub(crate) fn build_target(part: &[Triangle], cell: f64) -> (Option<Stock>, Option<String>) {
     if part.is_empty() {
         return (None, Some("no model to judge against".to_string()));
     }
-    match Stock::from_facets(Backend::Field { band: FIELD_BAND }, &subdivide(&part, cell), cell) {
+    match Stock::from_facets(Backend::Field { band: FIELD_BAND }, &subdivide(part, cell), cell) {
         Ok(t) => (Some(t), None),
         Err(e) => (None, Some(format!("the model cannot be signed as a field: {e}"))),
     }
