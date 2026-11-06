@@ -216,6 +216,21 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if let Some(msg) = side_sane(&params, &src) {
                 return Err(GenError::Invalid(msg));
             }
+            // Control-side compensation (M13.11) rides the closed-ring
+            // contour only: an open boundary, an open run and a 3+2
+            // tilt are refused by name, never posted as a centre path
+            // under a Control op.
+            let control_comp = lk.approach.compensation == crate::links::Compensation::Control;
+            if control_comp && contour_open {
+                return Err(GenError::Invalid(
+                    "control compensation does not ride an open contour - choose In computer".into(),
+                ));
+            }
+            if control_comp && matches!(params, OpParams::Contour { tilt: Some(_), .. }) {
+                return Err(GenError::Invalid(
+                    "control compensation does not ride a 3+2 tilt - choose In computer".into(),
+                ));
+            }
             let cp = ContourParams {
                 tool_diameter: d,
                 stock_to_leave: *stock_to_leave,
@@ -301,6 +316,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     } else {
                         machining2d::contour(&region, &cp)?
                     };
+                    if control_comp && !runs.is_empty() {
+                        return Err(GenError::Invalid(
+                            "control compensation does not ride open runs - pick closed rings, or choose In computer".into(),
+                        ));
+                    }
                     for run in &runs {
                         path = stitch(path, machining2d::contour_along_chain(run, &cp)?);
                     }
@@ -729,8 +749,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     crate::multiaxis::flow3d(&material.facets, fp)?
                 }
                 };
+                // M13.10: the clip's re-entries ramp along the kept
+                // chain under the guard's `entry_ramp` retry, from the
+                // solid's top (infinite for a centre-cutting tool, so
+                // its re-entry stays the plunge it may make).
                 match &clip {
-                    Some(c) => super::finish_clip::clip_path(whole, c, fp),
+                    Some(c) => super::finish_clip::clip_path(whole, c, fp, solid_top),
                     None => Ok(whole),
                 }
             };

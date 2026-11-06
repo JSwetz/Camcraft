@@ -140,8 +140,9 @@ impl AreaControls {
 
 /// The kinds whose region IS the area the tool works in, so the area
 /// controls mean something: the facing and clearing kinds, the contour
-/// ride, the 3D pocket ladder and the 3D finishing family (every
-/// pattern of `Finish3D` - its path is clipped to the area). Every
+/// ride, the 3D pocket ladder, the 3D finishing family (every
+/// pattern of `Finish3D` - its path is clipped to the area) and the
+/// outline rides Trace / Engrave (tool centre on the chain). Every
 /// other kind refuses non-default controls by name: [`area_unsupported`]
 /// is the one list, and this is its `is_none`.
 #[must_use]
@@ -162,16 +163,17 @@ pub fn area_unsupported(kind: OpType) -> Option<String> {
         | OpType::Adaptive2D
         | OpType::Offset2D
         | OpType::Pocket3D
-        | OpType::Finish3D => return None,
+        | OpType::Finish3D
+        // The outline rides (M13.10): the tool centre ON the chain is
+        // their native, so containment, offset and the extra boundaries
+        // move or shape the ring they ride (`Native::ToolOn`).
+        | OpType::Trace
+        | OpType::Engrave => return None,
         // Authored geometry: the numbers ARE the area.
         OpType::Slot => format!("a {kind} is authored by its two endpoints and width - move those instead of a boundary"),
         OpType::Circular => format!("a {kind} is authored by its centre and radius - set those instead of a boundary"),
-        // Rides of a line: the picked outline is the path itself, and a
-        // clipped or offset outline would be ridden where nothing was
-        // picked.
-        OpType::Trace | OpType::Engrave => {
-            format!("{kind} rides the picked outline itself as its path - a line bounds no area; pick other edges instead")
-        }
+        // The cone's ride is the wall itself: an offset or clipped
+        // outline would be ridden where nothing was picked.
         OpType::Chamfer2D => {
             format!("a {kind}'s cone lies on the picked wall - its ride cannot be offset or clipped; pick other edges instead")
         }

@@ -97,6 +97,8 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
         // The finish's rings reach a radius past the silhouette (the
         // ball rides a wall with its edge on it): tool outside, natively.
         OpParams::Finish3D { .. } => (Family::Finish, Native::ToolOutside),
+        // The outline rides (M13.10): the loops are the path, centre on.
+        OpParams::Trace { .. } | OpParams::Engrave { .. } => (Family::Ride, Native::ToolOn),
         _ => (Family::Clearing, Native::ToolInside),
     };
     let oz = frame.map_or(0.0, |f| f.origin.z);

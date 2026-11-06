@@ -26,7 +26,7 @@ use super::*;
 /// honest to draw), or when the band cannot be built.
 #[must_use]
 pub fn machined_footprint(world: &World, op: &Operation) -> Option<Region> {
-    let (region, turn, ctx) = region_turn_of(world, op)?;
+    let RegionTurn { region, turn, ctx, local } = region_turn_of(world, op)?;
     match &op.params {
         OpParams::Face { .. } => {
             let r = model::find_by_name(world, &op.tool)
@@ -34,7 +34,17 @@ pub fn machined_footprint(world: &World, op: &Operation) -> Option<Region> {
                 .map(|t| t.diameter * 0.5)
                 .filter(|r| r.is_finite() && *r > 0.0)
                 .unwrap_or(0.0);
-            face_band(&region, turn, r).ok()
+            // Under a 3+2 index (M13.10) the band is laid in the frame
+            // the rows run in - the local region, the local turn - and
+            // projected out through it, so the preview is the cut; the
+            // local turn on the world shadow was only a likeness.
+            match local {
+                Some((local, zl)) => {
+                    let f = op.params.tilt()?.frame()?;
+                    f.world_region(&face_band(&local, turn, r).ok()?, zl).ok()
+                }
+                None => face_band(&region, turn, r).ok(),
+            }
         }
         OpParams::Contour { stock_to_leave, climb, .. } => {
             let Some(ctx) = ctx.filter(|c| c.open.is_some()) else {

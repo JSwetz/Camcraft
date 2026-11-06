@@ -16,14 +16,24 @@ use super::*;
 /// (Prime Directive: a wrong preview is as bad as a wrong toolpath).
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
-    region_turn_of(world, op).map(|(r, _, _)| r)
+    region_turn_of(world, op).map(|r| r.region)
 }
 
-/// [`region_of`] plus the turn the area controls lay Face's rows at
-/// (0 without an open chain) and the resolved area controls (`None` at
-/// their identity) - what `footprint` needs to draw the band Face
-/// really clears, or the open pass a Contour rides.
-pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f64, Option<AreaCtx>)> {
+/// [`region_of`]'s full answer: the world region, the turn the area
+/// controls lay Face's rows at (0 without an open chain), the resolved
+/// area controls (`None` at their identity) and - under a 3+2 index -
+/// the LOCAL region with the plane it stands at (M13.10), so a band
+/// built in the frame projects through it instead of being laid on the
+/// world shadow. What `footprint` needs to draw the band Face really
+/// clears, or the open pass a Contour rides.
+pub(super) struct RegionTurn {
+    pub(super) region: Region,
+    pub(super) turn: f64,
+    pub(super) ctx: Option<AreaCtx>,
+    pub(super) local: Option<(Region, f64)>,
+}
+
+pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<RegionTurn> {
     // The 3+2 index (M5.1 B): a tilted planar op draws the cutting
     // plane's own shadow - the local region through the frame's door,
     // at the plane its `region_height` names. A tilt that commands no
@@ -71,19 +81,23 @@ pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f
         }
         apply_area_full(r, ctx.as_ref()).ok().map(|a| (a.region, a.turn))
     };
-    let (region, turn) = region_turn_core(world, op, frame.as_ref(), controlled)?;
-    Some((region, turn, ctx))
+    let (region, turn, local) = region_turn_core(world, op, frame.as_ref(), controlled)?;
+    Some(RegionTurn { region, turn, ctx, local })
 }
+
+/// The world region, the turn, and - under a tilt - the local region
+/// with its plane.
+type Laid = (Region, f64, Option<(Region, f64)>);
 
 /// The region and turn of [`region_turn_of`] with the area controls
 /// applied by `controlled`, split out so the controls' context outlives
-/// its borrow.
+/// its borrow; the third is the local region and its plane under a tilt.
 fn region_turn_core(
     world: &World,
     op: &Operation,
     frame: Option<&crate::cl::TiltedFrame>,
     controlled: impl Fn(Option<Region>) -> Option<(Region, f64)>,
-) -> Option<(Region, f64)> {
+) -> Option<Laid> {
     if let SrcRef::Selection(items) = &op.src
         && !matches!(
             op.params,
@@ -108,13 +122,14 @@ fn region_turn_core(
                 | OpParams::MultiAxisContour { .. }
         )
     {
-        return controlled(selection_region(world, op.setup.as_deref(), items, &op.params).ok());
+        return controlled(selection_region(world, op.setup.as_deref(), items, &op.params).ok()).map(|(r, t)| (r, t, None));
     }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
     match frame {
         None => controlled(
             region_for(world, op.setup.as_deref(), Some(&op.src), &material, &op.params, None).ok(),
-        ),
+        )
+        .map(|(r, t)| (r, t, None)),
         Some(f) => {
             let local = Material {
                 facets: f.local_facets(&material.facets),
@@ -137,7 +152,7 @@ fn region_turn_core(
             // applies to the local region and the result rides the
             // wrap out - exactly `run_job`'s order.
             let (local, turn) = controlled(Some(local))?;
-            f.world_region(&local, zl).ok().map(|r| (r, turn))
+            f.world_region(&local, zl).ok().map(|r| (r, turn, Some((local, zl))))
         }
     }
 }

@@ -4,10 +4,11 @@
 //! path is then CLIPPED to the area the boundary law resolved - the
 //! tool centre keeps to [`centre_area`], each cut move keeps the parts
 //! inside it, and the tool leaves and re-enters through the clearance
-//! plane, vertically. Nothing is re-generated: a kept point is a point
-//! the whole-model kernel already certified, a vertical line above it
-//! is air by the 3-axis tangent law, so the clipped path cuts nowhere
-//! the unclipped one did not.
+//! plane - vertically, or along the kept chain for a tool that may not
+//! plunge (`finish_entry::ramp_into`, M13.10). Nothing is re-generated: a kept
+//! point is a point the whole-model kernel already certified, a
+//! vertical line above it is air by the 3-axis tangent law, so the
+//! clipped path cuts nowhere the unclipped one did not.
 //!
 //! Provenance: our own design notes - clipping a surface toolpath to a
 //! 2D containment boundary at tool centre / edge is the textbook
@@ -45,7 +46,7 @@ fn inside(allow: &Region, p: Point3) -> bool {
     allow.contains(Point2::new(p.x, p.y))
 }
 
-fn lerp(a: Point3, b: Point3, t: f64) -> Point3 {
+pub(super) fn lerp(a: Point3, b: Point3, t: f64) -> Point3 {
     Point3::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t)
 }
 
@@ -149,43 +150,71 @@ fn link(out: &mut Vec<Move>, pos: Option<Point3>, p: Point3, clearance: f64, plu
     }
 }
 
-/// `path` clipped to `allow` (the tool-centre area): rapids survive
-/// only where they continue the clipped path and land inside; every
-/// cut move keeps its inside pieces, chorded where an arc crosses the
-/// boundary; each re-entry rides [`link`]. A path left with no cut at
-/// all refuses by name.
-pub(super) fn clip_path(path: Toolpath, allow: &Region, fp: &Finish3DParams) -> Result<Toolpath, GenError> {
+/// The contiguous runs of `path` inside `allow`: rapids survive only
+/// where they continue a run and land inside; every cut move keeps its
+/// inside pieces, chorded where an arc crosses the boundary. Each run
+/// is a chain (every move starts where the last ended) the output
+/// re-enters once.
+fn runs(path: &Toolpath, allow: &Region, tol: f64) -> Vec<Vec<Move>> {
     let edges = Edges::of(allow);
-    let clearance = fp.clearance_z;
-    let mut out: Vec<Move> = Vec::with_capacity(path.moves.len());
+    let mut runs: Vec<Vec<Move>> = Vec::new();
     let mut pos: Option<Point3> = None;
-    let mut kept = 0usize;
+    fn push(runs: &mut Vec<Vec<Move>>, pos: &mut Option<Point3>, m: Move) {
+        match runs.last_mut() {
+            Some(r) if *pos == Some(m.from) => r.push(m),
+            _ => runs.push(vec![m]),
+        }
+        *pos = Some(m.to);
+    }
     for m in &path.moves {
         if m.kind == MoveKind::Rapid {
             if pos == Some(m.from) && m.arc.is_none() && inside(allow, m.to) {
-                out.push(*m);
-                pos = Some(m.to);
+                push(&mut runs, &mut pos, *m);
             }
             continue;
         }
-        let segs = m.segments3(fp.tolerance);
+        let segs = m.segments3(tol);
         let whole = m.arc.is_some() && pos == Some(m.from) && segs.iter().all(|(a, b)| inside(allow, *a) && inside(allow, *b));
         if whole {
-            out.push(*m);
-            pos = Some(m.to);
-            kept += 1;
+            push(&mut runs, &mut pos, *m);
             continue;
         }
         for (a, b) in segs {
             for (p, q) in edges.clip(allow, a, b) {
-                if pos != Some(p) {
-                    link(&mut out, pos, p, clearance, fp.plunge_feed);
-                }
-                out.push(Move { kind: m.kind, from: p, to: q, feed: m.feed, arc: None, axis: m.axis });
-                pos = Some(q);
-                kept += 1;
+                push(&mut runs, &mut pos, Move { kind: m.kind, from: p, to: q, feed: m.feed, arc: None, axis: m.axis });
             }
         }
+    }
+    runs
+}
+
+/// `path` clipped to `allow` (the tool-centre area), see [`runs`]; each
+/// re-entry rides [`link`] - vertically, or, with `entry_ramp` on and a
+/// finite solid top `ramp_top` (the non-centre-cutting tool's retry),
+/// along `finish_entry::ramp_into` where it fits. A path left with no cut at all
+/// refuses by name.
+pub(super) fn clip_path(path: Toolpath, allow: &Region, fp: &Finish3DParams, ramp_top: f64) -> Result<Toolpath, GenError> {
+    let clearance = fp.clearance_z;
+    let mut out: Vec<Move> = Vec::with_capacity(path.moves.len());
+    let mut pos: Option<Point3> = None;
+    let mut kept = 0usize;
+    for run in runs(&path, allow, fp.tolerance) {
+        let Some(first) = run.first() else { continue };
+        let ramp = (fp.entry_ramp && ramp_top.is_finite())
+            .then(|| super::finish_entry::ramp_into(&run, ramp_top, fp.ramp_angle, fp.tolerance))
+            .flatten();
+        match ramp {
+            Some(legs) => {
+                link(&mut out, pos, legs[0], clearance, fp.plunge_feed);
+                for w in legs.windows(2) {
+                    out.push(Move { kind: MoveKind::Feed, from: w[0], to: w[1], feed: Some(fp.plunge_feed), arc: None, axis: None });
+                }
+            }
+            None => link(&mut out, pos, first.from, clearance, fp.plunge_feed),
+        }
+        kept += run.iter().filter(|m| m.kind != MoveKind::Rapid).count();
+        pos = run.last().map(|m| m.to);
+        out.extend(run);
     }
     if kept == 0 {
         return Err(GenError::Empty(
@@ -197,7 +226,7 @@ pub(super) fn clip_path(path: Toolpath, allow: &Region, fp: &Finish3DParams) -> 
     {
         out.push(Move { kind: MoveKind::Rapid, from: p, to: Point3::new(p.x, p.y, clearance), feed: None, arc: None, axis: None });
     }
-    Ok(Toolpath { moves: out, cycles: path.cycles, notes: path.notes })
+    Ok(Toolpath { moves: out, cycles: path.cycles, notes: path.notes, comps: path.comps })
 }
 
 #[cfg(test)]
@@ -248,7 +277,7 @@ mod law {
     fn a_row_through_the_area_keeps_its_inside_piece_and_relinks_through_clearance() {
         let allow = square(10.0);
         let path = Toolpath::new(vec![feed((-20.0, 0.0, 5.0), (20.0, 0.0, 5.0)), feed((20.0, 0.0, 5.0), (20.0, 3.0, 5.0))]);
-        let t = clip_path(path, &allow, &params()).expect("clipped");
+        let t = clip_path(path, &allow, &params(), f64::INFINITY).expect("clipped");
         let feeds: Vec<&Move> = t.moves.iter().filter(|m| m.kind == MoveKind::Feed).collect();
         assert_eq!(feeds.len(), 1, "{:?}", t.moves);
         assert!((feeds[0].from.x + 10.0).abs() < 1e-9 && (feeds[0].to.x - 10.0).abs() < 1e-9);
@@ -261,8 +290,68 @@ mod law {
     fn a_path_wholly_outside_refuses_by_name() {
         let allow = square(10.0);
         let path = Toolpath::new(vec![feed((15.0, 15.0, 5.0), (20.0, 15.0, 5.0))]);
-        let err = clip_path(path, &allow, &params()).expect_err("nothing inside").to_string();
+        let err = clip_path(path, &allow, &params(), f64::INFINITY).expect_err("nothing inside").to_string();
         assert!(err.contains("none of the finishing path"), "{err}");
+    }
+
+    /// M13.10: with `entry_ramp` on and a solid top 2 above the row,
+    /// the re-entry runs 2 along the kept row at 45 degrees - from the
+    /// top plane down onto the row's start - and the row is then cut
+    /// whole; the legs stand over the row, inside the area.
+    #[test]
+    fn a_re_entry_under_the_solid_top_ramps_along_the_kept_row() {
+        let allow = square(10.0);
+        let path = Toolpath::new(vec![feed((-20.0, 0.0, 5.0), (20.0, 0.0, 5.0))]);
+        let fp = Finish3DParams { entry_ramp: true, ..params() };
+        let t = clip_path(path, &allow, &fp, 7.0).expect("clipped");
+        assert_eq!(t.moves[0].kind, MoveKind::Plunge, "{:?}", t.moves);
+        assert_eq!(t.moves[0].to, Point3::new(-8.0, 0.0, 7.0), "the plunge lands on the top plane, in air");
+        assert_eq!(t.moves[1].kind, MoveKind::Feed);
+        assert_eq!((t.moves[1].from, t.moves[1].to), (Point3::new(-8.0, 0.0, 7.0), Point3::new(-10.0, 0.0, 5.0)));
+        assert_eq!(t.moves[1].feed, Some(100.0), "the ramp descends at the plunge feed");
+        assert_eq!((t.moves[2].from, t.moves[2].to), (Point3::new(-10.0, 0.0, 5.0), Point3::new(10.0, 0.0, 5.0)));
+    }
+
+    /// The ramp walks the chain across several moves; a chain shorter
+    /// than the ramp, or `entry_ramp` off, or no solid top, keeps the
+    /// vertical plunge (the audit's business, refused by name there).
+    #[test]
+    fn the_ramp_walks_the_chain_and_a_piece_too_small_keeps_the_plunge() {
+        let allow = square(10.0);
+        let fp = Finish3DParams { entry_ramp: true, ..params() };
+        let row = || Toolpath::new(vec![feed((-20.0, 0.0, 5.0), (-9.0, 0.0, 5.0)), feed((-9.0, 0.0, 5.0), (20.0, 0.0, 5.0))]);
+        let t = clip_path(row(), &allow, &fp, 10.0).expect("clipped");
+        let legs: Vec<&Move> = t.moves.iter().take_while(|m| m.kind != MoveKind::Feed || m.to.z < m.from.z).collect();
+        assert_eq!(legs.len(), 3, "a plunge and two ramp legs over the two chords: {:?}", t.moves);
+        let near = |p: Point3, x: f64, z: f64| (p.x - x).abs() < 1e-9 && p.y.abs() < 1e-9 && (p.z - z).abs() < 1e-9;
+        assert!(near(legs[1].from, -5.0, 10.0), "the far point, lifted to the top: {:?}", legs[1]);
+        assert!(near(legs[1].to, -9.0, 6.0), "over the chain's vertex: {:?}", legs[1]);
+        assert_eq!(legs[2].to, Point3::new(-10.0, 0.0, 5.0));
+        for (top, p) in [(30.0, fp), (10.0, params())] {
+            let t = clip_path(row(), &allow, &p, top).expect("clipped");
+            assert_eq!(t.moves[0].kind, MoveKind::Plunge);
+            assert_eq!(t.moves[0].to, Point3::new(-10.0, 0.0, 5.0), "the plunge stands: {:?}", t.moves);
+        }
+        let t = clip_path(row(), &allow, &fp, f64::INFINITY).expect("clipped");
+        assert_eq!(t.moves[0].to, Point3::new(-10.0, 0.0, 5.0), "a centre-cutting tool's plunge stands");
+    }
+
+    /// A chain that rises above the ramp's line would be bitten; the
+    /// ramp stands down and the plunge stays.
+    #[test]
+    fn a_bump_in_the_chain_refuses_the_ramp() {
+        let allow = square(10.0);
+        let fp = Finish3DParams { entry_ramp: true, ..params() };
+        // Top 8 over a row at 5: the ramp line reaches 7 at the second
+        // vertex, where the chain stands at 7.9.
+        let path = Toolpath::new(vec![
+            feed((-20.0, 0.0, 5.0), (-9.0, 0.0, 5.0)),
+            feed((-9.0, 0.0, 5.0), (-8.0, 0.0, 7.9)),
+            feed((-8.0, 0.0, 7.9), (20.0, 0.0, 5.0)),
+        ]);
+        let t = clip_path(path, &allow, &fp, 8.0).expect("clipped");
+        assert_eq!(t.moves[0].kind, MoveKind::Plunge);
+        assert!((t.moves[0].to.x + 10.0).abs() < 1e-9, "{:?}", t.moves);
     }
 
     #[test]

@@ -42,6 +42,9 @@ enum Family {
     Clearing,
     /// The 3D finishing family: the whole-model path clipped to the area.
     Finish,
+    /// The outline rides, Trace and Engrave (M13.10): tool centre ON
+    /// the chain, so containment moves the ride by the whole side.
+    Ride,
 }
 
 fn family(kind: OpType) -> Family {
@@ -49,6 +52,7 @@ fn family(kind: OpType) -> Family {
         OpType::Face => Family::Face,
         OpType::Contour => Family::Contour,
         OpType::Finish3D => Family::Finish,
+        OpType::Trace | OpType::Engrave => Family::Ride,
         _ => Family::Clearing,
     }
 }
@@ -105,6 +109,7 @@ fn verb(fam: Family) -> &'static str {
         Family::Contour => "Contours",
         Family::Clearing => "Clears",
         Family::Finish => "Finishes",
+        Family::Ride => "Rides",
     }
 }
 
@@ -130,6 +135,9 @@ fn native_inside(state: &State, fam: Family) -> Option<bool> {
         }
         // The finish's rings reach a radius past the silhouette.
         (_, Family::Finish) => Some(false),
+        // The ride's centre is ON the chain: neither side is its own,
+        // so no containment is the identity and no notice says so.
+        (_, Family::Ride) => None,
         _ => Some(true),
     }
 }
@@ -227,6 +235,9 @@ pub fn summarize(state: &State) -> Summary {
                 Family::Clearing => format!("Tool as {kind} cuts: the whole tool stays inside the area."),
                 Family::Finish => format!(
                     "Tool as {kind} cuts: the whole-model path is clipped to the area, the centre reaching {r} past its edge; it leaves and re-enters through the clearance plane."
+                ),
+                Family::Ride => format!(
+                    "Tool as {kind} cuts: its centre rides the outline itself; Inside or Outside moves the ride {r} in or out, the offset by its own amount."
                 ),
             });
         }

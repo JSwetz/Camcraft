@@ -238,6 +238,31 @@ fn a_boundary_offset_on_a_tilted_pocket_is_the_flat_offset_pocket_rotated() {
     }
 }
 
+/// M13.10, the tilted Face band preview: under b = 35 the band is
+/// built in the frame (the rows' own overrun of two radii along the
+/// frame's local X, `u`) and projected out, so the overrun past the
+/// shadow lands where `u` points in the world - not two radii along
+/// world X, which a band laid on the world shadow would draw.
+#[test]
+fn a_tilted_face_band_is_the_local_band_projected_through_the_frame() {
+    let world = tilt_world();
+    let t35 = Tilt { a_deg: 0.0, b_deg: 35.0, origin: [0.0; 3] };
+    let u = t35.frame().expect("frame").u;
+    let mut p = face(30.0);
+    if let OpParams::Face { tilt, clearance_z, .. } = &mut p {
+        *tilt = Some(t35);
+        *clearance_z = Height::fixed(70.0);
+    }
+    let o = op(SrcRef::Entity("tower".into()), p, AreaControls::default());
+    let (rl, rh) = operation::region_of(&world, &o).expect("tilted shadow").bounds().expect("bounds");
+    let (bl, bh) = operation::machined_footprint(&world, &o).expect("tilted band").bounds().expect("bounds");
+    let (wx, wy) = (2.0 * R * u[0].abs(), 2.0 * R * u[1].abs());
+    assert!(wx < 2.0 * R - 0.5 || wy > 0.5, "the tilt turns the rows off world X: u = {u:?}");
+    for (g, want) in [(rl.x - bl.x, wx), (bh.x - rh.x, wx), (rl.y - bl.y, wy), (bh.y - rh.y, wy)] {
+        assert!((g - want).abs() < 0.05, "the overrun projects through the tilt: {g} vs {want} ({bl:?} {bh:?})");
+    }
+}
+
 #[test]
 fn a_tilt_with_a_non_finite_angle_still_refuses_by_name_under_a_boundary() {
     let world = tilt_world();
@@ -297,15 +322,97 @@ fn the_finish_family_clips_its_path_to_the_boundary() {
     assert!(err.contains("Boundary settings leave no area"), "{err}");
 }
 
+/// M13.10, the clipped-entry ramp: the 40 x 40 x 10 slab in a stock 2
+/// taller, so every clipped row re-enters 2 mm into stock at its start.
+/// A non-centre-cutting ball ramps each re-entry along the row
+/// (the guard's `entry_ramp` retry reaches the clip) - no plunge into
+/// solid, no gouge, the note says the entries ramp; a piece too small
+/// for the ramp (a 5 degree ramp on an 8 mm centre area) refuses by
+/// name, as before.
+#[test]
+fn a_clipped_finish_with_a_non_centre_cutting_ball_ramps_its_re_entries_or_refuses_by_name() {
+    use camcraft_app::tools::Tool;
+    use camcraft_app::verify::Warning;
+    use camcraft_motion::approach::{CENTER_CUT_REFUSAL, NOT_CENTER_CUTTING};
+    use camcraft_motion::plunge_law::{Solid, first_solid_plunge};
+    let world = world_with(
+        Some(ImportModel::from_mesh("part", cube(Point3::new(-20.0, -20.0, 0.0), Point3::new(20.0, 20.0, 10.0)))),
+        0.0,
+        12.0,
+    );
+    let mut h = History::default();
+    let ball = catalog().into_iter().find(|(n, _)| *n == "BN-0600").map(|(_, t)| t).expect("ball");
+    h.execute(&world, AddTool::new(&world, "NC", Tool { center_cutting: false, ..ball }).expect("tool"));
+    let area = AreaControls { containment: Some(Containment::Inside), ..Default::default() };
+    let mut o = op(SrcRef::Entity("part".into()), finish_parallel(), area);
+    o.tool = "NC".into();
+    let (t, warnings) = operation::generate(&world, &o, "").expect("the clipped finish ramps in");
+    let solid = Solid { top: 12.0, footprint: None };
+    assert_eq!(first_solid_plunge(&t, 3.0, &solid), None, "no re-entry plunges into the stock: {:?}", t.notes);
+    assert!(t.notes.iter().any(|n| n.starts_with(NOT_CENTER_CUTTING)), "{:?}", t.notes);
+    let ramps = t.moves.iter().filter(|m| m.kind == MoveKind::Feed && m.to.z < m.from.z - 1e-9).count();
+    assert!(ramps > 1, "the re-entries ramp: {ramps}");
+    assert!(!warnings.iter().any(|w| matches!(w, Warning::Gouge { .. })), "{warnings:?}");
+    // Too small a piece for the ramp: the named refusal stands.
+    o.area = AreaControls { offset: -19.0, ..Default::default() };
+    if let OpParams::Finish3D { ramp_angle, .. } = &mut o.params {
+        *ramp_angle = 5.0;
+    }
+    let err = run(&world, &o).expect_err("no ramp fits");
+    assert!(err.contains(CENTER_CUT_REFUSAL) && err.contains("even with ramped entries"), "{err}");
+}
+
 #[test]
 fn every_kind_without_an_area_refuses_with_its_own_reason() {
     use camcraft_app::operation::{area_applies, area_unsupported};
-    for k in [OpType::Slot, OpType::Trace, OpType::Chamfer2D, OpType::Drill, OpType::Facing, OpType::Swarf] {
+    for k in [OpType::Slot, OpType::Deburr, OpType::Chamfer2D, OpType::Drill, OpType::Facing, OpType::Swarf] {
         let why = area_unsupported(k).expect("a reason");
         assert!(why.contains(&k.to_string()), "{k}: {why}");
         assert!(!area_applies(k));
     }
-    for k in [OpType::Face, OpType::Pocket, OpType::Finish3D, OpType::Pocket3D] {
+    for k in [OpType::Face, OpType::Pocket, OpType::Finish3D, OpType::Pocket3D, OpType::Trace, OpType::Engrave] {
         assert!(area_applies(k) && area_unsupported(k).is_none());
     }
+}
+
+fn trace_params() -> OpParams {
+    OpParams::Trace {
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(5.0),
+        stepdown: 5.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        tilt: None,
+    }
+}
+
+/// M13.10, the `ToolOn` native: a Trace rides the block's outline with
+/// its centre ON it (reach 20); containment Inside / On / Outside moves
+/// the ride by a radius in / not at all / a radius out, the offset
+/// moves it by its own amount, and an open boundary or an extension
+/// refuses by name. Default controls are the native ride, move for move.
+#[test]
+fn trace_containment_moves_the_ride_about_its_own_chain() {
+    let world = block_world();
+    let mut o = op(SrcRef::Entity("part".into()), trace_params(), AreaControls::default());
+    let (native, _) = run(&world, &o).expect("the native trace");
+    assert!((max_by(&feeds(&native), |p| p.x.abs().max(p.y.abs())) - 20.0).abs() < EPS);
+    for (c, want) in [(Containment::Inside, 20.0 - R), (Containment::On, 20.0), (Containment::Outside, 20.0 + R)] {
+        o.area = AreaControls { containment: Some(c), ..Default::default() };
+        let (t, _) = run(&world, &o).expect("the contained trace");
+        let reach = max_by(&feeds(&t), |p| p.x.abs().max(p.y.abs()));
+        assert!((reach - want).abs() < EPS, "{c:?}: reach {reach}, want {want}");
+        if c == Containment::On {
+            assert_eq!(t.moves, native.moves, "On is the native ride");
+        }
+    }
+    o.area = AreaControls { offset: 2.0, corner: CornerStyle::Sharp, ..Default::default() };
+    let (t, _) = run(&world, &o).expect("the offset trace");
+    assert!((max_by(&feeds(&t), |p| p.x.abs().max(p.y.abs())) - 22.0).abs() < EPS);
+    o.area = AreaControls { extension: 3.0, ..Default::default() };
+    let err = run(&world, &o).expect_err("no edge to extend past");
+    assert!(err.contains("no exterior edge to extend past"), "{err}");
 }

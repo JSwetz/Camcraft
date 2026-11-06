@@ -100,6 +100,7 @@ use boundary::AreaApplied;
 mod boundary_turn;
 mod contour_open;
 mod finish_clip;
+mod finish_entry;
 mod boundary_ctx;
 mod boundary_picks;
 pub use boundary_picks::{

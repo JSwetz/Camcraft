@@ -31,14 +31,20 @@ use super::boundary_turn::{sides_of_chain, snap_turn};
 /// Below this (mm^2) an area is nothing - the island law's noise floor.
 const AREA_EPS: f64 = 1e-4;
 
-/// What a kind's generator does natively with its region.
+/// What a kind's generator does natively with its region: where the
+/// TOOL stands - the shared prefix is the law's own word, and `ToolOn`
+/// is the name the ROADMAP ledger gave the ride's native (M13.10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 pub(super) enum Native {
     /// The tool stays inside the region (pocket family, Face rows,
     /// a contour on its Inside side).
     ToolInside,
     /// The tool rides outside the region (a contour on its Outside side).
     ToolOutside,
+    /// The tool CENTRE rides the region's outline (Trace / Engrave,
+    /// M13.10): containment moves the ride by the whole wanted side.
+    ToolOn,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +58,12 @@ pub(super) enum Family {
     /// zones it must keep its whole body out of ride `forbidden`, like
     /// Face's.
     Finish,
+    /// The outline rides, Trace and Engrave (M13.10): the region's
+    /// loops ARE the path, tool centre on them. Offset, containment and
+    /// the include / exclude boundaries shape the ring ridden (excludes
+    /// before containment, as the contour's); an open boundary or an
+    /// extension bounds no ride and refuses by name.
+    Ride,
 }
 
 /// A picked boundary for step 1, resolved to XY.
@@ -133,8 +145,15 @@ pub(super) fn containment_delta(native: Native, want: Containment, r: f64) -> f6
     let n = match native {
         Native::ToolInside => -r,
         Native::ToolOutside => r,
+        Native::ToolOn => 0.0,
     };
     t - n
+}
+
+/// The families whose exclude boundaries shape the ring they ride,
+/// before containment: the contour and the outline rides.
+fn rides(f: Family) -> bool {
+    matches!(f, Family::Contour | Family::Ride)
 }
 
 /// Run the law on `base` (the kind's own region).
@@ -153,6 +172,11 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
                 // itself (`contour_open`); it never reaches the area law.
                 return Err(GenError::Invalid(
                     "a Contour rides its open boundary as one open pass - the boundary bounds no area for it".into(),
+                ));
+            }
+            if ctx.family == Family::Ride {
+                return Err(GenError::Invalid(
+                    "an outline ride follows the picked outline itself - an open boundary bounds no ride for it; pick the chain as the outline instead".into(),
                 ));
             }
             let Some(stock) = &ctx.stock else {
@@ -193,6 +217,11 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
     }
     // 3. Extension past the exterior edges.
     if c.extension > 0.0 {
+        if ctx.family == Family::Ride {
+            return Err(GenError::Invalid(
+                "an outline ride has no exterior edge to extend past - use the offset to move the ride instead".into(),
+            ));
+        }
         let reach = match (&ctx.family, &ctx.stock) {
             (Family::Face, Some(s)) => s.union(&area)?.offset_sharp(c.extension)?,
             _ => area.offset_sharp(c.extension)?,
@@ -227,7 +256,7 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
         }
         Ok(a)
     };
-    if ctx.family == Family::Contour {
+    if rides(ctx.family) {
         area = check(excludes(area)?, "exclude boundaries")?;
     }
     // 5. Containment.
@@ -237,12 +266,12 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
         if let Some(f) = &mut far_side {
             *f = grow(f, -d, CornerStyle::Round)?;
         }
-        if ctx.family != Family::Contour {
+        if !rides(ctx.family) {
             area = check(islands(area)?, "tool containment (the part fills the area)")?;
         }
     }
     // 6. Excludes for the clearing kinds: the tool body stays out.
-    if ctx.family != Family::Contour {
+    if !rides(ctx.family) {
         area = check(excludes(area)?, "exclude boundaries")?;
     }
     if matches!(ctx.family, Family::Face | Family::Finish) {
