@@ -12,7 +12,8 @@
 //! Gate map (M11.3): covers camcraft_motion::plunge_law (posed_axial,
 //! cleared_along, first_solid_plunge, audit), camcraft_motion::finishing3d
 //! (center_cut guard_as), camcraft_motion::multiaxis (contour5d,
-//! parallel5d under the law).
+//! parallel5d under the law); the unposed cone of M11.3 owed (1) - a
+//! steep 3-axis descent is a plunge too, inside the same 30 deg cone.
 
 use camcraft_motion::approach::CENTER_CUT_REFUSAL;
 use camcraft_motion::cl::{Move, MoveKind, PathBuilder, Toolpath};
@@ -243,4 +244,76 @@ fn a_5_axis_path_whose_descents_fall_through_air_passes_untouched() {
             assert_eq!(t, own);
         }
     }
+}
+
+// ------------------------------- the unposed cone (M11.3 owed (1))
+
+/// An UNPOSED path: rapid to Z 12 over the stock, then one straight
+/// feed descending `drop` mm at `deg` degrees from horizontal (run
+/// along +X).
+fn unposed_descent(deg: f64, drop: f64) -> Toolpath {
+    let run = drop / deg.to_radians().tan();
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, 30.0));
+    b.push(MoveKind::Rapid, Point3::new(0.0, 0.0, 12.0), None);
+    b.push(MoveKind::Feed, Point3::new(run, 0.0, 12.0 - drop), Some(100.0));
+    b.finish()
+}
+
+#[test]
+fn an_unposed_steep_descent_into_solid_is_a_plunge_like_its_posed_twin() {
+    let stock = rect(-30.0, -30.0, 30.0, 30.0);
+    for solid in [Solid { top: 10.0, footprint: Some(&stock) }, Solid { top: 10.0, footprint: None }] {
+        // 80 deg from horizontal: 10 deg off straight down, inside the cone.
+        let t = unposed_descent(80.0, 8.0);
+        assert!(t.moves.iter().all(|m| m.axis.is_none()), "the path is unposed");
+        assert!(first_solid_plunge(&t, 3.0, &solid).is_some(), "an 80 deg descent into solid is a plunge");
+        refused("80 deg", &audit(&t, false, 3.0, &solid, "the test descent").expect_err("refused"));
+        // The centre-cutting tool passes the same path, unchanged.
+        assert_eq!(audit(&t, true, 3.0, &solid, "the test descent"), Ok(()));
+        // The posed twin (held vertical) reads the same.
+        let end = t.moves.last().map(|m| m.to).expect("a move");
+        let mut b = PathBuilder::new(Point3::new(0.0, 0.0, 30.0));
+        b.set_axis(Some([0.0, 0.0, 1.0]));
+        b.push(MoveKind::Rapid, Point3::new(0.0, 0.0, 12.0), None);
+        b.push(MoveKind::Feed, end, Some(100.0));
+        assert_eq!(first_solid_plunge(&b.finish(), 3.0, &solid), first_solid_plunge(&t, 3.0, &solid));
+    }
+}
+
+#[test]
+fn the_unposed_cone_ends_at_30_degrees_off_vertical() {
+    let solid = Solid { top: 10.0, footprint: None };
+    // The boundary is 60 deg from horizontal (sin 30 = CORE). The cone
+    // is closed in exact arithmetic (`lateral <= CORE * len`); AT 60 deg
+    // rounding decides, so the law is pinned a hair either side, and the
+    // boundary move itself reads exactly as `posed_axial` about +Z does
+    // (one cone, posed or not - never widened).
+    assert!(first_solid_plunge(&unposed_descent(60.01, 8.0), 3.0, &solid).is_some(), "60.01 deg: inside");
+    assert!(first_solid_plunge(&unposed_descent(61.0, 8.0), 3.0, &solid).is_some(), "61 deg: inside");
+    assert_eq!(first_solid_plunge(&unposed_descent(59.99, 8.0), 3.0, &solid), None, "59.99 deg: a ramp");
+    assert_eq!(first_solid_plunge(&unposed_descent(59.0, 8.0), 3.0, &solid), None, "59 deg: a ramp");
+    let edge = unposed_descent(60.0, 8.0);
+    let m = edge.moves.last().expect("a move");
+    assert_eq!(
+        first_solid_plunge(&edge, 3.0, &solid).is_some(),
+        posed_axial(m, Point3::new(0.0, 0.0, 1.0)),
+        "60 deg: the unposed verdict is the cone's"
+    );
+}
+
+#[test]
+fn an_unposed_shallow_ramp_or_a_drop_in_air_stays_legal() {
+    let solid = Solid { top: 10.0, footprint: None };
+    // The default-style 3 deg ramp into solid is a ramp, not a plunge.
+    let t = unposed_descent(3.0, 2.0);
+    assert_eq!(first_solid_plunge(&t, 3.0, &solid), None);
+    assert_eq!(audit(&t, false, 3.0, &solid, "the ramp"), Ok(()));
+    // The steep descent off the stock falls through air.
+    let away = rect(100.0, 100.0, 120.0, 120.0);
+    let air = Solid { top: 10.0, footprint: Some(&away) };
+    assert_eq!(audit(&unposed_descent(80.0, 8.0), false, 3.0, &air, "air"), Ok(()));
+    // A climb up a steep line never plunges.
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, 2.0));
+    b.push(MoveKind::Feed, Point3::new(1.0, 0.0, 9.0), Some(100.0));
+    assert_eq!(first_solid_plunge(&b.finish(), 3.0, &solid), None);
 }

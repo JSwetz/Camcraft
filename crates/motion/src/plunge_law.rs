@@ -22,8 +22,9 @@
 //! Posed paths (the multiaxis kinds) are judged by the same law read in
 //! the tool's own frame: a descent is axial when it runs down the posed
 //! axis (within the core's cone, [`posed_axial`]), and a column is
-//! cleared along that axis ([`cleared_along`]). An unposed move keeps
-//! the vertical reading exactly.
+//! cleared along that axis ([`cleared_along`]). An unposed move is read
+//! in the same cone about world Z (M11.3 owed (1)): a straight within
+//! 30 degrees of straight down is a plunge, not only an exact drop.
 //!
 //! Provenance: the centre-cutting / non-centre-cutting end mill
 //! distinction of machining handbooks (a non-centre-cutting end mill may
@@ -144,8 +145,10 @@ pub fn disc_overlaps(region: &Region, xy: Point2, r: f64) -> bool {
 /// The first axial descent of `t` into solid: a cutting move going
 /// down its tool's axis below `solid.top`, over the stock, onto a
 /// column no earlier cut of the path has cleared. `Some((xy, z))` names
-/// it (the tip's end). An unposed move is read the 3-axis way (no XY
-/// run, going down Z); a posed one (M11.3 owed, multiaxis) by
+/// it (the tip's end). An unposed move is read in the same cone as a
+/// posed one, about world Z (M11.3 owed (1): a straight within 30
+/// degrees of straight down, or any descent with no XY run), cleared by
+/// [`column_cleared`]; a posed one (M11.3 owed, multiaxis) by
 /// [`posed_axial`] and [`cleared_along`] - axial with respect to the
 /// pose, not world Z.
 #[must_use]
@@ -154,10 +157,13 @@ pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(P
         let xy = Point2::new(m.to.x, m.to.y);
         let hit = match m.axis {
             None => {
-                let axial = m.kind != MoveKind::Rapid
-                    && (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS
-                    && m.to.z < m.from.z - Z_EPS
-                    && m.to.z < solid.top - Z_EPS;
+                // The same cone as a posed move, read about world +Z: a
+                // straight within 30 degrees of straight down is a
+                // plunge; an arc keeps the exact reading (no XY run) -
+                // a helix's chords are shallow, its net run may be nil.
+                let exact = (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS && m.to.z < m.from.z - Z_EPS;
+                let coned = m.arc.is_none() && posed_axial(m, Point3::new(0.0, 0.0, 1.0));
+                let axial = m.kind != MoveKind::Rapid && (exact || coned) && m.to.z < solid.top - Z_EPS;
                 axial && solid.under(xy, tool_r) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r)
             }
             Some(ax) => {
