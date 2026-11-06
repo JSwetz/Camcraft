@@ -39,7 +39,8 @@ afterwards - the work must not bother them.
 
 Since 2026-11-07 (user: "move off the roadmap and track work as ISSUES") the
 work list is the repo's open GitHub issues, read and written with `gh`.
-`ROADMAP.md` and `DONE.md` are frozen archives: read them for history and
+`ROADMAP.md` is a frozen archive (`DONE.md` was retired - it lives in git
+history and in every tag up to v0.8.1): read it for history and
 design context, never add work to them. Decisions still go to
 `RECOMMENDED.md`; shipped changes go to `CHANGELOG.md`.
 
