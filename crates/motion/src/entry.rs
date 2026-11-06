@@ -54,31 +54,46 @@ pub enum Entry3D {
 /// transition's pitch (M11.2 C). The CL arc carries the Z change, so
 /// consecutive half turns are one continuous helix, each starting where
 /// the last ended.
-pub(crate) fn helix_turns_down(b: &mut PathBuilder, xy: Point2, z0: f64, z1: f64, rh: f64, turns: f64, feed: f64) {
+/// `ccw` is the sense (M11.3 B): `true` - every pre-M11.3 helix - runs
+/// over the +Y side, `false` over -Y; the circle, and so the tube the
+/// dive room certified, is the same either way. M11.3: about any
+/// `center` (the helix placed so it ends ON the pass start - the near
+/// side `xy` is the start, the far side its mirror through the center). Even half turns end back on `xy` at
+/// `z1`; the near points are `xy` exactly, the far ones lattice-snapped.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn helix_about(
+    b: &mut PathBuilder,
+    xy: Point2,
+    center: Point2,
+    z0: f64,
+    z1: f64,
+    turns: f64,
+    feed: f64,
+    ccw: bool,
+) {
     let span = z0 - z1;
-    if span <= 0.0 || rh <= 0.0 || !(turns.is_finite() && turns >= 1.0) {
+    if span <= 0.0 || !(turns.is_finite() && turns >= 1.0) {
         return;
     }
     let half_turns = ((turns * 2.0).ceil() as u32).max(2);
-    // Orbit about the circle whose near side is the entry point: center
-    // offset +rh in X. Endpoints sit lattice-snapped (the arc law wants
-    // a 1 um center; the builder keeps the chord endpoints exact).
-    let center = Point2::new(lattice(xy.x + rh), lattice(xy.y));
+    let far = Point2::new(lattice(2.0 * center.x - xy.x), lattice(2.0 * center.y - xy.y));
+    let near = Point2::new(lattice(xy.x), lattice(xy.y));
     for h in 0..half_turns {
         let frac = f64::from(h + 1) / f64::from(half_turns);
-        let tz = z0 - span * frac;
+        let last = h + 1 == half_turns;
+        let tz = lattice(z0 - span * frac);
         // Alternating far/near point of the circle; even counts close on
         // xy at the last leg.
-        let px = if h % 2 == 0 { xy.x + 2.0 * rh } else { xy.x };
-        // ccw: right -> left over the +Y side.
-        b.push_arc(
-            MoveKind::Feed,
-            Point3::new(lattice(px), lattice(xy.y), lattice(tz)),
-            Some(feed),
-            center,
-            true,
-        );
+        let q = if h % 2 == 0 { far } else if last { xy } else { near };
+        b.push_arc(MoveKind::Feed, Point3::new(q.x, q.y, tz), Some(feed), center, ccw);
     }
+}
+
+/// Is `c` a center point of `region` at least `margin` clear of every
+/// boundary edge - the disc of that radius about it inside the region?
+/// The test [`dive_room`] applies to its candidates, asked of one point.
+pub(crate) fn disc_clears(region: &Region, c: Point2, margin: f64) -> bool {
+    c.x.is_finite() && c.y.is_finite() && region.contains(c) && boundary_clears(region, c, margin)
 }
 
 /// The engagement law, in one line of trigonometry: a pass that bites

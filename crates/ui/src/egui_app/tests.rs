@@ -765,7 +765,7 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Stock to leave"]),
-                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level descent", "Between levels", "Between passes", "Tab count", "Tab width", "Tab height"]),
+                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level descent", "Between levels", "Between passes", "Plunge height above material (0 = feed from the traverse plane)", "Ramp / helix / arc feed (0 = cutting feed)", "Entry plunge feed (0 = plunge feed)", "Lead-in feed (% of cutting feed)", "Entry engagement limit (% of D, 0 = off)", "Lead out", "Extension before lead-in", "Extension after lead-out", "Vertical lead-in height", "Overlap past the start", "Tab count", "Tab width", "Tab height"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -775,7 +775,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:"]),
                 ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Passes", vec!["Stepover", "Stock to leave", "Strategy"]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes", "Plunge height above material (0 = feed from the traverse plane)", "Ramp / helix / arc feed (0 = cutting feed)", "Entry plunge feed (0 = plunge feed)", "Lead-in feed (% of cutting feed)", "Entry engagement limit (% of D, 0 = off)", "Helix minimum radius (0 = only the set radius)", "Entry helix pitch (0 = one turn per helix diameter)"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -3170,8 +3170,8 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
         .as_ref()
         .and_then(|e| model::operation_of(&st.world, e))
         .expect("the 3D Pocket cell created its operation through the actions law");
-    // The defaults state the level law with: a plunge ladder from the
-    // stock top, Auto strategy - no geometry pick field exists for this
+    // The defaults state the level law with: a helix ladder (M11.3) from
+    // the stock top, Auto strategy - no geometry pick field exists for this
     // kind because the region is the model's silhouette.
     let OpParams::Pocket3D { strategy, entry, .. } = &op.params else {
         panic!(
@@ -3180,7 +3180,14 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
         )
     };
     assert_eq!(*strategy, camcraft_app::machining2d::PocketStrategy::Auto);
-    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge);
+    // M11.3: new pocket-family ops helix in, at 0.4 x the tool radius.
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
+    let OpParams::Pocket3D { helix_radius, .. } = &op.params else { unreachable!() };
+    let tool_r = model::find_by_name(&st.world, &op.tool)
+        .and_then(|e| model::tool_of(&st.world, &e))
+        .map(|t| t.diameter * 0.5)
+        .expect("the op's tool");
+    assert!((helix_radius - ((0.4 * tool_r) * 100.0).round() / 100.0).abs() < 1e-12, "{helix_radius} vs tool r {tool_r}");
 }
 
 #[test]

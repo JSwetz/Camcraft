@@ -5,7 +5,7 @@ use crate::cl::{lattice, MoveKind, PathBuilder};
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
 
-use super::contour::{ContourParams, Lead, unit};
+use super::contour::{Lead, unit};
 use super::ring::dist;
 /// One piece of tool motion: a straight feed walk through the listed
 /// points (exactly how generators have always walked polylines), or one
@@ -325,9 +325,14 @@ pub(super) fn circle3(a: Point2, b: Point2, c: Point2) -> Option<(Point2, f64)> 
 
 /// (plunge point, segments from it onto the path, ending exactly at
 /// `s`).
-pub(super) fn lead_in(s: Point2, t: Point2, air: Point2, p: &ContourParams) -> (Point2, Vec<Seg>) {
-    match p.lead {
+pub(super) fn lead_in(s: Point2, t: Point2, air: Point2, lead: Lead) -> (Point2, Vec<Seg>) {
+    match lead {
         Lead::None => (s, Vec::new()),
+        // M11.3 C: straight in along the air normal, square to the wall.
+        Lead::Perpendicular { length } => (
+            Point2::new(s.x + air.x * length, s.y + air.y * length),
+            vec![Seg::Line(vec![s])],
+        ),
         Lead::Linear { length } => (
             Point2::new(s.x - t.x * length, s.y - t.y * length),
             vec![Seg::Line(vec![s])],
@@ -362,9 +367,12 @@ pub(super) fn lead_in(s: Point2, t: Point2, air: Point2, p: &ContourParams) -> (
 }
 
 /// Segments carrying the tool off the path end (not including it).
-pub(super) fn lead_out(e: Point2, t: Point2, air: Point2, p: &ContourParams) -> Vec<Seg> {
-    match p.lead {
+pub(super) fn lead_out(e: Point2, t: Point2, air: Point2, lead: Lead) -> Vec<Seg> {
+    match lead {
         Lead::None => Vec::new(),
+        Lead::Perpendicular { length } => {
+            vec![Seg::Line(vec![Point2::new(e.x + air.x * length, e.y + air.y * length)])]
+        }
         Lead::Linear { length } => vec![Seg::Line(vec![Point2::new(
             e.x + t.x * length,
             e.y + t.y * length,

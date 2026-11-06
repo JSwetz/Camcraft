@@ -38,6 +38,10 @@ pub enum Lead {
     /// end tangentially and leaves the wall moving parallel to the path.
     /// One posted arc move like [`Lead::Arc`].
     Tangential { radius: f64 },
+    /// Straight in along the wall's normal from `length` out in the air,
+    /// meeting the wall square (M11.3 C); lead-out mirrors it. Appended:
+    /// no earlier file holds it.
+    Perpendicular { length: f64 },
 }
 
 /// Which side of a contour boundary the cutter runs on - a sign law on
@@ -180,6 +184,7 @@ impl ContourParams {
             Lead::Linear { length } if length >= 0.0 && length.is_finite() => {}
             Lead::Arc { radius } if radius > 0.0 => {}
             Lead::Tangential { radius } if radius > 0.0 => {}
+            Lead::Perpendicular { length } if length >= 0.0 && length.is_finite() => {}
             _ => return Err(GenError::Invalid("bad lead-in parameters".into())),
         }
         if self.tab_count > 0 && (self.tab_width <= 0.0 || self.tab_height < 0.0) {
@@ -197,6 +202,12 @@ impl ContourParams {
             return Err(GenError::Invalid("helix radius must be positive".into()));
         }
         Ok(())
+    }
+
+    /// The lead-out's shape (M11.3 C): the approach's own, or the
+    /// lead-in mirrored - every file before the option.
+    pub(super) fn lead_out_shape(&self) -> Lead {
+        self.links.approach.lead_out.unwrap_or(self.lead)
     }
 
     /// Cut levels from `top_z` down to `bottom_z`, always ending exactly

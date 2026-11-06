@@ -342,7 +342,13 @@ pub(crate) fn add_operation(state: &mut State, kind: usize) {
         }
         n += 1;
     };
-    let params = quick_params(kind);
+    let mut params = quick_params(kind);
+    // M11.3: the seed helix radius follows the op's tool (0.4 x radius).
+    if let Some(t) = camcraft_app::model::find_by_name(&state.world, &tool)
+        .and_then(|e| camcraft_app::model::tool_of(&state.world, &e))
+    {
+        camcraft_app::operation::seed_helix_for_tool(&mut params, t.diameter);
+    }
     state.pending.push_back(CommandKind::CreateOperation {
         name: name.clone(),
         tool,

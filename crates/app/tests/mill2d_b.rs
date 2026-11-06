@@ -300,7 +300,7 @@ fn taper(diameter: f64, tip_angle: f64, flute_len: f64) -> Tool {
         shank_len: 40.0,
         holder_d: 44.0,
         holder_len: 35.0,
-        material_group: "aluminum".into(),
+        material_group: "aluminum".into(), center_cutting: true,
         rpm: 8000.0,
         feed: 1500.0,
         tool_material: None,

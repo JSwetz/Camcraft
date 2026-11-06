@@ -119,7 +119,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 
     // Region + path per kind. The level transitions and links (M11.2)
     // are read once: every ladder kind hands them to its generator.
-    let lk = params.links().copied().unwrap_or_else(|| params.default_links());
+    let mut lk = params.links().copied().unwrap_or_else(|| params.default_links());
+    // M11.3: the tool says whether an entry may plunge into solid - laid
+    // over the generation's copy only, never stored in the op.
+    lk.approach.center_cutting = tool.center_cutting;
     let (region, path) = match &params {
         OpParams::Face {
             stepover,

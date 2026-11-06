@@ -715,7 +715,7 @@ fn seed_pocket(c: &Carried) -> OpParams {
         // ride the 3-D pocket's defaults so a switched strategy or
         // entry starts from a legal one.
         strategy: PocketStrategy::Auto,
-        entry: Entry3D::Plunge,
+        entry: Entry3D::Helix, // M11.3: new pocket-family ops helix in (ramp, then plunge, stand in)
         helix_radius: 1.0,
         optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         // Turning-point blends are opt-in (M11.1 C), as on Face.
@@ -741,7 +741,7 @@ fn seed_adaptive2d(c: &Carried) -> OpParams {
         feed: c.feed,
         plunge_feed: c.plunge,
         climb: c.climb,
-        entry: Entry3D::Plunge,
+        entry: Entry3D::Helix, // M11.3: new pocket-family ops helix in (ramp, then plunge, stand in)
         helix_radius: 1.0,
         optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         tilt: c.tilt,
@@ -764,7 +764,7 @@ fn seed_offset2d(c: &Carried) -> OpParams {
         feed: c.feed,
         plunge_feed: c.plunge,
         climb: c.climb,
-        entry: Entry3D::Plunge,
+        entry: Entry3D::Helix, // M11.3: new pocket-family ops helix in (ramp, then plunge, stand in)
         helix_radius: 1.0,
         tilt: c.tilt,
     }
@@ -945,7 +945,7 @@ fn seed_pocket3d(c: &Carried) -> OpParams {
         strategy: PocketStrategy::Auto,
         // The dive the 2-D pocket already makes; ramp and helix are
         // opt-in once the walls are known to allow them.
-        entry: Entry3D::Plunge,
+        entry: Entry3D::Helix, // M11.3: new pocket-family ops helix in (ramp, then plunge, stand in)
         helix_radius: 1.0,
         // The staircase is honest noise until the user asks for
         // the closing pass: rest roughing costs a second ladder.
@@ -2254,6 +2254,28 @@ impl OpType {
             "KindInfo::ALL is out of step with OpType::ordinal"
         );
         row
+    }
+}
+
+/// M11.3: a NEW pocket-family op's helix radius from its tool - 0.4 x
+/// the tool radius (a helix bore wide enough for the adaptive spiral and
+/// for chips to clear, inside the roughing ladders' radius <= tool radius
+/// law), snapped to 0.01 mm. Called where an op is created from a seed
+/// with a known tool (the ribbon's quick-add); explicit params, saved
+/// files and retypes keep their own number.
+pub fn seed_helix_for_tool(params: &mut OpParams, tool_diameter: f64) {
+    let r = tool_diameter * 0.5;
+    if !(r.is_finite() && r > 0.0) {
+        return;
+    }
+    let want = ((0.4 * r) * 100.0).round() / 100.0;
+    let want = want.clamp(0.01, r);
+    match params {
+        OpParams::Pocket { helix_radius, .. }
+        | OpParams::Adaptive2D { helix_radius, .. }
+        | OpParams::Offset2D { helix_radius, .. }
+        | OpParams::Pocket3D { helix_radius, .. } => *helix_radius = want,
+        _ => {}
     }
 }
 

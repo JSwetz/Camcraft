@@ -12,6 +12,7 @@
 //! laws (what proves a keep-down link, what is named when it lifts) are
 //! ours; no vendor material consulted (Clean-Room Protocol).
 
+pub use crate::approach::Approach;
 use crate::cl::{MoveKind, PathBuilder};
 use crate::entry::Entry3D;
 use crate::geo2d::Point2;
@@ -60,6 +61,10 @@ pub struct Links {
     /// Longest keep-down link (mm, in XY); `0` puts no length limit on
     /// it - the proof of clearance still applies.
     pub max_stay_down: f64,
+    /// The entry, lead and engagement parameters (M11.3 B/C/D) - the
+    /// rest of the Lead in / Lead out section; [`Approach::DEFAULT`] is
+    /// every file before them.
+    pub approach: Approach,
 }
 
 /// The ramp transition's default maximum angle, degrees: a gentle
@@ -85,6 +90,7 @@ impl Links {
         level: Link::Clearance,
         pass: Link::Retract,
         max_stay_down: 0.0,
+        approach: Approach::DEFAULT,
     };
 
     /// The 3-D roughing ladder's default: its pass links have always
@@ -120,7 +126,7 @@ impl Links {
         if !(self.max_stay_down.is_finite() && self.max_stay_down >= 0.0) {
             return Err("the maximum stay-down distance must be zero (no limit) or positive");
         }
-        Ok(())
+        self.approach.validate()
     }
 
     /// Is a keep-down link of XY length `len` within the limit?
@@ -151,12 +157,17 @@ impl LinkTally {
         }
     }
 
-    /// One note per reason, onto the builder.
+    /// One note per reason, onto the builder - in words a user reads
+    /// on the status line (M11.3: what happened, why, and where).
     pub(crate) fn say(&self, b: &mut PathBuilder, what: &str) {
         for (why, n, at, z) in &self.lifted {
+            let plain = match *why {
+                NOT_PROVED => "staying down would have crossed passes on that plane or left the area proved safe",
+                TOO_LONG => "the link was longer than the maximum stay-down distance",
+                other => other,
+            };
             b.note(format!(
-                "link: {n} keep-down {what} link(s) lifted to the retract plane - {why} \
-                 (first from ({:.3}, {:.3}) at Z {z:.3})",
+                "link: the tool lifted to the retract plane {n} time(s) instead of the keep-down {what} link - {plain}; it went back down at the next entry (first lift at ({:.3}, {:.3}), Z {z:.3})",
                 at.x, at.y
             ));
         }
@@ -193,19 +204,22 @@ fn prefix(path: &[Point2], len: f64) -> Vec<Point2> {
 /// along the cut `path` (starting at `path[0]`) and returns to
 /// `path[0]`: `n` out-and-back legs over the path's first stretch.
 /// `None` when the path is too short for the angle within
-/// [`MAX_ZIG_LEGS`], or a number is not usable.
-pub(crate) fn plan_zig(path: &[Point2], dz: f64, angle_deg: f64) -> Option<(Vec<Point2>, usize)> {
+/// [`MAX_ZIG_LEGS`], or a number is not usable. Each leg is at most
+/// `max_leg` long (M11.3 B's maximum ramp length; `0` no cap): more
+/// out-and-back legs over a shorter stretch of the same cut.
+pub(crate) fn plan_zig_capped(path: &[Point2], dz: f64, angle_deg: f64, max_leg: f64) -> Option<(Vec<Point2>, usize)> {
     let tan = angle_deg.to_radians().tan();
     let avail: f64 = path.windows(2).map(|w| (w[1].x - w[0].x).hypot(w[1].y - w[0].y)).sum();
     if !(dz.is_finite() && dz > 0.0 && tan.is_finite() && tan > 0.0 && avail.is_finite() && avail > 1e-6) {
         return None;
     }
     let run = dz / tan;
-    let n = (run / (2.0 * avail)).ceil().max(1.0);
+    let reach = if max_leg > 0.0 && max_leg.is_finite() { avail.min(max_leg) } else { avail };
+    let n = (run / (2.0 * reach)).ceil().max(1.0);
     if n > MAX_ZIG_LEGS as f64 {
         return None;
     }
-    let leg = (run / (2.0 * n)).min(avail);
+    let leg = (run / (2.0 * n)).min(reach);
     let pre = prefix(path, leg);
     (pre.len() >= 2).then_some((pre, n as usize))
 }

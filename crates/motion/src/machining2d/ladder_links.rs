@@ -6,6 +6,7 @@
 //! strategies of published CAM practice (`links.rs`); the proof is the
 //! plan law M8.1 wrote for dive links. No vendor material consulted.
 
+use crate::approach::CENTER_CUT_REFUSAL;
 use crate::cl::{MoveKind, PathBuilder};
 use crate::entry::{Entry3D, chord_hits_plan};
 use crate::geo2d::Point2;
@@ -13,7 +14,7 @@ use crate::geometry::Point3;
 use crate::links::{Link, LinkTally, Links, NOT_PROVED, TOO_LONG};
 
 use super::arcs::Seg;
-use super::descent::{Lvl, plan, push, start};
+use super::descent::{Lvl, feed_down, plan, push, start};
 use super::levels::{Cert, Motion};
 
 /// One pass's place in the ladder, as a descent onto it reads it.
@@ -23,6 +24,8 @@ pub(super) struct LevelWalk<'a> {
     pub walk: Option<&'a [Seg]>,
     pub z: f64,
     pub prev_z: f64,
+    /// The material's top at this level (M11.3 B's plunge height).
+    pub mat_top: f64,
 }
 
 /// What the links remember across one ladder: the lifts to name, and the
@@ -62,14 +65,22 @@ pub(super) fn descend(
     let leg = Point2::new(cur.x, cur.y);
     match cert {
         Some(cen) => {
-            let l = Lvl { cen, passes: lv.passes, pass: lv.pass, walk: lv.walk };
+            let l = Lvl { cen, passes: lv.passes, pass: lv.pass, walk: lv.walk, mat_top: lv.mat_top };
             let d = plan(arm, zig, &l, leg, lv.z, lv.prev_z, m);
-            push(b, &d, &l, lv.z, lv.prev_z, tz, m)
+            push(b, &d, &l, lv.z, tz, m)
         }
         None => {
             let e = lv.pass.first()?;
+            if !m.links.approach.center_cutting {
+                // Nothing certified, so no helix or ramp can stand in: a
+                // tool that may not plunge into solid refuses the op.
+                b.note_once(&format!(
+                    "{CENTER_CUT_REFUSAL} - the dive at the pass start ({:.3}, {:.3}) has no certified room for a helix or ramp",
+                    e.x, e.y
+                ));
+            }
             b.push(MoveKind::Rapid, Point3::new(e.x, e.y, tz), None);
-            b.push(MoveKind::Plunge, Point3::new(e.x, e.y, lv.z), Some(m.plunge_feed));
+            feed_down(b, *e, lv.z, lv.mat_top, m, m.links.approach.plunge(m.plunge_feed));
             None
         }
     }
@@ -103,18 +114,18 @@ pub(super) fn level_link(
             // at that plane by a feed proved like every planar link -
             // inside the certified area (one region at every plane),
             // crossing none of that level's cuts, within the limit.
-            let l = Lvl { cen, passes: lv.passes, pass: lv.pass, walk: lv.walk };
+            let l = Lvl { cen, passes: lv.passes, pass: lv.pass, walk: lv.walk, mat_top: lv.mat_top };
             let d = plan(arm, zig, &l, at, lv.z, lv.prev_z, m);
-            let s = start(&d, &l, at);
+            let s = start(&d, &l, at, m);
             match link_proof(cen, &[lv.passes, &st.level], at, s, &m.links) {
                 Ok(()) => {
                     b.push(MoveKind::Feed, Point3::new(s.x, s.y, lv.prev_z), Some(m.feed));
-                    push(b, &d, &l, lv.z, lv.prev_z, lv.prev_z, m)
+                    push(b, &d, &l, lv.z, lv.prev_z, m)
                 }
                 Err(why) => {
                     st.tally.lift(why, at, lv.prev_z);
                     lift(b, m.hop_z);
-                    push(b, &d, &l, lv.z, lv.prev_z, m.hop_z, m)
+                    push(b, &d, &l, lv.z, m.hop_z, m)
                 }
             }
         }
@@ -129,10 +140,12 @@ pub(super) fn level_link(
 }
 
 /// The move between two passes of one level, by the pass link.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn pass_link(
     b: &mut PathBuilder,
     e: Point2,
     z: f64,
+    mat_top: f64,
     m: &Motion,
     cert: Option<&Cert<'_>>,
     passes: &[Vec<Point2>],
@@ -161,7 +174,7 @@ pub(super) fn pass_link(
     // the floor its neighbours already cleared, crossed in air.
     b.push(MoveKind::Rapid, Point3::new(at.x, at.y, plane), None);
     b.push(MoveKind::Rapid, Point3::new(e.x, e.y, plane), None);
-    b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
+    feed_down(b, e, z, mat_top, m, m.plunge_feed);
 }
 
 /// The keep-down link law: `a -> s` within the stay-down limit, inside

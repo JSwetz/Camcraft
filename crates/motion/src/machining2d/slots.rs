@@ -192,7 +192,7 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
         None if p.links == Links::PLANAR => None,
         None => stadium_center(a, b, h),
     };
-    motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
+    motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius).with_top(p.top_z);
     let link_cert = match (&tess, &link_tess) {
         (Some(t), _) | (None, Some(t)) => Some(Cert::Stadium { a, b, h, tess: t }),
         (None, None) => None,
@@ -202,6 +202,9 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
     bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
     let path = bld.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
@@ -349,13 +352,17 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
     // certification the geometry can never supply. The vertical plunge
     // onto the engraved point is the only legal first engagement (and
     // for an engraved line the whole cut is one kerf deep - nothing
-    // above the level is material to avoid).
-    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
+    // above the level is material to avoid). M11.3: it still rapids to
+    // the plunge height over the top before it feeds.
+    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed).with_top(p.top_z);
     run_levels(&mut b, &passes, &zs, &motion, None, None, None);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }

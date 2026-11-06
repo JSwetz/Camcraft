@@ -203,7 +203,7 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
             .with_entry(p.entry, p.helix_radius)
             .with_arc_radius(p.tool_diameter);
     }
-    let motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
+    let motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius).with_top(p.top_z);
     let cert = center_region.as_ref().map(Cert::Region);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
@@ -239,6 +239,9 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }

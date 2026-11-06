@@ -610,6 +610,8 @@ pub struct ToolUi {
     /// what the op page's Feeds section stated.
     pub tool_material: Option<camcraft_app::tools::ToolMaterial>,
     pub flutes: Option<u32>,
+    /// M11.3: may the tool plunge axially into solid?
+    pub center_cutting: bool,
 }
 
 impl Default for ToolUi {
@@ -656,6 +658,7 @@ impl ToolUi {
             feed: t.feed,
             tool_material: t.tool_material,
             flutes: t.flutes,
+            center_cutting: t.center_cutting,
         }
     }
 
@@ -691,6 +694,7 @@ impl ToolUi {
             feed: self.feed,
             tool_material: self.tool_material,
             flutes: self.flutes,
+            center_cutting: self.center_cutting,
         }
     }
 }

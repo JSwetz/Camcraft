@@ -110,6 +110,11 @@ pub fn current_stamp(
     if matches!(params, OpParams::Thread { .. }) {
         w(&mut h, tool.pitch);
     }
+    // M11.3: a tool that may not plunge into solid changes the entries;
+    // a byte only then, so no centre-cutting op's digest moves.
+    if !tool.center_cutting {
+        h.write_u8(0xCC);
+    }
     params.stamp_with(world, setup, Some(src), &mut h);
     match src {
         SrcRef::Stock => {

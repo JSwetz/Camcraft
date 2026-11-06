@@ -138,4 +138,7 @@ pub(super) fn links_editor(
              every other link lifts to the retract plane, named in the status line",
         );
     }
+    // M11.3 B/D: the entry's own shape, the plunge height, the entry
+    // feeds and the engagement limit.
+    super::approach_page::entry_shape_editor(ui, u, entry.or(links.transition), &mut links.approach);
 }

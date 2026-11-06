@@ -1,9 +1,11 @@
 //! The 3-D ladder's descents onto a level (moved out of `ladder.rs` by
-//! M11.2 C; the arms' laws unchanged): ramp chord or zig-zag ramp, the
-//! vertical-plane arc, the helix at its radius and pitch, the axial
-//! plunge in the floor's room - each traversing at the plane the user's
-//! level link chose. [`start`] answers where a descent begins, so a
-//! keep-down link knows what to reach.
+//! M11.2 C; M11.3 gives them the approach parameters and the one-entry
+//! law): ramp chord or zig-zag ramp, the vertical-plane arc, the helix
+//! at its radius and pitch - placed to close ON the pass start where it
+//! fits there - the axial plunge at the pass start off the wall or in
+//! the floor's room, each starting just over the material and traversing
+//! at the plane the user's level link chose. [`start`] answers where a
+//! descent begins, so a keep-down link knows what to reach.
 //!
 //! Provenance: standard CNC entry motions (plunge, linear and zig-zag
 //! ramp, helical interpolation, circular ramp) per public G-code manuals
@@ -13,12 +15,13 @@
 use super::level_ctx::{LevelCtx, bore_meets_lifted_leg, dive_link, feed_leg, substituted_dive, traverse};
 use super::params::Entry3D;
 
+use crate::approach::{CENTER_CUT_REFUSAL, NOT_CENTER_CUTTING};
 use crate::cl::{MoveKind, PathBuilder, lattice};
-use crate::entry::{dive_room, helix_turns_down};
-use crate::entry_arc::{arc_lead, pts_dir, push_arc_lead};
+use crate::entry::{chord_hits_plan, disc_clears, dive_room, helix_about};
+use crate::entry_arc::{arc_lead_swept, pts_dir, push_arc_lead};
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
-use crate::links::{helix_turns, plan_zig, push_zig};
+use crate::links::{helix_turns, plan_zig_capped, push_zig};
 use crate::machining2d::{chord_clears, ARC_FIT_TOL};
 
 /// One level's descent: the motion and how it reads the level.
@@ -36,65 +39,285 @@ pub(super) struct Ask<'a> {
     pub prev_cut: Option<f64>,
 }
 
+/// The plane a descent starts from (M11.3): on the first level the top
+/// of the cut plus the plunge height (air above by the generator's
+/// contract), on later levels the plane above - or, for a plain-ladder
+/// ramp to depth, the top of the cut again.
+fn from(lvl: &LevelCtx, a: &Ask, ramp: bool) -> f64 {
+    let p = lvl.p;
+    let ap = &p.links.approach;
+    if a.prev_cut.is_none() || (ramp && ap.ramp_to_depth && lvl.field.is_none()) {
+        (p.top_z + ap.plunge_height).min(a.prev_z)
+    } else {
+        a.prev_z
+    }
+}
+
+/// The material's top under a plunge at this level: the plane above on
+/// the plain ladder; on a lifted shell (whose previous level may have cut
+/// higher than its plane) and on the first level, the top of the cut.
+fn mat_top(lvl: &LevelCtx, a: &Ask) -> f64 {
+    match (lvl.field, a.prev_cut) {
+        (None, Some(pz)) => pz,
+        _ => lvl.p.top_z,
+    }
+}
+
+/// The axial feed onto `(xy, z_tip)`: a rapid to the plunge height over
+/// the material first (held under the retract plane), then the feed.
+fn feed_down(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, xy: Point2, z_tip: f64, feed: f64) {
+    let h = lvl.p.links.approach.plunge_height;
+    let top = mat_top(lvl, a);
+    let hz = (top + h).min(lvl.hop_z.max(top));
+    if h > 0.0 && hz.is_finite() && hz < b.at().z && hz > z_tip {
+        b.push(MoveKind::Rapid, Point3::new(xy.x, xy.y, hz), None);
+    }
+    b.push(MoveKind::Plunge, Point3::new(xy.x, xy.y, z_tip), Some(feed));
+}
+
 /// The ramp's zig-zag along the first pass, where the plain ladder can
-/// hold it (a lifted shell has no proof for it).
-fn zig(lvl: &LevelCtx, a: &Ask) -> Result<(Vec<Point2>, usize), &'static str> {
+/// hold it (a lifted shell has no proof for it): the transition's angle
+/// for a transition, the entry's own otherwise.
+fn zig(lvl: &LevelCtx, a: &Ask, angle: f64, zf: f64) -> Result<(Vec<Point2>, usize), &'static str> {
     if lvl.field.is_some() {
         return Err("the zig-zag ramp is not proved onto a lifted shell");
     }
-    plan_zig(a.first_pass, a.prev_z - lvl.z, lvl.p.links.ramp_angle)
+    plan_zig_capped(a.first_pass, zf - lvl.z, angle, lvl.p.links.approach.ramp_max_len)
         .ok_or("the first cut is too short to ramp at the angle")
 }
 
+/// A planned zig-zag: the stretch, the out-and-back count, its top plane.
+type Zig = (Vec<Point2>, usize, f64);
+
+/// The zig of a Ramp arm, if it zig-zags: the transition's, or the
+/// entry's at its own angle (M11.3 B).
+fn ramp_zig(lvl: &LevelCtx, a: &Ask) -> Option<Result<Zig, &'static str>> {
+    let ap = &lvl.p.links.approach;
+    if a.transition {
+        Some(zig(lvl, a, lvl.p.links.ramp_angle, a.prev_z).map(|(p, n)| (p, n, a.prev_z)))
+    } else if ap.ramp_zigs() {
+        let zf = from(lvl, a, true);
+        Some(zig(lvl, a, ap.ramp_angle, zf).map(|(p, n)| (p, n, zf)))
+    } else {
+        None
+    }
+}
+
+/// The fallback zig (M11.3): along the first pass at the entry's angle,
+/// the transition's when the entry sets none.
+fn zig_fallback(lvl: &LevelCtx, a: &Ask) -> Result<Zig, &'static str> {
+    let ap = &lvl.p.links.approach;
+    let angle = if ap.ramp_zigs() { ap.ramp_angle } else { lvl.p.links.ramp_angle };
+    let zf = from(lvl, a, true);
+    zig(lvl, a, angle, zf).map(|(p, n)| (p, n, zf))
+}
+
 fn arc(lvl: &LevelCtx, a: &Ask) -> Result<crate::entry_arc::ArcLead, &'static str> {
+    let ap = &lvl.p.links.approach;
     match lvl.field {
         Some(_) => Err("the arc entry is not proved onto a lifted shell"),
         None => pts_dir(a.entry, a.first_pass)
             .ok_or("the first cut has no direction to be tangent to")
             .and_then(|d| {
                 let ok = |s, q| chord_clears(lvl.cen, s, q);
-                arc_lead(a.entry, d, a.prev_z, lvl.z, lvl.p.tool_diameter, ARC_FIT_TOL, ok)
+                let r = ap.arc_nominal(lvl.p.tool_diameter);
+                arc_lead_swept(a.entry, d, from(lvl, a, false), lvl.z, r, ap.arc_sweep_rad(), ARC_FIT_TOL, ok)
             }),
     }
 }
 
-/// The helix orbit's dive point and turns, or why not.
-fn helix(lvl: &LevelCtx, a: &Ask) -> Result<(Point2, f64), &'static str> {
+/// The margin a dive at the pass start keeps off the wall.
+fn wall_margin(lvl: &LevelCtx) -> f64 {
+    (lvl.p.tool_diameter * 0.05).max(0.01)
+}
+
+/// Points along the first pass past its start (and a wall margin to
+/// either side), every half millimetre up to four tool diameters, that
+/// link back to the start at depth (inside the center, crossing no
+/// planned pass) - where an entry lands when the start sits on the wall
+/// (M11.3: one entry per level, no second dive).
+fn along_pass(lvl: &LevelCtx, a: &Ask) -> Vec<Point2> {
+    const STEP: f64 = 0.5;
+    let reach = (lvl.p.tool_diameter * 4.0).max(4.0);
+    let off = wall_margin(lvl) * 1.5;
+    let e = a.entry;
+    let mut out = Vec::new();
+    let mut run = 0.0;
+    let mut prev = e;
+    for &q in a.first_pass {
+        let d = (q.x - prev.x).hypot(q.y - prev.y);
+        if !(d.is_finite() && d > 0.0) {
+            prev = q;
+            continue;
+        }
+        let (nx, ny) = (-(q.y - prev.y) / d * off, (q.x - prev.x) / d * off);
+        let mut t = STEP;
+        while t <= d && run + t <= reach && out.len() < 1200 {
+            let f = t / d;
+            let (px, py) = (prev.x + (q.x - prev.x) * f, prev.y + (q.y - prev.y) * f);
+            for (dx, dy) in [(0.0, 0.0), (nx, ny), (-nx, -ny)] {
+                let c = Point2::new(lattice(px + dx), lattice(py + dy));
+                if chord_clears(lvl.cen, c, e) && !chord_hits_plan(c, e, lvl.passes) {
+                    out.push(c);
+                }
+            }
+            t += STEP;
+        }
+        run += d;
+        prev = q;
+        if run > reach {
+            break;
+        }
+    }
+    out
+}
+
+/// A placed helix: its near-side start, center, turns, radius.
+struct Hel {
+    start: Point2,
+    center: Point2,
+    turns: f64,
+    r: f64,
+}
+
+/// The helix: closing ON the pass start where a center a radius off it
+/// has the orbit's room (M11.3), else at the floor's widest room; radii
+/// from the op's down to the user's minimum.
+fn helix(lvl: &LevelCtx, a: &Ask) -> Result<Hel, &'static str> {
     let p = lvl.p;
-    let c = dive_room(lvl.cen, p.helix_radius + 1e-3).ok_or("the widened disc fits nowhere at this level")?;
-    let crosses = match (lvl.field, a.prev_cut) {
+    let ap = &p.links.approach;
+    let crosses = |c: Point2| match (lvl.field, a.prev_cut) {
         (Some(_), Some(pz)) => bore_meets_lifted_leg(lvl, pz, c),
         _ => false,
     };
-    if crosses {
-        return Err("the shell lifts legs the bore would cross");
+    let mut why = "the widened disc fits nowhere at this level";
+    for r in ap.helix_radii(p.helix_radius) {
+        let pitch = if a.transition { p.links.helix_pitch } else { ap.entry_pitch(r) };
+        let Some(t) = helix_turns(from(lvl, a, false) - lvl.z, r, pitch) else {
+            why = "the helix pitch asks too many turns";
+            continue;
+        };
+        for q in std::iter::once(a.entry).chain(along_pass(lvl, a)) {
+            for k in 0..8 {
+                let (sn, cs) = (f64::from(k) * std::f64::consts::FRAC_PI_4).sin_cos();
+                let c = Point2::new(lattice(q.x + r * cs), lattice(q.y + r * sn));
+                if disc_clears(lvl.cen, c, r + 1e-3) && !crosses(c) {
+                    return Ok(Hel { start: q, center: c, turns: t, r });
+                }
+            }
+        }
+        if let Some(c) = dive_room(lvl.cen, r + 1e-3) {
+            if crosses(c) {
+                why = "the shell lifts legs the bore would cross";
+                continue;
+            }
+            let s = Point2::new(lattice(c.x - r), lattice(c.y));
+            return Ok(Hel { start: s, center: Point2::new(lattice(s.x + r), lattice(s.y)), turns: t, r });
+        }
     }
-    let pitch = if a.transition { p.links.helix_pitch } else { 0.0 };
-    let t = helix_turns(a.prev_z - lvl.z, p.helix_radius, pitch).ok_or("the helix pitch asks too many turns")?;
-    Ok((Point2::new(lattice(c.x - p.helix_radius), lattice(c.y)), t))
+    Err(why)
+}
+
+/// Where the plain plunge lands: the pass start off the wall, else the
+/// floor's room.
+fn plunge_at(lvl: &LevelCtx, a: &Ask) -> Option<Point2> {
+    let m = wall_margin(lvl);
+    if disc_clears(lvl.cen, a.entry, m) {
+        return Some(a.entry);
+    }
+    along_pass(lvl, a).into_iter().find(|&q| disc_clears(lvl.cen, q, m)).or_else(|| dive_room(lvl.cen, 0.0))
 }
 
 /// Where the descent `a` begins in XY with the tool standing over `leg`.
 pub(super) fn start(lvl: &LevelCtx, a: &Ask, leg: Point2) -> Point2 {
-    let sub = || dive_room(lvl.cen, 0.0).unwrap_or(a.entry);
+    let sub = || plunge_at(lvl, a).unwrap_or(a.entry);
     if a.rest {
         return a.entry;
     }
+    let cc = lvl.p.links.approach.center_cutting;
     match a.arm {
-        Entry3D::Ramp if a.transition => zig(lvl, a).map_or_else(|_| sub(), |_| a.entry),
-        Entry3D::Ramp if chord_clears(lvl.cen, leg, a.entry) => leg,
+        Entry3D::Ramp => match ramp_zig(lvl, a) {
+            Some(Ok(_)) => a.entry,
+            Some(Err(_)) => sub(),
+            None if chord_clears(lvl.cen, leg, a.entry) => lvl.p.links.approach.ramp_start(leg, a.entry),
+            None => sub(),
+        },
         Entry3D::Arc => arc(lvl, a).map_or_else(|_| sub(), |l| l.start),
-        Entry3D::Helix => helix(lvl, a).map_or_else(|_| sub(), |(d, _)| d),
-        Entry3D::Ramp | Entry3D::Plunge => sub(),
+        Entry3D::Helix => helix(lvl, a).map_or_else(|_| if zig_fallback(lvl, a).is_ok() { a.entry } else { sub() }, |h| h.start),
+        Entry3D::Plunge if !cc => helix(lvl, a).map_or_else(|_| a.entry, |h| h.start),
+        Entry3D::Plunge => sub(),
     }
 }
 
+/// Post a helix and its link (if it did not close on the pass start).
+fn push_helix(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, h: &Hel) -> Option<Point2> {
+    let p = lvl.p;
+    let ap = &p.links.approach;
+    let z0 = from(lvl, a, false);
+    traverse(b, lvl, h.start);
+    if h.r < p.helix_radius {
+        b.note_once(&format!(
+            "entry: the helix fits only under its radius - flown at {:.3} mm, within the minimum radius",
+            h.r
+        ));
+    }
+    b.push(MoveKind::Rapid, Point3::new(h.start.x, h.start.y, z0), None);
+    // The turns count the drop the orbit really makes (to the shell tip,
+    // the legacy law's own span).
+    let z_hel = lvl.tip(h.start, h.r * 2.0);
+    let pitch = if a.transition { p.links.helix_pitch } else { ap.entry_pitch(h.r) };
+    let turns = helix_turns(z0 - z_hel, h.r, pitch).unwrap_or(h.turns);
+    helix_about(b, h.start, h.center, z0, z_hel, turns, ap.descent_feed(p.feed), !ap.helix_cw);
+    if h.start.x == a.entry.x && h.start.y == a.entry.y {
+        return None;
+    }
+    dive_link(b, lvl, h.start, a.entry);
+    Some(h.start)
+}
+
+fn push_zig3(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, pre: &[Point2], n: usize, zf: f64) {
+    traverse(b, lvl, a.entry);
+    b.push(MoveKind::Rapid, Point3::new(a.entry.x, a.entry.y, zf), None);
+    push_zig(b, pre, n, zf, lvl.z, lvl.p.links.approach.descent_feed(lvl.p.feed));
+}
+
+/// The stand-in when the asked arm cannot be honored (M11.3's order): a
+/// failed helix rides the zig along the first pass; a tool that is not
+/// centre-cutting takes the helix, then the zig, or the op is refused by
+/// name; otherwise M8.1's substituted dive.
+fn fallback(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, why: &str, tried_helix: bool) -> Option<Point2> {
+    let cc = lvl.p.links.approach.center_cutting;
+    if !cc
+        && !tried_helix
+        && let Ok(h) = helix(lvl, a)
+    {
+        b.note_once(&format!("{NOT_CENTER_CUTTING} ({why}) - helix entry instead"));
+        return push_helix(b, lvl, a, &h);
+    }
+    if (tried_helix || !cc)
+        && let Ok((pre, n, zf)) = zig_fallback(lvl, a)
+    {
+        let note = if cc {
+            format!("entry: {why} - the helix stands down to a ramp along the first cut")
+        } else {
+            format!("{NOT_CENTER_CUTTING} ({why}) - ramp along the first cut instead")
+        };
+        b.note_once(&note);
+        push_zig3(b, lvl, a, &pre, n, zf);
+        return None;
+    }
+    if !cc {
+        b.note_once(&format!("{CENTER_CUT_REFUSAL} - {why}, and no helix or ramp fits onto Z {:.3}", lvl.z));
+        return None;
+    }
+    substituted_dive(b, lvl, a.entry, why)
+}
+
 /// Post the descent onto `a.entry` at the level, traversing at `lvl.tz`.
-/// At clearance and the entry's own arm this is the pre-M11.2 ladder,
-/// move for move.
 pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Point2> {
     let p = lvl.p;
-    let (entry, z, prev_z) = (a.entry, lvl.z, a.prev_z);
+    let ap = &p.links.approach;
+    let (entry, z) = (a.entry, lvl.z);
     let at = b.at();
     let leg = Point2::new(at.x, at.y);
     if a.rest {
@@ -102,55 +325,58 @@ pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Po
         // run already swept, so it rides the vertical dive at the wall
         // entry the nesting law specced.
         traverse(b, lvl, entry);
-        b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, lvl.tip(entry, 0.0)), Some(p.plunge_feed));
+        feed_down(b, lvl, a, entry, lvl.tip(entry, 0.0), p.plunge_feed);
         return None;
     }
     match a.arm {
-        Entry3D::Ramp if a.transition => match zig(lvl, a) {
-            Ok((pre, n)) => {
-                traverse(b, lvl, entry);
-                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, prev_z), None);
-                push_zig(b, &pre, n, prev_z, z, p.feed);
+        Entry3D::Ramp => match ramp_zig(lvl, a) {
+            Some(Ok((pre, n, zf))) => {
+                push_zig3(b, lvl, a, &pre, n, zf);
                 None
             }
-            Err(why) => substituted_dive(b, lvl, entry, why),
-        },
-        Entry3D::Ramp => {
-            // The diagonal's legality is asked of THIS level's center:
-            // islands only grow downward, so the destination's room is a
-            // subset of every corridor above it - one chord test covers
-            // the whole interpolated move (M8.1).
-            if chord_clears(lvl.cen, leg, entry) {
-                b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
-                if lvl.field.is_none() {
-                    b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(p.feed));
-                } else {
-                    // The shell's ramp rides strictly above the plane
-                    // until one chord short of its destination, and only
-                    // then descends to the destination's tip (ladder.rs).
-                    let cap = p.tool_diameter * 0.5;
-                    let (dx, dy) = (entry.x - leg.x, entry.y - leg.y);
-                    let l = (dx * dx + dy * dy).sqrt();
-                    let t = if l > cap { 1.0 - cap / l } else { 0.0 };
-                    if t > 0.0 {
-                        let q1 = Point2::new(leg.x + dx * t, leg.y + dy * t);
-                        b.push(MoveKind::Feed, Point3::new(q1.x, q1.y, z), Some(p.feed));
-                        // The tail rides the plane - the depth this
-                        // level's passes are cut at - so it answers the
-                        // dive link's law: fed only when it crosses none
-                        // of them (a tail a radius long reaches across
-                        // the zig-zag rows next to the pass start),
-                        // flown over to the pass start when it would.
-                        dive_link(b, lvl, q1, entry);
-                    } else {
-                        feed_leg(b, lvl, entry, 0.0);
+            Some(Err(why)) => fallback(b, lvl, a, why, false),
+            None => {
+                // The diagonal's legality is asked of THIS level's center:
+                // islands only grow downward, so the destination's room is
+                // a subset of every corridor above it - one chord test
+                // covers the whole interpolated move (M8.1); the leg limit
+                // takes the chord's last stretch.
+                if chord_clears(lvl.cen, leg, entry) {
+                    let s = ap.ramp_start(leg, entry);
+                    let s = if chord_clears(lvl.cen, s, entry) { s } else { leg };
+                    if s.x != leg.x || s.y != leg.y {
+                        b.push(MoveKind::Rapid, Point3::new(s.x, s.y, at.z), None);
                     }
+                    b.push(MoveKind::Rapid, Point3::new(s.x, s.y, from(lvl, a, true)), None);
+                    let fd = ap.descent_feed(p.feed);
+                    if lvl.field.is_none() {
+                        b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(fd));
+                    } else {
+                        // The shell's ramp rides strictly above the plane
+                        // until one chord short of its destination, and
+                        // only then descends to the destination's tip.
+                        let cap = p.tool_diameter * 0.5;
+                        let (dx, dy) = (entry.x - s.x, entry.y - s.y);
+                        let l = (dx * dx + dy * dy).sqrt();
+                        let t = if l > cap { 1.0 - cap / l } else { 0.0 };
+                        if t > 0.0 {
+                            let q1 = Point2::new(s.x + dx * t, s.y + dy * t);
+                            b.push(MoveKind::Feed, Point3::new(q1.x, q1.y, z), Some(fd));
+                            // The tail rides the plane this level's passes
+                            // are cut at, so it answers the dive link's law:
+                            // fed only when it crosses none of them, flown
+                            // over to the pass start when it would.
+                            dive_link(b, lvl, q1, entry);
+                        } else {
+                            feed_leg(b, lvl, entry, 0.0);
+                        }
+                    }
+                    None
+                } else {
+                    fallback(b, lvl, a, "the ramp's chord is blocked", false)
                 }
-                None
-            } else {
-                substituted_dive(b, lvl, entry, "the ramp's chord is blocked")
             }
-        }
+        },
         // The circular ramp (M11.1): the ramp's chord law on the lead
         // chord behind the entry, the fan posted by `entry_arc`.
         Entry3D::Arc => match arc(lvl, a) {
@@ -158,35 +384,25 @@ pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Po
                 if lvl.kept && (leg.x != l.start.x || leg.y != l.start.y) {
                     traverse(b, lvl, l.start);
                 }
-                push_arc_lead(b, &l, lvl.tz, prev_z, p.feed);
+                push_arc_lead(b, &l, lvl.tz, from(lvl, a, false), ap.descent_feed(p.feed), ap.plunge(p.plunge_feed));
                 None
             }
-            Err(why) => substituted_dive(b, lvl, entry, why),
+            Err(why) => fallback(b, lvl, a, why, false),
         },
-        // The widened disc lands on this level's own floor (M8.1); the
-        // found point is the orbit's CENTER, the dive starts `rh` west.
         Entry3D::Helix => match helix(lvl, a) {
-            Ok((d, turns)) => {
-                traverse(b, lvl, d);
-                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                // The turns count the drop the orbit really makes (to
-                // the shell tip, the legacy law's own span).
-                let z_hel = lvl.tip(d, p.helix_radius * 2.0);
-                let pitch = if a.transition { p.links.helix_pitch } else { 0.0 };
-                let turns = helix_turns(prev_z - z_hel, p.helix_radius, pitch).unwrap_or(turns);
-                helix_turns_down(b, d, prev_z, z_hel, p.helix_radius, turns, p.feed);
-                dive_link(b, lvl, d, entry);
-                Some(d)
-            }
-            Err(why) => substituted_dive(b, lvl, entry, why),
+            Ok(h) => push_helix(b, lvl, a, &h),
+            Err(why) => fallback(b, lvl, a, why, true),
         },
-        // The axial arm dives where the disc has room, not at the
-        // pass start on a wall (M8.1).
-        Entry3D::Plunge => match dive_room(lvl.cen, 0.0) {
+        Entry3D::Plunge if !ap.center_cutting => fallback(b, lvl, a, "the plunge arm", false),
+        // The axial arm dives at the pass start off the wall, else where
+        // the disc has room - never on a wall (M8.1).
+        Entry3D::Plunge => match plunge_at(lvl, a) {
             Some(d) => {
                 traverse(b, lvl, d);
-                let z_d = lvl.tip(d, 0.0);
-                b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z_d), Some(p.plunge_feed));
+                feed_down(b, lvl, a, d, lvl.tip(d, 0.0), ap.plunge(p.plunge_feed));
+                if d.x == entry.x && d.y == entry.y {
+                    return None;
+                }
                 dive_link(b, lvl, d, entry);
                 Some(d)
             }

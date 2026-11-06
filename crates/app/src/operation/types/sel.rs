@@ -264,6 +264,7 @@ pub(super) fn lead_sane(lead: &Lead) -> bool {
         Lead::Linear { length } => length.is_finite() && *length >= 0.0,
         Lead::Arc { radius } => radius.is_finite() && *radius > 0.0,
         Lead::Tangential { radius } => radius.is_finite() && *radius > 0.0,
+        Lead::Perpendicular { length } => length.is_finite() && *length >= 0.0,
     }
 }
 

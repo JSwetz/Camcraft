@@ -6351,7 +6351,7 @@ fn stub_tool() -> Tool {
         shank_len: 20.0,
         holder_d: 16.0,
         holder_len: 10.0,
-        material_group: "aluminum".into(),
+        material_group: "aluminum".into(), center_cutting: true,
         rpm: 4000.0,
         feed: 800.0,
         tool_material: None,

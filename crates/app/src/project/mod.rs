@@ -113,6 +113,8 @@ mod params;
 pub use params::*;
 mod entity;
 mod params_impl;
+mod approach;
+pub use approach::*;
 mod links;
 pub use links::*;
 pub use entity::*;

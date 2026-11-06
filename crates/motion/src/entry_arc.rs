@@ -57,6 +57,11 @@ pub struct ArcLead {
     pub start: Point2,
     pub radius: f64,
     pub fan: Vec<Point3>,
+    /// The plane the arc starts on: the entry plane `z_top`, or - under
+    /// a sweep cap (M11.3 B) - lower, the rest of the drop an axial feed
+    /// at `start` (a center point of the destination level, so the
+    /// plunge's own law holds it).
+    pub top: f64,
 }
 
 /// Plan the arc entry onto `e` at `z_cut` from `z_top`, tangent at the
@@ -80,7 +85,28 @@ pub fn arc_lead(
     tol: f64,
     clears: impl Fn(Point2, Point2) -> bool,
 ) -> Result<ArcLead, &'static str> {
+    arc_lead_swept(e, dir, z_top, z_cut, nominal_r, 0.0, tol, clears)
+}
+
+/// [`arc_lead`] with the sweep capped at `max_sweep` radians (M11.3 B;
+/// `0` no cap - exactly [`arc_lead`]). A capped arc covers only
+/// `R (1 - cos sweep)` of the drop and starts that high over the cut;
+/// the radius may then sit under the drop, the search halving from the
+/// nominal no lower than the smaller of the two. The proof is the same
+/// lead chord.
+#[allow(clippy::too_many_arguments)]
+pub fn arc_lead_swept(
+    e: Point2,
+    dir: Point2,
+    z_top: f64,
+    z_cut: f64,
+    nominal_r: f64,
+    max_sweep: f64,
+    tol: f64,
+    clears: impl Fn(Point2, Point2) -> bool,
+) -> Result<ArcLead, &'static str> {
     let h = z_top - z_cut;
+    let cap = if max_sweep.is_finite() && max_sweep > 0.0 { max_sweep.min(std::f64::consts::FRAC_PI_2) } else { 0.0 };
     if !(h.is_finite() && h > 0.0) || !e.x.is_finite() || !e.y.is_finite() {
         return Err("the arc has no drop to make");
     }
@@ -93,24 +119,32 @@ pub fn arc_lead(
     }
     let u = Point2::new(dir.x / len, dir.y / len);
     let mut r = if nominal_r.is_finite() { nominal_r.max(h) } else { h };
+    // Under a sweep cap the radius is the user's own, floored only at the
+    // smaller of it and the drop.
+    let mut floor = h;
+    if cap > 0.0 && nominal_r.is_finite() && nominal_r > 0.0 {
+        r = nominal_r;
+        floor = h.min(nominal_r);
+    }
     let mut short = false;
     for _ in 0..RADIUS_TRIES {
         // The axis-plane lead first (one true G18/G19 arc), then the
         // exact tangent; each one's own chord is what `clears` proves.
-        let axis = axis_snap(u, lead_len(h, r), tol);
+        let theta = sweep_capped(h, r, cap);
+        let axis = axis_snap(u, r * theta.sin(), tol);
         for d in axis.into_iter().chain(std::iter::once(u)) {
-            match lead_at(e, d, h, z_cut, r, tol) {
+            match lead_at(e, d, h, z_cut, r, tol, cap, z_top) {
                 Ok(lead) if clears(lead.start, e) => return Ok(lead),
                 Ok(_) => {}
                 Err(why) if why == TOO_SHORT => short = true,
                 Err(why) => return Err(why),
             }
         }
-        if r <= h {
+        if r <= floor {
             break;
         }
         // Halve toward the quarter turn; land on it exactly last.
-        r = (r * 0.5).max(h);
+        r = (r * 0.5).max(floor);
     }
     if short {
         return Err(TOO_SHORT);
@@ -126,9 +160,10 @@ fn sweep_of(h: f64, r: f64) -> f64 {
     (1.0 - h / r).clamp(-1.0, 1.0).acos()
 }
 
-/// How far behind the entry the lead starts: `L = R sin theta0`.
-fn lead_len(h: f64, r: f64) -> f64 {
-    r * sweep_of(h, r).sin()
+/// The sweep flown at radius `r`: the drop's own (`r >= h`), or under a
+/// cap the smaller of the cap and the quarter turn the radius allows.
+fn sweep_capped(h: f64, r: f64, cap: f64) -> f64 {
+    if cap > 0.0 { sweep_of(h.min(r), r).min(cap) } else { sweep_of(h, r) }
 }
 
 /// The axis direction `u` nearly is (M11.2 B), when turning the lead
@@ -160,9 +195,24 @@ fn coord(ec: f64, uc: f64, d: f64) -> f64 {
     if uc == 0.0 { ec } else { lattice(ec + uc * d) }
 }
 
-/// The fan for one radius (`r >= h`, both positive and finite).
-fn lead_at(e: Point2, u: Point2, h: f64, z_cut: f64, r: f64, tol: f64) -> Result<ArcLead, &'static str> {
-    let theta0 = sweep_of(h, r);
+/// The fan for one radius (`r >= h` uncapped, both positive and finite).
+#[allow(clippy::too_many_arguments)]
+fn lead_at(
+    e: Point2,
+    u: Point2,
+    h: f64,
+    z_cut: f64,
+    r: f64,
+    tol: f64,
+    cap: f64,
+    z_top: f64,
+) -> Result<ArcLead, &'static str> {
+    let theta0 = sweep_capped(h, r, cap);
+    let full = cap <= 0.0 || (r >= h && theta0 >= sweep_of(h, r));
+    let top = if full { z_top } else { lattice(z_cut + r * (1.0 - theta0.cos())) };
+    if top.is_nan() || top <= z_cut {
+        return Err(TOO_SHORT);
+    }
     let lead = r * theta0.sin();
     let start = Point2::new(coord(e.x, u.x, -lead), coord(e.y, u.y, -lead));
     if start.x == e.x && start.y == e.y {
@@ -186,7 +236,7 @@ fn lead_at(e: Point2, u: Point2, h: f64, z_cut: f64, r: f64, tol: f64) -> Result
         fan.push(Point3::new(coord(e.x, u.x, s), coord(e.y, u.y, s), lattice(z)));
     }
     fan.push(Point3::new(e.x, e.y, z_cut));
-    Ok(ArcLead { start, radius: r, fan })
+    Ok(ArcLead { start, radius: r, fan, top })
 }
 
 /// The cut direction at the start of a fitted walk's first segment: a
@@ -218,14 +268,21 @@ pub(crate) fn pts_dir(e: Point2, rest: &[Point2]) -> Option<Point2> {
 /// the tool stands elsewhere (the helix arm's own traverse), drop at
 /// rapid to `z_top` - air by the superset law, the start is a center
 /// point of the destination level - then feed the fan.
-pub(crate) fn push_arc_lead(b: &mut PathBuilder, lead: &ArcLead, clearance_z: f64, z_top: f64, feed: f64) {
+pub(crate) fn push_arc_lead(
+    b: &mut PathBuilder,
+    lead: &ArcLead,
+    clearance_z: f64,
+    z_top: f64,
+    feed: f64,
+    plunge_feed: f64,
+) {
     let s = lead.start;
     let cur = b.at();
     if cur.x != s.x || cur.y != s.y {
         b.push(MoveKind::Rapid, Point3::new(s.x, s.y, clearance_z), None);
     }
     b.push(MoveKind::Rapid, Point3::new(s.x, s.y, z_top), None);
-    push_vertical_arc(b, lead, feed);
+    push_vertical_arc(b, lead, feed, plunge_feed);
 }
 
 /// The note an oblique vertical arc leaves on its path, said once.
@@ -245,10 +302,17 @@ const RADIUS_SLACK: f64 = 1e-4;
 /// arc onto the pass entry; an oblique one is the certified chord fan,
 /// named once in the path's notes. The builder must stand at
 /// `lead.start` on the arc's top plane.
-pub(crate) fn push_vertical_arc(b: &mut PathBuilder, lead: &ArcLead, feed: f64) {
+pub(crate) fn push_vertical_arc(b: &mut PathBuilder, lead: &ArcLead, feed: f64, plunge_feed: f64) {
     let Some(&end) = lead.fan.last() else {
         return;
     };
+    // A sweep-capped arc starts under the entry plane: the rest of the
+    // drop is an axial feed at its start (never on an uncapped lead,
+    // whose top IS the plane the caller stands on).
+    let at = b.at();
+    if at.x == lead.start.x && at.y == lead.start.y && at.z > lead.top {
+        b.push(MoveKind::Plunge, Point3::new(at.x, at.y, lead.top), Some(plunge_feed));
+    }
     match true_arc(b.at(), lead, end) {
         Ok((plane, center, ccw)) => b.push_arc_in(MoveKind::Feed, end, Some(feed), center, ccw, plane),
         Err(oblique) => {

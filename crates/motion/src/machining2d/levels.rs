@@ -106,6 +106,10 @@ pub(super) struct Motion {
     /// Level transitions and links; [`Links::PLANAR`] is the legacy
     /// ladder byte for byte.
     pub(super) links: Links,
+    /// The top of the cut (the material's top on the first level), read
+    /// by the approach's plunge height and ramp-to-depth (M11.3 B);
+    /// clearance until a ladder states it, which leaves both inert.
+    pub(super) top_z: f64,
 }
 
 impl Motion {
@@ -127,7 +131,16 @@ impl Motion {
             helix_radius: 0.0,
             arc_radius: 0.0,
             links: Links::PLANAR,
+            top_z: clearance_z,
         }
+    }
+
+    /// The top of the cut (M11.3 B), clamped under clearance.
+    pub(super) fn with_top(mut self, top_z: f64) -> Self {
+        if top_z.is_finite() {
+            self.top_z = top_z.min(self.clearance_z);
+        }
+        self
     }
 
     /// Opt this ladder into the entry family (the pocket's `entry`
@@ -204,6 +217,7 @@ pub(super) fn run_level_walks(
 ) {
     let mut first = true;
     let mut last_cut_z: Option<f64> = None;
+    let mut above = m.top_z;
     let mut st = LinkState::default();
     for &z in zs {
         for (pi, pass) in passes.iter().enumerate() {
@@ -216,13 +230,20 @@ pub(super) fn run_level_walks(
             let e = Point2::new(entry.x, entry.y);
             let walk = runs.and_then(|r| r.get(pi)).map(Vec::as_slice);
             let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-            let lv = LevelWalk { passes, pass, walk, z, prev_z };
+            // The material's top over this level (M11.3's plunge height):
+            // the plane above it - the last level cut when this level is
+            // entered, kept for its later passes - or the top of the cut.
+            if last_cut_z != Some(z) {
+                above = last_cut_z.unwrap_or(m.top_z);
+            }
+            let mat_top = above;
+            let lv = LevelWalk { passes, pass, walk, z, prev_z, mat_top };
             if first {
                 // The first entry: the entry family, from clearance.
                 let dove = descend(b, m.entry, false, center, &lv, m.clearance_z, m);
                 st.begin_level(e, dove);
             } else if last_cut_z == Some(z) {
-                pass_link(b, e, z, m, links_cert, passes, &mut st);
+                pass_link(b, e, z, mat_top, m, links_cert, passes, &mut st);
             } else {
                 // A level change. The transition, when the user set one,
                 // proves against the link area; "same as entry" keeps
@@ -246,4 +267,9 @@ pub(super) fn run_level_walks(
         }
     }
     st.tally.say(b, "level/pass");
+    if let Some(n) = m.links.approach.engagement_note()
+        && !first
+    {
+        b.note_once(&n);
+    }
 }

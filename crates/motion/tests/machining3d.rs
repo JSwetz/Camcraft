@@ -329,7 +329,8 @@ fn the_entry_family_is_obeyed_at_the_first_level_3d() {
 fn a_helix_that_does_not_fits_falls_back_to_a_plunge() {
     // The boss slab at its own silhouette: every row's span is the 7 mm
     // band between wall-erosion and boss-erosion, narrower than the
-    // widened disc (r + rh) of a 4 mm helix. Eroding the ring by that
+    // widened disc (r + rh) of a 4 mm helix - except at the band's
+    // corners (see below). Eroding the ring by that
     // much leaves an inverted annulus - the hole has swallowed the
     // outer loop - and M8.1's containment guard refuses its phantom
     // triangles, so the level lands the honest substitution: an axial
@@ -340,20 +341,19 @@ fn a_helix_that_does_not_fits_falls_back_to_a_plunge() {
     let f = slab_with_boss();
     let region = silhouette(&f);
     let t = pocket3d(&f, &region, &params(Entry3D::Helix, 4.0)).unwrap();
-    assert!(
-        t.notes.iter().any(|n| n.contains("widened disc")),
-        "the substitution must be said, got {:?}",
-        t.notes
-    );
-    for level in [-5.0, -10.0] {
-        let first = t
-            .moves
-            .iter()
-            .find(|m| m.to.z == level)
-            .unwrap_or_else(|| panic!("level {level} was cut by nothing"));
-        assert_eq!(first.kind, MoveKind::Plunge, "level {level} entry");
-        assert!(first.arc.is_none(), "no phantom orbit at {level}");
+    // M11.3: the exact distance law (`entry::disc_clears`) finds the room
+    // the triangulation's centroids missed - the band's corners, where
+    // the boss's rounded offset leaves 4.5 mm - and the helix lands there
+    // instead of substituting. Whatever lands, it is never a phantom:
+    // every orbit's center stands a helix radius clear of both walls.
+    for m in t.moves.iter().filter(|m| m.arc.is_some() && m.from.z != m.to.z) {
+        let c = m.arc.map(|a| a.center).expect("arc");
+        let to_wall = 16.0 - c.x.abs().max(c.y.abs());
+        let to_boss = ((c.x.abs() - 5.0).max(0.0)).hypot((c.y.abs() - 5.0).max(0.0)) - 4.0;
+        assert!(to_wall >= 4.0 && to_boss >= 4.0, "an orbit about {c:?} has no room");
     }
+    let orbits = t.moves.iter().any(|m| m.arc.is_some() && m.from.z != m.to.z);
+    assert!(orbits || t.notes.iter().any(|n| n.contains("widened disc")), "{:?}", t.notes);
     assert_eq!(verify_against(&f, &region, &t), Vec::new());
 }
 
@@ -834,7 +834,10 @@ fn ffo_the_first_cut_of_a_level_is_its_slowest_kind() {
     let planar: Vec<(f64, f64)> = o
         .moves
         .iter()
+        // M11.3: the short at-depth link from the entry dive onto the
+        // row start runs inside the dive's own hole - not a cut.
         .filter(|m| m.kind == MoveKind::Feed && (m.to.z - m.from.z).abs() <= 1e-6)
+        .filter(|m| (m.to.x - m.from.x).hypot(m.to.y - m.from.y) > 1.0)
         .map(|m| (m.to.z, m.feed.unwrap_or(0.0)))
         .collect();
     assert!(!planar.is_empty(), "the ladder has planar feeds");

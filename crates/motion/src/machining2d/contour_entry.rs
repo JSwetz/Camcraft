@@ -14,20 +14,16 @@
 use std::f64::consts::TAU;
 
 use crate::cl::{MoveKind, PathBuilder};
-use crate::entry::{Entry3D, dive_room, helix_turns_down};
-use crate::entry_arc::{arc_lead, push_arc_lead, push_vertical_arc, seg_dir};
+use crate::entry_arc::{arc_lead_swept, push_vertical_arc, seg_dir};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
-use crate::links::helix_turns;
 
 use super::arcs::{Seg, walk_tangent};
 use super::contour::{ContourParams, Lead, air_side};
-use super::descent::{dive_link, substituted_dive};
 use super::fillet::Legal;
 use super::lead_fit::{plan_leads, segs_hold, slack};
 use super::levels::{Cert, Motion};
 use super::ring::dist;
-use super::slots::chord_clears;
 
 /// Everything a level's engagement reads, borrowed from `contour`.
 pub(super) struct Engage<'a> {
@@ -37,99 +33,6 @@ pub(super) struct Engage<'a> {
     pub plan: &'a [Vec<Point2>],
     pub m: &'a Motion,
     pub legal: &'a Legal<'a>,
-}
-
-/// The bore side (`Side::Inside`, untabbed): the eroded region states
-/// the bounded air exactly, so every arm certifies against it with the
-/// pocket ladders' own machinery - the dive stands in the floor's room,
-/// never dwells on the finished wall.
-/// `arm` is the motion (the entry, or the user's level transition),
-/// `pitch` a transition helix's Z per turn (0: the entry's law), and
-/// `tz` the plane the tool traverses at (clearance, or the retract
-/// plane under that level link) - at clearance and the entry's own arm
-/// this posts exactly the pre-M11.2 descent.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn bore_entry(
-    b: &mut PathBuilder,
-    eng: &Engage,
-    arm: Entry3D,
-    pitch: f64,
-    e2: Point2,
-    z: f64,
-    prev_z: f64,
-    tz: f64,
-    lead: &[Seg],
-    walk: &[Seg],
-) -> Option<Point2> {
-    let Engage { p, center, cert, plan, m, .. } = *eng;
-    let sub = |b: &mut PathBuilder, why: &str| substituted_dive(b, cert, plan, e2, z, m, why, tz);
-    let cur = b.at();
-    let leg = Point2::new(cur.x, cur.y);
-    match arm {
-        Entry3D::Plunge => match dive_room(center, 0.0) {
-            Some(d) => {
-                if leg.x != d.x || leg.y != d.y {
-                    b.push(MoveKind::Rapid, Point3::new(d.x, d.y, tz), None);
-                }
-                b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(p.plunge_feed));
-                dive_link(b, cert, plan, d, e2, z, m);
-                Some(d)
-            }
-            None => sub(b, "the disc fits nowhere here"),
-        },
-        Entry3D::Ramp => {
-            // One chord test covers the whole interpolated descent: the
-            // region is one at every plane, and the destination's room
-            // bounds every plane above it (M8.1's superset law, here at
-            // its simplest - a planar contour's single center).
-            if chord_clears(center, leg, e2) {
-                b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
-                b.push(MoveKind::Feed, Point3::new(e2.x, e2.y, z), Some(p.feed));
-                None
-            } else {
-                sub(b, "the ramp's chord is blocked")
-            }
-        }
-        Entry3D::Arc => {
-            // The circular ramp onto the lead-in's own first move,
-            // certified by the ramp's chord law (see `entry_arc`).
-            let first = lead.first().or(walk.first());
-            let lead_arc = first
-                .and_then(|s| seg_dir(e2, s))
-                .ok_or("the first cut has no direction to be tangent to")
-                .and_then(|d| {
-                    let ok = |s, q| chord_clears(center, s, q);
-                    arc_lead(e2, d, prev_z, z, p.tool_diameter, p.tolerance, ok)
-                });
-            match lead_arc {
-                Ok(l) => {
-                    push_arc_lead(b, &l, tz, prev_z, p.feed);
-                    None
-                }
-                Err(why) => sub(b, why),
-            }
-        }
-        Entry3D::Helix => {
-            // The found point is the orbit's CENTER; the dive starts at
-            // its near side, `rh` west - one radius of center-room
-            // certifies the whole swept tube exactly (`entry::dive_room`).
-            let turns = helix_turns(prev_z - z, p.helix_radius, pitch);
-            match (dive_room(center, p.helix_radius + 1e-3), turns) {
-                (Some(c), Some(t)) => {
-                    let d = Point2::new(c.x - p.helix_radius, c.y);
-                    if leg.x != d.x || leg.y != d.y {
-                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, tz), None);
-                    }
-                    b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                    helix_turns_down(b, d, prev_z, z, p.helix_radius, t, p.feed);
-                    dive_link(b, cert, plan, d, e2, z, m);
-                    Some(d)
-                }
-                (Some(_), None) => sub(b, "the helix pitch asks too many turns"),
-                (None, _) => sub(b, "the widened disc fits nowhere at this level"),
-            }
-        }
-    }
 }
 
 /// The plane the wall-side arc descends from on level `zi`: the level
@@ -177,7 +80,9 @@ pub(super) fn wall_arc(
     let dir = first
         .and_then(|s| seg_dir(e2, s))
         .ok_or("the first cut has no direction to be tangent to")?;
-    let arc = arc_lead(e2, dir, z_top, z, p.tool_diameter, p.tolerance, holds)?;
+    let a = &p.links.approach;
+    let r = a.arc_nominal(p.tool_diameter);
+    let arc = arc_lead_swept(e2, dir, z_top, z, r, a.arc_sweep_rad(), p.tolerance, holds)?;
     let s = arc.start;
     let cur = b.at();
     let lift = cur.z.max(hop_z);
@@ -188,7 +93,7 @@ pub(super) fn wall_arc(
     if z_top < air {
         b.push(MoveKind::Plunge, Point3::new(s.x, s.y, z_top), Some(p.plunge_feed));
     }
-    push_vertical_arc(b, &arc, p.feed);
+    push_vertical_arc(b, &arc, a.descent_feed(p.feed), a.plunge(p.plunge_feed));
     Ok(())
 }
 
@@ -219,7 +124,8 @@ pub(super) fn seam_leads(
     }
     let n = poly.len();
     let closed = n > 2 && dist(poly[0], poly[n - 1]) <= 1e-9;
-    let tangential = matches!(p.lead, Lead::Tangential { .. });
+    let tangential =
+        matches!(p.lead, Lead::Tangential { .. }) && matches!(p.lead_out_shape(), Lead::Tangential { .. });
     if !(closed && tangential && crosses(planned.0, &planned.1, poly[0], &planned.2)) {
         return planned;
     }
@@ -278,7 +184,7 @@ const MAX_SAMPLES: usize = 4096;
 const STEP: f64 = 0.05;
 
 /// `segs` walked from `from`, flattened to a polyline.
-fn flatten(from: Point2, segs: &[Seg]) -> Vec<Point2> {
+pub(super) fn flatten(from: Point2, segs: &[Seg]) -> Vec<Point2> {
     let mut out = vec![from];
     let mut at = from;
     for seg in segs {

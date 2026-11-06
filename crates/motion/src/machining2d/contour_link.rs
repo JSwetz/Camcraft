@@ -11,7 +11,7 @@
 
 use crate::cl::{MoveKind, PathBuilder};
 use crate::entry::Entry3D;
-use crate::entry_arc::{arc_lead, push_vertical_arc, seg_dir};
+use crate::entry_arc::{arc_lead_swept, push_vertical_arc, seg_dir};
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
 use crate::links::{Link, Links};
@@ -117,13 +117,17 @@ pub(super) fn push_stay(
                 .first()
                 .and_then(|s| seg_dir(seam, s))
                 .ok_or("the first cut has no direction to be tangent to")
-                .and_then(|d| arc_lead(seam, d, zp, z, p.tool_diameter, p.tolerance, holds));
+                .and_then(|d| {
+                    let ap = &p.links.approach;
+                    let r = ap.arc_nominal(p.tool_diameter);
+                    arc_lead_swept(seam, d, zp, z, r, ap.arc_sweep_rad(), p.tolerance, holds)
+                });
             match arc {
                 Ok(a) => {
                     // Back along the proved lead chord at the level just
                     // cut, then the arc down onto the seam.
                     b.push(MoveKind::Feed, Point3::new(a.start.x, a.start.y, zp), Some(p.feed));
-                    push_vertical_arc(b, &a, p.feed);
+                    push_vertical_arc(b, &a, p.links.approach.descent_feed(p.feed), p.plunge_feed);
                 }
                 Err(why) => {
                     say(

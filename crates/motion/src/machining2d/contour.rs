@@ -11,7 +11,7 @@ use crate::links::{Link, LinkTally};
 
 use super::arcs::{fit_arcs, push_segs};
 use super::contour_depth::{Ladder, ladder};
-use super::contour_entry::{Engage, say, seam_leads, wall_arc, wall_arc_top};
+use super::contour_entry::{Engage, crosses, say, seam_leads, wall_arc, wall_arc_top};
 use super::contour_link::{plan_links, push_stay, ring_link};
 use super::contour_step::{Said, Step, engage_level};
 use super::levels::{Cert, Motion};
@@ -19,6 +19,7 @@ use super::ring::Ring;
 use super::face::GenError;
 use super::fillet::{Legal, fillet_corners};
 use super::fillet_tally::{FilletTally, fillet_floor};
+use super::lead_ext::{axis_reseat, extend_leads, push_lead_down, retrace};
 use super::lead_fit::reseat;
 
 pub use super::contour_params::{ContourParams, Lead, Side};
@@ -191,8 +192,23 @@ fn contour_impl(
         // A closed ring whose start leaves the lead no room (a bore
         // inset's corner) starts mid-run instead; tabbed levels keep the
         // start their windows are measured from.
+        // M11.3 C: an axis-aligned start first (an arc entry tangent to
+        // it posts as a true G18/G19), then the lead room's own reseat.
+        let ap = &p.links.approach;
+        let pts = if !tabbed && ap.axis_start { axis_reseat(&pts, ap.axis_tol).unwrap_or(pts) } else { pts };
         let pts = if tabbed { pts } else { reseat(&pts, p, &legal, &mut lead_notes).unwrap_or(pts) };
         let ring = Ring::new(pts);
+        // The overlap past the start on closed rings (M11.3 C): not on
+        // tabbed levels (their windows are the tab law's) and not under a
+        // keep-down level link (the next level descends from the seam).
+        let ov = if tabbed || ap.overlap <= 0.0 {
+            0.0
+        } else if p.links.level == Link::KeepDown {
+            say(&mut lead_notes, "lead: the overlap stands down under the keep-down level link - the next level descends from the seam".into());
+            0.0
+        } else {
+            ap.overlap.min(ring.len)
+        };
         let keeps = if tabbed {
             ring.tab_keeps(p.tab_count as usize, p.tab_width)
         } else {
@@ -211,9 +227,31 @@ fn contour_impl(
             }
             // Both leads keep the cutter center in the legal room
             // (lead_fit.rs), meet the wall on its own tangent, and stay
-            // off each other at the seam (contour_entry::seam_leads).
+            // off each other at the seam (contour_entry::seam_leads); the
+            // extensions ride the same room (lead_ext).
             let (entry, lead, lead_off) = seam_leads(&walk, &poly, p, &legal, &mut lead_notes);
+            let (entry, lead, lead_off) = extend_leads(entry, lead, lead_off, &walk, &poly, p, &legal, &mut lead_notes);
+            // The overlap (M11.3 C): the walk retraces its own first
+            // moves - the same segments, so the same chords, never a new
+            // crossing - and the lead-out leaves from where that ends.
+            let mut window = (poly, walk, entry, lead, lead_off);
+            if ov > 0.0 {
+                let (rpoly, rwalk) = retrace(&window.0, &window.1, ov);
+                let (en, li, lo) = seam_leads(&rwalk, &rpoly, p, &legal, &mut lead_notes);
+                let (en, li, lo) = extend_leads(en, li, lo, &rwalk, &rpoly, p, &legal, &mut lead_notes);
+                let last = rpoly[rpoly.len() - 1];
+                if crosses(en, &li, last, &lo) {
+                    say(&mut lead_notes, format!("lead: the {ov:.3} mm overlap's lead-out crosses the lead-in at ({:.3}, {:.3}) - overlap dropped", last.x, last.y));
+                } else {
+                    window = (rpoly, rwalk, en, li, lo);
+                }
+            }
+            let (poly, walk, entry, lead, lead_off) = window;
             let e2 = Point2::new(entry.x, entry.y);
+            let lf = ap.lead_feed(p.feed);
+            // The vertical lead-in's top (M11.3 C): a dive at the lead's
+            // start stops this high and the lead descends along itself.
+            let lead_top = if ap.lead_height > 0.0 && !lead.is_empty() { z + ap.lead_height } else { z };
             if let (Some(s), Some(&zp)) = (stay_in, rzi.checked_sub(1).and_then(|i| rz.get(i))) {
                 // Stayed down: the tool stands on the seam at the level
                 // above (its lead-out skipped); descend on the ring.
@@ -279,7 +317,7 @@ fn contour_impl(
                 // The level's first engagement: a crossing, or the path's
                 // first entry (prev_z falls back to clearance there).
                 let prev_z = if rzi == 0 { p.clearance_z } else { rz[rzi - 1] };
-                let step = Step { arm, e2, z, prev_z, first: first_entry, inside, tabbed };
+                let step = Step { arm, e2, z, prev_z, first: first_entry, inside, tabbed, lead_top };
                 if let Some(d) = engage_level(&mut b, &eng, &step, &lead, &walk, &mut said) {
                     if dives.0.to_bits() != z.to_bits() {
                         dives = (z, Vec::new());
@@ -291,10 +329,18 @@ fn contour_impl(
                 let cur = b.at();
                 b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop_z), Some(p.feed));
                 b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop_z), None);
-                b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
+                b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, lead_top), Some(p.plunge_feed));
             }
             first_entry = false;
-            push_segs(&mut b, &lead, z, p.feed);
+            let at = b.at();
+            if at.x == e2.x && at.y == e2.y && at.z > z {
+                push_lead_down(&mut b, &lead, at.z, z, lf);
+            } else {
+                if lead_top > z {
+                    say(&mut lead_notes, "lead: the vertical lead-in rides only a dive at the lead-in's start - this entry lands on the cut plane".into());
+                }
+                push_segs(&mut b, &lead, z, lf);
+            }
             push_segs(&mut b, &walk, z, p.feed);
             if !stay_out {
                 push_segs(&mut b, &lead_off, z, p.feed);
@@ -312,6 +358,9 @@ fn contour_impl(
     }
 
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }

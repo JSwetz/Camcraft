@@ -286,6 +286,9 @@ pub(super) fn ladder(
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if path.moves.is_empty() {
         return Err(GenError::Empty(
             "nothing to cut: the model fills the pocket at every level".into(),

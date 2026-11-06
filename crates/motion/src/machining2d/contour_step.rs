@@ -16,7 +16,11 @@ use crate::geometry::Point3;
 use crate::links::Link;
 
 use super::arcs::Seg;
-use super::contour_entry::{Engage, bore_entry};
+use crate::approach::CENTER_CUT_REFUSAL;
+
+use super::contour_bore::{BoreStep, bore_entry};
+use super::contour_entry::Engage;
+use super::descent::feed_down;
 
 /// What one level's engagement reads beyond the shared [`Engage`].
 pub(super) struct Step {
@@ -30,6 +34,10 @@ pub(super) struct Step {
     pub first: bool,
     pub inside: bool,
     pub tabbed: bool,
+    /// Where an axial dive at the lead-in's start stops: the cut plane,
+    /// or the vertical lead-in's height over it (M11.3 C) - the lead then
+    /// descends along itself.
+    pub lead_top: f64,
 }
 
 /// Structural refusals, each said once per path.
@@ -85,7 +93,7 @@ pub(super) fn engage_level(b: &mut PathBuilder, eng: &Engage, s: &Step, lead: &[
         }
         let cur = b.at();
         b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, cur.z), None);
-        b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
+        graze(b, eng, e2, s.lead_top);
         None
     } else if s.inside {
         // The bore side: the eroded region states the bounded air
@@ -94,7 +102,8 @@ pub(super) fn engage_level(b: &mut PathBuilder, eng: &Engage, s: &Step, lead: &[
         // never dwells on the finished wall. A transition's helix pitch
         // rides along; the first entry keeps the entry's own law.
         let pitch = if s.first { 0.0 } else { p.links.helix_pitch };
-        bore_entry(b, eng, s.arm, pitch, e2, z, s.prev_z, tz, lead, walk)
+        let bs = BoreStep { arm: s.arm, pitch, e2, z, prev_z: s.prev_z, tz, first: s.first };
+        bore_entry(b, eng, &bs, lead, walk)
     } else {
         // The wall side (explicit Outside, and every direct Auto): the
         // graze this generator has always posted, and the only one that
@@ -112,7 +121,25 @@ pub(super) fn engage_level(b: &mut PathBuilder, eng: &Engage, s: &Step, lead: &[
         }
         let cur = b.at();
         b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, cur.z), None);
-        b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
+        graze(b, eng, e2, s.lead_top);
         None
     }
+}
+
+/// The axial dive at the lead-in's start (tabbed bore levels, the wall
+/// side): rapid to the plunge height over the top of the cut - air by the
+/// generator's contract, nothing is engaged above it (M11.3) - then feed.
+/// A tool that is not centre-cutting may not plunge here (the stock
+/// beside the wall is not proved cleared): the operation is refused by
+/// name.
+fn graze(b: &mut PathBuilder, eng: &Engage, e2: Point2, z: f64) {
+    let p = eng.p;
+    let a = &p.links.approach;
+    if !a.center_cutting {
+        b.note_once(&format!(
+            "{CENTER_CUT_REFUSAL} - the dive at the lead-in ({:.3}, {:.3}) is into material no helix or ramp can be proved beside; pick the Arc entry or a centre-cutting tool",
+            e2.x, e2.y
+        ));
+    }
+    feed_down(b, e2, z, p.top_z, eng.m, a.plunge(p.plunge_feed));
 }

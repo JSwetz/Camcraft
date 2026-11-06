@@ -242,6 +242,20 @@ pub struct ToolDto {
     pub tool_material: Option<ToolMaterialDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flutes: Option<u32>,
+    /// M11.3 addition: absent from every older file (and written only
+    /// when false), serde-defaults to the centre-cutting tool every
+    /// earlier tool was taken to be - no version step.
+    #[serde(default = "centre_cutting", skip_serializing_if = "is_centre_cutting")]
+    pub center_cutting: bool,
+}
+
+fn centre_cutting() -> bool {
+    true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_centre_cutting(v: &bool) -> bool {
+    *v
 }
 
 /// The file mirror of `cutting::ToolMaterial` (M13.2): a word, so an
@@ -322,6 +336,7 @@ impl ToolDto {
                 crate::tools::ToolMaterial::Carbide => ToolMaterialDto::Carbide,
             }),
             flutes: t.flutes,
+            center_cutting: t.center_cutting,
         }
     }
 
@@ -359,6 +374,7 @@ impl ToolDto {
                 ToolMaterialDto::Carbide => crate::tools::ToolMaterial::Carbide,
             }),
             flutes: self.flutes,
+            center_cutting: self.center_cutting,
         }
     }
 }

@@ -83,7 +83,9 @@ fn the_arc_entry_changes_only_the_descents() {
     let (plunge, arc) = (cut(Entry3D::Plunge), cut(Entry3D::Arc));
     let shared: Vec<_> = plunge.iter().filter(|m| arc.contains(m)).cloned().collect();
     assert_eq!(shared, arc, "the arc's level walks are the plunge's, in order");
-    assert_eq!(plunge.len() - arc.len(), 3, "one dive link per level is all that differs");
+    // M11.3's one-entry law: the plunge now dives ON the lead-in's
+    // start (it stands off the wall), so no dive link is left either.
+    assert_eq!(plunge.len() - arc.len(), 0, "the same cut, entered once per level");
 }
 
 #[test]

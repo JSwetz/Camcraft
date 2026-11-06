@@ -97,7 +97,7 @@ const TOOL_KINDS: [&str; 11] = [
 ];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
-const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
+const LEADS: [&str; 5] = ["None", "Linear", "Arc", "Tangential", "Perpendicular"];
 /// The 3-D finish kinematics, in the order the combo maps them.
 const FINISH_PATTERNS: [&str; 18] = [
     "Waterline",
@@ -330,11 +330,11 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
     // whichever section is open.
     if exists {
         let ent = model::find_by_name(&state.world, &target);
-        let (moves, warnings): (usize, Vec<Warning>) = ent
+        let (moves, warnings, notes): (usize, Vec<Warning>, Vec<String>) = ent
             .as_ref()
             .and_then(|e| model::toolpath_of(&state.world, e))
-            .map(|tp| (tp.path.len(), tp.warnings))
-            .unwrap_or((0, Vec::new()));
+            .map(|tp| (tp.path.len(), tp.warnings, tp.path.notes))
+            .unwrap_or((0, Vec::new(), Vec::new()));
         // M10.1 C: the tool law's after-state outranks the stamp - a
         // blocked op says so and names why (the app's sentence, verbatim);
         // the cached count stays visible, it is just not cuttable.
@@ -359,6 +359,11 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
         ui.label(status_line);
         // The M1.5.4 fold, reused: one line per warning kind, not a wall.
         for line in fold_warnings(&warnings) {
+            ui.label(line);
+        }
+        // M11.3: entry fallbacks and lifted links, with their fix, where
+        // the user looks - not only in the status bar's long line.
+        for line in super::approach_page::entry_status_lines(&notes) {
             ui.label(line);
         }
     }
@@ -928,6 +933,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     Lead::Linear { .. } => 1,
                     Lead::Arc { .. } => 2,
                     Lead::Tangential { .. } => 3,
+                    Lead::Perpendicular { .. } => 4,
                 };
                 let before = l_idx;
                 combo(ui, "c_lead", &mut l_idx, &LEADS);
@@ -936,11 +942,12 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         1 => Lead::Linear { length: 8.0 },
                         2 => Lead::Arc { radius: 5.0 },
                         3 => Lead::Tangential { radius: 5.0 },
+                        4 => Lead::Perpendicular { length: 5.0 },
                         _ => Lead::None,
                     };
                 }
                 match lead {
-                    Lead::Linear { length } => {
+                    Lead::Linear { length } | Lead::Perpendicular { length } => {
                         field(ui, "Lead length");
                         num(ui, u, length);
                     }
@@ -957,6 +964,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 lead_page::entry_editor(ui, u, "c", entry, helix_radius);
                 lead_page::links_editor(ui, u, "c", Some(*entry), None, links);
                 ui.label("keep down between levels cuts each ring all the way down, descending on the ring itself");
+                super::approach_page::contour_leads_editor(ui, u, &mut links.approach);
                 field(ui, "Tab count");
                 let mut tabs = f64::from(*tab_count);
                 num_plain(ui, &mut tabs);
@@ -5271,6 +5279,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     num_plain(ui, &mut state.tool_ui.rpm);
                     field(ui, &format!("Feed ({})", u.feed_suffix()));
                     num_feed(ui, u, &mut state.tool_ui.feed);
+                    // M11.3: an entry may plunge into solid only with a
+                    // centre-cutting tool; otherwise it helixes, ramps,
+                    // or the operation is refused by name.
+                    ui.checkbox(&mut state.tool_ui.center_cutting, "Centre cutting (may plunge into solid)");
                 });
                 ui.vertical(|ui| {
                     draw_tool_preview(ui, &preview_tool, u);

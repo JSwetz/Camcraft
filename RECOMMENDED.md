@@ -9657,3 +9657,51 @@ name in `plan_program`; the annular-sector sweep is still owed. (4) An
 over-budget hidden-rest scan is `HiddenRest::OverBudget` plus
 `Warning::RestUnjudged` ("NOT JUDGED"), which blocks the post; dropped:
 a non-blocking advisory.
+
+## M11.3 B-D - lead in / lead out, complete, and the user's entry reports: eight decisions (2026-11-06)
+
+(1) **One `Approach` struct inside `Links`** carries every new
+entry/lead/feed setting. It is a diff-only file key with stamp bytes
+only when non-default, so there's no version bump. Centre cutting is
+read from the tool at generation and never saved on the op.
+
+(2) **Default plunge height 2 mm** (user: "why does it plunge straight
+into the material ... from high above"). Plunges rapid to material top
++ 2 mm, then feed. Material top is the level above (plain ladders) or
+the top of cut (contour walls, 3D shells - the only height known to be
+air there). This deliberately changed 11 CL + 40 NC goldens.
+
+(3) **One entry per level** (user: "the first entry should be enough ...
+the linking should go from that entry into the circles"). The descent
+ends on the first pass's start; on a wall start, it lands a little
+along the first pass and feeds back at depth. A second dive that still
+can't be avoided is named on the op page with a fix, never silent.
+
+(4) **Centre cutting** (`Tool.center_cutting`, true for the whole
+catalog; a tool-editor checkbox). A non-centre-cutting tool never dives
+into solid: helix, then ramp, else the op is refused by name.
+Between-pass plunges within a level are not yet checked.
+
+(5) **Fallback order: helix, ramp along the first cut, plunge.** New
+pocket-family ops seed Helix at 0.4 x tool radius, so the HSM spiral
+has a bore to grow from; stored ops keep their entry.
+
+(6) **Entry parameters** (user: "Arc: radius and length; Ramp: angle or
+length; extension values; plunge data; engagement"): ramp angle / max
+leg / ramp-to-depth; helix min radius / pitch or angle / direction; arc
+radius / sweep; separate descent, plunge and lead-in feeds; an
+engagement limit that slows the descent and its first link
+(removal-rate reading).
+
+(7) **Contour leads:** lead-out shape (new Perpendicular, appended - an
+older build refuses the file by name), extensions, vertical lead-in
+height, overlap (re-cuts the walk's own segments; dropped with a note if
+the lead-out would cross the lead-in), and the axis-aligned lead start
+(1 deg) that gives the user's part true G18/G19 arc entries.
+
+(8) **Visibility:** entry fallbacks, second dives and lifted links read
+as plain "Entry: ... - fix: ..." lines under the op status. Owed:
+horizontal-plane arc entry for pockets, slowing only the first stretch
+for the engagement limit, and removing (not just naming) second dives
+on wall-start rows. Existing ops keep their cached high plunges until
+regenerated.

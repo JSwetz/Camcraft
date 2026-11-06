@@ -1398,6 +1398,12 @@ pub enum LeadDto {
     Tangential {
         radius: f64,
     },
+    /// M11.3 C: the perpendicular lead - appended, so no earlier file
+    /// holds the tag and an older build refuses it as unknown (Corrupt),
+    /// never misreads it.
+    Perpendicular {
+        length: f64,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

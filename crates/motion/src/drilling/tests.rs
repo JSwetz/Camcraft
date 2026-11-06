@@ -64,7 +64,7 @@ pub(super) fn drill_tool(d: f64) -> Tool {
         shank_len: 40.0,
         holder_d: 44.0,
         holder_len: 35.0,
-        material_group: "aluminum".into(),
+        material_group: "aluminum".into(), center_cutting: true,
         rpm: 10_000.0,
         feed: 120.0,
         tool_material: None,

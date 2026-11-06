@@ -231,7 +231,7 @@ fn a_retype_carries_the_numbers_and_pins_the_ladder() {
         panic!("the Adaptive2D row seeds an Adaptive2D");
     };
     assert_eq!((*feed, *stepover, *helix_radius), (800.0, 3.0, 1.0), "shared numbers ride");
-    assert_eq!((*entry, *optimal_load, retract_z.is_none()), (Entry3D::Plunge, camcraft_app::load::DEFAULT_OPTIMAL_LOAD, true), "the ladder and its door seed at the catalog default - a Zigzag pocket's 60 was never in play");
+    assert_eq!((*entry, *optimal_load, retract_z.is_none()), (Entry3D::Helix, camcraft_app::load::DEFAULT_OPTIMAL_LOAD, true), "the ladder and its door seed at the catalog default (M11.3: new pocket-family ops helix in) - a Zigzag pocket's 60 was never in play");
     // The Offset row has no engagement field to carry INTO: the
     // pocket's 60 is dropped, not hidden - checked by the seed
     // compiling against the variant that has no such field, and by

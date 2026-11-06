@@ -213,7 +213,7 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
             .with_entry(p.entry, p.helix_radius)
             .with_arc_radius(p.tool_diameter);
     }
-    let motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
+    let mut motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
 
     for h in &p.holes {
@@ -246,6 +246,10 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
         let sweep = vec![h.xy, s0];
         let passes = [sweep, start];
         let zs = cut_levels(h.top_z, bottom, p.stepdown);
+        // Each hole's own entry surface is its top of cut (M11.3 B).
+        if h.top_z.is_finite() {
+            motion.top_z = h.top_z.min(motion.clearance_z);
+        }
 
         // The cross between holes is `run_levels`' own first-entry
         // law: it lifts to clearance, positions over the dive point,
@@ -259,6 +263,9 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
     }
 
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }

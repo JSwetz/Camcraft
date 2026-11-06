@@ -34,6 +34,9 @@ pub struct LinksDto {
     pub pass: Option<LinkDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_stay_down: Option<f64>,
+    /// M11.3 B/C/D: the entry, lead and feed parameters, diff-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approach: Option<ApproachDto>,
 }
 
 fn link_dto(l: Link) -> LinkDto {
@@ -85,6 +88,7 @@ pub fn links_to_dto(l: &Links, def: &Links) -> Option<LinksDto> {
         level: (l.level != def.level).then(|| link_dto(l.level)),
         pass: (l.pass != def.pass).then(|| link_dto(l.pass)),
         max_stay_down: num(l.max_stay_down, def.max_stay_down),
+        approach: approach_to_dto(&l.approach),
     })
 }
 
@@ -102,6 +106,7 @@ pub fn links_from_dto(d: Option<&LinksDto>, def: Links) -> Links {
         level: d.level.map_or(def.level, link_of),
         pass: d.pass.map_or(def.pass, link_of),
         max_stay_down: d.max_stay_down.unwrap_or(def.max_stay_down),
+        approach: if d.approach.is_some() { approach_from_dto(d.approach.as_ref()) } else { def.approach },
     }
 }
 

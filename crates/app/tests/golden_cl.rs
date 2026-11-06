@@ -463,7 +463,7 @@ fn cycle_tool(kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64) -> Tool
         shank_len: 30.0,
         holder_d: 20.0,
         holder_len: 40.0,
-        material_group: String::from("steel"),
+        material_group: String::from("steel"), center_cutting: true,
         rpm: 500.0,
         feed: 200.0,
         tool_material: None,

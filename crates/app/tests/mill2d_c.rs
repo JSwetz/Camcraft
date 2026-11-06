@@ -61,7 +61,7 @@ fn thread_mill(diameter: f64, pitch: f64) -> Tool {
         shank_len: 40.0,
         holder_d: 44.0,
         holder_len: 35.0,
-        material_group: "steel".into(),
+        material_group: "steel".into(), center_cutting: true,
         rpm: 6000.0,
         feed: 400.0,
         tool_material: None,

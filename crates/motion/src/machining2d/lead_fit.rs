@@ -108,13 +108,14 @@ fn scaled(lead: Lead, f: f64) -> Lead {
         Lead::Linear { length } => Lead::Linear { length: length * f },
         Lead::Arc { radius } => Lead::Arc { radius: radius * f },
         Lead::Tangential { radius } => Lead::Tangential { radius: radius * f },
+        Lead::Perpendicular { length } => Lead::Perpendicular { length: length * f },
     }
 }
 
 fn size(lead: Lead) -> f64 {
     match lead {
         Lead::None => 0.0,
-        Lead::Linear { length } => length,
+        Lead::Linear { length } | Lead::Perpendicular { length } => length,
         Lead::Arc { radius } | Lead::Tangential { radius } => radius,
     }
 }
@@ -125,6 +126,7 @@ fn kind(lead: Lead) -> &'static str {
         Lead::Linear { .. } => "linear",
         Lead::Arc { .. } => "arc",
         Lead::Tangential { .. } => "tangential",
+        Lead::Perpendicular { .. } => "perpendicular",
     }
 }
 
@@ -134,20 +136,25 @@ fn say(notes: &mut Vec<String>, n: String) {
     }
 }
 
+/// Neither end has a lead (the lead-out mirrors the lead-in unless the
+/// approach sets its own, M11.3 C).
+fn no_leads(p: &ContourParams) -> bool {
+    p.lead == Lead::None && p.lead_out_shape() == Lead::None
+}
+
 /// Does the lead `p` asks for, scaled by `f`, fit both ends of `walk`?
 fn both_fit(walk: &[Seg], poly: &[Point2], p: &ContourParams, f: f64, legal: &Legal) -> bool {
     let n = poly.len();
     if n < 2 {
         return true;
     }
-    let q = ContourParams { lead: scaled(p.lead, f), ..*p };
     let t0 = walk_tangent(walk, poly, true);
-    let (e, segs) = lead_in(poly[0], t0, air_side(t0, q.climb), &q);
+    let (e, segs) = lead_in(poly[0], t0, air_side(t0, p.climb), scaled(p.lead, f));
     if !segs_hold(legal, e, &segs, slack(p)) {
         return false;
     }
     let t1 = walk_tangent(walk, poly, false);
-    let out = lead_out(poly[n - 1], t1, air_side(t1, q.climb), &q);
+    let out = lead_out(poly[n - 1], t1, air_side(t1, p.climb), scaled(p.lead_out_shape(), f));
     segs_hold(legal, poly[n - 1], &out, slack(p))
 }
 
@@ -165,7 +172,7 @@ pub(super) fn reseat(
     legal: &Legal,
     notes: &mut Vec<String>,
 ) -> Option<Vec<Point2>> {
-    if p.lead == Lead::None || pts.len() < 3 {
+    if no_leads(p) || pts.len() < 3 {
         return None;
     }
     let walked = |v: Vec<Point2>| {
@@ -233,25 +240,24 @@ pub(super) fn plan_leads(
     let (Some(&s), Some(&e)) = (poly.first(), poly.last()) else {
         return (Point2::new(0.0, 0.0), Vec::new(), Vec::new());
     };
-    if p.lead == Lead::None || n < 2 {
+    if no_leads(p) || n < 2 {
         return (s, Vec::new(), Vec::new());
     }
     let t0 = walk_tangent(walk, poly, true);
     let t1 = walk_tangent(walk, poly, false);
-    let full = size(p.lead);
+    let out_shape = p.lead_out_shape();
     let mut lin = None;
     let mut lout = None;
     for k in 0..=LEAD_SHRINKS {
         let f = 0.5f64.powi(k as i32);
-        let q = ContourParams { lead: scaled(p.lead, f), ..*p };
         if lin.is_none() {
-            let (entry, segs) = lead_in(s, t0, air_side(t0, p.climb), &q);
+            let (entry, segs) = lead_in(s, t0, air_side(t0, p.climb), scaled(p.lead, f));
             if segs_hold(legal, entry, &segs, slack(p)) {
                 lin = Some((entry, segs, f));
             }
         }
         if lout.is_none() {
-            let segs = lead_out(e, t1, air_side(t1, p.climb), &q);
+            let segs = lead_out(e, t1, air_side(t1, p.climb), scaled(out_shape, f));
             if segs_hold(legal, e, &segs, slack(p)) {
                 lout = Some((segs, f));
             }
@@ -260,17 +266,17 @@ pub(super) fn plan_leads(
             break;
         }
     }
-    let mut word = |end: &str, at: Point2, f: Option<f64>| match f {
+    let mut word = |end: &str, lead: Lead, at: Point2, f: Option<f64>| match f {
         Some(f) if f < 1.0 => say(
             notes,
             format!(
                 "lead: the {:.3} mm {} lead-{end} at ({:.3}, {:.3}) leaves the legal cutter \
                  region - shrunk to {:.3} mm",
-                full,
-                kind(p.lead),
+                size(lead),
+                kind(lead),
                 at.x,
                 at.y,
-                full * f
+                size(lead) * f
             ),
         ),
         Some(_) => {}
@@ -279,14 +285,14 @@ pub(super) fn plan_leads(
             format!(
                 "lead: no {} lead-{end} fits the legal cutter region at ({:.3}, {:.3}) - \
                  refused, the cut meets the wall there without one",
-                kind(p.lead),
+                kind(lead),
                 at.x,
                 at.y
             ),
         ),
     };
-    word("in", s, lin.as_ref().map(|l| l.2));
-    word("out", e, lout.as_ref().map(|l| l.1));
+    word("in", p.lead, s, lin.as_ref().map(|l| l.2));
+    word("out", out_shape, e, lout.as_ref().map(|l| l.1));
     let (entry, segs_in) = lin.map_or((s, Vec::new()), |(en, sg, _)| (en, sg));
     let segs_out = lout.map_or(Vec::new(), |(sg, _)| sg);
     (entry, segs_in, segs_out)

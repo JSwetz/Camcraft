@@ -117,14 +117,29 @@ pub(super) fn dive_link(b: &mut PathBuilder, lvl: &LevelCtx, d: Point2, e: Point
     if chord_clears(lvl.cen, d, e) && !chord_hits_plan(d, e, lvl.passes) {
         feed_leg(b, lvl, e, 0.0);
     } else {
+        // M11.3: the second dive is named, never silent.
+        b.note(format!(
+            "entry: a second dive at the pass start ({:.3}, {:.3}) - the link from the entry at ({:.3}, {:.3}) is not proved clear at depth",
+            e.x, e.y, d.x, d.y
+        ));
         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, lvl.hop_z), None);
         b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.hop_z), None);
-        b.push(
-            MoveKind::Plunge,
-            Point3::new(e.x, e.y, lvl.tip(e, 0.0)),
-            Some(lvl.p.plunge_feed),
-        );
+        plunge_from_top(b, lvl, e, lvl.p.plunge_feed);
     }
+}
+
+/// The axial feed onto `xy`'s tip (M11.3): a rapid first to the plunge
+/// height over the top of the cut - air by the generator's contract -
+/// held under the retract plane, then the feed.
+pub(super) fn plunge_from_top(b: &mut PathBuilder, lvl: &LevelCtx, xy: Point2, feed: f64) {
+    let z = lvl.tip(xy, 0.0);
+    let h = lvl.p.links.approach.plunge_height;
+    let top = lvl.p.top_z;
+    let hz = (top + h).min(lvl.hop_z.max(top));
+    if h > 0.0 && hz.is_finite() && hz < b.at().z && hz > z {
+        b.push(MoveKind::Rapid, Point3::new(xy.x, xy.y, hz), None);
+    }
+    b.push(MoveKind::Plunge, Point3::new(xy.x, xy.y, z), Some(feed));
 }
 
 /// The entry arm's honorable failure (M8.1): the stated motion could
@@ -134,15 +149,18 @@ pub(super) fn dive_link(b: &mut PathBuilder, lvl: &LevelCtx, d: Point2, e: Point
 /// vanished, a region past the triangulation cap - falls back to the
 /// wall dive this ladder knew before Phase 8, still loudly.
 pub(super) fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) -> Option<Point2> {
-    match dive_room(lvl.cen, 0.0) {
+    let pf = lvl.p.links.approach.plunge(lvl.p.plunge_feed);
+    // M11.3: at the pass start itself where it stands off the wall - one
+    // dive, no link - else the floor's room.
+    let at_e = crate::entry::disc_clears(lvl.cen, e, (lvl.p.tool_diameter * 0.05).max(0.01));
+    match if at_e { Some(e) } else { dive_room(lvl.cen, 0.0) } {
         Some(d) => {
-            b.note(format!("entry: {why} - axial dive on the floor instead"));
+            b.note(format!("entry: {why} - axial dive on the floor instead at ({:.3}, {:.3})", d.x, d.y));
             traverse(b, lvl, d);
-            b.push(
-                MoveKind::Plunge,
-                Point3::new(d.x, d.y, lvl.tip(d, 0.0)),
-                Some(lvl.p.plunge_feed),
-            );
+            plunge_from_top(b, lvl, d, pf);
+            if d.x == e.x && d.y == e.y {
+                return None;
+            }
             dive_link(b, lvl, d, e);
             Some(d)
         }
@@ -152,11 +170,7 @@ pub(super) fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, w
             ));
             traverse(b, lvl, e);
             b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.tz), None);
-            b.push(
-                MoveKind::Plunge,
-                Point3::new(e.x, e.y, lvl.tip(e, 0.0)),
-                Some(lvl.p.plunge_feed),
-            );
+            plunge_from_top(b, lvl, e, pf);
             None
         }
     }

@@ -160,6 +160,11 @@ impl OpParams {
                         h.write_u8(3);
                         w(h, *radius);
                     }
+                    // M11.3 C: an appended tag - no earlier op holds it.
+                    Lead::Perpendicular { length } => {
+                        h.write_u8(4);
+                        w(h, *length);
+                    }
                 }
                 // Appended at the v7-era side field: even a pre-Side
                 // contour op digests differently - the mechanism saying
@@ -1354,8 +1359,12 @@ impl OpParams {
         // touched them keeps the digest it was cached under. (A contour
         // saved with the old stay-down ramp goes Stale once and
         // regenerates the same path - the mechanism saying so.)
-        if let Some(l) = self.links()
-            && *l != self.default_links()
+        // (The runtime centre-cutting flag is the tool's, never the op's.)
+        if let Some(l) = self.links().map(|l| crate::links::Links {
+            approach: crate::links::Approach { center_cutting: true, ..l.approach },
+            ..*l
+        })
+            && l != self.default_links()
         {
             h.write_u8(0xC2);
             let link = |k: crate::links::Link| match k {
@@ -1374,6 +1383,44 @@ impl OpParams {
             h.write_u8(link(l.pass));
             for v in [l.ramp_angle, l.helix_pitch, l.max_stay_down] {
                 w(h, v);
+            }
+            // M11.3 B/C/D: the entry, lead and feed parameters - bytes
+            // only when they differ from the defaults, so an op with
+            // links but default approach keeps its digest.
+            let a = l.approach;
+            if !a.is_default() {
+                h.write_u8(0xC3);
+                for v in [
+                    a.ramp_angle, a.ramp_max_len, a.helix_min_radius, a.helix_pitch, a.helix_angle,
+                    a.arc_radius, a.arc_sweep, a.plunge_height, a.ramp_feed, a.plunge_feed,
+                    a.lead_feed_pct, a.max_engagement, a.ext_in, a.ext_out, a.lead_height,
+                    a.overlap, a.axis_tol,
+                ] {
+                    w(h, v);
+                }
+                for f in [a.ramp_to_depth, a.helix_cw, a.axis_start] {
+                    h.write_u8(u8::from(f));
+                }
+                match a.lead_out {
+                    None => h.write_u8(0xFF),
+                    Some(Lead::None) => h.write_u8(0),
+                    Some(Lead::Linear { length }) => {
+                        h.write_u8(1);
+                        w(h, length);
+                    }
+                    Some(Lead::Arc { radius }) => {
+                        h.write_u8(2);
+                        w(h, radius);
+                    }
+                    Some(Lead::Tangential { radius }) => {
+                        h.write_u8(3);
+                        w(h, radius);
+                    }
+                    Some(Lead::Perpendicular { length }) => {
+                        h.write_u8(4);
+                        w(h, length);
+                    }
+                }
             }
         }
     }

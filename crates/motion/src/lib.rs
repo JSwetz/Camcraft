@@ -17,6 +17,7 @@
 //! finishing - all from public machining literature and G-code
 //! standards; no vendor strategy was inspected. No flecs, no world.
 
+pub mod approach;
 pub mod drilling;
 pub mod entry;
 pub mod entry_arc;

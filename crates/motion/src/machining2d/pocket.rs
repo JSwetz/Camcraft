@@ -276,7 +276,8 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
         .with_entry(p.entry, p.helix_radius)
         .with_arc_radius(p.tool_diameter)
-        .with_links(p.links, p.helix_radius);
+        .with_links(p.links, p.helix_radius)
+        .with_top(p.top_z);
     // The walks: fitted where the strategy fits, then - opted in - the
     // corner fillets, proved inside the cutter-center area. Passes are
     // one plan at every level, so the plan's refusals are said once.
@@ -318,6 +319,9 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }

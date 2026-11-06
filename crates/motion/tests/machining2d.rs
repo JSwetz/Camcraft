@@ -1024,8 +1024,10 @@ fn zigzag_fills_a_square_with_one_plunge_per_level() {
     // lands its dive on a wall corner, not even the stock's own
     // surface corner) - first dives at the floor's room, then links
     // to the row start - a chord across the rows' lines, so the
-    // hop-and-dive link. 3 levels: 2 * 3.
-    assert_eq!(plunge_xy(&t).len(), 6, "interior entry + row dive at every level");
+    // hop-and-dive link. 3 levels: 2 * 3. M11.3's one-entry law: the
+    // dive lands on the first row a little past its wall-corner start
+    // and links back along the row at depth - one dive per level.
+    assert_eq!(plunge_xy(&t).len(), 3, "one entry dive at every level");
     let floor = t
         .moves
         .iter()
@@ -1044,14 +1046,19 @@ fn zigzag_fills_a_square_with_one_plunge_per_level() {
         let mut v: Vec<f64> = pts.iter().map(|q| q.1).collect();
         v.sort_by(f64::total_cmp);
         v.dedup();
+        // M11.3: the entry dive lands just inside the first row (a wall
+        // margin off it) and links back to its start - not a row.
+        v.retain(|y| (y - y.round()).abs() < 1e-9);
         v
     };
     assert_eq!(ys, vec![5.0, 10.0, 15.0, 20.0, 25.0]);
     for q in &pts {
         assert!(in_closed(&center, *q), "feed point {q:?} outside the center area");
     }
-    // Five 20 mm rows plus four 5 mm connectors, all at cut depth.
-    assert!((level_len(&t, -6.0) - 120.0).abs() < 1e-9);
+    // Five 20 mm rows plus four 5 mm connectors, all at cut depth - and
+    // (M11.3) the short at-depth link from the entry onto the first row.
+    let len = level_len(&t, -6.0);
+    assert!((120.0 - 1e-9..120.0 + 2.0).contains(&len), "{len}");
 }
 
 #[test]
@@ -1081,7 +1088,9 @@ fn zigzag_hops_over_islands_and_leaves_them_standing() {
     // M8.1 read from level 0: every level posts five dives - the
     // interior entry dive whose link to the row start the island
     // forces to a hop, plus three island-crossing hops. 5 + 5 + 5.
-    assert_eq!(plunge_xy(&t).len(), 15);
+    // M11.3: the entry lands on the first row and links along it, so the
+    // entry's second dive is gone - 4 per level.
+    assert_eq!(plunge_xy(&t).len(), 12);
 
     for z in levels_3_zs() {
         let (pts, lifted) = polyline_at(&t, z);
@@ -1374,6 +1383,8 @@ fn waterline_rings_split_by_an_island_hop_below_clearance() {
     p.stepdown = 3.0; // two levels: 0 and -3
     p.clearance_z = 5.0;
     p.retract_z = Some(2.0); // hop plane, below clearance, above the cut
+    // The traverse-plane law itself (M11.3's plunge height 0 keeps it).
+    p.links.approach.plunge_height = 0.0;
     let region = Region::new(vec![
         Loop::new(vec![
             Point2::new(0.0, 0.0),
@@ -1436,6 +1447,8 @@ fn zigzag_and_levels_still_lift_to_clearance() {
     let mut p = pp(); // zigzag, top 0, bottom -6, stepdown 3 -> 3 levels
     p.clearance_z = 5.0;
     p.retract_z = Some(2.0);
+    // The traverse-plane law itself (M11.3's plunge height 0 keeps it).
+    p.links.approach.plunge_height = 0.0;
     let region = rect(0.0, 0.0, 30.0, 30.0);
     let t = pocket(&region, &p).expect("valid");
     let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
@@ -1774,7 +1787,9 @@ fn slot_helix_orbits_in_the_certified_channel() {
     };
     let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
     let t = slot(a, b, &p).expect("valid");
-    assert!(t.notes.is_empty(), "the channel has room; nothing to say: {:?}", t.notes);
+    // M11.3: the rows start on the channel's wall, where no orbit can
+    // close - the second dive there is named, nothing else is.
+    assert!(t.notes.iter().all(|n| n.contains("second dive")), "the channel has room; nothing else to say: {:?}", t.notes);
     assert!(t.is_chained() && t.all_finite());
     let arc_moves: Vec<_> = t.moves.iter().filter(|m| m.arc.is_some()).collect();
     assert!(!arc_moves.is_empty(), "a chosen helix must actually descend");
@@ -2114,7 +2129,9 @@ fn the_entry_family_is_obeyed_at_the_first_level() {
         .expect("something reaches the surface plane");
     assert_eq!(reach.kind, MoveKind::Feed, "the first level is entered in arcs: {reach:?}");
     assert!(reach.arc.is_some(), "and the arc is the helix's own");
-    assert!(t.notes.is_empty(), "room exists; nothing to substitute: {:?}", t.notes);
+    // M11.3: the helix lands on the first row; only a named second dive
+    // (the row start on the wall) may be said - never a substitution.
+    assert!(t.notes.iter().all(|n| n.contains("second dive")), "room exists; nothing to substitute: {:?}", t.notes);
     // Plunge next - the DEFAULT, so this is the shape every pocket
     // posts: the first dive stands in the floor's room, never on the
     // corner of `passes[0]`.
@@ -2130,7 +2147,7 @@ fn the_entry_family_is_obeyed_at_the_first_level() {
         "the level 0 dive is interior, got {:?}",
         dive.to
     );
-    assert!(t2.notes.is_empty(), "the axial arm found its room: {:?}", t2.notes);
+    assert!(t2.notes.is_empty(), "the axial arm found its room on the first row: {:?}", t2.notes);
 }
 
 #[test]
@@ -2170,12 +2187,15 @@ fn a_helix_with_no_room_on_the_plane_plunges() {
         .iter()
         .find(|m| m.to.z == -3.0)
         .expect("the -3.0 level was cut by something");
-    assert_eq!(level2.kind, MoveKind::Plunge, "no orbit, an axial dive");
+    // M11.3's fallback order: the helix stands down to the ramp along
+    // the first cut (a plunge only where no ramp fits either).
+    assert_ne!(level2.kind, MoveKind::Rapid, "the level is entered by a cut");
     assert!(
         level2.arc.is_none()
             && !t.moves.iter().any(|m| m.arc.is_some() && m.from.z != m.to.z),
-        "the substituted dive never orbits"
+        "the substituted descent never orbits"
     );
+    assert!(t.notes.iter().any(|n| n.contains("stands down to a ramp")), "{:?}", t.notes);
     assert!(
         t.notes.iter().any(|n| n.contains("widened disc")),
         "the substitution must be said, got {:?}",
@@ -2217,14 +2237,16 @@ fn the_helix_on_a_disc_spirals_from_the_core_not_the_wall() {
     assert!(t.notes.is_empty(), "room was found; nothing to say: {:?}", t.notes);
     let dist = |m: &camcraft_motion::cl::Move| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
     // The path's very first contact: the core, not the Ø30 wall ring.
+    // M11.3: the helix closes on the first ring's start - its first arc
+    // is the first contact.
     let first = t
         .moves
         .iter()
-        .find(|m| m.kind == MoveKind::Plunge)
-        .expect("some dive into the plane");
+        .find(|m| m.arc.is_some() && m.from.z != m.to.z)
+        .expect("some descent into the plane");
     assert!(
         dist(first) < 8.0,
-        "the first dive stands in the core, got {:?}",
+        "the first descent stands in the core, got {:?}",
         first.to
     );
     // And the crossing that opens -3.0 lands where it lands: the
