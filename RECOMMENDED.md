@@ -11106,16 +11106,28 @@ this machine) - the first tag push after merge is the test.
 
 ## M11.4: arc output for the HSM adaptive plan - four decisions (2026-11-06)
 
-**Gate finding (main session, same day): HELD.** The fit was green on the
-debug band and the three proofs, but the heavy lane's full-resolution report
-(`hsm_report_full_resolution`, D/120) read the load PAST the 14.6 % + 10 % law
-on every fixture - bore 17.1 %, rectangle 16.4 %, L-pocket 16.4 %, slot
-17.1 % - where the chord plan read inside it. An arc within 0.0025 mm of its
-chords cannot change the engagement; the reader's sampling of arcs (or the
-arc's chord stand-in when the report re-chords it) can. Until that is
-explained and the reading returns inside the law, the arcs stay out of main
-(tmp/hsmarcs.patch) - the four decisions below stand as written for the
-re-landing.
+**Gate finding (main session, same day), resolved: the READER, not the fit.**
+The heavy lane's full-resolution report read the load past the 14.6 % + 10 %
+law on every fixture (bore 17.1 %, rectangle/L 16.4 %, slot 17.1 %) where the
+chord plan read inside it. Measured: the 49 kept arcs stay within 0.0025 mm
+radially (max sagitta 0.0028), and the arc plan re-chorded at the reader's own
+pitch reads the same 17.06 % - so the geometry had not moved. The load
+reader (`quality::measure`) walks a path at its chord tolerance with the
+contact window facing `p − prev`, the walked chord, which lags the true
+tangent by half the chord's angular step; arcs were walked at 0.263 mm, 2.2×
+coarser than the plan's 0.118 mm chords, so the window turned backward by
+3.2° instead of 1.4° at the helix peak and over-read standing stock the
+cutter never touches (max_deg 47.5° → 50.0° = 15.38 % → 17.06 %, monotone in
+pitch). Two changes: on an XY arc the window faces the circle's tangent at the
+sample (pitch-independent), and the reader's chord tolerance is the plan's
+own sagitta (`PLAN_SAG` = 3e-4) so an arc is read as finely as the chords it
+replaced. The arc plan now reads the chord plan's exact numbers: 15.4 % at
+D/120 on all four fixtures, 19.51 % at D/60. Dropped: pitch-matching alone
+(16.04 % at D/120 but 20.26 % at D/60 - grid phase), and loosening the law.
+Noted, out of scope: the same chord-direction lag inflates CHORD-plan readings
+by ~1° at the plan's pitch (true load likely ~14.7 % against the 14.64 %
+target); a heading averaged over adjacent chords would remove it but
+recalibrates every law.
 ## M11.4: arc output for the HSM adaptive plan: four decisions (2026-11-06)
 
 (1) **One fitter, the ring budget.** The adaptive plan's cutting chords ride
@@ -11303,3 +11315,104 @@ corner landing off the lead (a disc-clear point in the cleared area within
 RAMP_RUN of the piece, descended as a chord). Patch held with the arcs
 (tmp/island-r6b.patch, on the hsmarcs base); the heavy lane has not read
 `late` on the lifted plans yet - due at close-out.
+
+## M11.4: the Pocket3D port of the HSM planner - the 2D plan inside the 3D level law (2026-11-06)
+
+**Each Z level's closed cutter-centre region goes to the 2D planner unchanged**
+(`machining3d/hsm.rs::plan_level` builds a one-level `PocketParams` and calls
+`pocket_hsm::adaptive_passes`): spiral, growth rings, microlift returns, hop
+budget, kink law and arc output are the one planner; the level ladder, the
+computed islands and rest/mask intersections, the erosion by r + leave, the
+entry (the plan's bore spot or narrowed helix radius rides a per-level params
+copy so `descent::helix` closes on the plan's seed) and the verify stay the
+3D op's own. The planner needed only visibility (`adaptive_passes`,
+`EntryRoom`, `Joins`, `fit_proved`, `crossing_free` as the runs-returning form
+of `post_crossing_free`, `microlift::link_at` with a hop plane + feed) and a
+`what` naming the area in its refusal sentence. One port defect the fixture
+found: an HSM level's unjoined pass must take the retract hop, never
+ROUGH3D's keep-down chord (it slotted at 100 % D through unplanned stock).
+
+**The choice is the existing `PocketStrategy`, not a new enum**: Pocket3D
+already carried it - `Adaptive` = the HSM plan per level, `OffsetRings` = the
+pre-port ring tiling at the load step (every earlier 3D Adaptive op,
+move for move); the fresh default `Auto` is unchanged, so the goldens are
+untouched; digest word 4 so an old Adaptive op goes Stale once (the 2D
+precedent). A level the planner refuses cuts rings and names its Z in the op
+summary ("… - Offset rings cut the level at Z -10.000 instead"); the rest
+pass and offset shells keep rings, said once. Dropped: a separate
+`Strategy3D` (a duplicate of an existing choice) and a migration of old
+Adaptive ops to OffsetRings (the 2D precedent did not). Readings on the
+60×40 slab with a 12×12 boss, D10, D/60: Z −5 open level 9,202 moves, 441
+proved arcs, 19.1 % D, 0 breaks, clean; Z −10 island level refused by name
+(the plan crosses itself at (−19.00, −2.13)) and cut with 443 ring moves,
+clean. Owed: the rotary wrap ladder keeps rings under Adaptive (channel
+levels the planner refuses); the arc crossing law on a 3D level is proved on a
+proxy posting of the level's walks, the verifier's crossing law remains the
+backstop. The agent ran out of its box before the app and ui suites - the
+main gate measures them.
+
+## M13.5 follow-ups: the ribbon reads the command door's word; the Setup pane offers the matching post (2026-11-06)
+
+**One visibility law, in app**: `Section::kinds_for(machine)` filters a
+section's kinds through `KindInfo::admits` - the same word the command door
+reads - and `shown_for(machine)` is the sections whose `kinds_for` is
+non-empty, so a lathe's ribbon now shows Drilling beside Turning with only
+the Drill kind in it. The UI (`panes.rs`: ribbon plan, enabled, tips, gate
+note, the tree's retype menu) reads only that; no `family().admits` copy
+remains in UI. Pinned: `shown_for` and `kinds_for` agree on every machine;
+`Drilling.kinds_for(Lathe) == [Drill]`; the ribbon snapshot goldens did not
+move.
+
+**The post is offered, never switched**: `posting::post_offer(world)` is
+`Some` only when the document's post does not serve the mounted machine's
+kind and the post is not a user file; the Setup pane's post section draws a
+status banner ("the current post serves a mill; switch to Fanuc Lathe?") with
+a Switch button that queues the EXISTING `SelectPost` command - undoable, no
+new command. Pinned: no banner on a mill; mount a lathe → the post stays,
+the banner names the lathe post; switch → Named("Fanuc Lathe"), banner gone;
+undo → back, banner back. Dropped: auto-switching on mount (a document's post
+is the user's word) and a modal prompt (a banner is Fusion's grammar for a
+recoverable state).
+
+## M13.8: the fixture sweep walks the mid-move pose law, with a proven swing (2026-11-06)
+
+**Finding first**: the fixture sweep did not sample only a move's ends -
+`posed_steel` already cut each posed move into 0.5 mm intervals - but its
+growth's swing term was the larger of the END poses' angles from the
+midpoint, i.e. it ASSUMED the letter lerp never strays farther between the
+samples than at them (true on an A-only geodesic, unproven on a combined
+A+B lean), and it was a private copy of the interval law. Now `posed_steel::
+sweep` walks `midpose::intervals` - the one law the part's solid (b2),
+contact (f2) and posed-rapid readings walk - and each `Interval` carries a
+PROVEN swing: each RS-274 letter turns the axis at most a radian per radian,
+so from the interval midpoint every pose inside lies within ½·(|ΔA|+|ΔB|+|ΔC|)
+of the midpoint pose; the capsules grow by `travel + reach·swing` and the
+machine-frame rotary growth takes the same bound. The enclosure is
+continuous between samples, not sampled. On A-only (4-axis) paths the bound
+equals the old chord angle - no golden gained a warning; unposed and
+constant-pose moves are byte-identical by construction; non-finite moves
+still fail closed. Pinned: a feed whose end poses (−40°/−140°) clear a clamp
+but whose lerp sweeps the holder through it mid-travel → FixtureHit once;
+the clamp moved out of the cone → clean; under a 90° index the fixed block
+(machine frame) is hit by the upright holder and the turning block (part
+frame) is clean. Verify time on the rotary fixtures unchanged (11.5 → 11.3 s,
+32.9 → 32.8 s). This closes M13.8's last owed item; the off-diagonal head-
+before-table reading (rotary.rs law c3) remains the part law's only.
+
+## The Phase 1 leftovers audit: M1.4 flips, the rest re-home their debts in M13.11 (2026-11-06)
+
+Audited (read-only, with evidence in code and ledger) the four ⚠️ Phase 1
+rows. **M1.4 flips to ✅**: every bullet done, no owed prose. **M1.1, M1.3 and
+M1.5 stay ⚠️** but no longer carry buried debts - each leftover now has a
+tracked row, M13.11 "Phase 1 leftovers": G41/G42 cutter-compensation output
+(`onRadiusCompensation` is never called; the only Phase 1 gap that touches
+the G-code - not to be dropped), mesh repair (weld, holes; only `open_edges`
+counts them today; cross-ref M12.1 healing), IGES import or a recorded
+won't-do (refused by name since M1.1, owned by nobody), cross-entity open-run
+stitching and facing rows honouring holes (M1.5's two real limits; the other
+"known limits" there - material side, ambiguous extensions, Trace on open
+runs, id re-keying - are decisions that refuse by name, not debts). Struck as
+done: the 2D pocket's spiral/ramp/helical entries (the Entry3D family since
+M5.1 H, helix the default since M11.3, the arc entry in M11.3). Dropped:
+declaring the two M1.5 limits won't-do (facing rows that ignore holes is a
+machining gap, not a design choice).

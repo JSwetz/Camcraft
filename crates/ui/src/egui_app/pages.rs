@@ -346,6 +346,11 @@ fn post_section(ui: &mut Ui, state: &mut State) {
     ui.label("Post");
     ui.label(posting::post_label(&state.world));
     ui.horizontal(|ui| {
+        // The registry by name; the combo OFFERS only the dialects
+        // that serve the mounted machine's kind (M13.5: a lathe lists
+        // its turning post, a mill-turn lists both), while the
+        // selected text still names whatever the document chose.
+        let kind = camcraft_app::machine::kind_of(&state.world);
         let names: Vec<&str> = posting::BUILTINS.iter().map(|(n, _)| *n).collect();
         let sel: Option<usize> = match &current {
             PostRef::Builtin => Some(0),
@@ -361,6 +366,9 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             .selected_text(text)
             .show_ui(ui, |ui| {
                 for (i, n) in names.iter().enumerate() {
+                    if !posting::post_serves(n, kind) && sel != Some(i) {
+                        continue;
+                    }
                     if ui.selectable_label(sel == Some(i), *n).clicked() {
                         pick = Some((*n).to_owned());
                     }

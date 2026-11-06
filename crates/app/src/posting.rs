@@ -36,7 +36,45 @@ pub const BUILTINS: &[(&str, &str)] = &[
     ("Siemens 840D", include_str!("../../../assets/posts/sinumerik.cps")),
     ("Heidenhain", include_str!("../../../assets/posts/heidenhain.cps")),
     ("Mazak", include_str!("../../../assets/posts/mazak.cps")),
+    ("Fanuc Lathe", include_str!("../../../assets/posts/fanuc-lathe.cps")),
 ];
+
+/// The registry entries that speak TURNING (M13.5): X as a diameter
+/// on one meridian, G18, G99, the face cycles. Everything else in
+/// `BUILTINS` is a milling dialect. The picker filters by the mounted
+/// machine's kind through [`post_serves`]; a mill-turn lists both.
+pub const LATHE_POSTS: &[&str] = &["Fanuc Lathe"];
+
+/// Whether a registry entry can post programs for a machine of this
+/// kind: a lathe post serves lathes and mill-turns, a mill post serves
+/// mills and mill-turns. A mismatched choice is not refused here (a
+/// user may still pick any name, and the post refuses by name what it
+/// cannot express) - this is the picker's listing law, not a gate.
+#[must_use]
+pub fn post_serves(name: &str, kind: crate::machine::Kind) -> bool {
+    use crate::machine::Kind;
+    let lathe_post = LATHE_POSTS.contains(&name);
+    match kind {
+        Kind::Mill => !lathe_post,
+        Kind::Lathe => lathe_post,
+        Kind::MillTurn => true,
+    }
+}
+
+/// The registry's default post for a machine kind: entry 0 (Fanuc
+/// mill) for mills and mill-turns, the first lathe post for lathes.
+/// A mount does not re-point the document's post by itself - the
+/// post choice is its own command - but this is the name a Setup
+/// pane or a script offers first for a freshly mounted lathe.
+#[must_use]
+pub fn default_post_for(kind: crate::machine::Kind) -> PostRef {
+    match kind {
+        crate::machine::Kind::Lathe => LATHE_POSTS
+            .first()
+            .map_or(PostRef::Builtin, |n| PostRef::Named((*n).to_owned())),
+        _ => PostRef::Builtin,
+    }
+}
 
 /// The default machine as text: a plain 3-axis VMC with flood coolant.
 pub const DEFAULT_MCH: &str = include_str!("../../../assets/machines/3axis-vmc.mch");
@@ -449,8 +487,11 @@ fn fixture_problems(world: &World) -> Vec<String> {
 /// The stream we would feed the engine: every operation's records,
 /// in document order, validated first. Split from the write so the
 /// gate's evidence (WARN records, cycle anchors) is testable without
-/// touching the filesystem or the script.
-fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
+/// touching the filesystem or the script. Public (M13.5) as the
+/// dialect-golden seam: a test posts the document's own stream
+/// through one script without the verification gate, which the
+/// posting suites lock separately - the golden locks the translation.
+pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
     let ops = program_ops(world)?;
 
     // Tool library rank, the T../H.. law: 1-based position among the

@@ -45,6 +45,8 @@ const GOLDENS: &[&str] = &[
 ];
 
 /// (registry name, .cps file, golden subdir - "" means the shared top).
+/// The MILLING dialects: the `.cl` goldens are mill programs (XY
+/// contours, Z-down holes), so these are the posts they conform on.
 const POSTS: &[(&str, &str, &str)] = &[
     ("Fanuc", "fanuc", ""),
     ("Haas", "haas", "haas"),
@@ -52,6 +54,36 @@ const POSTS: &[(&str, &str, &str)] = &[
     ("Heidenhain", "heidenhain", "heidenhain"),
     ("Mazak", "mazak", "mazak"),
 ];
+
+/// The TURNING dialects (M13.5): their goldens are the lathe
+/// documents' own streams (`lathe_post.rs`); on a mill golden they
+/// must REFUSE by name - never project a Y move onto a diameter.
+const LATHE_POSTS: &[(&str, &str)] = &[("Fanuc Lathe", "fanuc-lathe")];
+
+#[test]
+fn every_lathe_post_refuses_every_mill_golden_by_name() {
+    let mch: serde_json::Value =
+        serde_json::from_str(&read("assets/machines/lathe.mch")).expect("machine json");
+    for (name, cps_stem) in LATHE_POSTS {
+        let cps = read(&format!("assets/posts/{cps_stem}.cps"));
+        for g in GOLDENS {
+            let stream = read(&format!("crates/app/tests/golden/{g}.cl"));
+            let out = engine::run(&cps, &mch, &stream)
+                .unwrap_or_else(|e| panic!("{name} on {g}: the engine runs, the script refuses: {e}"));
+            // A path that leaves every meridian is milling work; a
+            // path that happens to ride one (the centerline slot) is
+            // still a legacy stream with no spindle, which G99 feed
+            // per revolution cannot pace - either way, named.
+            assert!(
+                out.warnings
+                    .iter()
+                    .any(|w| w.contains("milling work") || w.contains("needs a spindle speed")),
+                "{name} on {g}: a mill program must be refused by name, got {:?}",
+                out.warnings
+            );
+        }
+    }
+}
 
 #[test]
 fn every_builtin_posts_every_golden_byte_exact() {
@@ -285,9 +317,13 @@ fn every_builtin_registry_entry_compiles() {
     // include_str! is compile-time, but the NAMES are the persistence
     // contract, so spell the registry out here against posting.rs.
     let names: Vec<&str> = camcraft_app::posting::BUILTINS.iter().map(|(n, _)| *n).collect();
-    assert_eq!(
-        names,
-        POSTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
-        "the picker lists what the registry ships"
-    );
+    let mut want: Vec<&str> = POSTS.iter().map(|(n, _, _)| *n).collect();
+    want.extend(LATHE_POSTS.iter().map(|(n, _)| *n));
+    assert_eq!(names, want, "the picker lists what the registry ships");
+    for (n, _) in LATHE_POSTS {
+        assert!(
+            camcraft_app::posting::LATHE_POSTS.contains(n),
+            "{n} is a turning dialect in the registry's own table"
+        );
+    }
 }

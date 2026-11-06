@@ -204,7 +204,9 @@ pub fn write_golden(name: &str, text: &str) {
     let dir = golden_dir();
     let path = dir.join(name);
     if std::env::var_os("WRITE_GOLDEN").is_some() {
-        std::fs::create_dir_all(&dir).expect("cannot create tests/golden");
+        // Dialect goldens nest (`nc/<dialect>/`): create the file's own
+        // parent, not just the root.
+        std::fs::create_dir_all(path.parent().unwrap_or(&dir)).expect("cannot create tests/golden");
         std::fs::write(&path, text).expect("cannot write golden file");
         return;
     }
