@@ -63,6 +63,25 @@ pub(super) fn section_z_of(
 /// `section_z_of`'s answer for the section kinds and an ignored
 /// `Ok(0.0)` for the rest; `region_for` and the threaded job share this
 /// one body, so a batched generation cannot disagree with a single one.
+/// The outline of the material standing above the plane `z` (M13.11):
+/// the silhouette of only those facets with a vertex above it. A boss
+/// rising out of a faced plane shows here; a bore, or a pocket sunk
+/// below the plane, does not - so a facing row can tell an island from
+/// air. `None` when the slice refuses (the facer then lifts over every
+/// hole, the safe reading, and says so).
+pub(super) fn standing_above(material: &Material, z: f64) -> Option<Region> {
+    let above: Vec<Triangle> = material
+        .facets
+        .iter()
+        .filter(|t| t.a.z.max(t.b.z).max(t.c.z) > z + 1e-6)
+        .copied()
+        .collect();
+    if above.is_empty() {
+        return Some(Region::empty());
+    }
+    slice::project(&above, FOOTPRINT_SAMPLES).ok()
+}
+
 pub(super) fn region_core(
     material: &Material,
     params: &OpParams,

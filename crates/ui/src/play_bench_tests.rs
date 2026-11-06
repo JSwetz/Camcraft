@@ -31,7 +31,7 @@ fn faced_doc(side: f64, stepover: f64, stepdown: f64) -> State {
     state.history.execute(w, cmd);
     let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0400-2FL").map(|(_, t)| t).expect("tool");
     state.history.execute(w, AddTool::new(w, "EM-0400-2FL", tool).expect("add tool"));
-    let params = OpParams::Face {
+    let params = OpParams::Face { holes: Default::default(),
         tilt: None,
         stepover,
         clearance_z: Height::fixed(25.0),

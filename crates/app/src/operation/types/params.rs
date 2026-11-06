@@ -4,7 +4,7 @@ use crate::drilling::{CycleChoice, Hole};
 use crate::finishing3d;
 use crate::geo2d::Point2;
 use crate::links::Links;
-use crate::machining2d::{Lead, PocketStrategy, Side};
+use crate::machining2d::{FaceHoles, Lead, PocketStrategy, Side};
 use crate::machining3d::Entry3D;
 
 use super::height::Height;
@@ -81,6 +81,13 @@ pub enum OpParams {
         /// (`machining2d::face`); `false` is the sharp serpentine every
         /// pre-M11.1 file holds.
         blend_turns: bool,
+        /// How the rows meet a hole in the region (M13.11): lifted over
+        /// at the clearance plane (the default - safe for a bore and a
+        /// boss alike), cut straight across where the hole is air with
+        /// islands lifted, or ignored (`Through`: the M1.3 band
+        /// serpentine every earlier file holds). A region with no holes
+        /// faces the same under all three.
+        holes: FaceHoles,
         /// 3+2 index (M5.1 stage B): the plane this face cuts, tilted;
         /// `None` is the world XY the kind has always meant.
         tilt: Option<Tilt>,

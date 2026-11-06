@@ -87,6 +87,7 @@ impl OpParams {
                 plunge_feed,
                 climb,
                 blend_turns,
+                holes,
                 tilt,
             } => {
                 w(h, *stepover);
@@ -112,6 +113,14 @@ impl OpParams {
                 // (sharp) face keeps the digest it was cached under.
                 if *blend_turns {
                     h.write_u8(0xB1);
+                }
+                // M13.11: the hole law changes the moves only away from
+                // its default, and is written only then - every legacy
+                // (lift) face keeps the digest it was cached under.
+                match holes {
+                    crate::machining2d::FaceHoles::Lift => {}
+                    crate::machining2d::FaceHoles::CutAir => h.write_u8(0xB2),
+                    crate::machining2d::FaceHoles::Through => h.write_u8(0xB3),
                 }
             }
             OpParams::Contour {

@@ -284,7 +284,7 @@ mod path_tests {
                 "Face1",
                 "EM-0400-2FL",
                 SrcRef::Stock,
-                OpParams::Face { tilt: None, blend_turns: false,
+                OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
                     stepover: 3.0,
                     clearance_z: Height::fixed(25.0),
                     cut_z: Height::fixed(19.5),
@@ -601,7 +601,7 @@ mod preview_tests {
                 name: "Face1".into(),
                 tool: "EM-0400-2FL".into(),
                 src: SrcRef::Stock,
-                params: OpParams::Face { tilt: None, blend_turns: false,
+                params: OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
                     stepover: 3.0,
                     clearance_z: Height::fixed(25.0),
                     cut_z: Height::fixed(19.5),
@@ -639,7 +639,7 @@ mod preview_tests {
         // read, never a leftover from the last generation.
         state.pending.push_back(CommandKind::EditOperationParams {
             name: "Face1".into(),
-            params: OpParams::Face { tilt: None, blend_turns: false,
+            params: OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(10.0),
@@ -924,7 +924,7 @@ mod feature_pick_tests {
                 "G1",
                 "EM-0400-2FL",
                 SrcRef::Stock,
-                OpParams::Face { tilt: None, blend_turns: false,
+                OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
                     stepover: 3.0,
                     clearance_z: Height::fixed(25.0),
                     cut_z: Height::fixed(4.5),
@@ -1288,7 +1288,7 @@ mod height_plane_tests {
     fn height_planes_stand_in_only_when_the_level_is_undrawn() {
         let staged = state_with(
             "F1",
-            OpParams::Face { tilt: None, blend_turns: false,
+            OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(18.0),
@@ -1313,7 +1313,7 @@ mod height_plane_tests {
         // Unstaged: region_z IS the cut, one outline at one level.
         let flat = state_with(
             "F2",
-            OpParams::Face { tilt: None, blend_turns: false,
+            OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(18.0),
@@ -1437,7 +1437,7 @@ mod height_plane_tests {
         // level it will never cut. Staged, Top appears at the first level,
         // and editing the draft walks it live, the same honesty rule the
         // depth kinds follow.
-        let face_at = |top_z: Option<Height>| OpParams::Face { tilt: None, blend_turns: false,
+        let face_at = |top_z: Option<Height>| OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
             stepover: 8.0,
             clearance_z: Height::fixed(15.0),
             cut_z: Height::fixed(2.0),

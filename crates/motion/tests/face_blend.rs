@@ -22,7 +22,7 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
 }
 
 fn p(stepover: f64, blend: bool) -> FaceParams {
-    FaceParams {
+    FaceParams { holes: Default::default(),
         tool_diameter: 10.0,
         stepover,
         clearance_z: 5.0,

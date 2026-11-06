@@ -23,7 +23,7 @@ fn catalog_tool(name: &str) -> Tool {
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { holes: Default::default(),
         tilt: None,
         blend_turns: false,
         stepover: 3.0,

@@ -20,7 +20,7 @@ use camcraft_ui::interact::queue_feature_pick;
 use camcraft_ui::state::{BoundaryPick, CommandKind, OpUi, State};
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { holes: Default::default(),
         blend_turns: false,
         tilt: None,
         stepover: 3.0,

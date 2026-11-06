@@ -124,7 +124,7 @@ fn a_finish_whose_entries_fall_through_air_passes_untouched() {
 // ------------------------------------------------------------------- face
 
 fn face_p(top_z: Option<f64>) -> FaceParams {
-    FaceParams {
+    FaceParams { holes: Default::default(),
         tool_diameter: 10.0,
         stepover: 6.0,
         clearance_z: 25.0,

@@ -18,7 +18,7 @@ use camcraft_app::commands::{
     ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    MoveFixture, MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry,
+    MoveFixture, MoveModel, RegenerateAll, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
@@ -253,6 +253,15 @@ pub enum CommandKind {
         pitch_deg: f64,
         yaw_deg: f64,
     },
+    /// Mesh repair (M13.11): weld within `weld_tol` (mm) and fill every
+    /// boundary loop of at most `max_hole_edges` edges, one undo unit
+    /// over the model's facets. Only ever by this verb - never on
+    /// import - and refused by name when there is nothing to repair.
+    RepairModel {
+        name: String,
+        weld_tol: f64,
+        max_hole_edges: usize,
+    },
     /// Setup sheets (M3.2 stage D): render every setup and write the
     /// flip chart, one page per setup, form feeds as page breaks. The
     /// export is a VIEW of the document - no command, no history, no
@@ -383,6 +392,27 @@ pub struct ModelUi {
     pub yaw_deg: f64,
 }
 
+/// The Model page's repair draft (M13.11): the weld tolerance (mm) and
+/// the largest hole the fill may close, plus the last report so the
+/// page can show what the command did. Transient, never authoritative.
+#[derive(Clone, Debug)]
+pub struct RepairUi {
+    pub weld_tol: f64,
+    pub max_hole_edges: usize,
+    /// `(model name, report line)` of the last successful repair.
+    pub last: Option<(String, String)>,
+}
+
+impl Default for RepairUi {
+    fn default() -> Self {
+        RepairUi {
+            weld_tol: 0.001,
+            max_hole_edges: 256,
+            last: None,
+        }
+    }
+}
+
 /// Editable fields of the Properties pane's operation page. Transient UI
 /// state, never authoritative: the world's `Operation` component is,
 /// refetched by [`State::sync_ops_ui`] whenever the selection or the
@@ -425,7 +455,7 @@ impl Default for OpUi {
             // carries this clearance into every kind, so the draft
             // default must already be the seed shape the panes display -
             // quick-add and the retype menu then say the same thing.
-            params: OpParams::Face {
+            params: OpParams::Face { holes: Default::default(),
                 tilt: None,
                 stepover: 3.0,
                 clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
@@ -1036,6 +1066,8 @@ pub struct State {
     pub fixture_ui: FixtureUi,
     /// Model page placement draft (ephemeral; see [`ModelUi`]).
     pub model_ui: ModelUi,
+    /// The Model page's repair draft (M13.11).
+    pub repair_ui: RepairUi,
     /// The setups-page context (setup binding) the next finished import
     /// gets tagged with - `Some` only between ImportFixtureDialog and the
     /// import's finish; discarded with the import itself.
@@ -1244,6 +1276,7 @@ impl State {
             setups_ui: SetupsUi::default(),
             fixture_ui: FixtureUi::default(),
             model_ui: ModelUi::default(),
+            repair_ui: RepairUi::default(),
             import_as_fixture: None,
             // The tool draft carries a plausible name from the first
             // frame: an empty Name field made Add look dead (refused
@@ -2624,6 +2657,18 @@ impl State {
                         self.status = format!("moved {name}");
                     }
                     Err(err) => self.refuse(ErrorScope::Setup, format!("part not moved: {err}")),
+                }
+            }
+            CommandKind::RepairModel { name, weld_tol, max_hole_edges } => {
+                match RepairModel::new(&self.world, &name, weld_tol, max_hole_edges) {
+                    Ok(command) => {
+                        let summary = command.summary();
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.repair_ui.last = Some((name.clone(), summary.clone()));
+                        self.status = format!("repaired {name}: {summary}");
+                    }
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("{name} not repaired: {err}")),
                 }
             }
             CommandKind::ImportFixtureDialog => {

@@ -242,7 +242,7 @@ fn machined_mesh_paints_as_stock() {
     history.execute(&world, AddTool::new(&world, "EM-0400-2FL", tool.expect("catalog entry")).expect("tool"));
     let part = cube(Point3::new(-6.0, -6.0, 0.0), Point3::new(6.0, 6.0, 18.0));
     history.execute(&world, ImportModel::from_mesh("part", part));
-    let params = OpParams::Face {
+    let params = OpParams::Face { holes: Default::default(),
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),

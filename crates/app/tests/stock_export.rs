@@ -34,7 +34,7 @@ fn faced_world() -> flecs_ecs::prelude::World {
     let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0400-2FL").map(|(_, t)| t).expect("catalog entry");
     history.execute(&world, AddTool::new(&world, "EM-0400-2FL", tool).expect("catalog tool"));
     history.execute(&world, ImportModel::from_mesh("part", cube(Point3::new(-HALF, -HALF, 0.0), Point3::new(HALF, HALF, 18.0))));
-    let params = OpParams::Face {
+    let params = OpParams::Face { holes: Default::default(),
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),

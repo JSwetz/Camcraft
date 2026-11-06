@@ -31,7 +31,7 @@ fn params_sanity_gates() {
     // unresolved reference is never a lie there: refusing happens at
     // generate, by name.
     let world = crate::world::new_world();
-    let ok = OpParams::Face { tilt: None, blend_turns: false,
+    let ok = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -44,7 +44,7 @@ fn params_sanity_gates() {
     assert!(ok.is_sane() && depth_sane(&world, None, None, &ok));
     // Staged facing is sane when it descends: a top below the
     // finished height, or a zero stepdown, is not.
-    let staged = OpParams::Face { tilt: None, blend_turns: false,
+    let staged = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -55,7 +55,7 @@ fn params_sanity_gates() {
         climb: true,
     };
     assert!(staged.is_sane() && depth_sane(&world, None, None, &staged));
-    let low = OpParams::Face { tilt: None, blend_turns: false,
+    let low = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -70,7 +70,7 @@ fn params_sanity_gates() {
         !depth_sane(&world, None, None, &low),
         "staged top below the finished height"
     );
-    let no_step = OpParams::Face { tilt: None, blend_turns: false,
+    let no_step = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -135,7 +135,7 @@ fn stamp_follows_every_input() {
     // param path is deterministic here (Fixed heights resolve without
     // touching the world).
     let world = crate::world::new_world();
-    let a = OpParams::Face { tilt: None, blend_turns: false,
+    let a = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -146,7 +146,7 @@ fn stamp_follows_every_input() {
         climb: true,
     };
     // (No struct-update syntax on enum variants: write it out.)
-    let b = OpParams::Face { tilt: None, blend_turns: false,
+    let b = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.6),
@@ -156,7 +156,7 @@ fn stamp_follows_every_input() {
         plunge_feed: 100.0,
         climb: true,
     };
-    let c = OpParams::Face { tilt: None, blend_turns: false,
+    let c = OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -211,7 +211,7 @@ fn face_stamp_moves_with_stepdown() {
     // answer for a staged one - and two stagings that cut different
     // stacks must not claim each other's cache either.
     let world = crate::world::new_world();
-    let face_with = |top_z: Option<Height>, stepdown: Option<f64>| OpParams::Face { tilt: None, blend_turns: false,
+    let face_with = |top_z: Option<Height>, stepdown: Option<f64>| OpParams::Face { holes: Default::default(), tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),

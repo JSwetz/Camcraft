@@ -13,6 +13,7 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 blend_turns,
+                holes,
                 tilt,
             } => ParamsDto::Face {
                 stepover: *stepover,
@@ -24,6 +25,7 @@ impl ParamsDto {
                 top_z: (*top_z).map(Into::into),
                 stepdown: *stepdown,
                 blend_turns: *blend_turns,
+                holes: (*holes).into(),
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Contour {
@@ -1185,6 +1187,7 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 blend_turns,
+                holes,
                 tilt,
             } => OpParams::Face {
                 stepover: *stepover,
@@ -1196,6 +1199,7 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
                 climb: *climb,
                 blend_turns: *blend_turns,
+                holes: (*holes).into(),
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Contour {
@@ -2320,5 +2324,42 @@ impl ParamsDto {
                 holes: holes.iter().copied().map(HoleDto::to_hole).collect(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod face_holes_law {
+    use super::*;
+    use crate::machining2d::FaceHoles;
+    use crate::operation::Height;
+
+    fn face(holes: FaceHoles) -> OpParams {
+        OpParams::Face {
+            holes,
+            blend_turns: false,
+            tilt: None,
+            stepover: 3.0,
+            clearance_z: Height::fixed(25.0),
+            cut_z: Height::fixed(4.5),
+            top_z: None,
+            stepdown: None,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb: true,
+        }
+    }
+
+    /// M13.11: the hole law rides the file only away from its default,
+    /// so every earlier save stays byte-identical and reads as `lift`.
+    #[test]
+    fn the_file_carries_the_hole_law_only_away_from_its_default() {
+        let s = serde_json::to_string(&ParamsDto::from_params(&face(FaceHoles::Lift))).expect("json");
+        assert!(!s.contains("holes"), "{s}");
+        let back: ParamsDto = serde_json::from_str(&s).expect("read");
+        assert!(matches!(back.to_params(), OpParams::Face { holes: FaceHoles::Lift, .. }));
+        let s = serde_json::to_string(&ParamsDto::from_params(&face(FaceHoles::CutAir))).expect("json");
+        assert!(s.contains("\"holes\":\"cut_air\""), "{s}");
+        let back: ParamsDto = serde_json::from_str(&s).expect("read");
+        assert!(matches!(back.to_params(), OpParams::Face { holes: FaceHoles::CutAir, .. }));
     }
 }

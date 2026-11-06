@@ -10,7 +10,7 @@
 pub(super) use egui::{ComboBox, DragValue, Ui};
 pub(super) use flecs_ecs::prelude::World;
 
-pub(super) use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
+pub(super) use camcraft_app::machining2d::{ARC_FIT_TOL, FaceHoles, Lead, PocketStrategy, Side};
 pub(super) use camcraft_app::model;
 pub(super) use camcraft_app::operation::{self, Height, OpParams, Tilt};
 pub(super) use camcraft_app::units::{self, Unit};

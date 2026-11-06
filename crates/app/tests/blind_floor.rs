@@ -342,7 +342,7 @@ fn a_drill_past_a_blind_floor_is_a_gouge_and_never_posts() {
 
 #[test]
 fn a_face_cut_into_the_part_is_a_gouge() {
-    let face = |cut: f64| OpParams::Face {
+    let face = |cut: f64| OpParams::Face { holes: Default::default(),
         blend_turns: false,
         tilt: None,
         stepover: 4.0,

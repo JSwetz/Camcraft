@@ -108,8 +108,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         retract: hs.retract.map(|v| v - oz),
     };
     let material_local = frame.as_ref().map(|f| Material {
+        // A 1:1 map of the facets: the body ranges ride unchanged.
         facets: f.local_facets(&material.facets),
         top: material.top - oz,
+        bodies: material.bodies.clone(),
     });
     let m_gen = material_local.as_ref().unwrap_or(&material);
 
@@ -145,6 +147,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             plunge_feed,
             climb,
             blend_turns,
+            holes,
             ..
         } => {
             let region = region_for_job(
@@ -174,8 +177,22 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 plunge_feed: *plunge_feed,
                 climb: *climb,
                 blend_turns: *blend_turns,
+                holes: *holes,
             };
-            let path = boundary_turn::turn_path(machining2d::face(&laid, &fparams)?, -turn)?;
+            // M13.11: under the cut-across law the facer needs to know
+            // which holes of its region hold material standing above
+            // the face (an island, lifted over) and which are air (cut
+            // across) - the outline of the material above the cut
+            // plane, in the facer's own turned frame.
+            let solid = match holes {
+                machining2d::FaceHoles::CutAir => {
+                    super::material_source::standing_above(m_gen, fparams.cut_z)
+                        .map(|s| boundary_turn::turn_region(&s, turn))
+                        .transpose()?
+                }
+                _ => None,
+            };
+            let path = boundary_turn::turn_path(machining2d::face_over(&laid, &fparams, 0.0, solid.as_ref())?, -turn)?;
             // M11.3 owed: the facer enters a radius off the footprint -
             // from air over the stock's edge; over the stock (an inner
             // patch) the entry runs on along its row out to air, or the
@@ -187,7 +204,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     path,
                     (stock_facets.as_deref(), m_gen, frame.as_ref()),
                     band.as_deref().unwrap_or(&[]),
-                    |lead| boundary_turn::turn_path(machining2d::face_led(&laid, &fparams, lead)?, -turn),
+                    |lead| boundary_turn::turn_path(machining2d::face_over(&laid, &fparams, lead, solid.as_ref())?, -turn),
                     d * 0.5,
                 )?
             };
@@ -311,8 +328,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         Toolpath::new(Vec::new())
                     } else if part_solid {
                         // Picked rings of a part: each walked only down
-                        // to the floor of the wall it trims.
-                        machining2d::contour_on_part(&region, &m_gen.facets, &cp)?
+                        // to the floor of the wall it trims - the part
+                        // read as the union of its touching bodies
+                        // (M13.11) when the picks span several models.
+                        machining2d::contour_on_bodies(&region, &m_gen.facets, &m_gen.bodies, &cp)?
                     } else {
                         machining2d::contour(&region, &cp)?
                     };
@@ -340,7 +359,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     // still exists (a blind bore's ring ends at its
                     // floor) - never the top plane's ring at every level.
                     let path = if part_solid {
-                        machining2d::contour_on_part(&region, &m_gen.facets, &cp)?
+                        machining2d::contour_on_bodies(&region, &m_gen.facets, &m_gen.bodies, &cp)?
                     } else {
                         machining2d::contour(&region, &cp)?
                     };
@@ -2501,7 +2520,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let depth_law = depth_law_of(&params, &src, part_solid);
     match &frame {
         None => {
-            let mut warns = verify::verify(
+            let mut warns = verify::verify_bodies(
                 &path,
                 &VerifyContext {
                     region: &region,
@@ -2642,6 +2661,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     fixtures: &[],
                     spindle: None,
                 },
+                // The picks' touching bodies, read as their union
+                // (M13.11); empty for one body.
+                &material.bodies,
             );
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
@@ -2792,7 +2814,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 .map(|t| f.local_facets(t))
                 .and_then(|t| slice::project(&t, FOOTPRINT_SAMPLES).ok())
                 .filter(|r| !r.is_empty());
-            let mut warns = verify::verify(
+            let mut warns = verify::verify_bodies(
                 &path,
                 &VerifyContext {
                     region: &region,
@@ -2814,6 +2836,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     fixtures: &[],
                     spindle: None,
                 },
+                &m_gen.bodies,
             );
             // The containment kinds' solid law (their verify runs without
             // the model - exact rims): the tool's own tip and stack swept

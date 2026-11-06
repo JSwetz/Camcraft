@@ -186,7 +186,7 @@ mod tests {
     use crate::geometry::cube;
 
     fn face(clearance_z: Height) -> OpParams {
-        OpParams::Face {
+        OpParams::Face { holes: Default::default(),
             tilt: None,
             blend_turns: false,
             stepover: 8.0,

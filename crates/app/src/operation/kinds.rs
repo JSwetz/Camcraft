@@ -660,6 +660,9 @@ fn seed_face(c: &Carried) -> OpParams {
         // Turning-point blends are opt-in (M11.1 A): a fresh face is
         // the sharp serpentine every golden and every saved file knows.
         blend_turns: false,
+        // M13.11: a fresh face lifts over its holes - a bore or a boss
+        // is bridged in the air; cutting across is the user's choice.
+        holes: Default::default(),
         tilt: c.tilt,
     }
 }

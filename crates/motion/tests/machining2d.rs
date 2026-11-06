@@ -13,7 +13,7 @@ use camcraft_motion::entry::Entry3D;
 use camcraft_motion::geo2d::{Loop, Point2, Region};
 use camcraft_motion::machining2d::{
     ARC_FIT_TOL, chord_clears, contour, contour_along_chain, face, on_boundary, pocket,
-    ring_is_circular, slot, trace, ContourParams, FaceParams, GenError, Lead, PocketParams,
+    ring_is_circular, slot, trace, ContourParams, FaceHoles, FaceParams, GenError, Lead, PocketParams,
     PocketStrategy, Side, SlotParams, TraceParams,
 };
 
@@ -29,7 +29,7 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
 }
 
 fn params() -> FaceParams {
-    FaceParams {
+    FaceParams { holes: Default::default(),
         tool_diameter: 10.0,
         stepover: 5.0,
         clearance_z: 5.0,
@@ -223,8 +223,16 @@ fn holes_are_overflown_not_avoided() {
         .unwrap(),
     ])
     .unwrap();
-    let t = face(&r, &params()).expect("valid");
+    // M13.11: that is the `Through` law now - kept to the byte - while
+    // the default lifts the row over the hole and re-enters past it.
+    let mut through = params();
+    through.holes = FaceHoles::Through;
+    let t = face(&r, &through).expect("valid");
     assert_eq!(rows(&t).len(), 3, "same rows as the plain square");
+    assert_eq!(t.moves, face(&rect(0.0, 0.0, 20.0, 20.0), &through).expect("plain").moves);
+    let lifted = face(&r, &params()).expect("valid");
+    assert_eq!(rows(&lifted).len(), 6, "the same three rows, each in two pieces around the hole");
+    assert!(lifted.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count() > 1, "re-entered past the hole");
 }
 
 #[test]

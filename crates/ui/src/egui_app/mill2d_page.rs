@@ -25,6 +25,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             plunge_feed,
             climb,
             blend_turns,
+            holes,
             tilt,
         } => {
             if tab == SEC_HEIGHTS {
@@ -70,6 +71,26 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 // M11.1 A: row ends turn on one arc where it is legal;
                 // the status line names every turn left sharp.
                 check_row(ui, "Arc turns at row ends", blend_turns);
+                // M13.11: how a row meets a hole in the faced region.
+                // Lift is safe for a bore and a boss alike; cutting
+                // across air is the user's call, islands stay lifted.
+                let mut h_idx = match holes {
+                    FaceHoles::Lift => 0,
+                    FaceHoles::CutAir => 1,
+                    FaceHoles::Through => 2,
+                };
+                let before = h_idx;
+                prop_row(ui, "Holes", |ui| {
+                    combo(ui, "f_holes", &mut h_idx, &["Lift over", "Cut across air, lift over islands", "Cut straight through"])
+                });
+                if h_idx != before {
+                    *holes = match h_idx {
+                        1 => FaceHoles::CutAir,
+                        2 => FaceHoles::Through,
+                        _ => FaceHoles::Lift,
+                    };
+                }
+                hint(ui, "rows stop a tool radius short of a hole and cross it at clearance; cut-across runs through a bore at feed");
             }
             if tab == SEC_FEEDS {
                 prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));

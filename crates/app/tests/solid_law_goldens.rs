@@ -274,7 +274,7 @@ fn verdicts() -> Vec<(&'static str, Vec<Warning>)> {
         ("face_square_40x40_blended.cl", true, None, None),
         ("face_square_40x40_stepped.cl", false, Some(2.0), Some(1.5)),
     ] {
-        let p = FaceParams { tool_diameter: 10.0, stepover: 8.0, clearance_z: 5.0, cut_z: -2.0, top_z: top, stepdown: step, feed: 500.0, plunge_feed: 100.0, climb: true, blend_turns: blend };
+        let p = FaceParams { holes: Default::default(), tool_diameter: 10.0, stepover: 8.0, clearance_z: 5.0, cut_z: -2.0, top_z: top, stepdown: step, feed: 500.0, plunge_feed: 100.0, climb: true, blend_turns: blend };
         let t = face(&reg, &p).expect("face");
         check(name, &t, section_law(&t, &reg, &part, &g10, Mode::Boundary, top.unwrap_or(-2.0), 5.0));
     }

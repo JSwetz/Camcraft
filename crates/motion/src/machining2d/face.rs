@@ -8,6 +8,7 @@ use crate::geo2d::{GeoError, Point2, Region};
 use crate::geometry::Point3;
 
 use super::blend::plan_reversals;
+use super::face_holes::{self, FaceHoles};
 use super::levels::cut_levels;
 #[derive(Error, Debug, PartialEq)]
 pub enum GenError {
@@ -55,6 +56,11 @@ pub struct FaceParams {
     /// in the path's notes. `false` - every pre-M11.1 file - is the
     /// sharp serpentine, unchanged to the byte.
     pub blend_turns: bool,
+    /// How a row meets a hole in the region (M13.11): lifted over at
+    /// the clearance plane (the default), cut across when the hole is
+    /// air, or ignored - the pre-M13.11 band serpentine. A region with
+    /// no holes faces the same under every law.
+    pub holes: FaceHoles,
 }
 
 impl FaceParams {
@@ -123,6 +129,25 @@ pub fn face(region: &Region, p: &FaceParams) -> Result<Toolpath, GenError> {
 /// `lead = 0` is [`face`] to the byte; a negative or non-finite lead is
 /// refused.
 pub fn face_led(region: &Region, p: &FaceParams, lead: f64) -> Result<Toolpath, GenError> {
+    face_over(region, p, lead, None)
+}
+
+/// [`face_led`] told where material stands above the face: `solid` is
+/// that outline (M13.11), read only under [`FaceHoles::CutAir`] to tell
+/// an air hole (cut straight across) from an island (lifted over);
+/// `None` lifts over every hole and says so in the notes. Each row is
+/// clipped to keep the tool centre a radius out of every bridged hole
+/// (`face_holes`), the pieces are cut in row order, and the row crosses
+/// a bridged hole through the clearance plane - up, across, plunge -
+/// the facer's own level link. A hole that leaves material the clipped
+/// rows cannot reach (a strip narrower than the tool) is refused by
+/// name, never faced short.
+pub fn face_over(
+    region: &Region,
+    p: &FaceParams,
+    lead: f64,
+    solid: Option<&Region>,
+) -> Result<Toolpath, GenError> {
     p.validate()?;
     if !(lead.is_finite() && lead >= 0.0) {
         return Err(GenError::Invalid("the facing lead-in must be finite and not negative".into()));
@@ -144,27 +169,87 @@ pub fn face_led(region: &Region, p: &FaceParams, lead: f64) -> Result<Toolpath, 
     let (turns, blend_notes) = plan_reversals(&ys, r, p.blend_turns);
 
     let start_x = if p.climb { x_in - lead } else { x_out + lead };
-    let mut b = PathBuilder::new(Point3::new(start_x, ys[0], p.clearance_z));
+    // The rows' extents and their pieces around the bridged holes,
+    // decided once like the reversals: a hole-free region keeps every
+    // row whole, to the same numbers.
+    let bridged = face_holes::forbidden(region, p.holes, solid, r)?;
+    let (forbidden, hole_note) = (bridged.grown, bridged.note);
+    let rows: Vec<(f64, f64, f64)> = ys
+        .iter()
+        .enumerate()
+        .map(|(i, &y)| {
+            // Serpentine: even rows run the climb direction, odd rows return.
+            let forward = p.climb == (i % 2 == 0);
+            let (from, to) = if forward { (x_in, x_out) } else { (x_out, x_in) };
+            (y, if i == 0 { start_x } else { from }, to)
+        })
+        .collect();
+    let pieces: Vec<Vec<(f64, f64)>> =
+        rows.iter().map(|&(y, a, b)| face_holes::pieces(&forbidden, y, a, b)).collect();
+    // Two bridged holes closer than the tool leave the strip between
+    // them standing, with no row piece to cut it: refused by name.
+    // Material beside a hole that only a tangent row would reach is the
+    // rows' own limit (rows never change), stated in the notes like the
+    // band a wide stepover leaves - visible, never silent.
+    let mut unfaced = None;
+    if !forbidden.is_empty() {
+        if let Some((y, gap)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces) {
+            return Err(GenError::Invalid(format!(
+                "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, narrower than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
+                p.tool_diameter
+            )));
+        }
+        unfaced = face_holes::uncut(region, &rows, &pieces, r)?;
+    }
+    let entry = pieces.iter().flatten().next().map(|&(x, _)| x).unwrap_or(start_x);
+
+    let mut b = PathBuilder::new(Point3::new(entry, ys[0], p.clearance_z));
     for n in blend_notes {
         b.note(n);
     }
+    if let Some(n) = hole_note {
+        b.note(n);
+    }
+    if let Some(area) = unfaced {
+        b.note(format!(
+            "the rows leave {area:.2} mm^2 beside the bridged holes unfaced - no row runs tangent to them; a smaller stepover, or cutting through the holes, reaches it"
+        ));
+    }
+    let mut lifted = false;
     for (k, &z) in zs.iter().enumerate() {
         if k > 0 {
             // New material is engaged from the air, never from under:
             // lift to clearance and re-enter above the row's start.
             let at = b.at();
             b.push(MoveKind::Rapid, Point3::new(at.x, at.y, p.clearance_z), None);
-            b.push(MoveKind::Rapid, Point3::new(start_x, ys[0], p.clearance_z), None);
+            b.push(MoveKind::Rapid, Point3::new(entry, ys[0], p.clearance_z), None);
         }
-        b.push(MoveKind::Plunge, Point3::new(start_x, ys[0], z), Some(p.plunge_feed));
+        b.push(MoveKind::Plunge, Point3::new(entry, ys[0], z), Some(p.plunge_feed));
         for (i, y) in ys.iter().enumerate() {
-            // Serpentine: even rows run the climb direction, odd rows return.
             let forward = p.climb == (i % 2 == 0);
-            let end_x = if forward { x_out } else { x_in };
-            b.push(MoveKind::Feed, Point3::new(end_x, *y, z), Some(p.feed));
+            let end_x = rows[i].2;
+            for &(x0, x1) in &pieces[i] {
+                let at = b.at();
+                if (at.x - x0).abs() > 0.0 || (at.y - *y).abs() > 0.0 || at.z != z {
+                    // Across a bridged hole (or onto a row whose start
+                    // was clipped): the level link, through clearance.
+                    lifted = true;
+                    link(&mut b, Point3::new(x0, *y, z), p);
+                }
+                b.push(MoveKind::Feed, Point3::new(x1, *y, z), Some(p.feed));
+            }
             if let Some(&y1) = ys.get(i + 1) {
                 let to = Point3::new(end_x, y1, z);
-                if turns.get(i).copied().unwrap_or(false) {
+                let at = b.at();
+                let next_whole = pieces[i + 1].first().is_some_and(|&(x0, _)| x0 == end_x);
+                if at.x != end_x || at.y != *y || !next_whole {
+                    // A hole took the row's end or the next row's start:
+                    // no reversal to ride, the link takes the tool over.
+                    lifted = true;
+                    if let Some(&(x0, _)) = pieces[i + 1].first() {
+                        link(&mut b, Point3::new(x0, y1, z), p);
+                    }
+                } else if turns.get(i).copied().unwrap_or(false) {
                     // Blended reversal: the step's own endpoints, one
                     // semicircle bulging away from the footprint - a
                     // left (ccw) turn off a +X row, a right (cw) one
@@ -177,6 +262,9 @@ pub fn face_led(region: &Region, p: &FaceParams, lead: f64) -> Result<Toolpath, 
             }
         }
     }
+    if lifted {
+        b.note("facing rows lifted over the region's holes at the clearance plane");
+    }
     let at = b.at();
     b.push(MoveKind::Rapid, Point3::new(at.x, at.y, p.clearance_z), None);
 
@@ -185,6 +273,16 @@ pub fn face_led(region: &Region, p: &FaceParams, lead: f64) -> Result<Toolpath, 
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
     Ok(path)
+}
+
+/// The facer's link from where the path stands to `to` on the cut
+/// level: up to the clearance plane, across at it, and down at the
+/// plunge feed - the level-to-level lift, used across a bridged hole.
+fn link(b: &mut PathBuilder, to: Point3, p: &FaceParams) {
+    let at = b.at();
+    b.push(MoveKind::Rapid, Point3::new(at.x, at.y, p.clearance_z), None);
+    b.push(MoveKind::Rapid, Point3::new(to.x, to.y, p.clearance_z), None);
+    b.push(MoveKind::Plunge, to, Some(p.plunge_feed));
 }
 
 /// Row centers banding [a + r, b - r]: start at the low edge's coverage

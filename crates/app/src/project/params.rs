@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::machining2d::FaceHoles;
 use crate::operation::Tilt;
 
 /// The file mirror of `operation::Tilt` (M5.1 stage B): plain f64
@@ -56,6 +57,11 @@ pub enum ParamsDto {
         /// version step, the same pure default as `tilt`.
         #[serde(default, skip_serializing_if = "is_false")]
         blend_turns: bool,
+        /// M13.11 hole law: absent (and written only when not the
+        /// default) is `lift` - a file that predates the word lifts
+        /// over its holes, the safe reading; no version step.
+        #[serde(default, skip_serializing_if = "FaceHolesDto::is_default")]
+        holes: FaceHolesDto,
         /// Declared at v22-era M5.1 B: absent is no index - the
         /// prismatic op every earlier file held.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1116,6 +1122,44 @@ fn default_helix_radius() -> f64 {
 /// `false` is absent from the file, so legacy saves stay byte-identical.
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// The facing hole law (M13.11): `lift` is the default and absent from
+/// the file, so a legacy save stays byte-identical and reads as the
+/// safe law; `cut_air` and `through` are the user's own choices.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FaceHolesDto {
+    #[default]
+    Lift,
+    CutAir,
+    Through,
+}
+
+impl FaceHolesDto {
+    fn is_default(&self) -> bool {
+        *self == FaceHolesDto::Lift
+    }
+}
+
+impl From<FaceHoles> for FaceHolesDto {
+    fn from(h: FaceHoles) -> Self {
+        match h {
+            FaceHoles::Lift => FaceHolesDto::Lift,
+            FaceHoles::CutAir => FaceHolesDto::CutAir,
+            FaceHoles::Through => FaceHolesDto::Through,
+        }
+    }
+}
+
+impl From<FaceHolesDto> for FaceHoles {
+    fn from(h: FaceHolesDto) -> Self {
+        match h {
+            FaceHolesDto::Lift => FaceHoles::Lift,
+            FaceHolesDto::CutAir => FaceHoles::CutAir,
+            FaceHolesDto::Through => FaceHoles::Through,
+        }
+    }
 }
 
 /// The pre-M11.2 contour level-link word, still read and written (`links.rs`

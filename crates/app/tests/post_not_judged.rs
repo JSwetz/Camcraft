@@ -222,7 +222,7 @@ fn a_posed_program_is_refused_by_name_never_cut_upright() {
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { holes: Default::default(),
         blend_turns: false,
         tilt: None,
         stepover: 3.0,

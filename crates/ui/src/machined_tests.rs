@@ -38,7 +38,7 @@ fn faced_state() -> State {
     state.history.execute(&state.world, add);
     let part = cube(Point3::new(-HALF, -HALF, 0.0), Point3::new(HALF, HALF, 18.0));
     state.history.execute(&state.world, ImportModel::from_mesh("part", part));
-    let params = OpParams::Face {
+    let params = OpParams::Face { holes: Default::default(),
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
