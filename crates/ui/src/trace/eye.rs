@@ -21,45 +21,66 @@
 //!   its cut layer in place (and still drops the cached frame) - only
 //!   the patched brick runs when the patch's chain covers the resident
 //!   frame (M13.1), the whole layer on any doubt.
+//! - **The CPU march never blocks the frame (M13.1 leftover).** With no
+//!   GPU scene the march runs on `cpu_eye`'s worker; `prepare` asks for
+//!   the picture and returns at once. While the first picture is
+//!   pending the slot draws what it drew before (`Ok(false)`: the sheet
+//!   or the machined mesh); after that the last finished picture is
+//!   blitted exactly as it was marched (its own camera and `mvp`) until
+//!   the next one lands - a playback frame of the same session keeps
+//!   the picture, never a sheet flicker between two marches.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use egui_wgpu::wgpu;
 use wgpu::util::DeviceExt;
 
 use camcraft_app::stock_sim::preview::{pack_cut, pack_field, pack_target};
-use camcraft_app::stock_sim::{preview, Preview, PreviewCamera, DEV_TOL};
+use camcraft_app::stock_sim::{Preview, PreviewCamera, DEV_TOL};
 use camcraft_app::stock_view::{CutLayer, FieldView};
 use camcraft_app::geometry::Point3;
 
 use super::composite::{Composite, FrameGeom};
+use super::cpu_eye::{CpuEye, CpuJob};
+use super::eye_geom::{cam_bits, TAN_HALF_FOV};
+pub use super::eye_geom::{encode, fit, preview_camera};
 use super::TracePass;
 use crate::viewport::Camera;
 
 /// GPU trace budget per frame: past it the trace runs at an integer
 /// fraction of the viewport (a 4K panel traces at half resolution).
-const GPU_PIXELS: u64 = 1 << 21;
+pub(crate) const GPU_PIXELS: u64 = 1 << 21;
 
 /// CPU fallback budget: a thumbnail the march answers interactively.
 const CPU_PIXELS: u64 = 1 << 15;
 
-/// The camera's vertical half field of view - `Camera::mvp`'s 60° law.
-const TAN_HALF_FOV: f64 = 0.577_350_269_189_625_8; // tan(pi/6)
-
-/// What a cached frame was marched for.
+/// What a cached frame was marched for (opaque outside the eye: the
+/// CPU worker only carries it back).
 #[derive(Clone, Copy, PartialEq, Debug)]
-struct Key {
+pub struct Key {
     cam: [u64; 4],
     view: (u32, u32),
 }
 
+impl Key {
+    /// A key no frame is ever shown under (a lost worker's answer).
+    pub(crate) const NONE: Key = Key { cam: [u64::MAX; 4], view: (0, 0) };
+}
+
 struct Frame {
     key: Key,
+    /// The field it was marched from (a CPU picture may outlive its
+    /// source by a playback frame - the module law).
+    source: Arc<FieldView>,
     bind: wgpu::BindGroup,
     // The bind group keeps the buffer alive; held for clarity of ownership.
     _buf: wgpu::Buffer,
     k: u32,
     trace: (u32, u32),
+    /// The eye and projection it was marched for: what it blits with.
+    pcam: PreviewCamera,
+    mvp: [[f32; 4]; 4],
 }
 
 /// The trace + composite pair and whatever they hold resident.
@@ -74,6 +95,8 @@ pub struct StockEye {
     refused: Option<Key>,
     /// The verdict palette the composite paints with (M13.4).
     verdict: [[f32; 3]; 4],
+    /// The CPU march's worker, started on the first CPU frame.
+    cpu: Option<CpuEye>,
 }
 
 impl StockEye {
@@ -90,7 +113,13 @@ impl StockEye {
             }
         };
         let verdict = Self::verdict_of(&crate::egui_app::colorvision::Semantic::OFF);
-        Ok(StockEye { trace, composite, source: None, gpu_scene: false, frame: None, refused: None, verdict })
+        Ok(StockEye { trace, composite, source: None, gpu_scene: false, frame: None, refused: None, verdict, cpu: None })
+    }
+
+    /// Wait up to `timeout` for the CPU worker to finish a picture;
+    /// tests only - the UI never waits. False with no worker or none.
+    pub fn wait_cpu_picture(&self, timeout: Duration) -> bool {
+        self.cpu.as_ref().is_some_and(|c| c.wait_picture(timeout))
     }
 
     fn verdict_of(p: &crate::egui_app::colorvision::Semantic) -> [[f32; 3]; 4] {
@@ -148,7 +177,12 @@ impl StockEye {
                 self.frame = None;
                 self.refused = None;
             } else {
+                // A CPU picture of the same packed session stands until
+                // the next one lands (the module law); anything else
+                // is forgotten with the lattice.
+                let keep = (!self.gpu_scene).then(|| self.frame.take()).flatten().filter(|f| same_session(&f.source, fv));
                 self.clear();
+                self.frame = keep;
                 self.source = Some(Arc::clone(fv));
                 self.gpu_scene = self.upload(device, fv);
             }
@@ -158,10 +192,13 @@ impl StockEye {
         if self.refused == Some(key) {
             return Ok(false);
         }
-        if self.frame.as_ref().is_none_or(|f| f.key != key) {
-            self.frame = None;
-            match self.march(device, queue, encoder, fv, &pcam, key) {
-                Ok(f) => self.frame = Some(f),
+        if self.frame.as_ref().is_none_or(|f| f.key != key || !Arc::ptr_eq(&f.source, fv)) {
+            if self.gpu_scene {
+                self.frame = None;
+            }
+            match self.march(device, queue, encoder, fv, &pcam, key, mvp) {
+                Ok(Some(f)) => self.frame = Some(f),
+                Ok(None) => {} // a CPU picture is pending: what stands, stands
                 Err(e) => {
                     self.refused = Some(key);
                     eprintln!("stock eye: {e}");
@@ -172,17 +209,17 @@ impl StockEye {
         let Some(f) = &self.frame else { return Ok(false) };
         let v = |p: Point3| [p.x as f32, p.y as f32, p.z as f32];
         let geom = FrameGeom {
-            eye: v(pcam.eye),
-            fwd: v(pcam.fwd),
-            right: v(pcam.right),
-            up: v(pcam.up),
+            eye: v(f.pcam.eye),
+            fwd: v(f.pcam.fwd),
+            right: v(f.pcam.right),
+            up: v(f.pcam.up),
             tan_half_fov: TAN_HALF_FOV as f32,
-            view,
+            view: f.key.view,
             k: f.k,
             trace: f.trace,
             verdict: self.verdict,
         };
-        self.composite.write(queue, mvp, &geom);
+        self.composite.write(queue, &f.mvp, &geom);
         Ok(true)
     }
 
@@ -246,34 +283,80 @@ impl StockEye {
         }
     }
 
+    /// March `fv` for `key`: `Ok(None)` when the CPU worker has the
+    /// frame in hand and nothing is finished yet.
+    #[allow(clippy::too_many_arguments)] // device, queue, encoder + the frame's own four
     fn march(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        fv: &FieldView,
+        fv: &Arc<FieldView>,
         pcam: &PreviewCamera,
         key: Key,
-    ) -> Result<Frame, String> {
+        mvp: &[[f32; 4]; 4],
+    ) -> Result<Option<Frame>, String> {
         let gpu = self.trace.as_ref().filter(|_| self.gpu_scene);
         let budget = if gpu.is_some() { GPU_PIXELS } else { CPU_PIXELS };
         let (k, tw, th) = fit(key.view, budget);
-        let buf = match gpu {
-            Some(t) => t.encode(device, queue, encoder, pcam, tw, th, DEV_TOL)?,
+        let (buf, source) = match gpu {
+            Some(t) => (t.encode(device, queue, encoder, pcam, tw, th, DEV_TOL)?, Arc::clone(fv)),
             None => {
-                let stock = fv.stock.field().ok_or("the field view holds no field to march")?;
-                let target = fv.target.as_ref().and_then(|t| t.field());
-                let pv = preview(stock, target, pcam, tw, th, DEV_TOL)
-                    .map_err(|e| format!("the CPU march refused the frame: {e}"))?;
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                let Some((pv, src)) = self.cpu_picture(fv, pcam, key, (tw, th))? else { return Ok(None) };
+                let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("stock-eye-cpu-frame"),
                     contents: &encode(&pv),
                     usage: wgpu::BufferUsages::STORAGE,
-                })
+                });
+                (buf, src)
             }
         };
         let bind = self.composite.bind(device, &buf);
-        Ok(Frame { key, bind, _buf: buf, k, trace: (tw, th) })
+        Ok(Some(Frame { key, source, bind, _buf: buf, k, trace: (tw, th), pcam: *pcam, mvp: *mvp }))
+    }
+
+    /// The worker's picture for `key`, with the view it marched: `fv`
+    /// itself, or an older view of the same playback session (the
+    /// newest is asked for, and the finished one stands meanwhile -
+    /// a march slower than the transport still lands every picture it
+    /// finishes). Asked for when not already in flight; `Ok(None)`
+    /// while pending. A picture for a moved camera is thrown away.
+    fn cpu_picture(
+        &mut self,
+        fv: &Arc<FieldView>,
+        pcam: &PreviewCamera,
+        key: Key,
+        (w, h): (u32, u32),
+    ) -> Result<Option<(Preview, Arc<FieldView>)>, String> {
+        if self.cpu.is_none() {
+            self.cpu = Some(CpuEye::spawn()?);
+        }
+        let cpu = self.cpu.as_ref().ok_or("the CPU eye has no worker")?;
+        let shows = |f: &Arc<FieldView>| Arc::ptr_eq(f, fv) || same_session(f, fv);
+        if let Some(p) = cpu.take() {
+            if p.key == Key::NONE {
+                return Err(p.frame.err().unwrap_or_else(|| "cpu eye: the worker is lost".into()));
+            }
+            if p.key == key && let Some(src) = p.fv.filter(shows) {
+                let pv = p.frame?;
+                if !cpu.in_flight(key, fv) && !Arc::ptr_eq(&src, fv) {
+                    cpu.request(CpuJob { fv: Arc::clone(fv), cam: *pcam, w, h, key });
+                }
+                return Ok(Some((pv, src)));
+            }
+        }
+        if !cpu.in_flight(key, fv) {
+            cpu.request(CpuJob { fv: Arc::clone(fv), cam: *pcam, w, h, key });
+        }
+        Ok(None)
+    }
+}
+
+/// Two views of one playback session: the same packed base.
+fn same_session(a: &FieldView, b: &FieldView) -> bool {
+    match (&a.packed, &b.packed) {
+        (Some(x), Some(y)) => Arc::ptr_eq(&x.base, &y.base),
+        _ => false,
     }
 }
 
@@ -287,93 +370,3 @@ fn full_cut(fv: &FieldView) -> Option<Arc<Vec<f32>>> {
     }
 }
 
-/// The viewport camera as the march's eye: the same basis and eye the
-/// `mvp` is built from, the same 60° vertical field.
-#[must_use]
-pub fn preview_camera(cam: &Camera) -> Option<PreviewCamera> {
-    let (r, u, f) = cam.view_basis();
-    let e = cam.eye();
-    let p = |t: (f64, f64, f64)| Point3::new(t.0, t.1, t.2);
-    let pc = PreviewCamera {
-        eye: Point3::new(e[0], e[1], e[2]),
-        fwd: p(f),
-        right: p(r),
-        up: p(u),
-        tan_half_fov: TAN_HALF_FOV,
-    };
-    let finite = [pc.eye, pc.fwd, pc.right, pc.up].iter().all(|q| q.is_finite());
-    let unit = |q: Point3| ((q.x * q.x + q.y * q.y + q.z * q.z) - 1.0).abs() < 1e-6;
-    (finite && unit(pc.fwd) && unit(pc.right) && unit(pc.up)).then_some(pc)
-}
-
-fn cam_bits(c: &PreviewCamera) -> [u64; 4] {
-    let h = |p: Point3| p.x.to_bits() ^ p.y.to_bits().rotate_left(21) ^ p.z.to_bits().rotate_left(42);
-    [h(c.eye), h(c.fwd), h(c.right), h(c.up)]
-}
-
-/// The smallest integer downscale `k` whose trace frame fits `budget`
-/// pixels: (k, trace width, trace height), never zero-sized.
-#[must_use]
-pub fn fit(view: (u32, u32), budget: u64) -> (u32, u32, u32) {
-    let (w, h) = (view.0.max(1), view.1.max(1));
-    let mut k = 1u32;
-    loop {
-        let (tw, th) = (w.div_ceil(k), h.div_ceil(k));
-        if u64::from(tw) * u64::from(th) <= budget.max(1) || tw == 1 && th == 1 {
-            return (k, tw, th);
-        }
-        k = k.saturating_add(1);
-    }
-}
-
-/// A CPU frame as the kernel's vec4s (depth, class, shade, status):
-/// status 1 hit, 0 miss - the composite reads one layout from both eyes.
-#[must_use]
-pub fn encode(pv: &Preview) -> Vec<u8> {
-    let mut b = Vec::with_capacity(pv.depth.len() * 16);
-    for i in 0..pv.depth.len() {
-        let d = pv.depth[i];
-        let hit = d.is_finite();
-        let cls = pv.class.get(i).copied().unwrap_or(3.0);
-        let shade = pv.shade.get(i).copied().unwrap_or(0.0);
-        for x in [if hit { d as f32 } else { 0.0 }, cls, shade, if hit { 1.0 } else { 0.0 }] {
-            b.extend_from_slice(&x.to_le_bytes());
-        }
-    }
-    b
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_fit_keeps_small_frames_whole_and_halves_a_4k_one() {
-        assert_eq!(fit((800, 600), GPU_PIXELS), (1, 800, 600));
-        let (k, tw, th) = fit((3840, 2160), GPU_PIXELS);
-        assert_eq!(k, 2);
-        assert!(u64::from(tw) * u64::from(th) <= GPU_PIXELS);
-        assert_eq!(fit((0, 0), 0), (1, 1, 1));
-    }
-
-    #[test]
-    fn the_preview_camera_is_the_viewport_basis() {
-        let cam = Camera::default();
-        let pc = preview_camera(&cam).expect("default camera is sane");
-        let (r, u, f) = cam.view_basis();
-        assert!((pc.fwd.x - f.0).abs() < 1e-12 && (pc.right.y - r.1).abs() < 1e-12);
-        assert!((pc.up.z - u.2).abs() < 1e-12);
-        // The centre ray of any frame is the forward axis.
-        let d = pc.ray_dir(50, 50, 101, 101);
-        assert!((d.x - f.0).abs() < 1e-9 && (d.y - f.1).abs() < 1e-9 && (d.z - f.2).abs() < 1e-9);
-    }
-
-    #[test]
-    fn a_cpu_miss_encodes_as_status_zero_never_a_hit() {
-        let pv = Preview { w: 2, h: 1, depth: vec![f64::NAN, 3.5], class: vec![3.0, 1.0], shade: vec![0.0, 0.7], unresolved: 0 };
-        let b = encode(&pv);
-        let f = |o: usize| f32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
-        assert_eq!(f(12), 0.0);
-        assert_eq!((f(16), f(20), f(28)), (3.5, 1.0, 1.0));
-    }
-}

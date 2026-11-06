@@ -159,6 +159,47 @@ fn traced_playback_cost_per_frame_and_per_jump() {
     assert_eq!(shown(&state), Some(end), "the jump lands");
 }
 
+/// M13.1 jump throughput: a full-length jump on the worker against the
+/// pre-worker path (one `FieldPlay::seek` to the end on this thread),
+/// both over the dense fixture. The seconds are the report's; the
+/// assert is a generous ceiling so the test documents, never flakes.
+#[test]
+#[ignore = "heavy lane (playback perf bench): a full-length jump on the worker vs a direct seek, release ~40 s - run with --release -- --ignored --nocapture"]
+fn a_full_length_jump_on_the_worker_costs_no_more_than_the_direct_seek() {
+    use camcraft_app::stock_play::{FieldPlay, PlaySeed};
+    use camcraft_app::stock_play_worker::PlayWorker;
+    use camcraft_app::stock_view::DEFAULT_TEXELS;
+    let state = faced_doc(100.0, 0.5, 0.5);
+    let seed = || PlaySeed::gather(&state.world, false, DEFAULT_TEXELS).expect("seed");
+    // The reference: the whole program in one seek, no worker.
+    let mut play = FieldPlay::from_seed(seed()).expect("play");
+    let total = play.total();
+    let t0 = Instant::now();
+    play.seek(total).expect("direct seek");
+    let direct = t0.elapsed().as_secs_f64();
+    println!("direct seek 0 -> {total}: {direct:.2} s");
+    // The worker: the uncut frame first, then one jump to the end.
+    let w = PlayWorker::spawn(seed()).expect("worker");
+    let mut seen = 0u64;
+    let t1 = Instant::now();
+    while w.shown_at() != Some(0) && t1.elapsed() < Duration::from_secs(120) {
+        seen = w.wait_published(seen, Duration::from_millis(100));
+        let _ = w.take();
+    }
+    assert_eq!(w.shown_at(), Some(0), "the uncut stock is published first");
+    let t2 = Instant::now();
+    w.request(total);
+    let mut frames = 0u32;
+    while w.shown_at() != Some(total) && t2.elapsed() < Duration::from_secs(120) {
+        seen = w.wait_published(seen, Duration::from_millis(100));
+        frames += u32::from(matches!(w.take(), Some(Ok(_))));
+    }
+    let jump = t2.elapsed().as_secs_f64();
+    println!("worker jump 0 -> {total}: {jump:.2} s ({frames} frames taken); direct {direct:.2} s; ratio {:.2}", jump / direct.max(1e-9));
+    assert_eq!(w.shown_at(), Some(total), "the jump lands");
+    assert!(jump <= 2.0 * direct.max(0.5), "a worker jump ({jump:.2} s) stays within 2x the direct seek ({direct:.2} s)");
+}
+
 #[test]
 fn the_shown_stock_follows_the_playhead_without_blocking() {
     let mut state = faced_doc(12.0, 3.0, 2.5);

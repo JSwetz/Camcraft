@@ -264,6 +264,41 @@ fn the_dirty_ledger_follows_cuts_and_refuses_a_restore() {
     assert_eq!(play.take_dirty().map(|d| d.len()), Some(0), "standing still dirties nothing");
 }
 
+/// M13.1 leftover: jump mode keeps no ledger (every take is a whole
+/// upload), and leaving it starts the ledger fresh from a whole upload,
+/// so a patch can never be relative to a cut the ledger missed.
+#[test]
+fn jump_mode_sends_whole_layers_and_hands_back_a_fresh_ledger() {
+    let world = faced_doc();
+    let mut play = FieldPlay::from_seed(PlaySeed::gather(&world, false, COARSE).expect("seed")).expect("play");
+    let total = play.total();
+    assert!(play.take_dirty().is_none(), "the first take is a whole upload");
+    play.set_batched(true);
+    assert!(play.batched());
+    play.seek(total / 2).expect("cut half, batched");
+    assert!(play.take_dirty().is_none(), "jump mode: the whole layer, every take");
+    assert!(!play.view().stock.field().expect("field").tracks_dirty(), "the field keeps no ledger while batched");
+    play.set_batched(false);
+    assert!(play.view().stock.field().expect("field").tracks_dirty(), "the ledger returns with play mode");
+    assert!(play.take_dirty().is_none(), "the first take after a jump is a whole upload");
+    play.seek(total).expect("cut the rest");
+    assert!(play.take_dirty().is_some_and(|d| !d.is_empty()), "then the ledger follows cuts again");
+    // The next checkpoint boundary is where a jump's stride ends.
+    play.seek(0).expect("rewind");
+    let b = play.next_boundary();
+    assert!(b > 0 && b <= total, "a boundary past move 0 within the program: {b}");
+    play.seek(b).expect("to the boundary");
+    assert!(play.next_boundary() > b || b == total, "the boundary advances");
+    // The worker's jump lands on the same picture as a direct seek.
+    let w = PlayWorker::spawn(PlaySeed::gather(&world, false, COARSE).expect("seed")).expect("worker");
+    w.request(total);
+    let fr = frames_until(&w, total);
+    let last = fr.last().expect("the jump lands");
+    assert_eq!(last.at, total);
+    let full = field_view_with(&world, COARSE).expect("deviate view");
+    assert!(same(&frame(&last.view.stock), &frame(&full.stock)), "the jump's last frame IS the Deviate picture");
+}
+
 #[test]
 fn a_worker_refusal_is_said_by_name_and_drop_joins() {
     // An empty document has no program: the seed itself refuses.

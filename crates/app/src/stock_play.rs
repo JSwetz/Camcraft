@@ -130,6 +130,9 @@ pub struct FieldPlay {
     /// A checkpoint replaced `cur` since the last `take_dirty`: its
     /// dirty ledger is not relative to anything uploaded (M13.1).
     restored: bool,
+    /// Jump mode (M13.1 leftover): the dirty ledger is off, every
+    /// take answers "send the whole layer".
+    batched: bool,
     target: Option<Arc<Stock>>,
     target_note: Option<String>,
     cell: f64,
@@ -178,6 +181,7 @@ impl FieldPlay {
             cur: stock,
             at: 0,
             restored: true,
+            batched: false,
             target: target.map(Arc::new),
             target_note,
             cell,
@@ -231,6 +235,34 @@ impl FieldPlay {
         self.checkpoints.iter().rev().find(|(n, _)| *n <= k).map_or(0, |c| c.0)
     }
 
+    /// The next checkpoint boundary past `at` (the end at the latest):
+    /// a jump cuts checkpoint to checkpoint, one batch per stride.
+    #[must_use]
+    pub fn next_boundary(&self) -> usize {
+        (self.at / self.stride.max(1)).saturating_add(1).saturating_mul(self.stride).min(self.total)
+    }
+
+    /// Jump mode on or off (M13.1 leftover): on, the field keeps no
+    /// dirty ledger (a jump's picture travels whole anyway, and the
+    /// per-cell bookkeeping is pure cost); off again, the next take is
+    /// a whole upload and the ledger starts fresh from there.
+    pub fn set_batched(&mut self, on: bool) {
+        if self.batched == on {
+            return;
+        }
+        self.batched = on;
+        self.cur.set_dirty_tracking(!on);
+        if !on {
+            self.restored = true;
+        }
+    }
+
+    /// Whether jump mode is on.
+    #[must_use]
+    pub const fn batched(&self) -> bool {
+        self.batched
+    }
+
     /// Cut (or restore) the shown stock to exactly `k` moves; `Ok(true)`
     /// when the picture changed. `k` past the end clamps to the end.
     pub fn seek(&mut self, k: usize) -> Result<bool, String> {
@@ -248,6 +280,8 @@ impl FieldPlay {
             self.cur = snap.clone();
             self.at = *at;
             self.restored = true;
+            // The snapshot carries the ledger mode of its own time.
+            self.cur.set_dirty_tracking(!self.batched);
         }
         // Forward in stride-sized runs, snapshotting each boundary
         // passed for the first time.
@@ -281,10 +315,13 @@ impl FieldPlay {
 
     /// The cut bricks changed since the last take, as one contiguous
     /// forward run; `None` when the delta is not provable that way (a
-    /// checkpoint restore, the first take, a column stock) and the
-    /// caller must re-send the whole cut layer.
+    /// checkpoint restore, the first take, jump mode, a column stock)
+    /// and the caller must re-send the whole cut layer.
     pub fn take_dirty(&mut self) -> Option<std::collections::HashSet<[i32; 3]>> {
         let d = self.cur.take_dirty_bricks();
+        if self.batched {
+            return None;
+        }
         let restored = std::mem::replace(&mut self.restored, false);
         d.filter(|_| !restored)
     }

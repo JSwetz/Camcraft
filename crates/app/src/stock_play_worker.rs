@@ -15,6 +15,13 @@
 //!   frame's worth of work, re-reading the target between chunks, so
 //!   a scrub turned around mid-jump is followed at once and a jump to
 //!   the end publishes its progress as it goes.
+//! - **A jump is batched (M13.1 leftover).** A target farther than the
+//!   field's own batch (`JUMP_MOVES`) is cut checkpoint to checkpoint
+//!   with the dirty ledger off (`FieldPlay::set_batched`): no per-move
+//!   bookkeeping for a picture that travels whole anyway. The target
+//!   is still re-read at every checkpoint, progress is published at
+//!   most once a second (`JUMP_PUBLISH`), and the landing is published
+//!   once; the ledger returns when the next play step arrives.
 //! - **Publication is throttled.** A view is snapshotted (cut layers
 //!   cloned, cut lattice packed) at most every `MIN_PUBLISH`, or when
 //!   the worker catches up - the per-frame clone is bounded by time.
@@ -47,6 +54,13 @@ const CHUNK_TARGET: Duration = Duration::from_millis(15);
 /// Chunk bounds, in moves (the upper one is the field's own batch).
 const CHUNK_MIN: usize = 1;
 const CHUNK_MAX: usize = 1024;
+
+/// A target this far past the cut is a jump, not a play step (the
+/// module law): the field's own batch, so a play can never trip it.
+pub const JUMP_MOVES: usize = CHUNK_MAX;
+
+/// The publication floor while jumping: progress once a second.
+pub const JUMP_PUBLISH: Duration = Duration::from_secs(1);
 
 /// One published picture: the view and the moves it is cut by.
 #[derive(Clone, Debug)]
@@ -278,10 +292,17 @@ fn run(shared: &Shared, seed: PlaySeed) {
     let (mut published, mut last, mut chunk) = (None, None::<Instant>, 64usize);
     let mut chain = Chain::default();
     while let Some(k) = next_target(shared, play.at(), published, play.total()) {
+        // A jump (the module law) cuts checkpoint to checkpoint with
+        // the ledger off, and stays one until it lands (the last stride
+        // is not a play step); a play step cuts a frame's worth of moves.
+        let jump = k > play.at() && (play.batched() || k > play.at().saturating_add(JUMP_MOVES));
+        play.set_batched(jump);
         // A backward target restores its checkpoint first (no cutting),
         // then walks forward in chunks like any other.
         let step = if k < play.at() {
             play.floor_checkpoint(k)
+        } else if jump {
+            k.min(play.next_boundary())
         } else {
             k.min(play.at().saturating_add(chunk))
         };
@@ -289,14 +310,23 @@ fn run(shared: &Shared, seed: PlaySeed) {
         if let Err(e) = play.seek(step) {
             return publish(shared, Err(e));
         }
+        // A stride's time says nothing about a chunk's: the chunk
+        // adapts on play steps only.
         let dt = t0.elapsed();
-        if dt < CHUNK_TARGET / 2 {
+        if !jump && dt < CHUNK_TARGET / 2 {
             chunk = chunk.saturating_mul(2).min(CHUNK_MAX);
-        } else if dt > CHUNK_TARGET * 2 {
+        } else if !jump && dt > CHUNK_TARGET * 2 {
             chunk = (chunk / 2).max(CHUNK_MIN);
         }
-        let due = last.is_none_or(|t| t.elapsed() >= MIN_PUBLISH);
-        if published != Some(play.at()) && (play.at() == k || due) {
+        let floor = if jump { JUMP_PUBLISH } else { MIN_PUBLISH };
+        let due = last.is_none_or(|t| t.elapsed() >= floor);
+        let landed = play.at() == k;
+        if landed {
+            // The landing picture is the whole upload the next play
+            // step's patches are relative to: the ledger restarts here.
+            play.set_batched(false);
+        }
+        if published != Some(play.at()) && (landed || due) {
             publish(shared, Ok(snapshot(shared, &mut play, base.as_ref(), &mut chain)));
             published = Some(play.at());
             last = Some(Instant::now());

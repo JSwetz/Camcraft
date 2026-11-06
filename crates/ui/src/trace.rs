@@ -22,7 +22,9 @@
 //!   the caller falls back to the CPU march. No `unwrap` on any of it.
 
 pub mod composite;
+pub mod cpu_eye;
 pub mod eye;
+mod eye_geom;
 
 use egui_wgpu::wgpu;
 use wgpu::util::DeviceExt;

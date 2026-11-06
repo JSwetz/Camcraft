@@ -1479,7 +1479,7 @@ handle engagement.")
 **Goal: the operation's region is what the selection encloses - a picked face
 and its picked boundary edges give the same region and the same toolpath - and
 adaptive clearing is planned by high-speed-machining principles, specified the
-way machinists specify it.** — ⚠️ partial (C rounds 2-5 landed; owed: island late returns, arc output, Pocket3D port - see RECOMMENDED "M11.4 C round 5")
+way machinists specify it.** — ⚠️ partial (C rounds 2-5 landed; arc output HELD 2026-11-06 - RECOMMENDED "M11.4: arc output for the HSM adaptive plan": G2/G3 over the passes under three proofs (area, crossing, kink), bore 6650 → 1200 moves at D/60, but the heavy lane's full-resolution load reading rose on every fixture (17.1/16.4 % D past the 14.6 % + 10 % law) - the fit is held in tmp/hsmarcs.patch until the reading is explained; owed: island late returns, Pocket3D port, a curvature-reading fit for the morph-spiral arcs the kink law refuses - see RECOMMENDED "M11.4 C round 5")
 
 (User review, 2026-11-05: "there is a misconception that there should be
 different path generations depending on if it's a pocket's edge chosen or a
@@ -1653,15 +1653,17 @@ every consumer Phase 7 promised it to.** — ⚠️ partial (owed: lathe/rotary 
       JUDGED") and blocks the post instead of the stated zero.
 - **Owed** (RECOMMENDED "Merge batch 2026-11-06", M13.1 (3)): the
       lathe sweep landed (revolved stadium, meridian parity), the rotary
-      chord pre-pass landed with bar parity, and the rotary LIFT landed for
-      Rotary Parallel (RECOMMENDED "M13.1: the rotary lift": the eye routes
-      through `simulate_rotary` at cell/4, the column verdict refuses rotary
-      by name, parity 1.47e-5 / 0 sign misses / 12 s release); still owed:
-      Contour and Offset (refused by name as unmeasured - Contour is 92,727
-      sub-chords / 179 s at the verdict class and the standing bar has no
-      sphere-cut column from above; Offset unmeasured), a flute-rotation
-      bound, the parity fixture into tests/common, and the lathe lift (nose
-      + frame in the plan) and a
+      chord pre-pass landed with bar parity, and the rotary LIFT is written
+      but HELD (RECOMMENDED "M13.1: the rotary lift": Parallel's parity is in
+      hand - 1.47e-5 / 0 sign misses / 12 s release - but the heavy lane read
+      the Offset ladder's field cut MISSING at a floor column (field 16.0 vs
+      law 3.31) and the eye would route it, so the patch waits in
+      tmp/rotarylift.patch until the Offset pass is explained and the eye
+      routes only kinds with parity in hand); still owed: Contour (92,727
+      sub-chords / 179 s at the verdict class; the standing bar has no
+      sphere-cut column from above), a flute-rotation bound, the parity
+      fixture into tests/common, and the lathe lift (nose + frame in the
+      plan) and a
       blade-profile variant for groove/part/thread/form; the eikonal band
       re-normalization; the extracted mesh for the viewer's stock display
       and picking; dual contouring; the field answering past the
@@ -1670,8 +1672,12 @@ every consumer Phase 7 promised it to.** — ⚠️ partial (owed: lathe/rotary 
 
 - **Traced playback leftovers** (RECOMMENDED "Traced playback off the UI
       thread"): dirty-brick GPU upload DONE 2026-11-06 (2.02 MB -> 57 KB per
-      picture, RECOMMENDED "M13.1: playback uploads only the dirty bricks"); jump throughput (a full-length jump 14.8 s vs 12.4 s before the
-      worker), and the CPU-fallback eye still drawing on the UI thread.
+      picture, RECOMMENDED "M13.1: playback uploads only the dirty bricks");
+      jump throughput and the CPU-fallback eye DONE 2026-11-06 (RECOMMENDED
+      "M13.1: the playback jump cuts checkpoint to checkpoint": a jump cuts
+      checkpoint to checkpoint with the ledger off, ratio to a direct seek
+      1.03 → 0.99, publications 395 → 16; the CPU eye traces on a worker and
+      the UI thread only blits).
 
 ### M13.2 - Machine limits and cutting data
 **Goal: a program is judged against the machine's spindle and the
@@ -1876,14 +1882,14 @@ visible and pinned while the generator fix is owed.
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
 | **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; pocket G17 arc entry, 3D first-stretch slowing, 3D ladder / bore second dives done 2026-11-06; owed: the bore's linear-lead second dive, Rotary Parallel infeed / Swarf first-entry ramps, swarf air-link count + re-entry audit (-> M11.3 Owed bullet) | ⚠️ |
-| **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); every fixture at 0 kinks past 5° (done, ratchet empty); owed: island legal late returns (round 6 finding: the 9 hops are the west-wall corner pieces k=585..631 whose leads read 16.5-18 deg vs the 15 deg bite on the RE-ORDERED stock - next: re-mark late pieces' leads with out.ras.walk_marks at schedule time and trim them to where they read <= bite, so the graze joins the cut and high() takes them), arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
+| **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); every fixture at 0 kinks past 5° (done, ratchet empty); owed: island legal late returns (round 6: late leads re-marked on the re-ordered stock and trailing grazes join the cut - LinkLaw::late, held in tmp/island-r6b.patch; the island's 9 hops are the SW-corner piece of every lap whose 24.7 mm lead grazes 20 deg for 22 mm with stock inside the disc on the last 3 mm - a LEADING graze; cause: depends reads 3 mm of a lead, high() descends along all of it; whole-lead reading drops hops to 1 but breaks the air budget 3.9x - next: a lead-scoped dependency or a corner landing off the lead; RECOMMENDED "M11.4 C round 6"), arc output (fit written and proved at D/60 - bore 6650 -> 1200 moves - but HELD: the full-resolution load reading rose past the law on every fixture, tmp/hsmarcs.patch), Pocket3D port, a curvature-reading arc fit for the morph-spiral chords the kink law refuses (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; open-boundary Contour band/extensions done; boundaries on 3+2-indexed ops read in the tilted plane and the group on the whole 3D finish family via a clip law (done 2026-11-06); kinds without an area refuse from one list by reason; leftovers tracked in M13.10 | ✅ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
-| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; the lathe revolved-stadium sweep landed with meridian parity (RECOMMENDED "M13.1: the lathe sweep on the field"); the rotary chord pre-pass landed with bar parity and the lift for Rotary Parallel (RECOMMENDED "M13.1: the rotary lift"); owed: Contour/Offset lifts (unmeasured, refused by name), a flute-rotation bound, lifting plan_program's lathe refusal (nose + lathe frame in the plan), a blade-profile variant for groove/part/thread/form, eikonal, the viewer/picking mesh (done 2026-11-06), dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
+| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; the lathe revolved-stadium sweep landed with meridian parity (RECOMMENDED "M13.1: the lathe sweep on the field"); the rotary chord pre-pass landed with bar parity; the rotary lift is written but HELD (Offset's field cut missing at a floor column on the heavy lane; RECOMMENDED "M13.1: the rotary lift"); owed: the Offset pass explained, Contour parity, a flute-rotation bound, lifting plan_program's lathe refusal (nose + lathe frame in the plan), a blade-profile variant for groove/part/thread/form, eikonal, the viewer/picking mesh (done 2026-11-06), dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
 | **M13.3** | Builds and distribution | Code signing + installer-vs-zip decided and built (Inno installer additive to the zip, env-gated signtool path; RECOMMENDED "M13.3: code signing and the installer-vs-zip decision"); themes beside the exe (done); owed: the .iss compile proven on the runner, uninstaller signing, Docker builds for every target, app/UI on wasm (M4.2), a headless binary per crate (Phase 4 intro) | ⚠️ |
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); all done: remaps, catalog hint, text colours, dialog polish, vertex picking, Set origin on a vertex or face | ✅ |
-| **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
+| **M13.5** | Mill-turn completeness | Axial drilling done 2026-11-06 (the Drill kind admitted on a lathe, meridian verdict, refusals by name; RECOMMENDED "M13.5: axial drilling on the lathe"); the rotary letter gate reads the machine's rotary inventory (A/B admitted, a missing line refused by name); the first lathe post fanuc-lathe.cps (diameter X on the meridian, G18 I/K, G97+G50, G99, G83/G84/G85, G32; RECOMMENDED "M13.5: the first lathe post"); owed: C-axis live tooling (C pinned: the cl pose law carries a tool axis, not a rotary angle - needs a stated rotary angle on posed moves, the C word in the posts, the letter gate reading it), G76 once the stream carries a thread cycle, the ribbon reading KindInfo::admits, the Setup pane offering default_post_for on mount | ⚠️ |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); mid-move pose law + the swarf pose laws (normal retract, law (d) solid reading, no upright under the equator) (done 2026-11-06) | ✅ |
 | **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; generate-time check on the workholding laws, Fixed toggle; the setup sheet naming each fixture's frame (RECOMMENDED "M13.8: the setup sheet names each fixture's frame"); owed: continuous pose | ⚠️ |

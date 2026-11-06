@@ -82,7 +82,14 @@ fn centre_with(dev: &wgpu::Device, q: &wgpu::Queue, parts: &[GpuPart], traced: b
     let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     let fv = field_view();
     if traced {
-        let ready = eye.prepare(dev, q, &mut enc, Some(&fv), &cam, &mvp, (W, H)).unwrap();
+        let mut ready = eye.prepare(dev, q, &mut enc, Some(&fv), &cam, &mvp, (W, H)).unwrap();
+        if cpu {
+            // The CPU march runs off this thread (M13.1): the first
+            // call only asks for the picture; it is bound once it lands.
+            assert!(!ready, "the first CPU frame is pending, never traced on the caller's thread");
+            assert!(eye.wait_cpu_picture(std::time::Duration::from_secs(30)), "the CPU worker finishes the picture");
+            ready = eye.prepare(dev, q, &mut enc, Some(&fv), &cam, &mvp, (W, H)).unwrap();
+        }
         assert!(ready, "a sane field and camera must yield a traced frame");
         let draw = |pass: &mut wgpu::RenderPass<'_>| eye.draw(pass);
         view.render_with(q, &mut enc, &mvp, cam.eye_f32(), DisplayMode::ShadedEdges, Some(&draw));
@@ -128,6 +135,41 @@ fn the_traced_depth_sorts_against_models_both_ways() {
     // A plate below the stock is hidden by it: the pixel is the trace's.
     let below = [plate(-6.0), stock_part()];
     assert!(close(centre(&dev, &q, &below, true), traced_alone));
+}
+
+/// M13.1 leftover: the CPU fallback never marches on the caller's
+/// thread. The first `prepare` returns inside a short budget with the
+/// march in flight (the slot keeps what it drew: `Ok(false)`), the
+/// picture arrives on the worker, and the next `prepare` binds it.
+#[test]
+fn the_cpu_fallback_marches_off_the_ui_thread_and_the_picture_arrives() {
+    let Some((dev, q)) = device_and_queue() else {
+        eprintln!("trace_composite: no adapter - skipped");
+        return;
+    };
+    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0 };
+    let mvp = cam.mvp(f64::from(W) / f64::from(H));
+    let mut eye = StockEye::new(&dev, FORMAT).unwrap().cpu_only();
+    let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    // A frame big enough that a march on this thread would show in
+    // the clock: the CPU thumbnail budget's worth of pixels.
+    let big = (1024, 1024);
+    let fv = field_view();
+    let t0 = std::time::Instant::now();
+    let first = eye.prepare(&dev, &q, &mut enc, Some(&fv), &cam, &mvp, big).unwrap();
+    let dt = t0.elapsed();
+    assert!(!first, "the first frame is pending: the slot draws what it drew before");
+    assert!(dt < std::time::Duration::from_millis(250), "prepare returned at once with the march in flight: {dt:?}");
+    assert!(eye.wait_cpu_picture(std::time::Duration::from_secs(60)), "the worker finishes the picture");
+    let second = eye.prepare(&dev, &q, &mut enc, Some(&fv), &cam, &mvp, big).unwrap();
+    assert!(second, "the finished picture is bound on the next frame");
+    // A moved camera keeps the last picture up while the next marches.
+    let moved = Camera { target: [5.0, 5.0, 2.5], yaw: 1.2, pitch: 0.7, dist: 28.0 };
+    let mvp2 = moved.mvp(f64::from(W) / f64::from(H));
+    let t1 = std::time::Instant::now();
+    let kept = eye.prepare(&dev, &q, &mut enc, Some(&fv), &moved, &mvp2, big).unwrap();
+    assert!(kept, "the last finished picture stands while the next is pending");
+    assert!(t1.elapsed() < std::time::Duration::from_millis(250), "and the frame still did not wait");
 }
 
 #[test]

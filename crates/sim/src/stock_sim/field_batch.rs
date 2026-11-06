@@ -53,11 +53,20 @@ pub(crate) struct CostLedger {
     /// M13.1's upload ledger: the cut bricks whose values moved since
     /// the last `take_dirty_bricks` - what a playback picture re-sends.
     pub(crate) dirty: HashSet<[i32; 3]>,
+    /// Whether the ledger is kept (off during a playback jump, whose
+    /// picture is sent whole: the per-cell insert is then pure cost).
+    pub(crate) track_dirty: bool,
 }
 
 impl Default for CostLedger {
     fn default() -> Self {
-        CostLedger { region: [(0, -1); 3], full: HashMap::new(), stats: CutStats::default(), dirty: HashSet::new() }
+        CostLedger {
+            region: [(0, -1); 3],
+            full: HashMap::new(),
+            stats: CutStats::default(),
+            dirty: HashSet::new(),
+            track_dirty: true,
+        }
     }
 }
 
@@ -107,6 +116,23 @@ impl SdfField {
     pub fn take_dirty_bricks(&mut self) -> HashSet<[i32; 3]> {
         std::mem::take(&mut self.cost.dirty)
     }
+
+    /// Keep (or stop keeping) the dirty ledger. While it is off the
+    /// ledger is incomplete and a consumer must send the whole layer;
+    /// turning it back on starts a fresh ledger, so what it then holds
+    /// is relative to the next whole upload, never to a cut it missed.
+    pub fn set_dirty_tracking(&mut self, on: bool) {
+        if on && !self.cost.track_dirty {
+            self.cost.dirty.clear();
+        }
+        self.cost.track_dirty = on;
+    }
+
+    /// Whether the dirty ledger is being kept.
+    #[must_use]
+    pub fn tracks_dirty(&self) -> bool {
+        self.cost.track_dirty
+    }
 }
 
 impl super::backend::Stock {
@@ -116,6 +142,14 @@ impl super::backend::Stock {
         match self {
             super::backend::Stock::Field(f) => Some(f.take_dirty_bricks()),
             super::backend::Stock::Column(_) => None,
+        }
+    }
+
+    /// `SdfField::set_dirty_tracking` on the field arm; a column stock
+    /// keeps no ledger and ignores it.
+    pub fn set_dirty_tracking(&mut self, on: bool) {
+        if let super::backend::Stock::Field(f) = self {
+            f.set_dirty_tracking(on);
         }
     }
 }
@@ -305,8 +339,11 @@ impl SdfField {
                 *self.cost.full.entry(brick_of(key)).or_insert(0) += 1;
             }
             // The only write into the cut layer: every value change
-            // marks its brick for the next upload (M13.1).
-            self.cost.dirty.insert(brick_of(key));
+            // marks its brick for the next upload (M13.1) - while the
+            // ledger is kept at all.
+            if self.cost.track_dirty {
+                self.cost.dirty.insert(brick_of(key));
+            }
         }
     }
 

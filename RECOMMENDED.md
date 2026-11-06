@@ -11025,6 +11025,20 @@ take containment through a `ToolOn` native later.
 
 ## M13.1: the rotary lift - the eye routes, the verdict refuses (2026-11-06)
 
+**Gate finding (main session, same day): HELD.** The heavy parity test's
+Offset arm (`rotary_field_parity::every_rotary_kind_reads_the_radial_law_and_
+its_cost_is_measured`, 427 s release) read the FIELD at the uncut top (16.0)
+on a floor column where the radial law reads the cut floor (3.31): the Offset
+ladder's chord pass never cut that column. Offset is refused by name in
+`plan_program`, but the EYE routes every rotary kind through
+`simulate_rotary_slice` - so the viewport would show uncut stock where the
+program cuts: a wrong picture, which the Prime Directive forbids as much as a
+wrong verdict. Until the Offset pass is explained (the ladder's station moves
+may not read as "turning" to `rotary_chords`, or the held pose is wrong for a
+standing bar), the lift stays out of main (tmp/rotarylift.patch); the three
+decisions below stand for the re-landing, and the eye must route only the
+kinds whose parity is in hand.
+
 **Three decisions.** (1) The field EYE (`stock_view::field_view_with`,
 `stock_play::cut`) routes every rotary op through `simulate_rotary_slice` at
 `rotary_pose_tol(cell) = cell/4` - the field's own arc chord law, one chord
@@ -11089,3 +11103,203 @@ build machine may lack; the runner image ships it, so there it is an
 error. Not validated here: the `.iss` compile itself (no Inno Setup on
 this machine) - the first tag push after merge is the test.
 
+
+## M11.4: arc output for the HSM adaptive plan - four decisions (2026-11-06)
+
+**Gate finding (main session, same day): HELD.** The fit was green on the
+debug band and the three proofs, but the heavy lane's full-resolution report
+(`hsm_report_full_resolution`, D/120) read the load PAST the 14.6 % + 10 % law
+on every fixture - bore 17.1 %, rectangle 16.4 %, L-pocket 16.4 %, slot
+17.1 % - where the chord plan read inside it. An arc within 0.0025 mm of its
+chords cannot change the engagement; the reader's sampling of arcs (or the
+arc's chord stand-in when the report re-chords it) can. Until that is
+explained and the reading returns inside the law, the arcs stay out of main
+(tmp/hsmarcs.patch) - the four decisions below stand as written for the
+re-landing.
+## M11.4: arc output for the HSM adaptive plan: four decisions (2026-11-06)
+
+(1) **One fitter, the ring budget.** The adaptive plan's cutting chords ride
+`arcs::fit_arcs` - the pocket/contour family's own fitter, not a second one -
+at `ARC_FIT_TOL * 0.25` (RECOMMENDED "The ring arc-fit budget": the plan's
+walk is already a tessellation, so the fit may not stack a second sag on
+it). `PocketParams` carries no chord tolerance, so the budget is the
+fitter's own constant quartered, the same number the waterline ring gets.
+Only the passes are fitted: microlift returns, pass links, descents and
+leads are posted by their own laws and never pass through the fitter.
+
+(2) **Every arc is proved inside the area or refused by name**
+(`machining2d::arc_proof`): the horizontal arc entry's law (`descent_xy`) -
+the inscribed chord fan at sagitta <= 0.01 mm and the circumscribed tangent
+polyline, both proved chord by chord inside the cutter-centre area by
+`chord_clears` (walls and islands alike). A refused arc hands back exactly
+the plan vertices it covered (the fitter's endpoints are always plan
+vertices, so the walk's cursor is an index into the pass).
+
+(3) **The crossing law and the kink law are proofs too - the fixtures
+demanded both.** The bore's first fit raised two verifier crossings: the
+plan's revolutions part from their rings by microns at the landing seams,
+where an arc's few-micron bow off its chords crosses the neighbouring turn
+- no region test can see it. So the posted path is held to the verifier's
+own law (a) on the TRUE arc (its bracket's chords against every other feed
+chord, the orientation predicate at a shared depth, grid-bucketed); an arc
+that crosses is given up and the walks are posted again, three rounds at
+most, then every arc still standing is dropped. And the rectangle, L and
+slot read 2 / 60 / 8 in-cut breaks past 5 deg (worst 10.65) at D/60 with
+the fit alone: a short, marginally curved run fits a circle within the
+budget whose end tangent stands degrees off the next chord. Law: fitting
+never adds a kink - at each junction the turn between the arc's tangent and
+the neighbouring chord may not exceed the turn the plan's own chords made
+there. Every held fixture is back at zero breaks. Cost: the kink law refuses
+most arcs over the morph spiral (rectangle 672 of 1115, L 1988 of 3310, slot
+372 of 741); the concentric revolutions and bands keep theirs. Readings at
+D/60, before -> after: bore 6650 -> 1200 moves (86 arcs), rectangle 36118 ->
+18372 (882), L 87764 -> 51788 (2636), slot 42892 -> 23280 (690); loads bore
+19.51 -> 19.14 %, rectangle 19.51 -> 20.26 % (grid phase on the arc's
+samples, inside the 10 % law; `PLAN_TOL` names the arc fit in its margin),
+L and slot unchanged. The island and channel fall back to Offset rings by
+name (owed round 6) and are untouched.
+
+(4) **No new parameter.** The 2D family exposes no "arc output" toggle
+(waterline rings are fitted by strategy, not by a field), so the adaptive
+op fits by default like them; a user wanting chords has no plausible reason
+the rings' users lack. Dropped: refactoring `descent_xy::arc_at` onto the
+shared bracket (its lattice-snapped fan would have to be re-proved byte for
+byte against the xy-arc goldens - a follow-up, not this lane). Owed: the
+kink law's refusals over the morph spiral - a fit that reads the plan's
+local curvature (a tangent-constrained biarc) would keep them.
+
+## M13.1: the playback jump cuts checkpoint to checkpoint, and the CPU eye leaves the UI thread (2026-11-06)
+
+**Where the jump's time went** (dense bench, 4,267 moves, release): the
+worker's own overhead was ~0.65 s of a 25.9 s jump - adaptive 15 ms chunks of
+2-4 moves (the field's per-batch brick walk ran ~1000× instead of once per
+checkpoint stride), a snapshot every 50 ms (cut-layer clone, `take_dirty`,
+`pack_cut_patch`) for pictures the jump overwrites, and the dirty ledger's
+per-cell insert for a picture sent whole. The pre-worker 12.4 vs 14.8 s were
+measured on a faster machine; the comparable figure is the ratio to a direct
+seek, 1.03 → 0.99 after.
+
+**A jump (target farther than the field's 1,024-move batch) cuts checkpoint
+to checkpoint with the ledger off** (`FieldPlay::set_batched`, `Stock::
+set_dirty_tracking`), re-reads its target every stride, and publishes whole
+layers at a 1 s floor with the landing published once; jump mode holds until
+it lands and resets the ledger there so the next play's patches are relative
+to that picture. Decision: 1 Hz progress pictures during a jump rather than
+one publication at the end - a 12-25 s jump must not be a frozen stock (the
+user's original complaint); ~16 full packs per jump, in the noise. Dropped:
+shrinking the chunk timer (it was the chunking itself that cost), and
+publishing the landing only.
+
+**The CPU fallback eye runs on a worker** (`ui::trace::cpu_eye::CpuEye`:
+latest-wins job slot, single output slot - PlayWorker's pattern). `StockEye::
+march` on the CPU path only takes a finished picture (matched by camera key
+and field, or an older view of the same session so a slow march still lands),
+requests the newest if none is in flight, and returns pending; `prepare` keeps
+what stands - the sheet or the machined mesh before the first picture, the
+last finished picture (with its own camera and mvp) after. The shell polls
+with a redraw per `about_to_wait`, so the picture is picked up next frame.
+`trace/eye.rs` was split: pure geometry to `eye_geom.rs` (400-line law).
+Pinned: the first `prepare` returns pending under 250 ms, the picture arrives
+on the worker, a moved camera keeps the last picture; the CPU and GPU eyes
+still paint the same pixels.
+
+## M13.5: axial drilling on the lathe, and the C-axis letter gate (2026-11-06)
+
+**The Drill kind is admitted on a lathe, not a new Turn-family kind**
+(`KindInfo::admits(machine)`: the family table plus one per-kind exception,
+read by `family_gate`). A new OpType would touch the registry, ordinal,
+labels, DTO and UI for no new behaviour - the mill's cycle vocabulary
+(G81/G82/G83/G73) IS the lathe's for a hole on the spindle axis. On a lathe a
+Z-hole Drill passes `drilling::axial_doors` before the mill's cycle kernel,
+verifies under `Mode::Revolve`, and gets the meridian verdict
+`drilling::axial_warnings` (hole recognition re-run on the part: no modelled
+hole on the axis, drill wider than the bore, bottom past the floor or exit →
+Gouge at the cycle's first move; a blind floor left short → Envelope rest).
+Refused by name: a hole off the spindle axis (that is F2's cross drill or the
+C-axis end hole), past the bar's far end, a drill wider than the bore. The
+ribbon still hides the Drilling section on a lathe (section-level law; the
+command door is the law) - follow-up: `panes.rs` reads `KindInfo::admits`.
+Limit named: every shipped `.cps` is a 3-axis mill post; the cycles post in
+the mill dialect (X0 Y0 Z R). A lathe post script (G83 Z R Q with G98/G99) is
+its own row.
+
+**C is pinned, not faked through A/B.** `operation::rotary_gate::
+rotary_letter` matches the kernel's fitted axis line against the mounted
+machine's rotary inventory (`AxisLimits.axis`, M3.3 D): A/B on a table
+trunnion admitted, no rotary on that line refused naming the line and the
+inventory, letter C refused "(M13.5 B)". Why: the stream's pose law
+`cl::axis_to_angles` renders a stated tool-axis VECTOR as [A, B, 0] - a
+direction has two degrees of freedom and C is the one it cannot carry - so a
+part turning about the spindle would post as A/B swings, a silent wrong
+program. What the lift needs: a stated rotary angle on posed moves beside the
+tool axis, the C word in the posts, and `machine::check_document`'s letter
+gate reading it. Found in passing: the program sim judges against EVERY
+model in the document (two bars in one world made one's top disc the part
+surface inside the other's bore) - fixtures hold one model per world; a 4 mm
+drill in a 16-gon 4 mm bore is a sliver gouge to any height field (the
+fixture models the bore at r 2.05, 64 segments).
+
+## M13.5: the first lathe post, fanuc-lathe.cps (2026-11-06)
+
+**Diameter programming on the kernel's meridian, read axis-agnostically.**
+The turning kernel's frame puts the meridian on world +Y for an upright bar
+(`radial = u × (1,0,0)`), not X; the post reads the radius as the signed
+single in-plane coordinate (origin-relative) and emits X = 2·r. A move with
+both X and Y off the axis is off every meridian: "milling work", refused by
+name. G18, G02/G03 with I/K radius-value increments (a YZ-stated meridian arc
+flips handedness viewed as ZX from +Y).
+
+**0i-T face cycles G83/G84/G85, not G81/G82**: public T-series references
+list only those three as face cycles, and on T controls G98/G99 mean per-
+minute/per-rev, not retract level - so G81/G82 would be a mill word in a
+lathe program. Q peck in whole microns, P dwell in ms; one positioning rapid
+only when the chain is not already there. **G97 + G50**: `G97 S M03` from the
+stated rpm, `G50 S<machine max>` once per program when stated; G96 only on a
+stated SurfaceSpeed parameter (none exists yet - the post never invents CSS
+from an rpm). **G99 feed per rev** = mm/min ÷ rpm at 4 dp; no rpm → refused.
+**G32, not G76**: the stream carries no thread cycle record; the kernel's XY
+half-turn arcs about the axis (constant radius, antipodal ends) post as `G32 Z
+F<lead>` with lead = 2·Δz. G76 waits for a thread cycle record in the stream.
+Refused by name, counted once per reason: off-meridian, posed A/B/C, a cycle
+off the spindle axis, back-bore, an XY arc that is not a thread half-turn, a
+half-turn with no lead, feed per rev without rpm, rpm over the machine's max.
+
+**A mount does not auto-switch the post.** `posting::default_post_for(Kind)`
+exists and the picker filters by the mounted machine's kind (mill-turn lists
+both), but `LoadMachine` does not re-point the document's post - that is its
+own command and decision (the Setup pane may offer it). Dropped: a silent
+switch on mount (a document's post is the user's word). Goldens under
+`crates/app/tests/golden/nc/fanuc-lathe/` (facing, profile rough+finish,
+groove+part, axial drill); the facing fixture is not warning-silent (its own
+RapidInStock/Envelope notes ride as comments) and `program_of` asserts the
+script itself refused nothing. Every mill golden refuses through the lathe
+post by name (conformance).
+
+## M11.4 C round 6: late leads re-marked on the re-ordered stock; the island's hops are a corner piece's leading graze (2026-11-06)
+
+**Built, the recorded step**: `LinkLaw::late` (adaptive/lift_link.rs) - when
+`high()` refuses a late piece, its lead is re-marked with `walk_marks` on the
+stock as it stands at that point in the order; each trailing graze run over
+the bite is joined to the piece's cut, the lead trimmed to the air before it,
+and a straight return then a retract-plane return retried. All laws kept (hop
+budget 8, kink, load, no self-crossing, descents, the "no worse than the
+spiral" keep law reading the joined graze). It converts trailing grazes (piece
+200: 90-point lead at 17.0° → 13 points at 13.5°, hop → high; lap piece 31:
+40.5° → 14.0°, straight return).
+
+**Finding - the island stays on the named ring fallback.** Its 9 hops are the
+SW-corner piece of every lap (debug grid pieces 197..237 at (5.47, 7.9)): their
+24.7 mm leads graze 20.0-20.5° for the first 22 mm and the last 3 mm holds
+stock inside the r5 tool disc, so no rapid column and no plunge landing
+exists - the graze is AHEAD of the only air, and a leading graze cannot join a
+cut that runs forward from the piece. Cause: `depends` reads the last 3 mm of
+a lead (`LEAD_READ`) while `high()` descends along as much of it as it needs,
+so the piece that clears the lead's first 22 mm is not yet cut. Tried and
+dropped: reading the WHOLE lead in `depends` - hops 9 → 1, but it forces the
+spiral's order back and the plan fails the air budget (16,943 mm out of cut
+for 4,344 in cut, 3.9× over 1.5×). Next: a lead-scoped dependency (only the
+pieces overlapping the ramp `high()` would take, not the whole lead), or a
+corner landing off the lead (a disc-clear point in the cleared area within
+RAMP_RUN of the piece, descended as a chord). Patch held with the arcs
+(tmp/island-r6b.patch, on the hsmarcs base); the heavy lane has not read
+`late` on the lifted plans yet - due at close-out.
