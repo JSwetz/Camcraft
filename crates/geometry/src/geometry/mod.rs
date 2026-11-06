@@ -13,6 +13,7 @@
 
 pub mod feature;
 mod primitives;
+pub mod repair;
 pub mod revision;
 pub mod slice;
 pub mod stock;

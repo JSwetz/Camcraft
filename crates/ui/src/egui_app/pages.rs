@@ -50,8 +50,8 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, FontId, Id, Label, Pos2, ScrollArea, Sense, Shape,
-    Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense,
+    Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
@@ -1661,6 +1661,33 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
             apply_model_draft(state);
         }
     });
+    // Mesh repair (M13.11): weld and fill on the user's say-so, never on
+    // import. The button queues `RepairModel`; the report lands in the
+    // status line and stays here while this model is on the page.
+    ui.add_space(6.0);
+    ui.label("Mesh repair");
+    field(ui, "Weld tolerance");
+    num(ui, u, &mut state.repair_ui.weld_tol);
+    field(ui, "Largest hole to fill (edges)");
+    ui.add(DragValue::new(&mut state.repair_ui.max_hole_edges).range(3..=100_000));
+    hint(
+        ui,
+        "Welds vertices closer than the tolerance, drops degenerate facets, then closes every \
+         boundary loop up to the stated size by ear clipping in its plane. Non-manifold or \
+         non-planar holes are refused by name; undo restores the facets.",
+    );
+    if ui.button("Repair mesh").clicked() {
+        state.pending.push_back(CommandKind::RepairModel {
+            name: name.clone(),
+            weld_tol: state.repair_ui.weld_tol,
+            max_hole_edges: state.repair_ui.max_hole_edges,
+        });
+    }
+    if let Some((who, line)) = &state.repair_ui.last
+        && *who == name
+    {
+        ui.label(format!("Last repair: {line}"));
+    }
     let users: Vec<String> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(&state.world, e))

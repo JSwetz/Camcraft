@@ -12,6 +12,8 @@ pub mod load_machine;
 pub mod move_model;
 pub mod operation;
 pub mod post;
+// M13.11: mesh repair (weld + fill holes) as one undo unit over UpdateModel.
+pub mod repair_model;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
@@ -40,6 +42,7 @@ pub use operation::{
     GenerateOperation, RegenerateAll, SetOperationGeometry,
 };
 pub use post::SelectPost;
+pub use repair_model::RepairModel;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};

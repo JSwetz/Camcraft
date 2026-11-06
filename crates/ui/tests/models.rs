@@ -140,3 +140,51 @@ fn pure_rotation_is_undoable_like_any_move() {
     state.drain_actions();
     assert_eq!(loc(&state, "cube").rot, [0.0, 0.0, 0.0, 1.0]);
 }
+
+/// Mesh repair (M13.11) through the queue: a closed cube refuses by
+/// name, a holed one fills with the report on the status line and on
+/// the page draft, and undo restores the facet count.
+#[test]
+fn repair_model_queue_reports_refuses_and_undoes() {
+    use camcraft_app::commands::ImportModel;
+    use camcraft_app::geometry::{cube, Mesh, Point3};
+
+    let mut state = State::new();
+    import_cube(&mut state);
+    state.pending.push_back(CommandKind::RepairModel {
+        name: "cube".into(),
+        weld_tol: 0.001,
+        max_hole_edges: 256,
+    });
+    state.drain_actions();
+    assert!(
+        state.status.contains("cube not repaired") && state.status.contains("nothing to repair"),
+        "{:?}",
+        state.status
+    );
+    assert!(state.repair_ui.last.is_none(), "a refusal leaves no report");
+
+    let holed = Mesh::from_facets(cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0)).facets[2..].to_vec());
+    state.history.execute(&state.world, ImportModel::from_mesh("holed", holed));
+    let count = |state: &State| {
+        model::find_by_name(&state.world, "holed").and_then(|e| model::facets_of(&state.world, &e)).map(|f| f.len())
+    };
+    assert_eq!(count(&state), Some(10));
+    state.pending.push_back(CommandKind::RepairModel {
+        name: "holed".into(),
+        weld_tol: 0.001,
+        max_hole_edges: 256,
+    });
+    state.drain_actions();
+    assert!(
+        state.status.starts_with("repaired holed:") && state.status.contains("filled 1 hole"),
+        "{:?}",
+        state.status
+    );
+    assert_eq!(count(&state), Some(12));
+    assert!(matches!(&state.repair_ui.last, Some((n, _)) if n == "holed"));
+
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert_eq!(count(&state), Some(10), "undo restores the facets");
+}
