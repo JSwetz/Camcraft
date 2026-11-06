@@ -216,6 +216,11 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // verdict that governs it is the revolved one, already binding
         // at generation; HERE the honest answer is that nothing was
         // judged. Refusal, not a guess - the rotated-stock precedent.
+        // The FIELD arm cuts the annular-sector sweep in closed form
+        // (`Stock::simulate_lathe`, M13.1 owed); routing the Turn
+        // family through it needs the field eye's walk to carry the
+        // nose radius and the lathe frame, which this column-engine
+        // verdict cannot - so the refusal stands here by name.
         if op.params.kind().info().family() == crate::operation::Family::Turn {
             return Err(format!(
                 "{name}: a revolved path is not judgeable in the mill's dexel frame - its law is the revolved verdict at generation"
@@ -229,6 +234,12 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // program is refused by name until the sector sweep exists
         // (ROADMAP M13.1, "a lathe or rotary cut = torus/annular-
         // sector sweeps"). Its own verdict stands at generation.
+        // The FIELD arm now chords the turn (`Stock::simulate_rotary`,
+        // the `rotary_chords` pre-pass: pose lerped per sub-chord at
+        // a stated sag) with parity against the radial law on the
+        // sim's own bar (crates/sim/tests/stock_rotary.rs); lifting
+        // this refusal waits on that parity over the app's rotary
+        // fixtures and on the fitted axis riding the plan - owed.
         if matches!(
             op.params,
             crate::operation::OpParams::RotaryContour { .. }

@@ -60,7 +60,7 @@
 
 use super::field::{cell_of, SdfField};
 use super::field_bull::{bull_closed, bull_dist, bull_tie};
-use super::field_solid::{add, dist_pt_para, dot, flat_tie, pose_dist, scale, sub, tool_kind, upright_flat_foot, RevKind, ToolKind};
+use super::field_solid::{add, dist_pt_para, dist_pt_seg2, dot, flat_tie, pose_dist, scale, sub, tool_kind, upright_flat_foot, RevKind, ToolKind};
 use super::kernel::StockError;
 use super::scan::dist_pt_seg3;
 
@@ -106,11 +106,25 @@ pub enum SdfTool {
     /// revolved (`field_bull`), the dexel's `cut_bull` atom made a
     /// solid. `0 < corner <= r`, `flank >= corner`.
     BullNose { r: f64, corner: f64, flank: f64 },
+    /// Turning insert (M13.1 owed, the annular-sector sweep): moves
+    /// are the nose CENTER's path in the mill world of a lathe whose
+    /// spindle axis is +Z through the origin (the convention the
+    /// turning kernels and `envelope_scan_centers` share, M5.2 E);
+    /// the part spins a full revolution at every instant, so a move
+    /// removes the solid of revolution of the half-plane stadium of
+    /// radius `nose` about its (radius, station) chord. A pose stamp
+    /// means nothing to a spinning part and is ignored.
+    Lathe { nose: f64 },
 }
 
 /// One chord's swept solid, prepped for the walk (`field_ray` reads
 /// it too - the ray-entry layer is this layer's companion).
 pub(crate) enum Sweep {
+    /// The annular sector of a turning move (M13.1 owed): the nose
+    /// center's chord in the (radius, station) half-plane, revolved
+    /// about +Z through the origin, dilated by the nose radius -
+    /// the revolved stadium `turning::revolve`'s meridian law cuts.
+    Lathe { r0: f64, z0: f64, r1: f64, z1: f64, nose: f64 },
     /// The capsule of a ball center path.
     Ball { c0: Point3, c1: Point3, r: f64 },
     /// The ball center path swept up the axis by `up` (the shank),
@@ -127,6 +141,7 @@ impl Sweep {
     /// inflated into every axis, which would refuse payables.
     fn extent(&self) -> f64 {
         match self {
+            Sweep::Lathe { nose, .. } => *nose,
             Sweep::Ball { r, .. } => *r,
             Sweep::Shanked { r, up, .. } => r + dot(*up, *up).sqrt(),
             Sweep::Revolve { kind, .. } => match kind {
@@ -145,6 +160,9 @@ impl Sweep {
     /// path, so its solid is the path dilated by `r` and nothing more.
     fn reach(&self) -> (f64, f64) {
         match self {
+            // The revolved solid's reach is its own window (`window_of`
+            // reads the annulus directly); the nose is its dilation.
+            Sweep::Lathe { nose, .. } => (*nose, 0.0),
             Sweep::Ball { r, .. } => (*r, 0.0),
             Sweep::Shanked { r, up, .. } => (*r, dot(*up, *up).sqrt()),
             Sweep::Revolve { kind, .. } => match kind {
@@ -161,6 +179,10 @@ impl Sweep {
         match self {
             Sweep::Ball { c0, c1, .. } | Sweep::Shanked { c0, c1, .. } => (*c0, *c1),
             Sweep::Revolve { a, b, .. } => (*a, *b),
+            // The meridian chord at azimuth 0: one generator of the
+            // solid, never its extent (the window and the stadium
+            // test read the revolved solid, not this).
+            Sweep::Lathe { r0, z0, r1, z1, .. } => (Point3::new(*r0, 0.0, *z0), Point3::new(*r1, 0.0, *z1)),
         }
     }
 
@@ -175,7 +197,7 @@ impl Sweep {
     /// 1-Lipschitz in its anchor); the capsule is closed-form.
     pub(crate) fn residual(&self) -> f64 {
         match self {
-            Sweep::Ball { .. } | Sweep::Shanked { .. } => 0.0,
+            Sweep::Ball { .. } | Sweep::Shanked { .. } | Sweep::Lathe { .. } => 0.0,
             Sweep::Revolve { a, b, .. } => {
                 let d = sub(*b, *a);
                 dot(d, d).sqrt() * GS_RESIDUAL
@@ -186,6 +208,9 @@ impl Sweep {
     /// A cheap LOWER bound of `dist` (a stadium, not the solid), used
     /// to skip window corners before the honest evaluation.
     pub(crate) fn stadium(&self, q: Point3) -> f64 {
+        if let Sweep::Lathe { .. } = self {
+            return self.dist([0.0, 0.0, 1.0], q); // closed form already: its own bound
+        }
         let (p0, p1) = self.path();
         dist_pt_seg3(q.x, q.y, q.z, p0, p1) - self.extent()
     }
@@ -195,6 +220,18 @@ impl Sweep {
     /// bound of the truth (the conservative half of the law above).
     pub(crate) fn dist(&self, ax: [f64; 3], q: Point3) -> f64 {
         match self {
+            // The half-plane law (`field_solid`'s header): a solid of
+            // revolution's nearest point lies in the query's own
+            // meridian, so the 2-D stadium distance IS the 3-D
+            // distance. A chord that crosses the axis (parting) is
+            // revolved from its mirror too, so both signs of rho are
+            // read and the nearer wins - exact, no sampling.
+            Sweep::Lathe { r0, z0, r1, z1, nose } => {
+                let rho = q.x.hypot(q.y);
+                dist_pt_seg2(rho, q.z, *r0, *z0, *r1, *z1)
+                    .min(dist_pt_seg2(-rho, q.z, *r0, *z0, *r1, *z1))
+                    - nose
+            }
             Sweep::Ball { c0, c1, r } => dist_pt_seg3(q.x, q.y, q.z, *c0, *c1) - r,
             Sweep::Shanked { c0, c1, up, r } => dist_pt_para(q, *c0, sub(*c1, *c0), *up) - r,
             Sweep::Revolve { a, b, kind } => {
@@ -326,6 +363,13 @@ impl SdfField {
                         b,
                         kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank },
                     },
+                    ToolKind::Lathe { nose } => Sweep::Lathe {
+                        r0: a.x.hypot(a.y),
+                        z0: a.z,
+                        r1: b.x.hypot(b.y),
+                        z1: b.z,
+                        nose: *nose,
+                    },
                 };
                 // The ceiling bounds the WORK: the window as clipped
                 // to the cut region, the only cells the walk can visit.
@@ -352,6 +396,18 @@ impl SdfField {
 /// radius (the M7.1 B law), or the axial reach both ways (M7.1 C),
 /// made a vertical tool's window as deep as it is tall.
 fn window_of(sw: &Sweep, cell: f64, cap: f64, ax: [f64; 3]) -> [(i32, i32); 3] {
+    if let Sweep::Lathe { r0, z0, r1, z1, nose } = sw {
+        // The revolved stadium's box: the outer radius round the
+        // axis in XY, the station span along Z, the nose both ways.
+        let pad = nose + cap + cell;
+        let rr = r0.abs().max(r1.abs()) + pad;
+        let (zl, zh) = (z0.min(*z1) - pad, z0.max(*z1) + pad);
+        return [
+            (cell_of(-rr, cell), cell_of(rr, cell)),
+            (cell_of(-rr, cell), cell_of(rr, cell)),
+            (cell_of(zl, cell), cell_of(zh, cell)),
+        ];
+    }
     let (p0, p1) = sw.path();
     let (lat, axial) = sw.reach();
     let span = |lo: f64, hi: f64, u: usize| {

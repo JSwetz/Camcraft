@@ -36,6 +36,9 @@ pub(crate) enum ToolKind {
     Flat { r: f64, flank: f64 },
     Taper { r: f64, cot: f64 },
     Bull { r: f64, corner: f64, flank: f64 },
+    /// The turning insert's nose (M13.1 owed): the annular-sector
+    /// sweep about the lathe axis, `field_cut`'s `Sweep::Lathe`.
+    Lathe { nose: f64 },
 }
 
 /// The tool's parameters, refused by name when nonsense.
@@ -86,6 +89,10 @@ pub(crate) fn tool_kind(tool: &SdfTool) -> Result<ToolKind, StockError> {
                 )));
             }
             ToolKind::Bull { r: *r, corner: *corner, flank: *flank }
+        }
+        SdfTool::Lathe { nose } => {
+            length("nose radius", nose)?;
+            ToolKind::Lathe { nose: *nose }
         }
     })
 }
@@ -211,7 +218,7 @@ pub(crate) fn flat_tie(foot: Point3, q: Point3, kind: &RevKind, v: f64) -> f64 {
 }
 
 /// Distance in the (rho, z) half-plane from a point to a segment.
-fn dist_pt_seg2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
+pub(crate) fn dist_pt_seg2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     let (dx, dy) = (bx - ax, by - ay);
     let dd = dx * dx + dy * dy;
     let t = if dd > 0.0 {

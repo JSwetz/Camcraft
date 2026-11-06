@@ -275,6 +275,34 @@ impl Stock {
         }
     }
 
+    /// A turning program (M13.1 owed, the annular-sector sweep):
+    /// `moves` are the insert's nose-CENTER path (the M5.2 E
+    /// convention) on a lathe whose spindle axis is +Z through the
+    /// origin, `nose` its nose radius; each move removes the solid
+    /// of revolution of its half-plane stadium (`SdfTool::Lathe`).
+    /// The field arm cuts it in closed form; the column arm has no
+    /// revolved reading - a Z height field reads a parting kerf as a
+    /// plunge - and refuses by name (`LATHE_COLUMN_REFUSAL`), the
+    /// honest answer the document verdict gives today.
+    pub fn simulate_lathe(&mut self, moves: &[crate::cl::Move], nose: f64) -> Result<(), StockError> {
+        match self {
+            Stock::Column(_) => Err(StockError::Invalid(LATHE_COLUMN_REFUSAL.into())),
+            Stock::Field(f) => {
+                if !moves.iter().all(|m| m.is_finite()) {
+                    return Err(StockError::Invalid(
+                        "lathe program carries a non-finite move - the sim refuses instead of cutting nothing silently".into(),
+                    ));
+                }
+                let chord_tol = (f.cell() * 0.25).max(1e-9);
+                let tool = SdfTool::Lathe { nose };
+                for chunk in moves.chunks(super::field_batch::BATCH_MOVES) {
+                    f.subtract_batch(chunk, &tool, chord_tol)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// The program's verdict against the model, per column. The tol
     /// gate and every aggregate are `deviate`'s law read off the
     /// engine's own tops (the height-parity law above).
@@ -341,6 +369,9 @@ impl Stock {
     }
 }
 
+/// The column engine's refusal of a turning program, said once.
+pub const LATHE_COLUMN_REFUSAL: &str = "a revolved path is not judgeable in the mill's dexel frame - the column engine has no annular-sector sweep; the field arm cuts it (Stock::simulate_lathe)";
+
 /// The box gate, `Dexel::block`'s own words, then a solid whose floor
 /// lies far enough under the stock that a program of the stock's own
 /// scale marches through material to its last cell - the reach a
@@ -389,7 +420,7 @@ fn block_field(
 /// removal below that world. Above it the two engines were never
 /// going to agree (the column removes everything to the sky), and no
 /// verdict lives there.
-fn spanning_flank(f: &SdfField) -> f64 {
+pub(crate) fn spanning_flank(f: &SdfField) -> f64 {
     let b = f.bounds();
     let (dx, dy, dz) = (b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
     (dx * dx + dy * dy + dz * dz).sqrt() + 2.0 * f.cap() + 4.0 * f.cell()
@@ -399,7 +430,7 @@ fn spanning_flank(f: &SdfField) -> f64 {
 /// arm's gates are per-op by construction, and an error that cannot
 /// say which op raised its hand is the opaque failure AGENTS.md
 /// refuses.
-fn named_op(i: usize, e: StockError) -> StockError {
+pub(crate) fn named_op(i: usize, e: StockError) -> StockError {
     match e {
         StockError::Invalid(s) => StockError::Invalid(format!("op {i}: {s}")),
         other => other,
