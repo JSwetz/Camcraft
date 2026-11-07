@@ -153,7 +153,53 @@ pub fn disc_overlaps(region: &Region, xy: Point2, r: f64) -> bool {
 /// pose, not world Z.
 #[must_use]
 pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(Point2, f64)> {
-    first_plunge_where(t, tool_r, |m| m.to.z < solid.top - Z_EPS && solid.under(Point2::new(m.to.x, m.to.y), tool_r))
+    first_solid_plunge_as(t, tool_r, solid, false)
+}
+
+/// [`first_solid_plunge`] with the tool's shape said: for a BALL tool
+/// (`ball`) a posed re-entry into the already-cut sphere is no plunge
+/// into solid ([`reenters_cut_sphere`], #17). Any other tool reads the
+/// tip column alone, as before.
+#[must_use]
+pub fn first_solid_plunge_as(t: &Toolpath, tool_r: f64, solid: &Solid, ball: bool) -> Option<(Point2, f64)> {
+    let in_solid = |m: &Move| m.to.z < solid.top - Z_EPS && solid.under(Point2::new(m.to.x, m.to.y), tool_r);
+    first_plunge_where(t, tool_r, |i, m| in_solid(m) && !(ball && reenters_cut_sphere(&t.moves[..=i], tool_r)))
+}
+
+/// The posed link's re-entry (#17, the swarf link law): is the last
+/// move of `moves` a posed plunge whose ball (centre at `tip + r·axis`)
+/// retraces, end to start, the ball path of a rapid that left from the
+/// centre the last cutting move finished on, and lands on that same
+/// centre? Then it sweeps exactly the capsule its own retract swept (in
+/// air, or that rapid is the verifier's conviction) and ends in the
+/// sphere the previous cut already emptied: a sphere is the same under
+/// any pose about its centre, so the core lands on removed material. A
+/// near-vertical re-entry read by its tip column alone is convicted -
+/// no earlier cut ran down the NEW axis, since the pose turned - though
+/// nothing uncut stands in its way. Only for a ball tool: nothing else
+/// is pose-invariant about a point.
+#[must_use]
+pub fn reenters_cut_sphere(moves: &[Move], r: f64) -> bool {
+    const C_EPS: f64 = 1e-6;
+    let Some((m, before)) = moves.split_last() else { return false };
+    if m.kind != MoveKind::Plunge || m.axis.is_none() || m.arc.is_some() || !(r.is_finite() && r > 0.0) {
+        return false;
+    }
+    let centre = |p: Point3, a: Option<[f64; 3]>| {
+        let a = a.unwrap_or([0.0, 0.0, 1.0]);
+        Point3::new(p.x + r * a[0], p.y + r * a[1], p.z + r * a[2])
+    };
+    let near = |a: Point3, b: Point3| {
+        let d = a - b;
+        d.dot(d).sqrt() <= C_EPS
+    };
+    let Some(k) = before.iter().rposition(|q| q.kind != MoveKind::Rapid) else { return false };
+    let Some(retract) = before[k + 1..].first() else { return false };
+    let c_cut = centre(before[k].to, before[k].axis);
+    retract.arc.is_none()
+        && near(centre(m.to, m.axis), c_cut)
+        && near(centre(retract.from, retract.axis), c_cut)
+        && near(centre(retract.to, retract.axis), centre(m.from, m.axis))
 }
 
 /// [`first_solid_plunge`] against a round bar (#16): the same axial
@@ -162,12 +208,12 @@ pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(P
 /// whose tip stays outside the bar's radius falls through air.
 #[must_use]
 pub fn first_bar_plunge(t: &Toolpath, tool_r: f64, bar: &Bar) -> Option<(Point2, f64)> {
-    first_plunge_where(t, tool_r, |m| bar.holds(m.to))
+    first_plunge_where(t, tool_r, |_, m| bar.holds(m.to))
 }
 
 /// The plunge reading the box and the bar share: `in_solid` says
 /// whether a move's tip lands in stock.
-fn first_plunge_where(t: &Toolpath, tool_r: f64, in_solid: impl Fn(&Move) -> bool) -> Option<(Point2, f64)> {
+fn first_plunge_where(t: &Toolpath, tool_r: f64, in_solid: impl Fn(usize, &Move) -> bool) -> Option<(Point2, f64)> {
     t.moves.iter().enumerate().find_map(|(i, m)| {
         let xy = Point2::new(m.to.x, m.to.y);
         let hit = match m.axis {
@@ -179,14 +225,14 @@ fn first_plunge_where(t: &Toolpath, tool_r: f64, in_solid: impl Fn(&Move) -> boo
                 let exact = (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS && m.to.z < m.from.z - Z_EPS;
                 let coned = m.arc.is_none() && posed_axial(m, Point3::new(0.0, 0.0, 1.0));
                 let axial = m.kind != MoveKind::Rapid && (exact || coned);
-                axial && in_solid(m) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r)
+                axial && in_solid(i, m) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r)
             }
             Some(ax) => {
                 let a = Point3::new(ax[0], ax[1], ax[2]);
                 m.kind != MoveKind::Rapid
                     && m.arc.is_none()
                     && posed_axial(m, a)
-                    && in_solid(m)
+                    && in_solid(i, m)
                     && !cleared_along(&t.moves[..i], m.to, a, tool_r)
             }
         };
@@ -261,7 +307,12 @@ fn across(a: Point3) -> Option<(Point3, Point3)> {
 /// the first plunge into solid refuses the operation by name
 /// ([`CENTER_CUT_REFUSAL`]), `site` naming the motion.
 pub fn audit(t: &Toolpath, center_cutting: bool, tool_r: f64, solid: &Solid, site: &str) -> Result<(), GenError> {
-    match first_solid_plunge(t, tool_r, solid).filter(|_| !center_cutting) {
+    audit_as(t, center_cutting, tool_r, solid, false, site)
+}
+
+/// [`audit`] with the tool's shape said ([`first_solid_plunge_as`]).
+pub fn audit_as(t: &Toolpath, center_cutting: bool, tool_r: f64, solid: &Solid, ball: bool, site: &str) -> Result<(), GenError> {
+    match first_solid_plunge_as(t, tool_r, solid, ball).filter(|_| !center_cutting) {
         None => Ok(()),
         Some((xy, z)) => Err(refusal(site, xy, z)),
     }

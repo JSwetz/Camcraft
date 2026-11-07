@@ -109,6 +109,7 @@ pub use params::{
 };
 pub use center_cut::guard as center_cut_guard;
 pub use center_cut::guard_as as center_cut_guard_as;
+pub use center_cut::guard_shaped as center_cut_guard_shaped;
 pub use deburr::{deburr, DeburrParams};
 pub use flat::flat;
 pub use geodesic::geodesic;

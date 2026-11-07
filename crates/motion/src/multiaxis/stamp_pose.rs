@@ -35,7 +35,7 @@ use crate::machining2d::GenError;
 
 use super::retip::UP;
 use super::stamp::Station;
-use super::stamp_link::{flank_clear, ruled_sign, SIN_MIN};
+use super::stamp_link::{flank_clear, ruled_sign, turn_deg, LINK_TURN_DEG, SIN_MIN};
 use super::tilt::{command_axis, AxisControl};
 
 /// The facet list, its AABB shells, and the whole shell's box (the
@@ -113,6 +113,8 @@ pub(super) fn pose_law(
             best = Some((d2, q, fi));
         }
     }
+    // In air the swarf hold does not speak: a posed feed in air is read
+    // by the verifier's posed contact law as a cut standing off the part.
     let Some((d2, q, fi)) = best else {
         return Ok((None, up, false));
     };
@@ -128,7 +130,7 @@ pub(super) fn pose_law(
     // there is no flank to lean off, and the honest pose for a floor
     // is the one it always had (upright).
     if 1.0 - n.z <= 1e-12 {
-        return Ok((None, up, false));
+        return Ok((hold(s, mesh, r, ruling, held, None), up, false));
     }
     // The swarf law (M5.1 D): on a facet the ruling analysis marked
     // ruled, the tool lies WITH the blade - the pass direction
@@ -146,8 +148,9 @@ pub(super) fn pose_law(
         let d3 = Point3::new(rl.dir.x - n.x * dn, rl.dir.y - n.y * dn, rl.dir.z - n.z * dn);
         let l = tl(d3);
         if l > SIN_MIN && dn.abs() <= SIN_MIN {
-            let a = Point3::new(d3.x / l, d3.y / l, d3.z / l);
-            return Ok((Some(ruled_sign(a, held, last_lean)), n, false));
+            let a = ruled_sign(Point3::new(d3.x / l, d3.y / l, d3.z / l), held, last_lean);
+            let a = if a[2] < -1e-9 { level_ruling(s, mesh, r, rl, fi, held, last_lean).unwrap_or(a) } else { a };
+            return Ok((Some(a), n, false));
         }
     }
     // The feed direction: this station's travel; a vertical entry has
@@ -179,8 +182,77 @@ pub(super) fn pose_law(
     let a = [a.x, a.y, a.z];
     match ruling {
         None => Ok((Some(a), n, false)),
-        Some(rl) => swarf_fallback(s, mesh, r, rl, n, a, held, last_lean).map(|b| (Some(b), n, false)),
+        Some(rl) => swarf_fallback(s, mesh, r, rl, n, a, held, last_lean)
+            .map(|b| (hold(s, mesh, r, ruling, held, Some(b)).or(Some(b)), n, false)),
     }
+}
+
+/// The rim dip's cure (#17): a ruled contact read off a facet's EDGE
+/// (the ball at a rim column, its contact normal leaning along the
+/// ruling by up to the 10-degree band) projects the ruling into a
+/// plane the facet does not lie in, and the pose dips under level by
+/// as much. The facet's own plane holds the ruling exactly; where that
+/// reading is level or above and its flank is proved in air
+/// ([`flank_clear`]), it is the pose. None leaves the contact's
+/// projection standing (still inside the band the laws allow).
+#[allow(clippy::too_many_arguments)] // one station's flat read
+fn level_ruling(
+    s: &Station,
+    mesh: &Mesh,
+    r: f64,
+    rl: Ruled,
+    fi: usize,
+    held: [f64; 3],
+    last_lean: Option<[f64; 3]>,
+) -> Option<[f64; 3]> {
+    let f = mesh.facets.get(fi)?;
+    let fn_ = (f.b - f.a).cross(f.c - f.a);
+    let ln = tl(fn_);
+    if !(ln.is_finite() && ln > 1e-12) {
+        return None;
+    }
+    let m = Point3::new(fn_.x / ln, fn_.y / ln, fn_.z / ln);
+    let dm = rl.dir.dot(m);
+    let d3 = Point3::new(rl.dir.x - m.x * dm, rl.dir.y - m.y * dm, rl.dir.z - m.z * dm);
+    let l = tl(d3);
+    if !(l.is_finite() && l > SIN_MIN) {
+        return None;
+    }
+    let a = ruled_sign(Point3::new(d3.x / l, d3.y / l, d3.z / l), held, last_lean);
+    (a[2] >= -1e-9 && flank_clear(s.to, a, r, rl.tol, mesh.facets, mesh.boxes, &mesh.bounds)).then_some(a)
+}
+
+/// The swarf hold (#17): wherever the ball is in contact but the ruling
+/// does not speak (a level floor, a rim or cap edge under the ball -
+/// every contact station the lean law answers), a pose that would turn past
+/// the link threshold off the pose held coming in keeps the held pose
+/// instead, when that pose is a lean (not upright), not under level,
+/// and its flank is proved in air at this station ([`flank_clear`]).
+/// The ball cuts the same surface under any pose about its centre, so
+/// the contact is unchanged; only the flank could differ, and it is
+/// proved. What it saves is the rim station's turn at a raster's ends
+/// and the cap rings' turns off the lying pose. Never in air: a posed
+/// feed off the part is read by the verifier's posed contact law as a
+/// cut standing off its surface (the app blade's 14.8 mm Envelope rest
+/// when the hold rode the exit rise). None where the held
+/// pose does not qualify, or the law's own pose is within the
+/// threshold: the law's pose stands.
+fn hold(
+    s: &Station,
+    mesh: &Mesh,
+    r: f64,
+    ruling: Option<Ruled>,
+    held: [f64; 3],
+    law: Option<[f64; 3]>,
+) -> Option<[f64; 3]> {
+    let rl = ruling?;
+    if held[2] >= 1.0 - 1e-12 || held[2] < -1e-6 {
+        return None;
+    }
+    if turn_deg(held, law.unwrap_or(UP)) <= LINK_TURN_DEG {
+        return None;
+    }
+    flank_clear(s.to, held, r, rl.tol, mesh.facets, mesh.boxes, &mesh.bounds).then_some(held)
 }
 
 /// The swarf kinds' second opinion on a lean-law pose (module

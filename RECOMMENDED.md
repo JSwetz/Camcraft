@@ -11805,3 +11805,91 @@ refining across the edge arcs). Dropped: the belt's gap law (a slack in the
 facet test - forgives a sunk centre on a convex fold, the corrugated belt's
 0.0317 mm bite); vertex contacts (the vertex gaps are points the readings no
 longer see; owed only if a fixture shows them).
+
+## #17 (M11.3): the swarf pose-law leftovers - link count, re-entry audit, rim dip: five decisions (2026-11-07, Prime Directive)
+
+Readings on the motion suite's debug blade (`swarf_pose_continuity`, the
+16 x 6 capped tube; the "172" of the M13.7 entry was an earlier landing's
+count, 153 / 234 after the normal-retract fix on the app fixture):
+
+| run | air links before | after |
+|---|---|---|
+| swarf, debug band | 68 | 34 |
+| ladder, debug band | 106 | 51 |
+| swarf, full band | 93 | 55 |
+| ladder, full band | 145 | 84 |
+
+Lowest stated pose: -7.3 deg (swarf) / -9.4 deg (ladder) under level before,
+level (-1e-17) after.
+
+(1) **The curvature fit reads one sheet at a time** (`curv::CREASE_COS`, a
+neighbour whose normal turns more than 60 deg off the facet's is across a
+crease and is skipped). The first cause found: the fit's neighbourhood is
+1.5 x 4 mean edges (27 mm on the blade) and its 64-neighbour cap fills in
+grid order from -x first, so every facet on the -x half of the tube took
+the -x cap's normals (90 deg round the rim) as curvature along the ruling,
+read unruled, and lost the swarf pose to the lean law mid-line: a 75 deg and
+a 105 deg air link on every raster line. Now all 192 tube facets read ruled.
+Alone it moved the count nowhere (68 -> 71: the mid-line pair became a
+line-start pair at the rim); with (3) and (4) together 34 (the hold in air took it to 23 but was dropped, see (3)).
+Dropped: nearest-first neighbour selection (would make both ends unruled
+near the caps symmetrically - still the crease read as curvature); a
+narrower radius (changes every flow fixture's field for no law).
+
+(2) **`ruling::analyze` keeps one verdict per facet** - a facet the fit
+could not answer pushed nothing, shifting every later facet's `ruled` flag
+and indexing the direction scan past the end (a panic the crease fix
+exposed: the flat caps' fits went singular once their tube neighbours were
+excluded). It now pushes `false` ("no claim").
+
+(3) **The swarf hold** (`stamp_pose::hold`): wherever the ball is in
+contact but the ruling does not speak (a level floor, a rim or cap edge -
+the stations the lean law answers), a pose that would turn past
+`LINK_TURN_DEG` off the held one keeps the held pose, if that pose is a
+lean, not under level, and its flank is proved in air (`flank_clear`, the
+stamp's own proof). The ball cuts the same surface under any pose about its
+centre; only the flank could differ, and it is proved. This removes the rim
+station's turn at the raster ends and most cap-ring turns. NOT in air: a
+first draft also held the pose on the exit rise (a Feed off the part) and
+reached 23 links, but the app blade's verifier read that posed feed in air
+as an Envelope rest of 14.8 mm (`swarf_generates_blade_lying_axes_and_
+verifies_clean`, `advanced_swarf_adds_the_coarse_rungs`); a feed in air
+keeps the modal upright, so each raster end still links once on its exit
+rise. Owed: let the exit rise be a Rapid (or let the posed contact law
+excuse a feed that leaves contact along the normal) and the raster-end link
+goes too. This is the "lead-out blend" option of the owed line in its
+simplest form - no turn at all; dropped: a retract-height lift (it shortens
+each link but cuts none), and a blended pose ramp over the line's last
+stations (a turn on a cut, which the guard exists to refuse). Not proved
+here: the heavy pivot5d envelope scan (release lane) - the hold's flank
+proof is the same proof every swarf station already carries, but the scan
+is the judge of record and must run at the next cut.
+
+(4) **The rim dip is fixed, not bounded** (`stamp_pose::level_ruling`): a
+ruled contact read off a facet's EDGE projected the ruling into the contact
+normal's plane, which leans along the ruling by up to sin 10 deg, so the
+pose dipped by as much. The facet's own plane holds the ruling exactly;
+where that reading is level or above and its flank clears, it is the pose.
+The pinned bound in `swarf_pose_continuity` tightens from -0.1737 to
+-1e-9 (level). This also lets the hold (3) qualify at the cap rings, where
+the dipped lying pose used to fail the hold's not-under-level test.
+
+(5) **The re-entry plunge audit reads the already-cut sphere for a ball
+tool** (`plunge_law::reenters_cut_sphere`, `first_solid_plunge_as` /
+`audit_as` with `ball`, wired through `center_cut::guard_shaped` and
+`plunge_solid::guard_posed` with `tool.kind == BallNose`). The owed line
+said the audit read a near-vertical re-entry "by tip column rather than by
+the already-cut sphere (a non-centre-cutting tool could be refused there)":
+the defect is the false refusal. A link's re-entry whose incoming pose
+lies within the core's 30 deg cone of the contact normal is axial, and its
+tip column was never cut down the NEW axis (the pose turned), so the column
+law convicts it - though the ball only retraces its own retract and ends on
+the centre the last cut finished on. Acquitted only when all of: a posed
+Plunge; its end ball centre equals the last cutting move's end centre; the
+first rapid after that cut starts at that centre and ends where the plunge
+starts (both within 1e-6). Every other plunge, and every non-ball tool,
+keeps the tip-column reading verbatim (`swarf_reentry` pins both arms and
+two misses). The retract rapid itself stays the verifier's to judge (the
+posed rapid solid law) - the audit acquits only what that rapid already
+answers for. Dropped: acquitting any plunge ending inside an earlier ball's
+sphere (a plunge from elsewhere sweeps unretraced material on its way).

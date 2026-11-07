@@ -71,11 +71,14 @@ pub(super) fn face_air_entry(
 /// twins): the posed path is judged along the tool's own axis
 /// (`plunge_law::posed_axial`), retried with the finish's sloped
 /// entries, else refused by name. A centre-cutting tool reads no stock
-/// and gets `run`'s path untouched.
+/// and gets `run`'s path untouched. `ball` says the tool is a ball nose:
+/// a posed link's re-entry into the sphere the last cut emptied is then
+/// no plunge (`plunge_law::reenters_cut_sphere`, #17).
 #[allow(clippy::too_many_arguments)] // the arm's flat read of the law's inputs
 pub(super) fn guard_posed<F>(
     kind: &str,
     center_cutting: bool,
+    ball: bool,
     stock_facets: Option<&[Triangle]>,
     material: &Material,
     frame: Option<&crate::cl::TiltedFrame>,
@@ -90,7 +93,7 @@ where
     }
     let (top, footprint) = plunge_solid(stock_facets, material, frame);
     let solid = camcraft_motion::plunge_law::Solid { top, footprint: footprint.as_ref() };
-    camcraft_motion::finishing3d::center_cut_guard_as(kind, false, &solid, fp, run)
+    camcraft_motion::finishing3d::center_cut_guard_shaped(kind, false, &solid, ball, fp, run)
 }
 
 /// The same law, audit-only, for Rotary Offset (#16): solid is the
