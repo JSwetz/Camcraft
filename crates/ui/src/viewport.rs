@@ -690,11 +690,13 @@ impl View3D {
         let edge_bytes: Vec<u8> = edges.iter().flat_map(|i| i.to_le_bytes()).collect();
         let edge_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport3d-ebuf"),
-            size: edge_bytes.len() as u64,
+            size: (edge_bytes.len() as u64).max(4),
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&edge_buf, 0, &edge_bytes);
+        if !edge_bytes.is_empty() {
+            queue.write_buffer(&edge_buf, 0, &edge_bytes);
+        }
         self.vertex_buf = vertex_buf;
         self.index_buf = index_buf;
         self.index_count = idx.len() as u32;
@@ -839,9 +841,9 @@ impl View3D {
                 pass.set_pipeline(&self.pipeline);
                 pass.draw_indexed(0..self.model_index_count, 0, 0..1);
             }
-            pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_pipeline(&self.line_pipeline);
             if self.model_edge_count > 0 {
+                pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_pipeline(&self.line_pipeline);
                 pass.draw_indexed(0..self.model_edge_count, 0, 0..1);
             }
             let traced = stock.filter(|_| !wireframe);

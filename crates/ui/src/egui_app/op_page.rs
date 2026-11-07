@@ -3,8 +3,8 @@
 //! label | control header for Tool, Source and Setup; ONE coloured status
 //! banner that expands to the warning list on click; the section tab bar;
 //! the open tab's content in its own scroll; and a fixed action bar at
-//! the bottom, outside the scroll - Generate primary, Apply and Clear
-//! toolpath secondary, Delete operation apart and marked destructive.
+//! the bottom, outside the scroll - Generate primary, Apply, Clear
+//! toolpath and Close secondary, Delete operation apart and marked destructive.
 //! Every change still rides `state.pending` / the command methods; tab
 //! and banner state are view state, never commands.
 //!
@@ -28,7 +28,7 @@ use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_MACHINE, SEC_PASSES};
 use super::theme::Tokens;
 
 /// Room the action bar (and the line above it) keeps under the scroll.
-const BAR_RESERVE: f32 = 96.0;
+const BAR_RESERVE: f32 = 120.0;
 
 /// The empty state of the properties pane when nothing is targeted and
 /// nothing is selected (M9.1): the kind comes from the button you
@@ -59,17 +59,15 @@ pub(super) fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &T
     // also what bounds the page's width (the dock body may scroll
     // sideways), so the bar takes the same width under it.
     let max_h = (ui.available_height() - BAR_RESERVE).max(80.0);
-    let mut close_editor = false;
     let out = ScrollArea::vertical().id_salt("op_page_scroll").max_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
         ui.horizontal(|ui| {
-            close_editor = ui.small_button("Close").clicked();
+            ui.heading(format!("Operation: {label}"));
             if exists && ui.small_button("Rename").clicked() {
                 state.rename_draft = Some((target.clone(), label.clone()));
             }
-            ui.heading(format!("Operation: {label}"));
         });
-        if close_editor {
-            return;
+        if let Some(op) = &live {
+            ui.label(format!("Type: {}", op.params.kind()));
         }
         let mut new_label = None;
         let mut cancel_rename = false;
@@ -132,10 +130,6 @@ pub(super) fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &T
             ui.colored_label(text_inks(ui, &state.world).warn, note);
         }
     });
-    if close_editor {
-        state.close_operation_editor(&target);
-        return;
-    }
     ui.set_max_width((out.inner_rect.width() - 12.0).max(120.0));
     actions(ui, state, &target, live.as_ref(), exists, pal);
 }
@@ -322,6 +316,13 @@ fn actions(ui: &mut Ui, state: &mut State, target: &str, live: Option<&Operation
             why_not: Some("Nothing generated yet - there is no toolpath to clear"),
         },
         Action {
+            label: "Close",
+            kind: ActionKind::Secondary,
+            enabled: true,
+            hint: Some("Close this editor without deleting the operation"),
+            why_not: None,
+        },
+        Action {
             label: "Delete operation",
             kind: ActionKind::Destructive,
             enabled: exists,
@@ -334,7 +335,8 @@ fn actions(ui: &mut Ui, state: &mut State, target: &str, live: Option<&Operation
         Some(0) => state.generate_operation(target),
         Some(1) => state.apply_operation_params(target),
         Some(2) => state.pending.push_back(CommandKind::ClearToolpath(target.to_owned())),
-        Some(3) => state.pending.push_back(CommandKind::DeleteOperation(target.to_owned())),
+        Some(3) => state.close_operation_editor(target),
+        Some(4) => state.pending.push_back(CommandKind::DeleteOperation(target.to_owned())),
         _ => {}
     }
 }

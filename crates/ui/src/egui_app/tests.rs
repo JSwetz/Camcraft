@@ -56,6 +56,25 @@ use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::viewcube;
 use super::{theme, world};
 
+#[test]
+fn empty_egui_meshes_are_filtered_before_gpu_submission() {
+    let empty = egui::ClippedPrimitive {
+        clip_rect: egui::Rect::EVERYTHING,
+        primitive: egui::epaint::Primitive::Mesh(egui::Mesh::default()),
+    };
+    assert!(!super::shell::renderable_paint_job(&empty));
+    let mut mesh = egui::Mesh::default();
+    mesh.add_colored_rect(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(10.0, 10.0)),
+        egui::Color32::WHITE,
+    );
+    let nonempty = egui::ClippedPrimitive {
+        clip_rect: egui::Rect::EVERYTHING,
+        primitive: egui::epaint::Primitive::Mesh(mesh),
+    };
+    assert!(super::shell::renderable_paint_job(&nonempty));
+}
+
 mod face_origin;
 mod layout;
 
@@ -4074,6 +4093,29 @@ fn sim_readout_names_the_op_and_the_verb() {
     assert!(none.starts_with("(none) · END · "), "degenerate: {none}");
 }
 
+#[test]
+fn playback_follows_reordered_operations_instead_of_name_order() {
+    let mut shell = ShellUi::seeded();
+    let original = model::find_by_name(&shell.state.world, "Contour1").expect("seed operation");
+    let op = model::operation_of(&shell.state.world, &original).expect("operation settings");
+    shell.state.pending.push_back(CommandKind::CreateOperation {
+        name: "AContour".into(), tool: op.tool,
+        src: op.src, params: op.params,
+    });
+    shell.state.drain_actions();
+    shell.state.pending.push_back(CommandKind::GenerateOperation("AContour".into()));
+    shell.state.drain_actions();
+    shell.state.pending.push_back(CommandKind::ReorderOperation {
+        name: "Contour1".into(), target: "AContour".into(), after: false,
+    });
+    shell.state.drain_actions();
+    assert_eq!(camcraft_app::setup::operation_order(&shell.state.world)
+        .into_iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        ["Contour1", "AContour"]);
+    let script = super::shell::sim_script(&shell.state);
+    assert_eq!(script.ops, ["Contour1", "AContour"]);
+}
+
 // ------------------------------------------- M1.7d: G-code viewer
 
 #[test]
@@ -4542,6 +4584,51 @@ fn close_operation_editor_clears_the_page_without_deleting_the_operation() {
 }
 
 #[test]
+fn close_property_editors_keep_stock_offsets_models_and_tools() {
+    let mut harness = shell_harness();
+    let targets = [
+        UiTarget::Stock,
+        UiTarget::WcsSlot(0),
+        UiTarget::Model("Block".into()),
+        UiTarget::Tool("EM-0600-4FL".into()),
+    ];
+    for target in targets {
+        harness.state_mut().state.ui_target = target;
+        harness.run_steps(2);
+        harness.get_by_label("Close").click();
+        harness.run_steps(2);
+        let state = &harness.state().state;
+        assert_eq!(state.pane_target(), UiTarget::None);
+        assert!(state.selected_operation().is_none());
+        for name in ["Stock", "G54", "Block", "EM-0600-4FL", "Contour1"] {
+            assert!(model::find_by_name(&state.world, name).is_some(), "Close removed {name}");
+        }
+    }
+}
+
+#[test]
+fn close_tool_editor_window_keeps_the_tool() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.pending.push_back(CommandKind::Select(None));
+    harness.state_mut().state.ui_target = UiTarget::None;
+    crate::actions::open_tool_editor(&mut harness.state_mut().state, "EM-0600-4FL");
+    harness.run_steps(2);
+    assert!(harness.state().state.tool_editor.is_some());
+    let original_diameter = model::find_by_name(&harness.state().state.world, "EM-0600-4FL")
+        .and_then(|entity| model::tool_of(&harness.state().state.world, &entity))
+        .expect("seed tool").diameter;
+    harness.state_mut().state.tool_ui.diameter = original_diameter + 3.0;
+    harness.get_by_label("Close").click();
+    harness.run_steps(2);
+    let state = &harness.state().state;
+    assert!(state.tool_editor.is_none());
+    assert!(model::find_by_name(&state.world, "EM-0600-4FL").is_some());
+    crate::actions::open_tool_editor(&mut harness.state_mut().state, "EM-0600-4FL");
+    assert_eq!(harness.state().state.tool_ui.diameter, original_diameter,
+        "reopening discards the uncommitted draft");
+}
+
+#[test]
 fn operations_heading_menu_pastes_the_copied_operation() {
     let mut harness = shell_harness();
     harness.state_mut().state.copy_operation("Contour1");
@@ -4564,6 +4651,42 @@ fn operations_heading_menu_pastes_the_copied_operation() {
     button_at(&mut harness, egui::PointerButton::Primary, paste, false);
     harness.run_steps(2);
     assert!(model::find_by_name(&harness.state().state.world, "Contour1 Copy").is_some());
+}
+
+#[test]
+fn operation_type_menu_requires_confirmation() {
+    let mut harness = shell_harness();
+    harness.run_steps(2);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let row = leaves.iter().position(|leaf| matches!(leaf,
+        panes::Leaf::Op(name) if name == "Contour1"))
+        .expect("operation row");
+    let row_height = theme::current().row_height;
+    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    set_pos(&mut harness, operation);
+    button_at(&mut harness, egui::PointerButton::Secondary, operation, true);
+    button_at(&mut harness, egui::PointerButton::Secondary, operation, false);
+    assert_eq!(harness.state().state.tree_menu,
+        Some(TreeMenuTarget::Operation("Contour1".into())));
+
+    // Operation, Rename, Copy, Paste, Clear, Delete, section header, Face.
+    let face = egui::pos2(90.0,
+        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 7.5 * row_height);
+    set_pos(&mut harness, face);
+    button_at(&mut harness, egui::PointerButton::Primary, face, true);
+    button_at(&mut harness, egui::PointerButton::Primary, face, false);
+    assert_eq!(harness.state().state.retype_confirm,
+        Some(("Contour1".into(), camcraft_app::operation::OpType::Face as usize)));
+    let entity = model::find_by_name(&harness.state().state.world, "Contour1").unwrap();
+    assert_eq!(model::operation_of(&harness.state().state.world, &entity).unwrap().params.kind(),
+        camcraft_app::operation::OpType::Contour);
+
+    button_at(&mut harness, egui::PointerButton::Primary, face, true);
+    button_at(&mut harness, egui::PointerButton::Primary, face, false);
+    harness.run_steps(2);
+    let entity = model::find_by_name(&harness.state().state.world, "Contour1").unwrap();
+    assert_eq!(model::operation_of(&harness.state().state.world, &entity).unwrap().params.kind(),
+        camcraft_app::operation::OpType::Face);
 }
 
 #[test]

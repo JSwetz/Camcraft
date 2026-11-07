@@ -451,7 +451,11 @@ impl Shell {
         drain_textures(renderer, device, queue, &mut full_output);
         winit_state.handle_platform_output(window, full_output.platform_output);
 
-        let clipped = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let clipped: Vec<_> = egui_ctx
+            .tessellate(full_output.shapes, full_output.pixels_per_point)
+            .into_iter()
+            .filter(renderable_paint_job)
+            .collect();
 
         let st = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(st)
@@ -630,6 +634,16 @@ pub(crate) fn shell_layout(
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
 /// renderer. 0.36's TexturesDelta asserts on drop unless drained - consume,
 /// don't peek (the S1 panic this replaced was exactly that).
+/// egui-wgpu 0.36 binds one buffer slice per mesh, including meshes with
+/// no vertices or indices. wgpu 30 rejects those zero-length slices.
+pub(crate) fn renderable_paint_job(job: &egui::ClippedPrimitive) -> bool {
+    match &job.primitive {
+        egui::epaint::Primitive::Mesh(mesh) =>
+            !mesh.vertices.is_empty() && !mesh.indices.is_empty(),
+        egui::epaint::Primitive::Callback(_) => true,
+    }
+}
+
 fn drain_textures(
     renderer: &mut Renderer,
     device: &wgpu::Device,
@@ -1260,11 +1274,10 @@ pub(crate) fn cached_script(state: &mut State) -> std::sync::Arc<camcraft_app::s
 /// display, not suppression; the law stands on `State::has_toolpaths`),
 /// so the transport clock and the posted program count the same moves.
 pub(crate) fn sim_script(state: &State) -> camcraft_app::sim::Script {
-    use camcraft_app::{model, posting, sim};
+    use camcraft_app::{model, posting, setup, sim};
     let tr = sim::Traverse::from_machine(&posting::machine_value(&state.world));
-    let paths: Vec<(String, camcraft_app::cl::Toolpath)> = model::named_entities(&state.world)
+    let paths: Vec<(String, camcraft_app::cl::Toolpath)> = setup::operation_order(&state.world)
         .into_iter()
-        .filter(|(_, e)| model::is_operation(&state.world, e))
         .filter_map(|(n, e)| model::toolpath_of(&state.world, &e).map(|tp| (n, tp.path)))
         .collect();
     sim::script(paths.iter().map(|(n, t)| (n.as_str(), t)), &tr)

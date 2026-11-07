@@ -1658,6 +1658,7 @@ pub fn browser(
             _ => None,
         };
         state.tree_menu = target.filter(|target| state.tree_menu.as_ref() != Some(target));
+        state.retype_confirm = None;
     }
     tree_menu(ui, state, pal, rect, &leaves);
     ui.allocate_rect(rect, Sense::hover());
@@ -1677,7 +1678,7 @@ const MENU_PASTE: usize = usize::MAX - 4;
 /// header fronts the axial Drill alone, every other row of it dark),
 /// and the current kind's section staying listed even when the
 /// machine says no, so a mid-edit machine swap never erases the
-/// operation's own name. A row's click queues
+/// operation's own name. A kind row needs a second click before it queues
 /// `ChangeOperationKind` - one undo unit, the numbers carried by the
 /// one retype law below; a dark row is queued too, because the refusal
 /// belongs at the command door (`family_gate`), where it names itself
@@ -1696,6 +1697,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     });
     let Some(ix) = row_ix else {
         state.tree_menu = None;
+        state.retype_confirm = None;
         return;
     };
     let name = match &target {
@@ -1705,6 +1707,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                 .is_none()
             {
                 state.tree_menu = None;
+                state.retype_confirm = None;
                 return;
             }
             Some(name.as_str())
@@ -1791,8 +1794,13 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                 {
                     p.rect_filled(r, 0.0, pal.field_hover);
                 }
+                let armed = name.is_some_and(|name| state.retype_confirm.as_ref()
+                    .is_some_and(|(pending_name, pending_kind)|
+                        pending_name == name && *item == Some(*pending_kind)));
                 let text = if is_current {
                     format!("{label} (current)")
+                } else if armed {
+                    format!("Confirm change to {label}")
                 } else {
                     (*label).to_owned()
                 };
@@ -1832,12 +1840,19 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
             } else if i == MENU_DELETE {
                 state.pending.push_back(CommandKind::DeleteOperation(name.to_owned()));
             } else if Some(i) != here {
-                state.pending.push_back(CommandKind::ChangeOperationKind {
-                    name: name.to_owned(), kind: i,
-                });
+                let choice = (name.to_owned(), i);
+                if state.retype_confirm.as_ref() == Some(&choice) {
+                    state.pending.push_back(CommandKind::ChangeOperationKind {
+                        name: name.to_owned(), kind: i,
+                    });
+                } else {
+                    state.retype_confirm = Some(choice);
+                    return;
+                }
             }
         }
         state.tree_menu = None;
+        state.retype_confirm = None;
     } else if ui.input(|i| {
         i.pointer.button_pressed(egui::PointerButton::Primary)
             && i.pointer.hover_pos().is_none_or(|pos| !panel.contains(pos))
@@ -1846,6 +1861,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
         // row is the menu's - it never stacks and never stalks a
         // document the user has moved on from.
         state.tree_menu = None;
+        state.retype_confirm = None;
     }
 }
 

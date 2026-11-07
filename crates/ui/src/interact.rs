@@ -910,7 +910,7 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
     // M13.4: the move kinds wear the viewer's colour-vision palette
     // (Off = the three consts above, unchanged).
     let pal = crate::egui_app::colorvision::palette_of(&state.world);
-    for (name, entity) in model::named_entities(&state.world) {
+    for (name, entity) in camcraft_app::setup::operation_order(&state.world) {
         // Browser-eye hidden: the cache still exists and still posts, it
         // just does not draw (display state, never a geometry change).
         if state.hidden_paths.contains(&name) {

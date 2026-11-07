@@ -1073,6 +1073,8 @@ pub struct State {
     /// draw retires it on any choice, outside press, or a row whose
     /// operation is gone.
     pub tree_menu: Option<TreeMenuTarget>,
+    /// A type change chosen once in the operation menu; a second click confirms it.
+    pub retype_confirm: Option<(String, usize)>,
     /// Inline rename editor: stable key and current draft.
     pub rename_draft: Option<(String, String)>,
     /// Operation key being dragged in the browser; discarded on release.
@@ -1296,6 +1298,7 @@ impl State {
             panels_open: PanelsOpen { browser: true, properties: true },
             layout_request: None,
             tree_menu: None,
+            retype_confirm: None,
             rename_draft: None,
             dragging_op: None,
             pending: VecDeque::new(),
@@ -1958,19 +1961,26 @@ impl State {
         })
     }
 
-    /// Close the operation page without changing the document. Clear the
-    /// selection too, since pane_target otherwise reopens that operation.
-    pub(crate) fn close_operation_editor(&mut self, name: &str) {
+    /// Dismiss the current properties page without changing the document.
+    /// Clear selection so pane_target cannot reopen a selected operation.
+    pub(crate) fn close_property_editor(&mut self) {
         self.ui_target = UiTarget::None;
         self.pending.push_back(CommandKind::Select(None));
         self.op_ui.name.clear();
         self.op_synced = (String::new(), self.doc_version);
         self.boundary_pick = None;
         self.boundary_view.shown = false;
-        if self.rename_draft.as_ref().is_some_and(|(key, _)| key == name) {
-            self.rename_draft = None;
-        }
+        self.rename_draft = None;
+    }
+
+    pub(crate) fn close_operation_editor(&mut self, name: &str) {
+        self.close_property_editor();
         self.status = format!("closed operation {name}");
+    }
+
+    pub(crate) fn close_tool_editor_window(&mut self) {
+        self.tool_editor = None;
+        self.tool_synced = (String::new(), self.doc_version);
     }
 
     pub(crate) fn copy_operation(&mut self, name: &str) {

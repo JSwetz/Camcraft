@@ -114,8 +114,11 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         super::op_page::operation_page(ui, state, n.as_str(), pal);
         return;
     }
+    let has_close = matches!(&t, UiTarget::Tool(_) | UiTarget::Stock | UiTarget::WcsSlot(_) | UiTarget::Model(_));
+    let content_height = (ui.available_height() - if has_close { 40.0 } else { 0.0 }).max(80.0);
     ScrollArea::vertical()
         .auto_shrink([false, false])
+        .max_height(content_height)
         .show(ui, |ui| match t {
             UiTarget::None => super::op_page::no_operation_page(ui),
             UiTarget::Operation(_) => {}
@@ -148,6 +151,12 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 setup_error(ui, state);
             }
         });
+    if has_close {
+        ui.separator();
+        if ui.button("Close").clicked() {
+            state.close_property_editor();
+        }
+    }
 }
 
 fn setup_error(ui: &mut Ui, state: &State) {
@@ -1255,6 +1264,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
         "New tool".to_owned()
     };
     let mut open = true;
+    let mut close_clicked = false;
     Window::new(title)
         .id(Id::new("tool-editor"))
         .open(&mut open)
@@ -1475,9 +1485,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
             if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
                 ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
             }
+            close_clicked = ui.button("Close").clicked();
         });
-    if !open {
-        state.tool_editor = None;
+    if !open || close_clicked {
+        state.close_tool_editor_window();
     }
 }
 
