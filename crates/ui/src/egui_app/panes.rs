@@ -1263,9 +1263,24 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
 // ------------------------------------------------------------------ browser
 
 /// What a browser row's click means. Parallel to the painted Row list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BrowserSection {
+    Setup,
+    Models,
+    Tools,
+    Operations,
+}
+
+impl BrowserSection {
+    const fn index(self) -> usize {
+        self as usize
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Leaf {
     Section,
+    Parent(BrowserSection),
     /// The Setups page row (M3.2 A): one row over the document's whole
     /// setups list, like Tool rows - target-only, never arms Del.
     Setups,
@@ -1343,137 +1358,149 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let mut leaves = Vec::new();
     let t = state.pane_target();
 
-    push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    // As before, the manager appears only after the document has an
-    // explicit setup. Stock and WCS follow the active setup.
-    let active = camcraft_app::setup::active(&state.world);
-    if !camcraft_app::setup::names(&state.world).is_empty() {
+    let setup_open = state.browser_expanded[BrowserSection::Setup.index()];
+    push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Parent(setup_open), None, false, false, 0, Leaf::Parent(BrowserSection::Setup));
+    if setup_open {
+        // As before, the manager appears only after the document has an
+        // explicit setup. Stock and WCS follow the active setup.
+        let active = camcraft_app::setup::active(&state.world);
+        if !camcraft_app::setup::names(&state.world).is_empty() {
+            push_row(
+                &mut rows,
+                &mut leaves,
+                "Setups".to_owned(),
+                active.clone().unwrap_or_default(),
+                painted::Kind::Section,
+                Some(Icon::WorkOffset),
+                matches!(t, UiTarget::Setups),
+                false,
+                1,
+                Leaf::Setups,
+            );
+        }
+        let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
         push_row(
             &mut rows,
             &mut leaves,
-            "Setups".to_owned(),
-            active.clone().unwrap_or_default(),
-            painted::Kind::Section,
-            Some(Icon::WorkOffset),
-            matches!(t, UiTarget::Setups),
+            stock_name,
+            String::new(),
+            painted::Kind::Stock,
+            Some(Icon::Stock),
+            matches!(t, UiTarget::Stock),
             false,
             1,
-            Leaf::Setups,
+            Leaf::Stock,
         );
-    }
-    let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
-    push_row(
-        &mut rows,
-        &mut leaves,
-        stock_name,
-        String::new(),
-        painted::Kind::Stock,
-        Some(Icon::Stock),
-        matches!(t, UiTarget::Stock),
-        false,
-        1,
-        Leaf::Stock,
-    );
-    for (i, slot) in WCS_SLOTS.iter().enumerate() {
-        let placed =
-            camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
-        push_row(
-            &mut rows,
-            &mut leaves,
-            (*slot).to_owned(),
-            if placed { String::new() } else { "not placed".into() },
-            painted::Kind::Wcs,
-            Some(Icon::WorkOffset),
-            matches!(t, UiTarget::WcsSlot(j) if j == i),
-            false,
-            1,
-            Leaf::Wcs(i),
-        );
+        for (i, slot) in WCS_SLOTS.iter().enumerate() {
+            let placed =
+                camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
+            push_row(
+                &mut rows,
+                &mut leaves,
+                (*slot).to_owned(),
+                if placed { String::new() } else { "not placed".into() },
+                painted::Kind::Wcs,
+                Some(Icon::WorkOffset),
+                matches!(t, UiTarget::WcsSlot(j) if j == i),
+                false,
+                1,
+                Leaf::Wcs(i),
+            );
+        }
     }
 
-    push_row(&mut rows, &mut leaves, "Models".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let entities = model::model_entities(&state.world);
-    if entities.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no models yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
-    }
-    for (name, entity) in entities {
-        let selected = model::is_selected(&state.world, &entity);
-        let hidden = state.hidden_models.contains(&name);
-        let (suffix, kind, icon) =
-            model_row_marks(model::is_fixture(&state.world, &entity), hidden);
-        push_row(
-            &mut rows,
-            &mut leaves,
-            name.clone(),
-            suffix,
-            kind,
-            Some(icon),
-            matches!(&t, UiTarget::Model(n) if *n == name) || selected,
-            hidden,
-            1,
-            Leaf::Model(name),
-        );
-    }
-
-    push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let tools: Vec<(String, camcraft_app::tools::Tool)> = model::named_entities(&state.world)
-        .into_iter()
-        .filter(|(_, e)| model::is_tool(&state.world, e))
-        .filter_map(|(name, e)| model::tool_of(&state.world, &e).map(|t| (name, t)))
-        .collect();
-    if tools.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no tools yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
-    }
-    for (name, tool) in tools {
-        push_row(
-            &mut rows,
-            &mut leaves,
-            name.clone(),
-            format!("Ø{} {}", tool.diameter, kind_name(tool.kind)),
-            painted::Kind::Tool,
-            Some(Icon::Tools),
-            matches!(&t, UiTarget::Tool(n) if *n == name),
-            false,
-            1,
-            Leaf::Tool(name),
-        );
+    let models_open = state.browser_expanded[BrowserSection::Models.index()];
+    push_row(&mut rows, &mut leaves, "Models".into(), String::new(), painted::Kind::Parent(models_open), None, false, false, 0, Leaf::Parent(BrowserSection::Models));
+    if models_open {
+        let entities = model::model_entities(&state.world);
+        if entities.is_empty() {
+            push_row(&mut rows, &mut leaves, "(no models yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+        }
+        for (name, entity) in entities {
+            let selected = model::is_selected(&state.world, &entity);
+            let hidden = state.hidden_models.contains(&name);
+            let (suffix, kind, icon) =
+                model_row_marks(model::is_fixture(&state.world, &entity), hidden);
+            push_row(
+                &mut rows,
+                &mut leaves,
+                name.clone(),
+                suffix,
+                kind,
+                Some(icon),
+                matches!(&t, UiTarget::Model(n) if *n == name) || selected,
+                hidden,
+                1,
+                Leaf::Model(name),
+            );
+        }
     }
 
-    push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let ordered = camcraft_app::setup::operation_order(&state.world);
-    if ordered.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+    let tools_open = state.browser_expanded[BrowserSection::Tools.index()];
+    push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Parent(tools_open), None, false, false, 0, Leaf::Parent(BrowserSection::Tools));
+    if tools_open {
+        let tools: Vec<(String, camcraft_app::tools::Tool)> = model::named_entities(&state.world)
+            .into_iter()
+            .filter(|(_, e)| model::is_tool(&state.world, e))
+            .filter_map(|(name, e)| model::tool_of(&state.world, &e).map(|t| (name, t)))
+            .collect();
+        if tools.is_empty() {
+            push_row(&mut rows, &mut leaves, "(no tools yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+        }
+        for (name, tool) in tools {
+            push_row(
+                &mut rows,
+                &mut leaves,
+                name.clone(),
+                format!("Ø{} {}", tool.diameter, kind_name(tool.kind)),
+                painted::Kind::Tool,
+                Some(Icon::Tools),
+                matches!(&t, UiTarget::Tool(n) if *n == name),
+                false,
+                1,
+                Leaf::Tool(name),
+            );
+        }
     }
-    for (name, entity) in ordered {
-        let (kind, icon) = model::operation_of(&state.world, &entity)
-            .map(|op| {
-                let k = op.params.kind();
-                (k.to_string(), op_icon(k))
-            })
-            .unwrap_or_else(|| (String::new(), Icon::Generate));
-        let tag = match operation::status_of(&state.world, &entity) {
-            operation::OpStatus::Never => "never",
-            operation::OpStatus::Ok => "ok",
-            operation::OpStatus::Stale => "STALE",
-        };
-        let warns = model::toolpath_of(&state.world, &entity).map_or(0, |tp| tp.warnings.len());
-        let warn_text = match warns {
-            0 => String::new(),
-            1 => "  1 warning".to_owned(),
-            n => format!("  {n} warnings"),
-        };
-        let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
-            Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
-            None => format!("{kind}  {tag}{warn_text}"),
-        };
-        let hidden = state.hidden_paths.contains(&name);
-        push_row(
-            &mut rows, &mut leaves,
-            model::operation_label(&state.world, &name, &entity), suffix,
-            painted::Kind::Op, Some(icon),
-            matches!(&t, UiTarget::Operation(n) if *n == name),
-            hidden, 1, Leaf::Op(name),
-        );
+
+    let operations_open = state.browser_expanded[BrowserSection::Operations.index()];
+    push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Parent(operations_open), None, false, false, 0, Leaf::Parent(BrowserSection::Operations));
+    if operations_open {
+        let ordered = camcraft_app::setup::operation_order(&state.world);
+        if ordered.is_empty() {
+            push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+        }
+        for (name, entity) in ordered {
+            let (kind, icon) = model::operation_of(&state.world, &entity)
+                .map(|op| {
+                    let k = op.params.kind();
+                    (k.to_string(), op_icon(k))
+                })
+                .unwrap_or_else(|| (String::new(), Icon::Generate));
+            let tag = match operation::status_of(&state.world, &entity) {
+                operation::OpStatus::Never => "never",
+                operation::OpStatus::Ok => "ok",
+                operation::OpStatus::Stale => "STALE",
+            };
+            let warns = model::toolpath_of(&state.world, &entity).map_or(0, |tp| tp.warnings.len());
+            let warn_text = match warns {
+                0 => String::new(),
+                1 => "  1 warning".to_owned(),
+                n => format!("  {n} warnings"),
+            };
+            let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
+                Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
+                None => format!("{kind}  {tag}{warn_text}"),
+            };
+            let hidden = state.hidden_paths.contains(&name);
+            push_row(
+                &mut rows, &mut leaves,
+                model::operation_label(&state.world, &name, &entity), suffix,
+                painted::Kind::Op, Some(icon),
+                matches!(&t, UiTarget::Operation(n) if *n == name),
+                hidden, 1, Leaf::Op(name),
+            );
+        }
     }
     (rows, leaves)
 }
@@ -1545,6 +1572,10 @@ pub fn browser(
     if let Some(ix) = hit.row {
         match leaves[ix].clone() {
             Leaf::Section => {}
+            Leaf::Parent(section) => {
+                let expanded = &mut state.browser_expanded[section.index()];
+                *expanded = !*expanded;
+            }
             // Target-only, like the Tool rows: browsing setups never
             // arms Del, and one page lists them all.
             Leaf::Setups => actions::target(state, UiTarget::Setups),

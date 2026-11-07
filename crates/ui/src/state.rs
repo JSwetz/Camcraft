@@ -979,6 +979,8 @@ pub struct State {
     /// Operations whose cached path stays undrawn (eye toggle per op).
     /// Same rule: the path still exists and posts.
     pub hidden_paths: Vec<String>,
+    /// Expanded state of Setup, Models, Tools, and Operations in the browser.
+    pub browser_expanded: [bool; 4],
 
     /// Show the dimmed world origin axes in the viewport. View state like
     /// the camera - not undoable, not saved - toggled from the Models panel;
@@ -1252,6 +1254,7 @@ impl State {
             op_tab: 0,
             hidden_models: Vec::new(),
             hidden_paths: Vec::new(),
+            browser_expanded: [true; 4],
             cam: Camera::default(),
             show_world_axes: true,
             show_all_paths: false,

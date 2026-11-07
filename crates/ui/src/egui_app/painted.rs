@@ -147,6 +147,8 @@ pub struct Row {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Section,
+    /// A browser parent; true points down, false points right.
+    Parent(bool),
     Model,
     /// A model wearing the fixture marker (M3.2 B): the vise row, not
     /// the part row - same hideability, different noun.
@@ -324,6 +326,14 @@ pub fn tree(
 fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Tokens) {
     let s = Stroke::new(1.0, pal.text_dim);
     match kind {
+        Kind::Parent(expanded) => {
+            let points = if expanded {
+                vec![c + Vec2::new(-4.0, -2.0), c + Vec2::new(4.0, -2.0), c + Vec2::new(0.0, 3.0)]
+            } else {
+                vec![c + Vec2::new(-2.0, -4.0), c + Vec2::new(3.0, 0.0), c + Vec2::new(-2.0, 4.0)]
+            };
+            shapes.push(Shape::convex_polygon(points, pal.text_dim, Stroke::NONE));
+        }
         Kind::Section => {
             // Open folder: a body with a back-tab.
             let body = Rect::from_min_size(c + Vec2::new(-5.0, -3.0), Vec2::new(10.0, 7.0));
