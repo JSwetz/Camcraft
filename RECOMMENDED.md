@@ -11893,3 +11893,39 @@ two misses). The retract rapid itself stays the verifier's to judge (the
 posed rapid solid law) - the audit acquits only what that rapid already
 answers for. Dropped: acquitting any plunge ending inside an earlier ball's
 sphere (a plunge from elsewhere sweeps unretraced material on its way).
+
+## #18 - M11.2 verdicts made final: oblique entries and Heidenhain vertical arcs stay chords: three decisions (2026-11-07)
+
+(1) **Heidenhain keeps vertical arcs as 1 um chord fans - final.** The
+brief recommended native XZ/YZ arcs; dropped for a hard reason. The
+post is the TNC's DIN/ISO mode (M3.3 B), not plain language, so the
+CC / C DR+/- spelling does not apply. The public TNC 620/640 DIN/ISO
+manuals say I/J are the absolute Cartesian circle centre in the
+working plane (not start-relative increments). An arc with axes off
+that plane (`G2 Z.. X..` under a Z tool axis) appears only as the
+spatial-arc case, with no stated rotation sense for the ZX/YZ view and
+no rule on axis order. A native arc would therefore guess a direction
+that can mirror, and a mirrored vertical entry gouges. The fan is
+exact to the 3-decimal word resolution, so nothing is lost but block
+count. `arc_planes::heidenhain_rides_its_vertical_arcs_as_chords_and_
+never_switches_plane` now pins both planes: on the circle, the arc's
+own sweep sense (G3 in XZ, G2 in YZ) and the exact end. Reopen only
+with a documented sense rule, or with a KL-mode post (M3.3 B).
+
+(2) **Oblique entry chords stay a chord fan with one note - final.**
+G17/G18/G19 are the only arc planes ISO 6983 / RS-274 define. A tilted
+working plane per entry (G68.2 / PLANE SPATIAL) changes the post's
+frame for a single lead move, and every dialect would need its own
+tilt-and-restore block pair and its own refusal paths. That is not
+cheap and not safe for one entry arc. Already pinned by
+`vertical_arc_entry::an_oblique_first_cut_stays_chords_and_says_so_once`.
+The near-axis snap (M11.2 B (4)) still turns the cases that are
+within tolerance of an axis into true arcs.
+
+(3) **Finding, filed separately: the Heidenhain XY arc centre words.**
+The post writes `I`/`J` as centre-minus-start increments (Fanuc
+semantics). The same manual reading says this mode's I/J are the
+absolute centre, so XY arcs that don't start at the centre's origin
+offset may be read wrong by a real TNC. That is outside #18's scope and
+golden-locked, so it is left for its own issue (#49, P0: wrong
+output) and not changed here.

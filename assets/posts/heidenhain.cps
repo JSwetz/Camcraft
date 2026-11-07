@@ -179,6 +179,10 @@ function onLinear() {
 // word resolution), the normal coordinate linear along the sweep. The
 // motion is the arc's own to the output resolution; the plane word
 // is never touched, so G17 stays the program's only plane.
+// #18 made this final: the public manuals allow G2/G3 with axes off
+// the working plane only as a spatial-arc case and state no rotation
+// sense for it (and the I/J/K centre meaning is itself open, #49) -
+// a native XZ/YZ arc would be a guess at a mirrorable direction.
 var ARC_CHORD_TOL = 0.001;
 var ARC_MAX_CHORDS = 1024;
 function verticalArc(p) {
