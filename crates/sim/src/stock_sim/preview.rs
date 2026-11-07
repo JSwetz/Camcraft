@@ -39,11 +39,13 @@
 //!   this runs at low resolution and upsamples - never a black
 //!   screen (the Prime Directive's "never crash" includes it).
 
+pub mod eikonal;
 pub mod pack;
 pub mod patch;
 
 mod march;
 
+pub use eikonal::Renormalized;
 pub use pack::{pack_cut, pack_field, pack_target, DistanceLattice, FieldLattice, LatticeMeta};
 pub use patch::{pack_cut_patch, CutPatch};
 
