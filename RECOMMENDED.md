@@ -12853,3 +12853,16 @@ keeps the part-only chain bit for bit.
   R 10 (the rapid onto R crossed 2 mm of part); it now moves down, the
   staleness pinned unchanged. The material-top readers moved to
   `operation/drill_top.rs` (drill_reach stays under 400 lines).
+
+## #72: Linux release assets
+
+- Build Linux x86_64 on Ubuntu 22.04 so the release binary targets an older
+  glibc than the current Fedora workstation. Ship a portable TAR.GZ plus DEB
+  and RPM from the same staged binaries and assets. The package installs its
+  binaries and `assets/` together under `/usr/lib/camcraft`, matching the
+  app's adjacent-theme lookup; short commands in `/usr/bin` launch them.
+- Let the existing Windows release job publish after the Linux job succeeds,
+  with the Linux outputs downloaded as artifacts. Dropped concurrent release
+  publishers: both jobs would race to create or edit the same GitHub Release.
+  AUR, FreeBSD, and Web/WASM remain separate slices of #72 because they need
+  their own package or platform build paths.
