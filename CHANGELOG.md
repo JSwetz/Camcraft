@@ -9,6 +9,7 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 619e479 | 2026-11-07 | fix(sim): Contour moves answer to the part walls along their length; pocket chord law only below the stock top (#43) | Unreleased |
 | 5083771 | 2026-11-07 | fix(motion): control compensation refuses a contour the controller cannot offset (#40) | Unreleased |
 | 3c0e2d8 | 2026-11-07 | fix(sim): the gouge law measures every chord of an Area move along its length (#42) | Unreleased |
 | 0605698 | 2026-11-07 | fix(app): a whole-part Pocket/Adaptive clears the stock around the part, never its own section (#12) | Unreleased |

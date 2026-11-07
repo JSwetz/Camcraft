@@ -1,3 +1,26 @@
+# CamCraft 0.8.3 (clean-room implementation)
+
+A patch release: four fixes, three of them safety (issues #12, #42, #43, #40).
+
+## Fixed
+- **A whole-part Pocket or 2D Adaptive no longer cuts into the part** (#12).
+  With the whole model as the source, it now clears only the stock around
+  the part; if the part fills the stock outline, it refuses and says so.
+- **The verifier catches a straight cut across a part's corner** (#42).
+  Pocket-type operations are now checked along every move, not only at its
+  end - a 0.3 mm corner intrusion reads as a gouge and blocks the post.
+- **G41/G42 compensation refuses contours the controller cannot offset**
+  (#40): inside fillets tighter than the tool, edges too short for the
+  offset, and necks narrower than the tool - each named with its position.
+
+- **Contour moves are checked against the part's walls along their whole
+  length** (#43), so a straight cut across a convex corner of the wall is a
+  gouge; a Face's rows crossing its open rim stay legal.
+- The pocket check from #42 now judges only the stretch of a move below the
+  stock top: a ramp crossing the wall line in the air is not a gouge.
+
+---
+
 # CamCraft 0.8.2 (clean-room implementation)
 
 A bug-fix release from hand-testing 0.8.0/0.8.1.
