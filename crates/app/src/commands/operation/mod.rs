@@ -19,7 +19,7 @@ mod geometry;
 mod meta;
 
 pub use clear::ClearToolpath;
-pub use create::{CreateOperation, DeleteOperation};
+pub use create::{CreateOperation, DeleteOperation, PasteOperation};
 pub use edit::{ChangeOperationKind, EditOperationLinks, EditOperationParams};
 pub use generate::{GenerateOperation, RegenerateAll};
 pub use geometry::SetOperationGeometry;

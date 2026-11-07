@@ -46,7 +46,7 @@ use camcraft_app::schema::{ThemeRef, WCS_SLOTS};
 use camcraft_app::units::{self, Unit};
 
 use crate::interact;
-use crate::state::{CommandKind, DragMode, GeoPick, PostView, State, UiTarget};
+use crate::state::{CommandKind, DragMode, GeoPick, PostView, State, TreeMenuTarget, UiTarget};
 
 use super::contrast;
 use super::icons::{Icon, IconSet};
@@ -287,6 +287,29 @@ fn click_toggles_view_state() {
     harness.run();
     assert_eq!(harness.state().state.display, crate::state::DisplayMode::Wireframe);
     assert!(harness.state().state.pending.is_empty(), "a view toggle queues nothing");
+}
+
+#[test]
+fn browser_show_and_hide_all_toolpaths_update_operation_eyes() {
+    let mut harness = shell_harness();
+    let operation_names: Vec<String> = model::named_entities(&harness.state().state.world)
+        .into_iter()
+        .filter(|(_, entity)| model::is_operation(&harness.state().state.world, entity))
+        .map(|(name, _)| name)
+        .collect();
+    assert!(!operation_names.is_empty());
+
+    harness.get_by_label("Show all toolpaths").click();
+    harness.run();
+    let state = &harness.state().state;
+    assert!(state.show_all_paths);
+    assert!(state.hidden_paths.is_empty());
+
+    harness.get_by_label("Show all toolpaths").click();
+    harness.run();
+    let state = &harness.state().state;
+    assert!(!state.show_all_paths);
+    assert!(operation_names.iter().all(|name| state.hidden_paths.contains(name)));
 }
 
 /// M-d's startup law, proven in pixels: the window opens on a plain
@@ -4441,6 +4464,106 @@ fn dragging_an_operation_row_reorders_within_global_setup() {
     let ordered: Vec<String> = camcraft_app::setup::operation_order(&harness.state().state.world)
         .into_iter().map(|(name, _)| name).collect();
     assert_eq!(ordered, ["Contour2", "Contour1"]);
+}
+
+#[test]
+fn copying_and_pasting_an_operation_keeps_settings_and_is_undoable() {
+    let mut shell = ShellUi::seeded();
+    let original = model::find_by_name(&shell.state.world, "Contour1").expect("source operation");
+    let source = model::operation_of(&shell.state.world, &original).expect("source settings");
+    shell.state.copy_operation("Contour1");
+    shell.state.paste_operation();
+    shell.state.drain_actions();
+
+    let pasted = model::find_by_name(&shell.state.world, "Contour1 Copy").expect("pasted operation");
+    let mut copied = model::operation_of(&shell.state.world, &pasted).expect("copied settings");
+    copied.stamp = source.stamp.clone();
+    assert_eq!(copied, source, "tool, source, setup, area, and parameters are copied");
+    assert!(model::toolpath_of(&shell.state.world, &pasted).is_none(), "paste needs generation");
+    assert_eq!(camcraft_app::setup::operation_order(&shell.state.world)
+        .into_iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        ["Contour1", "Contour1 Copy"]);
+
+    shell.state.paste_operation();
+    shell.state.drain_actions();
+    assert!(model::find_by_name(&shell.state.world, "Contour1 Copy 2").is_some());
+    shell.state.pending.push_back(CommandKind::Undo);
+    shell.state.drain_actions();
+    assert!(model::find_by_name(&shell.state.world, "Contour1 Copy 2").is_none());
+    shell.state.pending.push_back(CommandKind::Undo);
+    shell.state.drain_actions();
+    assert!(model::find_by_name(&shell.state.world, "Contour1 Copy").is_none());
+    shell.state.pending.push_back(CommandKind::Redo);
+    shell.state.drain_actions();
+    assert!(model::find_by_name(&shell.state.world, "Contour1 Copy").is_some());
+}
+
+#[test]
+fn operation_copy_paste_shortcuts_use_the_selected_operation() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.pending.push_back(CommandKind::Select(Some("Contour1".into())));
+    harness.run_steps(2);
+    harness.input_mut().events.push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::C, physical_key: None, pressed: true, repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run();
+    assert_eq!(harness.state().state.operation_clipboard.as_ref().map(|c| c.label.as_str()), Some("Contour1"));
+
+    harness.input_mut().events.push(Event::Key {
+        key: Key::V, physical_key: None, pressed: true, repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run_steps(2);
+    assert!(model::find_by_name(&harness.state().state.world, "Contour1 Copy").is_some());
+}
+
+#[test]
+fn close_operation_editor_clears_the_page_without_deleting_the_operation() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.ui_target = UiTarget::Operation("Contour1".into());
+    harness.state_mut().state.pending.push_back(CommandKind::Select(Some("Contour1".into())));
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.selected_operation().as_deref(), Some("Contour1"));
+    harness.get_by_label("Close").click();
+    harness.run_steps(2);
+
+    let state = &harness.state().state;
+    assert_eq!(state.pane_target(), UiTarget::None);
+    assert!(state.selected_operation().is_none());
+    assert!(state.op_ui.name.is_empty());
+    assert!(model::find_by_name(&state.world, "Contour1").is_some());
+    assert!(interact::height_planes(state).is_empty());
+
+    harness.state_mut().state.ui_target = UiTarget::Operation("Contour1".into());
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.op_ui.name, "Contour1", "reopening reloads its draft");
+}
+
+#[test]
+fn operations_heading_menu_pastes_the_copied_operation() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.copy_operation("Contour1");
+    harness.run_steps(2);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let row = leaves.iter().position(|leaf| matches!(leaf,
+        panes::Leaf::Parent(panes::BrowserSection::Operations)))
+        .expect("Operations heading");
+    let row_height = theme::current().row_height;
+    let heading = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    set_pos(&mut harness, heading);
+    button_at(&mut harness, egui::PointerButton::Secondary, heading, true);
+    button_at(&mut harness, egui::PointerButton::Secondary, heading, false);
+    assert_eq!(harness.state().state.tree_menu, Some(TreeMenuTarget::Operations));
+
+    let paste = egui::pos2(90.0,
+        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
+    set_pos(&mut harness, paste);
+    button_at(&mut harness, egui::PointerButton::Primary, paste, true);
+    button_at(&mut harness, egui::PointerButton::Primary, paste, false);
+    harness.run_steps(2);
+    assert!(model::find_by_name(&harness.state().state.world, "Contour1 Copy").is_some());
 }
 
 #[test]

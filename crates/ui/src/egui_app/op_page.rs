@@ -59,13 +59,18 @@ pub(super) fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &T
     // also what bounds the page's width (the dock body may scroll
     // sideways), so the bar takes the same width under it.
     let max_h = (ui.available_height() - BAR_RESERVE).max(80.0);
+    let mut close_editor = false;
     let out = ScrollArea::vertical().id_salt("op_page_scroll").max_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.heading(format!("Operation: {label}"));
+            close_editor = ui.small_button("Close").clicked();
             if exists && ui.small_button("Rename").clicked() {
                 state.rename_draft = Some((target.clone(), label.clone()));
             }
+            ui.heading(format!("Operation: {label}"));
         });
+        if close_editor {
+            return;
+        }
         let mut new_label = None;
         let mut cancel_rename = false;
         if let Some((key, draft)) = state.rename_draft.as_mut() && key == &target {
@@ -127,6 +132,10 @@ pub(super) fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &T
             ui.colored_label(text_inks(ui, &state.world).warn, note);
         }
     });
+    if close_editor {
+        state.close_operation_editor(&target);
+        return;
+    }
     ui.set_max_width((out.inner_rect.width() - 12.0).max(120.0));
     actions(ui, state, &target, live.as_ref(), exists, pal);
 }

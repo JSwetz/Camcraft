@@ -425,6 +425,29 @@ mod path_tests {
     }
 
     #[test]
+    fn show_and_hide_all_toolpaths_update_every_operation_eye() {
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        state.hide_all_toolpaths();
+        assert!(state.hidden_paths.contains(&"Face1".to_owned()));
+        assert!(!state.show_all_paths);
+        assert!(toolpath_lines(&state).is_empty(), "hide all includes the selected path");
+
+        state.show_all_toolpaths();
+        assert!(state.hidden_paths.is_empty());
+        assert!(state.show_all_paths);
+        assert!(!toolpath_lines(&state).is_empty(), "show all restores the hidden path");
+
+        state.toggle_all_toolpaths();
+        assert!(!state.show_all_paths);
+        assert!(state.hidden_paths.contains(&"Face1".to_owned()));
+        assert!(toolpath_lines(&state).is_empty(), "an active path icon hides all paths");
+        state.toggle_all_toolpaths();
+        assert!(state.show_all_paths);
+        assert!(state.hidden_paths.is_empty());
+    }
+
+    #[test]
     fn collect_overlay_adds_the_path_after_the_furniture() {
         let mut state = state_with_generated_path();
         select(&mut state, Some("Face1"));

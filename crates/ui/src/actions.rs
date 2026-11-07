@@ -97,6 +97,14 @@ pub(crate) fn delete_selected(state: &mut State) {
     state.pending.push_back(CommandKind::DeleteSelected);
 }
 
+pub(crate) fn copy_operation(state: &mut State, name: &str) {
+    state.copy_operation(name);
+}
+
+pub(crate) fn paste_operation(state: &mut State) {
+    state.paste_operation();
+}
+
 /// View: reframe the camera on the whole document (ephemeral, like the
 /// camera itself - no command).
 pub(crate) fn frame_all(state: &mut State) {

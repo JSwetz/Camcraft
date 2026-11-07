@@ -28,7 +28,7 @@ use camcraft_app::schema::WCS_SLOTS;
 use camcraft_app::tools::ToolKind;
 
 use crate::actions;
-use crate::state::{CommandKind, DisplayMode, Sim, State, UiTarget};
+use crate::state::{CommandKind, DisplayMode, Sim, State, TreeMenuTarget, UiTarget};
 
 use super::icons::{Icon, IconSet};
 use super::layout;
@@ -49,7 +49,7 @@ pub(crate) const TYPES: [&str; camcraft_app::operation::KIND_COUNT] =
 /// `crate::actions`, the same entry the ribbon uses.
 pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     let typing = ui.memory(|m| m.focused().is_some());
-    let (modifiers, n, o, s, p, q, z, y, del, f) = ui.input(|i| {
+    let (modifiers, n, o, s, p, q, z, y, del, f, c, v) = ui.input(|i| {
         (
             i.modifiers,
             i.key_pressed(Key::N),
@@ -61,6 +61,8 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
             i.key_pressed(Key::Y),
             i.key_pressed(Key::Delete),
             i.key_pressed(Key::F),
+            i.key_pressed(Key::C),
+            i.key_pressed(Key::V),
         )
     });
     let cmd = modifiers.command;
@@ -72,6 +74,14 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
         actions::redo(state);
     }
     if cmd && !typing {
+        if c {
+            if let Some(name) = state.selected_operation() {
+                actions::copy_operation(state, &name);
+            }
+        }
+        if v {
+            actions::paste_operation(state);
+        }
         // The File tips' keys (ribbon.rs strings): N new, O a model,
         // Shift+O a project, S save, Shift+S save as.
         if n {
@@ -389,7 +399,11 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Run => "Generate the selected operation".into(),
         Cmd::Delete => "Delete the selection\tDel".into(),
         Cmd::Frame => "Frame all\tF".into(),
-        Cmd::Paths => "Show every cached toolpath".into(),
+        Cmd::Paths => if state.show_all_paths {
+            "Hide every toolpath".into()
+        } else {
+            "Show every cached toolpath".into()
+        },
         Cmd::Simulate => "Simulate tool moves (transport bar)".into(),
         Cmd::Deviate => {
             "Judge the program's stock against the model (deviation map)".into()
@@ -644,7 +658,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Run => actions::generate_selected(state),
         Cmd::Delete => actions::delete_selected(state),
         Cmd::Frame => actions::frame_all(state),
-        Cmd::Paths => state.show_all_paths = !state.show_all_paths,
+        Cmd::Paths => state.toggle_all_toolpaths(),
         Cmd::Simulate => {
             // View state, like Paths: the cell arms or disarms the
             // transport. The playhead inside is immediate-mode by
@@ -1517,7 +1531,14 @@ pub fn browser(
     icons: Option<&IconSet>,
 ) {
     ui.checkbox(&mut state.show_world_axes, "Show world origin axes");
-    ui.checkbox(&mut state.show_all_paths, "Show all toolpaths");
+    let mut show_all_paths = state.show_all_paths;
+    if ui.checkbox(&mut show_all_paths, "Show all toolpaths").changed() {
+        if show_all_paths {
+            state.show_all_toolpaths();
+        } else {
+            state.hide_all_toolpaths();
+        }
+    }
     // The display mode rides the same law as the checkboxes: a direct
     // field flip (view state like the camera, never a command, never on
     // the ribbon - the M-f tip table is imgui's 18-cell law untouched).
@@ -1628,16 +1649,15 @@ pub fn browser(
             }
         }
     }
-    // The op row's right-click is the retype verb's door (M9.1): the
-    // menu belongs to the row's operation, moves to whichever row
-    // asks, closes when the same row asks twice, and retires on any
-    // row that is not an operation.
+    // Operation rows offer the operation verbs. The Operations parent
+    // offers Paste even when the list has no operation rows yet.
     if let Some(ix) = hit.menu {
-        if let Leaf::Op(n) = leaves[ix].clone() {
-            state.tree_menu = (state.tree_menu.as_deref() != Some(n.as_str())).then_some(n);
-        } else {
-            state.tree_menu = None;
-        }
+        let target = match leaves.get(ix) {
+            Some(Leaf::Op(name)) => Some(TreeMenuTarget::Operation(name.clone())),
+            Some(Leaf::Parent(BrowserSection::Operations)) => Some(TreeMenuTarget::Operations),
+            _ => None,
+        };
+        state.tree_menu = target.filter(|target| state.tree_menu.as_ref() != Some(target));
     }
     tree_menu(ui, state, pal, rect, &leaves);
     ui.allocate_rect(rect, Sense::hover());
@@ -1647,6 +1667,8 @@ pub fn browser(
 const MENU_CLEAR: usize = usize::MAX;
 const MENU_DELETE: usize = usize::MAX - 1;
 const MENU_RENAME: usize = usize::MAX - 2;
+const MENU_COPY: usize = usize::MAX - 3;
+const MENU_PASTE: usize = usize::MAX - 4;
 
 /// The operation's retype menu (M9.1): what replaced the page's Type
 /// combo. Grouping is the retired combo's law restated once -
@@ -1664,21 +1686,34 @@ const MENU_RENAME: usize = usize::MAX - 2;
 /// at Foreground order, so a press on a row belongs to the row, never
 /// to the tree behind it; any other primary press closes it.
 fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[Leaf]) {
-    let Some(name) = state.tree_menu.clone() else {
+    let Some(target) = state.tree_menu.clone() else {
         return;
     };
-    // Self-heal, twice over: the named operation must still have its
-    // row and its component. A frame that proves otherwise retires the
-    // menu by dropping it - never a stale popup outliving its subject.
-    let row_ix = leaves
-        .iter()
-        .position(|l| matches!(l, Leaf::Op(n) if *n == name));
-    let op = model::find_by_name(&state.world, &name).and_then(|e| model::operation_of(&state.world, &e));
-    let (Some(ix), Some(op)) = (row_ix, op) else {
+    let row_ix = leaves.iter().position(|leaf| match (&target, leaf) {
+        (TreeMenuTarget::Operation(name), Leaf::Op(row)) => name == row,
+        (TreeMenuTarget::Operations, Leaf::Parent(BrowserSection::Operations)) => true,
+        _ => false,
+    });
+    let Some(ix) = row_ix else {
         state.tree_menu = None;
         return;
     };
-    let here = op.params.kind().ordinal();
+    let name = match &target {
+        TreeMenuTarget::Operation(name) => {
+            if model::find_by_name(&state.world, name)
+                .and_then(|entity| model::operation_of(&state.world, &entity))
+                .is_none()
+            {
+                state.tree_menu = None;
+                return;
+            }
+            Some(name.as_str())
+        }
+        TreeMenuTarget::Operations => None,
+    };
+    let here = name.and_then(|name| model::find_by_name(&state.world, name))
+        .and_then(|entity| model::operation_of(&state.world, &entity))
+        .map(|op| op.params.kind().ordinal());
     let machine = camcraft_app::machine::kind_of(&state.world);
     // The rows: section headers and kinds, in registry order, read
     // from the same taxonomy as the ribbon's cells - never a list.
@@ -1687,11 +1722,17 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     // operation) and deleting the operation are two different asks,
     // and the menu names both - each one undoable command.
     lines.push(("Operation", false, None));
-    lines.push(("Rename operation", true, Some(MENU_RENAME)));
-    lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
-    lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
-    let here_section = operation::KindInfo::ALL.get(here).map(|k| k.section);
-    for s in operation::Section::ORDER {
+    if name.is_some() {
+        lines.push(("Rename operation", true, Some(MENU_RENAME)));
+        lines.push(("Copy operation", true, Some(MENU_COPY)));
+    }
+    lines.push(("Paste operation", state.operation_clipboard.is_some(), Some(MENU_PASTE)));
+    if name.is_some() {
+        lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
+        lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
+    }
+    let here_section = here.and_then(|index| operation::KindInfo::ALL.get(index).map(|k| k.section));
+    for s in operation::Section::ORDER.into_iter().filter(|_| name.is_some()) {
         // The current kind's own section keeps every row (dark where
         // the machine says no); any other section lists only what the
         // door admits, and leaves the menu when that is nothing.
@@ -1719,7 +1760,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
         Vec2::new(DROP_W, lines.len() as f32 * pal.row_height),
     );
     let mut chosen: Option<usize> = None;
-    egui::Area::new(ui.id().with(("tree-menu", name.clone())))
+    egui::Area::new(ui.id().with(("tree-menu", ix)))
         .fixed_pos(anchor)
         .order(egui::Order::Foreground)
         .movable(false)
@@ -1737,7 +1778,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                     egui::Pos2::new(anchor.x, anchor.y + k as f32 * pal.row_height),
                     Vec2::new(DROP_W, pal.row_height),
                 );
-                let is_current = item.is_some_and(|i| i == here);
+                let is_current = item.is_some_and(|i| Some(i) == here);
                 if is_current {
                     p.rect_filled(r, 0.0, pal.selection_bg);
                 }
@@ -1768,30 +1809,39 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                 );
                 if let Some(resp) = resp
                     && resp.clicked()
+                    && (*runnable || *item != Some(MENU_PASTE))
                 {
                     chosen = *item;
                 }
             }
         });
     if let Some(i) = chosen {
-        if i == MENU_RENAME {
-            let label = model::find_by_name(&state.world, &name)
-                .map(|e| model::operation_label(&state.world, &name, &e))
-                .unwrap_or_else(|| name.clone());
-            state.rename_draft = Some((name.clone(), label));
-            actions::target(state, UiTarget::Operation(name.clone()));
-        } else if i == MENU_CLEAR {
-            state.pending.push_back(CommandKind::ClearToolpath(name.clone()));
-        } else if i == MENU_DELETE {
-            state.pending.push_back(CommandKind::DeleteOperation(name.clone()));
-        } else if i != here {
-            state.pending.push_back(CommandKind::ChangeOperationKind {
-                name: name.clone(),
-                kind: i,
-            });
+        if i == MENU_PASTE {
+            actions::paste_operation(state);
+        } else if let Some(name) = name {
+            if i == MENU_RENAME {
+                let label = model::find_by_name(&state.world, name)
+                    .map(|e| model::operation_label(&state.world, name, &e))
+                    .unwrap_or_else(|| name.to_owned());
+                state.rename_draft = Some((name.to_owned(), label));
+                actions::target(state, UiTarget::Operation(name.to_owned()));
+            } else if i == MENU_COPY {
+                actions::copy_operation(state, name);
+            } else if i == MENU_CLEAR {
+                state.pending.push_back(CommandKind::ClearToolpath(name.to_owned()));
+            } else if i == MENU_DELETE {
+                state.pending.push_back(CommandKind::DeleteOperation(name.to_owned()));
+            } else if Some(i) != here {
+                state.pending.push_back(CommandKind::ChangeOperationKind {
+                    name: name.to_owned(), kind: i,
+                });
+            }
         }
         state.tree_menu = None;
-    } else if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+    } else if ui.input(|i| {
+        i.pointer.button_pressed(egui::PointerButton::Primary)
+            && i.pointer.hover_pos().is_none_or(|pos| !panel.contains(pos))
+    }) {
         // The dropdowns' close law: a primary press that is nobody's
         // row is the menu's - it never stacks and never stalks a
         // document the user has moved on from.

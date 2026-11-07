@@ -18,7 +18,7 @@ use camcraft_app::commands::{
     ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    MoveFixture, MoveModel, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
+    MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
@@ -158,6 +158,7 @@ pub enum CommandKind {
         src: SrcRef,
         params: OpParams,
     },
+    PasteOperation { name: String, operation: OperationDef },
     /// The properties page's parameter draft.
     EditOperationParams {
         name: String,
@@ -944,6 +945,20 @@ impl PanelsOpen {
     }
 }
 
+/// Snapshot held by Copy until another operation is copied. Generated
+/// toolpaths are intentionally absent: Paste creates a fresh operation.
+#[derive(Clone)]
+pub struct OperationClipboard {
+    pub label: String,
+    pub operation: OperationDef,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TreeMenuTarget {
+    Operation(String),
+    Operations,
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
@@ -983,6 +998,7 @@ pub struct State {
     /// Operations whose cached path stays undrawn (eye toggle per op).
     /// Same rule: the path still exists and posts.
     pub hidden_paths: Vec<String>,
+    pub operation_clipboard: Option<OperationClipboard>,
     /// Expanded state of Setup, Models, Tools, and Operations in the browser.
     pub browser_expanded: [bool; 4],
 
@@ -1056,7 +1072,7 @@ pub struct State {
     /// ribbon's dropdowns - a frame fact, not a document fact; the
     /// draw retires it on any choice, outside press, or a row whose
     /// operation is gone.
-    pub tree_menu: Option<String>,
+    pub tree_menu: Option<TreeMenuTarget>,
     /// Inline rename editor: stable key and current draft.
     pub rename_draft: Option<(String, String)>,
     /// Operation key being dragged in the browser; discarded on release.
@@ -1260,6 +1276,7 @@ impl State {
             hidden_stocks: Vec::new(),
             hidden_offsets: Vec::new(),
             hidden_paths: Vec::new(),
+            operation_clipboard: None,
             browser_expanded: [true; 4],
             cam: Camera::default(),
             show_world_axes: true,
@@ -1941,6 +1958,60 @@ impl State {
         })
     }
 
+    /// Close the operation page without changing the document. Clear the
+    /// selection too, since pane_target otherwise reopens that operation.
+    pub(crate) fn close_operation_editor(&mut self, name: &str) {
+        self.ui_target = UiTarget::None;
+        self.pending.push_back(CommandKind::Select(None));
+        self.op_ui.name.clear();
+        self.op_synced = (String::new(), self.doc_version);
+        self.boundary_pick = None;
+        self.boundary_view.shown = false;
+        if self.rename_draft.as_ref().is_some_and(|(key, _)| key == name) {
+            self.rename_draft = None;
+        }
+        self.status = format!("closed operation {name}");
+    }
+
+    pub(crate) fn copy_operation(&mut self, name: &str) {
+        let Some(entity) = model::find_by_name(&self.world, name) else {
+            self.status = format!("copy failed: operation '{name}' was not found");
+            return;
+        };
+        let Some(operation) = model::operation_of(&self.world, &entity) else {
+            self.status = format!("copy failed: '{name}' is not an operation");
+            return;
+        };
+        let label = model::operation_label(&self.world, name, &entity);
+        self.operation_clipboard = Some(OperationClipboard { label: label.clone(), operation });
+        self.status = format!("copied operation {label}");
+    }
+
+    pub(crate) fn paste_operation(&mut self) {
+        let Some(clip) = self.operation_clipboard.clone() else {
+            self.status = String::from("nothing to paste: copy an operation first");
+            return;
+        };
+        let base = format!("{} Copy", clip.label);
+        let mut suffix = 1usize;
+        let name = loop {
+            let candidate = if suffix == 1 { base.clone() } else { format!("{base} {suffix}") };
+            let taken = model::find_by_name(&self.world, &candidate).is_some()
+                || camcraft_app::setup::operation_order(&self.world)
+                    .into_iter()
+                    .any(|(key, entity)| model::operation_label(&self.world, &key, &entity) == candidate);
+            if !taken {
+                break candidate;
+            }
+            let Some(next) = suffix.checked_add(1) else {
+                self.status = String::from("paste failed: too many copies of this operation");
+                return;
+            };
+            suffix = next;
+        };
+        self.pending.push_back(CommandKind::PasteOperation { name, operation: clip.operation });
+    }
+
     /// Names of the tool entities, in document order.
     #[must_use]
     pub fn tool_names(&self) -> Vec<String> {
@@ -1972,6 +2043,32 @@ impl State {
             camcraft_app::setup::active(&self.world).as_deref(),
         );
         self.hidden_stocks.iter().any(|n| n == &name)
+    }
+
+    /// Show every cached operation path, including paths hidden by their
+    /// browser eyes. This only changes viewport state.
+    pub(crate) fn show_all_toolpaths(&mut self) {
+        self.hidden_paths.clear();
+        self.show_all_paths = true;
+    }
+
+    /// Hide every operation path, including the selected operation's path.
+    /// Keeping the names in the eye list makes each row reflect the result.
+    pub(crate) fn hide_all_toolpaths(&mut self) {
+        self.hidden_paths = model::named_entities(&self.world)
+            .into_iter()
+            .filter(|(_, entity)| model::is_operation(&self.world, entity))
+            .map(|(name, _)| name)
+            .collect();
+        self.show_all_paths = false;
+    }
+
+    pub(crate) fn toggle_all_toolpaths(&mut self) {
+        if self.show_all_paths {
+            self.hide_all_toolpaths();
+        } else {
+            self.show_all_toolpaths();
+        }
     }
 
     /// Run every queued action, then poll the import worker once. Safe to
@@ -2385,6 +2482,19 @@ impl State {
                     );
                 }
             },
+            CommandKind::PasteOperation { name, operation } => {
+                match PasteOperation::new(&self.world, &name, operation) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        History::execute_ephemeral(&self.world, SelectEntity::new(&self.world, Some(name.as_str())));
+                        self.selection_version = self.selection_version.wrapping_add(1);
+                        self.ui_target = UiTarget::Operation(name.clone());
+                        self.doc_version += 1;
+                        self.status = format!("pasted operation {name}; generate its toolpath when ready");
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("paste failed: {err}")),
+                }
+            }
             CommandKind::EditOperationParams { name, params } => {
                 match EditOperationParams::new(&self.world, &name, params) {
                     Ok(command) => {
