@@ -94,7 +94,9 @@ gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --pagi
 For each line `<N> <login> <time>` (the window only finds claims made since
 a recent tick; a claim applied earlier keeps its label and assignee and is
 judged stale by AGENTS.md's rule - 4 h with no newer comment from the
-claimant - not by this window):
+claimant - not by this window; on the first run of a session, or after the loop was
+off, widen it to `-7 days` so a claim kept fresh by later comments is not
+missed - its freshness is then checked as in "held" below):
 - **already applied** - the issue carries `claimed` and `<login>` is an
   assignee: skip silently (this keeps each 10-minute tick from replying
   again);
