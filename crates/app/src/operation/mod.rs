@@ -119,6 +119,7 @@ pub use job::*;
 mod generate;
 mod cross_spindle;
 mod cross_stock;
+mod drill_reach;
 mod plunge_solid;
 mod rotary_law;
 pub(crate) mod spindle_law;

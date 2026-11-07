@@ -3803,11 +3803,12 @@ fn drill_op_recognizes_from_the_model_then_machines_clean() {
 }
 
 #[test]
-fn a_hole_deeper_than_the_drill_reaches_warns_and_still_generates() {
+fn a_hole_deeper_than_the_drill_reaches_is_refused_by_name() {
     // The hole list is data, not a theorem: a hand-edited floor below
-    // the tool's reach must still generate (so the user can read the
-    // numbers) while verification names the exact collision - the cycle
-    // reach law, at the hole's first move, on the part.
+    // the tool's reach is refused at generation, naming the numbers the
+    // user needs (issue #84 - it once generated with a ShankHit warning
+    // for the post gate to refuse; the shank feeding into uncut stock is
+    // a collision, and the generator refuses it by name, earlier).
     let world = new_world();
     let mut history = History::default();
     box_stock(&world, &mut history, 100.0, 100.0, 130.0);
@@ -3831,25 +3832,11 @@ fn a_hole_deeper_than_the_drill_reaches_warns_and_still_generates() {
         )
         .expect("create"),
     );
-    history.execute(
-        &world,
-        GenerateOperation::new(&world, "Deep1").expect("generate"),
-    );
-    let cache = cache(&world, "Deep1").expect("cached");
-    assert_eq!(cache.path.cycles[0].kind, CycleKind::Deep, "131 mm past 4d");
-    assert!(
-        cache.warnings.iter().any(|w| matches!(
-            w,
-            camcraft_app::verify::Warning::ShankHit { part: true, .. }
-        )),
-        "reach law must speak: {:?}",
-        cache.warnings
-    );
-    assert_eq!(
-        status(&world, "Deep1"),
-        OpStatus::Ok,
-        "a warning is not a refusal"
-    );
+    let err = GenerateOperation::new(&world, "Deep1").err().map(|e| e.to_string()).unwrap_or_default();
+    for s in ["131.000 mm deep from the stock surface", "DR-0400", "12.000 mm"] {
+        assert!(err.contains(s), "the refusal names '{s}': {err:?}");
+    }
+    assert!(cache(&world, "Deep1").is_none(), "a refused hole caches no path");
 }
 
 #[test]
@@ -3888,7 +3875,12 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
         let world = new_world();
         let mut history = History::default();
         history.execute(&world, ImportModel::from_mesh("pblock", drilled_block()));
-        add_tool(&world, &mut history, "DR-0400");
+        // A long-series flute: moved up 2 mm the block's top stands 13
+        // mm over the stored through floor - past the jobber's 12 mm
+        // (issue #84's reach law), and this test pins staleness.
+        let mut drill = catalog_tool("DR-0400");
+        drill.flute_len = 20.0;
+        history.execute(&world, AddTool::new(&world, "DR-0400", drill).expect("tool"));
         let e = model::find_by_name(&world, "pblock").expect("part");
         let holes = drilling::recognize(&model::facets_of(&world, &e).expect("mesh"));
         history.execute(

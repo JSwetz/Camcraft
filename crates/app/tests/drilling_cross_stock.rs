@@ -114,6 +114,9 @@ fn world_on(word: &str, stock: Option<(StockShape, f64)>, at: (f64, f64), grind:
     let m = Machine { model: format!("TestBench {word}"), kind: Some(word.into()), axes: rotaries(), ..Default::default() };
     history.execute(&world, LoadMachine::new(&world, "bench.mch".into(), Some(m)).expect("machine"));
     let mut tool = catalog().into_iter().find(|(n, _)| *n == "DR-0400").map(|(_, t)| t).expect("catalog entry");
+    // A long-series flute (issue #84's reach law): the mouths on the raw
+    // bar stand 16-24 mm above their floors, past the jobber's 12 mm.
+    tool.flute_len = 30.0;
     grind(&mut tool);
     history.execute(&world, AddTool::new(&world, "DR-0400", tool).expect("catalog tool"));
     let shift = |p: Point3| Point3::new(p.x + at.0, p.y + at.1, p.z);

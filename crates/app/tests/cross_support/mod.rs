@@ -248,7 +248,12 @@ pub fn cross_world_on(word: &str, stock: StockShape, at: Location) -> (World, Hi
     history.execute(&world, SetStock::new(&world, stock, at).expect("box stock"));
     let cmd = LoadMachine::new(&world, "bench.mch".into(), Some(machine(word)));
     history.execute(&world, cmd.expect("machine"));
-    add_tool(&world, &mut history, "DR-0400");
+    // A long-series Ø4 (issue #84's reach law): the through hole is 31
+    // mm deep from the bar's face and 47 from the Ø44 raw box's - far
+    // past the catalog jobber's 12 mm flute, a real shank collision.
+    let mut drill = catalog_tool("DR-0400");
+    drill.flute_len = 50.0;
+    history.execute(&world, AddTool::new(&world, "DR-0400", drill).expect("long-series drill"));
     history.execute(&world, ImportModel::from_mesh("bar", Mesh::from_facets(radial_bar())));
     (world, history)
 }

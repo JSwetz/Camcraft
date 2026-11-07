@@ -1789,7 +1789,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     tool: &tool,
                     holes: cross,
                 };
-                super::cross_spindle::cross_drill(radial, &material.facets, stock_facets.as_deref(), wcs_origin)?
+                super::cross_spindle::cross_drill(radial, &material.facets, stock_facets.as_deref(), wcs_origin, &tool_name)?
             } else {
                 // M13.5 A: on a plain lathe the Drill kind is the
                 // turret's axial hole - the doors refuse by name a
@@ -1811,6 +1811,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     plunge_feed: *plunge_feed,
                     tool: &tool,
                     holes,
+                })
+                .and_then(|t| {
+                    // Issue #84: flute reach and holder from the stock.
+                    super::drill_reach::axial_reach(&t, &material.facets, stock_facets.as_deref(), &tool, &tool_name)?;
+                    Ok(t)
                 })?
             };
             (region, path)
