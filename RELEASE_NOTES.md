@@ -1,3 +1,21 @@
+# CamCraft 0.10.0 (clean-room implementation)
+
+A minor release: one new capability and two fixes (issues #15, #14, #16).
+
+## New
+- **Rotary Parallel and Swarf ramp in on their first entry** (#15). Where a
+  straight plunge is refused, the first infeed now comes in on a sloped ramp,
+  each one proved clear of the part and the stock before it is kept.
+
+## Fixed
+- **A lead-in outside a round bore is seated inside it** (#14): one descent
+  per level instead of a plunge into material beside the bore.
+- **Rotary Offset is judged against the real round bar** (#16). Its plunge
+  check now uses the true stock cylinder about the rotary axis instead of a
+  box around it, so moves in the air beside the bar are no longer refused.
+
+---
+
 # CamCraft 0.9.0 (clean-room implementation)
 
 A minor release: one new capability and one measurement fix (issues #11, #10).
