@@ -74,7 +74,7 @@ if ($LASTEXITCODE -ne 0) { Fail "git rev-parse failed" }
 # Branch/PR flow: the bump is committed on release/vX.Y.Z (-NoTag), never on
 # main; a tagging run is the legacy direct cut and belongs on main only.
 if ($NoTag -and $branchNow -eq "main") { Fail "-NoTag runs on a release/v$Version branch, not on main" }
-if (-not $NoTag -and $branchNow -ne "main") { Fail "a tagging cut runs on main; on $branchNow use -NoTag (tag main after the release PR merges)" }
+if (-not $NoTag) { Fail "main is branch-protected (PR only): cut on release/v$Version with -NoTag and tag main after the release PR merges" }
 $existing = git tag --list $tag
 if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
 if ($existing) { Fail "tag $tag already exists" }
@@ -223,7 +223,7 @@ if ($NoTag) {
     Write-Host "      record tip=`$(git rev-parse $branch) before merging; after it merges: git switch main; git pull --ff-only;"
     Write-Host "      git diff `$tip main must be empty, then git tag -a $tag -m 'CamCraft $Version' main; git push origin $tag"
 } else {
-    Write-Host "Legacy direct cut (only when the user directs it): git push origin main && git push origin $tag"
+    Write-Host "main is branch-protected: a direct push is refused. Cut on release/v$Version with -NoTag (AGENTS.md 'A cut goes PR review')."
 }
 Write-Host "NOTHING WAS PUSHED. Pushing is left to you."
 exit 0
