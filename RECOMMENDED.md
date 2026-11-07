@@ -13096,3 +13096,34 @@ revolved (follow-up material if users hit it with long keyways).
   mouths now nearer the axis, it could refuse a holder that a per-line
   reading would pass. That is left as a possible false refusal, not a
   collision, and can be filed if a user hits it.
+- Review fixes (PR #120):
+  - The band was measured against the GLOBAL raw radius, so a round well
+    inside it (a stepped bar's d40 section under a d60 step, a cylinder
+    stock off the spindle axis, a round boss on a block) was read at its
+    chords on grazing lines: the mouth inside metal, the #84 reach short.
+    Each facet is now read as its sagitta slab: thickened either side by
+    `(h/2) tan(theta/2)`, `theta` the dihedral angle to an edge
+    neighbour (|cos|, so a flipped winding hides nothing) and `h` the
+    facet's width across that edge - twice the inscribed polygon's
+    `(h/2) tan(theta/4)`, an upper bound however narrow the neighbour.
+    Dihedrals above 45 degrees are real edges (box 90, hex 60): those
+    facets stay exact, so box faces and hex flats read exactly. A round
+    bar stays bit for bit: the slab only raises the crossing, which only
+    deepens the fall-back to the circumscribed reading (the fingerprint
+    test, re-run on the pre-#85 parent 2037891, passes with the same
+    values).
+    Dropped: trusting a facet only when its normal is parallel to the
+    line (a tessellated round has such facets too); falling back to the
+    corner circle (the pre-#85 air on every stepped bar).
+    Accepted conservatism: an octagon reads as a coarse round, and a flat
+    face bordering a tessellated fillet takes that crease's allowance
+    (air, capped by the circumscribed reading, never metal). A round
+    whose facets share no vertices gets no allowance - a known gap for
+    non-conforming STLs.
+  - The per-line entry reads the part's facets beside the stock's: a
+    part poking out of a box face (a modelling error) still bounds the
+    mouth and the along-line rapids.
+  - The shank branch of the along-line proof cannot refuse a chain the
+    #84 reach law passed (depth to the shank's meeting point <= flute
+    means the shank stands outside it at the feed entry); its test pins
+    the passing side on box stock.

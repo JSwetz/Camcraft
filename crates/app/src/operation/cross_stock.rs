@@ -25,9 +25,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::tools::Tool;
 
-#[path = "cross_entry.rs"]
-mod entry;
-use entry::{Line, entry};
+use super::cross_entry::{Line, StockMesh, entry};
 
 /// What the cross drill stands off, measured about world Z through the
 /// spindle origin `(ox, oy)` (already the kernel's frame).
@@ -39,9 +37,11 @@ pub(super) struct Standoff {
     /// The raw stock's radius when it is wider than the part: the
     /// mouths move out to it. `None` keeps the part-only chain.
     pub raw: Option<f64>,
-    /// The raw stock's facets in the spindle frame (empty without
-    /// `raw`): each hole's mouth is where its own line meets them (#85).
-    pub mesh: Vec<Triangle>,
+    /// The raw stock's facets in the spindle frame, with the part's
+    /// beside them (empty without `raw`): each hole's mouth is where its
+    /// own line first meets either (#85) - a part poking out of the
+    /// stock (a modelling error) still counts as material on its line.
+    pub mesh: StockMesh,
 }
 
 fn reach(facets: &[Triangle], ox: f64, oy: f64) -> (f64, Option<f64>) {
@@ -60,7 +60,7 @@ fn reach(facets: &[Triangle], ox: f64, oy: f64) -> (f64, Option<f64>) {
 pub(super) fn standoff(part: &[Triangle], stock: Option<&[Triangle]>, ox: f64, oy: f64) -> Standoff {
     let (part_r, part_z) = reach(part, ox, oy);
     let Some((stock_r, stock_z)) = stock.filter(|s| !s.is_empty()).map(|s| reach(s, ox, oy)) else {
-        return Standoff { r: part_r, z_max: part_z, raw: None, mesh: Vec::new() };
+        return Standoff { r: part_r, z_max: part_z, raw: None, mesh: StockMesh::default() };
     };
     let raw = (stock_r > part_r + 1e-9).then_some(stock_r);
     let z_max = match (part_z, stock_z) {
@@ -68,9 +68,14 @@ pub(super) fn standoff(part: &[Triangle], stock: Option<&[Triangle]>, ox: f64, o
         (a, b) => a.or(b),
     };
     let shift = |p: Point3| Point3::new(p.x - ox, p.y - oy, p.z);
+    let frame = |s: &[Triangle]| StockMesh::new(s.iter().map(|t| Triangle::new(shift(t.a), shift(t.b), shift(t.c))).collect());
     let mesh = match (raw, stock) {
-        (Some(_), Some(s)) => s.iter().map(|t| Triangle::new(shift(t.a), shift(t.b), shift(t.c))).collect(),
-        _ => Vec::new(),
+        (Some(_), Some(s)) => {
+            let mut m = frame(s);
+            m.extend(frame(part));
+            m
+        }
+        _ => StockMesh::default(),
     };
     Standoff { r: raw.unwrap_or(part_r), z_max, raw, mesh }
 }
@@ -274,7 +279,9 @@ pub(super) fn rapids_clear(t: &Toolpath, st: &Standoff, tool: &Tool) -> Result<(
                 let Some((got, need)) = short else { continue };
                 if got.is_nan() || got < need - tol {
                     return Err(GenError::Invalid(format!(
-                        "cross-drill rapid {i} stops {got:.3} mm out along its hole's line, inside where                          the tool body meets the stock ({need:.3} mm) - a rapid through material; raise the                          clearance or retract height, or turn the bar to size first"
+                        "cross-drill rapid {i} stops {got:.3} mm out along its hole's line, inside where \
+                         the tool body meets the stock ({need:.3} mm) - a rapid through material; raise \
+                         the clearance or retract height, or turn the bar to size first"
                     )));
                 }
                 continue;

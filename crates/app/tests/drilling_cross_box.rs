@@ -18,7 +18,7 @@ use flecs_ecs::prelude::World;
 use camcraft_app::cl::{MoveKind, Toolpath};
 use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock};
 use camcraft_app::drilling::{CrossHole, CycleChoice};
-use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, Triangle};
+use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, Triangle, cube};
 use camcraft_app::machine::{AxisLimits, Machine};
 use camcraft_app::operation::{self, Height, OpParams, SrcRef};
 use camcraft_app::schema::{Location, Operation};
@@ -89,6 +89,11 @@ fn square(side: f64) -> StockShape {
 /// The r10 bar on `word`'s machine with `stock` (z -20..20) and the
 /// catalog DR-0400 re-ground by `grind`.
 fn world_on(word: &str, stock: StockShape, grind: impl Fn(&mut Tool)) -> (World, History) {
+    world_with(word, stock, bar(PART_R), grind)
+}
+
+/// `world_on` with `part` in place of the r10 bar.
+fn world_with(word: &str, stock: StockShape, part: Mesh, grind: impl Fn(&mut Tool)) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
     let at = Location { pos: Point3::new(0.0, 0.0, -20.0), rot: IDENTITY_Q };
@@ -99,7 +104,7 @@ fn world_on(word: &str, stock: StockShape, grind: impl Fn(&mut Tool)) -> (World,
     tool.flute_len = 30.0;
     grind(&mut tool);
     history.execute(&world, AddTool::new(&world, "DR-0400", tool).expect("catalog tool"));
-    history.execute(&world, ImportModel::from_mesh("bar", bar(PART_R)));
+    history.execute(&world, ImportModel::from_mesh("bar", part));
     (world, history)
 }
 
@@ -257,4 +262,76 @@ fn a_cylinder_stock_chain_is_unchanged_bit_for_bit() {
         })
         .collect();
     assert_eq!(got, vec![2202346499980779381, 1828336726059972913], "the round-bar chains moved");
+}
+
+/// The r10 bar with a block (a modelling error) poking out through the
+/// face of a 40 box (r20) to x `out`, over y `y0..y1`, z -3..3.
+fn bar_with_lump(out: f64, y0: f64, y1: f64) -> Mesh {
+    let mut f = bar(PART_R).facets.to_vec();
+    f.extend(cube(Point3::new(8.0, y0, -3.0), Point3::new(out, y1, 3.0)).facets.iter().copied());
+    Mesh::from_facets(f)
+}
+
+/// The approach rapids along the hole's own line (y 0, z 0, along X)
+/// before the first cut - after it, a peck's rapids ride its own kerf.
+fn along_line(t: &Toolpath) -> Vec<(Point3, Point3)> {
+    let on = |p: Point3| p.y.abs() < 1e-9 && p.z.abs() < 1e-9;
+    t.moves
+        .iter()
+        .take_while(|m| m.kind == MoveKind::Rapid)
+        .filter(|m| on(m.from) && on(m.to))
+        .map(|m| (m.from, m.to))
+        .collect()
+}
+
+/// A part poking out of a 40 box's face to x 26 on the hole's line:
+/// before, the per-line entry read the stock mesh alone - the mouth at
+/// the r20 face and the feed-entry rapid down to x 25, inside the part.
+/// The entry is the outer of the stock's and the part's crossings, so
+/// every rapid along the line stays outside the part. Mill-turn only: a
+/// lathe refuses the lumpy part as not turned about one axis.
+#[test]
+fn a_part_poking_out_of_the_box_face_still_bounds_the_along_line_rapids() {
+    let cross = vec![hole(Point3::new(PART_R, 0.0, 0.0), Point3::new(-1.0, 0.0, 0.0), -3.0)];
+    for word in ["mill-turn"] {
+        let (world, _h) = world_with(word, square(40.0), bar_with_lump(26.0, -3.0, 3.0), |_| {});
+        let (t, _) = operation::generate(&world, &op(cross.clone()), "")
+            .unwrap_or_else(|e| panic!("{word}: the cross drill generates: {e}"));
+        let rapids = along_line(&t);
+        assert!(!rapids.is_empty(), "{word}: the chain approaches along the line");
+        for (a, b) in rapids {
+            let tip = a.x.min(b.x);
+            assert!(tip >= 26.0 - 1e-6, "{word}: a rapid along the line reaches x {tip:.3}, inside the part (x 26)");
+        }
+    }
+}
+
+/// The shank branch of the along-line proof on box stock: a d4 drill on
+/// a d12 shank, a part lump out to x 27.5 lying only in the shank's band
+/// (y 3..5.5). The drill's mouth stays at the r20 face (its own band
+/// meets only the face), the shank's reach is read off the lump, and
+/// the chain is proven clear - the shank behind the flutes stands
+/// outside the lump on every rapid along the line - and posts.
+#[test]
+fn a_wide_shank_on_box_stock_is_proven_clear_along_the_line() {
+    use camcraft_app::posting;
+    let cross = vec![hole(Point3::new(PART_R, 0.0, 0.0), Point3::new(-1.0, 0.0, 0.0), -3.0)];
+    let (world, mut history) = world_with("mill-turn", square(40.0), bar_with_lump(27.5, 3.0, 5.5), |t| {
+        t.shank_d = 12.0;
+    });
+    let o = op(cross);
+    let (t, _) = operation::generate(&world, &o, "").unwrap_or_else(|e| panic!("the wide-shank box hole drills: {e}"));
+    let (from, _) = first_plunge(&t).unwrap_or_else(|| panic!("the chain plunges"));
+    assert!(from.x > 20.0 + R_D - 1e-6 && from.x < 27.5, "the drill's mouth is the face, not the shank's lump: {from:?}");
+    for (a, b) in along_line(&t) {
+        let shank = a.x.min(b.x) + 30.0;
+        assert!(shank >= 27.5, "the shank stands at x {shank:.3}, inside the lump");
+    }
+    let create = CreateOperation::new(&world, "CD1", "DR-0400", o.src.clone(), o.params.clone());
+    history.execute(&world, create.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "CD1").expect("generate"));
+    let path = std::env::temp_dir().join(format!("camcraft-85-shank-{}.nc", std::process::id()));
+    let posted = posting::post_setup(&world, &path);
+    let _ = std::fs::remove_file(&path);
+    assert!(posted.is_ok(), "the wide-shank box hole posts: {:?}", posted.err());
 }

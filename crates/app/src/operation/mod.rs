@@ -117,6 +117,7 @@ use boundary_ctx::*;
 mod job;
 pub use job::*;
 mod generate;
+mod cross_entry;
 mod cross_spindle;
 mod cross_stock;
 mod drill_reach;
