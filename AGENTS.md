@@ -44,6 +44,12 @@ history and in every tag up to v0.8.1): read it for history and
 design context, never add work to them. Decisions still go to
 `RECOMMENDED.md`; shipped changes go to `CHANGELOG.md`.
 
+- **Use the gh-issues skill.** Any work that reads, files, comments on,
+  labels, claims, closes or reopens an issue loads the `gh-issues` skill
+  first (Skill tool), and subagents briefed on issue work are told to do
+  the same. The skill carries the `gh` mechanics (list limits, search
+  syntax, heredoc bodies, closing keywords); this law stays the rule
+  where the two differ.
 - **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked"`
   and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
