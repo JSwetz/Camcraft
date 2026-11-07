@@ -9,7 +9,8 @@
 //! job is carried into the spindle's frame (an XY shift by the origin
 //! `posting::wcs_context` hands the post, the one the spindle law
 //! judges against), run there, and carried back - so the kernel's own
-//! laws hold about the spindle the machine turns.
+//! laws hold about the spindle the machine turns. The reach and holder
+//! laws (issue #84, `drill_reach`) judge the chain in the same frame.
 //!
 //! Provenance: a lathe's or mill-turn's live-tool radial position is
 //! measured from the spindle centreline (RS-274 / ISO 6983 lathe
@@ -63,6 +64,7 @@ pub(super) fn cross_drill(
     facets: &[Triangle],
     stock: Option<&[Triangle]>,
     origin: [f64; 3],
+    tool_name: &str,
 ) -> Result<Toolpath, GenError> {
     let (ox, oy) = (origin[0], origin[1]);
     if !(ox.is_finite() && oy.is_finite()) {
@@ -73,7 +75,6 @@ pub(super) fn cross_drill(
     // the kernel route an opposite-station travel over the end face
     // (M5.2 G); a solid with no vertices says so honestly.
     let st = super::cross_stock::standoff(facets, stock, ox, oy);
-    let d = p.tool.diameter;
     let on_origin = ox == 0.0 && oy == 0.0;
     let local: Vec<CrossHole> = if on_origin {
         p.holes.to_vec()
@@ -83,10 +84,13 @@ pub(super) fn cross_drill(
             .map(|h| CrossHole { origin: Point3::new(h.origin.x - ox, h.origin.y - oy, h.origin.z), ..*h })
             .collect()
     };
-    let local = match st.raw {
-        Some(raw) => super::cross_stock::to_raw_mouths(&local, raw, d)?,
-        None => local,
+    let (local, extra) = match st.raw {
+        Some(raw) => super::cross_stock::to_raw_mouths(&local, raw, p.tool)?,
+        None => (local, Vec::new()),
     };
+    // Issue #84: no hole deeper from the stock surface than the flute
+    // (the wider of drill and shank sets where the stock surface is).
+    super::drill_reach::cross_reach(&local, &extra, p.holes, p.cycle, p.tool, tool_name)?;
     // A shank wider than the drill raises the planes to clear it.
     let (clearance_d, hop_d) = super::cross_stock::body_clear(p.clearance_d, p.hop_d, p.tool);
     let mut t = drilling::cross_drill(&CrossParams {
@@ -99,6 +103,7 @@ pub(super) fn cross_drill(
     })
     .map_err(|e| in_world(e, &local, p.holes))?;
     super::cross_stock::rapids_clear(&t, &st, p.tool)?;
+    super::drill_reach::cross_holder(&t, facets, stock, (ox, oy), p.tool, tool_name)?;
     if on_origin {
         return Ok(t);
     }

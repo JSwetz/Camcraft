@@ -12686,3 +12686,90 @@ keeps the part-only chain bit for bit.
   (3) A lathe part whose fit returns a degenerate axis says so, rather
   than "its axis lies near the table". (4) A test pins that moving G54
   under a generated mill-turn cross drill stales it and the post refuses.
+
+## #84: drilling refuses a hole deeper than the flute from the stock surface, and proves the holder clear (2026-11-07, Prime Directive)
+
+- *Reach rule.* Every drilling op (cross and axial, every cycle) refuses by
+  name a hole whose depth from the STOCK surface exceeds `Tool::flute_len`
+  ("hole X is Y mm deep from the stock surface; tool T's flute reaches Z
+  mm"). Chosen: the conservative rule - past the flute the shank enters the
+  hole, and nothing models a necked shank's wall clearance, so a `shank_d <
+  d` tool is held to its flute too. Dropped: relaxing for necked tools;
+  measuring from the part surface (the uncut stock is what the shank hits -
+  #77 moved cross mouths out to the raw surface, ~16 mm vs ~6 mm deep).
+  Verify's law (e) (`flute + shank + holder` from the part entry, a
+  warning) stays as the softer, later net.
+- *Cross depth* is read off the spindle-frame hole list after
+  `to_raw_mouths`: `-floor_d` plus `THROUGH_CLEAR` on a through hole,
+  `min(SPOT_DEPTH, -floor_d)` for a spot cycle - the depths the kernel
+  feeds. *Axial depth* is read off the kernel's own cycle records: from the
+  highest material over the drill's (or a wider shank's) disk down to
+  `bottom_z`. The material is the part's facets as they stand, plus the
+  setup's stock clipped to the cycle's R plane (the cycle rapids down to R,
+  so stock above R is the rapid laws' business, not stock this cycle feeds
+  through). Conservative: a facet counts at its highest vertex when its
+  projection meets the disk, and a stock declared over a part counts at
+  full height to R even where a prior op milled it (drilling has no
+  rest-material reading yet) - a possible false refusal on a pocket-floor
+  hole with stock, never a silent collision. Dropped: counting the stock
+  above R (every faced block whose Top Z sits under the raw top would
+  refuse every hole).
+- *Holder.* Read from the tool stack as modelled: the holder's face stands
+  `flute_len + shank_len` behind the tip, `holder_d` wide, `holder_len`
+  long; no holder modelled (`holder_d` or `holder_len` 0 - the turret-held
+  kinds) means nothing to sweep. Axial: the face, `flute + shank` above
+  the cycle bottom, must stand above the material top over the holder's
+  disk. Cross: on every move (rapid and feed), the holder - a horizontal
+  cylinder about the move's tool axis - must either ride with its lower
+  edge (`z - holder_d/2`) above the stock's Z top, or keep the XY rectangle
+  its footprint sweeps (convex hull of the eight corners) outside the
+  stock radius `st.r`. The end-face swing between opposite stations is
+  REFUSED by name when the holder would sweep the end face, not raised:
+  the clearance that clears a Ø44 holder is the user's to set (a test pins
+  that raising Clearance by 20 mm then drills), and a kernel that silently
+  lifts the swing 22 mm hides a setup choice. Closes the "left open" of
+  #77's review (the holder over the end face).
+- *Fixtures that now refuse - real reach collisions.* The F2 cross bar
+  (`cross_support`): its 30 mm through hole is 31 mm deep from the bar face
+  (38 mm from the Ø44 raw box's face; the law reads 47 off the box's corner
+  radius - #85) on DR-0400's 12 mm flute - re-ground to a
+  50 mm long-series flute. `drilling_cross_stock`: mouths on the r20 raw
+  bar 16-24 mm above their floors - flute 30. `blind_floor` and
+  `solid_law`'s drill gouge tests drilled 14-15 mm from the z20 stock top -
+  flute 30 there (they pin the solid/gouge laws, not reach).
+  `operations::moving_the_part_marks_the_drill_op_stale_until_regen`: the
+  block moved up 2 mm stands 13 mm over the stored through floor - flute 20.
+  `operations::a_hole_deeper_than_the_drill_reaches_warns_and_still_generates`
+  (M1.6: a 131 mm hole on the 12 mm flute generated with a ShankHit warning
+  for the post gate to refuse) is overturned by this issue's done-criterion
+  and becomes `..._is_refused_by_name`. `posting`'s warned-path test used
+  that same fixture; its warned path is now a contour whose Ø8 shank over a
+  2 mm Ø6 flute rides into the part's wall (the post gate's refusal of a
+  warned path is what it pins). Verify's cycle-reach law (e) in practice no longer
+  fires on a generated drill path (this law is stricter); it stays
+  as the net for paths that reach verify another way.
+- *Review fixes (PR #90).* (1) Tap, Bore and BackBore run in a hole that
+  is already there (the kernel's solid-cycle door lets them by; the bore
+  door already proves the cutting end fits), so they are no longer held to
+  the flute: within the flute nothing but the cutting end is in the hole;
+  past it the shank must fit the hole's diameter (`shank_d <= 2 r`), refused
+  by name otherwise. The holder law still applies. Dropped: holding them to
+  the flute (a 25 mm bore on BR-1000's 20 mm flute in a pre-drilled Ø12 hole
+  was falsely refused). (2) The cross holder is judged per Z band: each
+  move's holder Z extent (both move ends, both holder ends, its radius
+  across the axis) against the widest part or stock radius within that band,
+  each facet clipped to the band. A holder riding above the end face meets
+  no material - the old global `z_max` skip falls out of it - and a Ø60
+  flange 30 mm below a hole in a Ø20 section no longer refuses it. Dropped:
+  the global stock radius (false refusals on any stepped shaft). (3) An
+  off-centre cross hole's reach is the wider body's: a shank wider than the
+  drill meets the raw bar further out than the drill's edge (raw r20, offset
+  15, Ø3 on Ø6: 1.244 mm), and `to_raw_mouths` now returns that extra
+  per hole for the reach law; the mouth itself stays at the drill's edge
+  (where cutting starts). (4) A non-finite or negative `holder_d` /
+  `holder_len` is refused by name (AddTool already refuses it; this guards
+  any other path in); 0 still means no holder. (5) `meets_disk` skips
+  facets with no 3D area, and reads a wall (no XY area) by its edges only -
+  the same-sign inside test passed every disk on a wall's line. The
+  cross_support fixture note now gives the raw box's true face depth, 38 mm
+  (47 is the box corner radius, #85).

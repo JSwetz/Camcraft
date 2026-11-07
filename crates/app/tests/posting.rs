@@ -282,20 +282,30 @@ fn a_stale_operation_blocks_the_post_and_leaves_the_file_untouched() {
 
 #[test]
 fn a_warned_path_blocks_even_though_it_generated() {
-    // The M1.6 deep-hole fixture: generation succeeds WITH a ShankHit
-    // warning (the user must be able to read the numbers). The post
-    // gate is where that warning becomes a refusal - the path exists,
-    // is fresh, and is still not safe to machine.
+    // A ShankHit fixture: generation succeeds WITH the warning (the
+    // user must be able to read the numbers). The post gate is where
+    // that warning becomes a refusal - the path exists, is fresh, and is
+    // still not safe to machine. (Once the M1.6 deep hole; issue #84
+    // refuses a hole past the flute at generation, so the warned path is
+    // now a contour whose Ø8 shank, 2 mm over a Ø6 flute, rides 1 mm
+    // into the part's wall.)
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 100.0, 100.0, 130.0);
-    add_tool(&world, &mut history, "DR-0400");
+    box_stock(&world, &mut history, 100.0, 100.0, 10.0);
+    let mut stub = catalog_tool("EM-0600-4FL");
+    stub.flute_len = 2.0;
+    stub.shank_d = 8.0;
+    history.execute(&world, AddTool::new(&world, "EM-0600-4FL", stub).expect("stub tool"));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
     let cmd = CreateOperation::new(
         &world,
         "Deep1",
-        "DR-0400",
-        SrcRef::Stock,
-        drill_params(hole(0.0, 0.0, 2.0, 130.0, 0.0, true), 130.0, 140.0),
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
     history.execute(

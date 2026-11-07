@@ -112,7 +112,13 @@ fn world_with(mesh: Mesh, tool: &str) -> (World, History) {
     h.execute(&world, ImportModel::from_mesh("part", mesh));
     let loc = Location { pos: Point3::new(0.0, 0.0, -2.0), ..Default::default() };
     h.execute(&world, SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 22.0 }, loc).expect("stock"));
-    let t = catalog().into_iter().find(|(n, _)| *n == tool).map(|(_, t)| t).expect("catalog");
+    let mut t = catalog().into_iter().find(|(n, _)| *n == tool).map(|(_, t)| t).expect("catalog");
+    if tool == "DR-0400" {
+        // A long-series flute: these holes run 14-15 mm from the z20
+        // stock top, past the jobber's 12 mm - issue #84's reach law
+        // would refuse them before the law under test speaks.
+        t.flute_len = 30.0;
+    }
     h.execute(&world, AddTool::new(&world, tool, t).expect("tool"));
     (world, h)
 }
