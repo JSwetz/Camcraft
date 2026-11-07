@@ -13183,6 +13183,222 @@ revolved (follow-up material if users hit it with long keyways).
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
 
+## #103: a turned path's axial rapids judged in the meridian plane (partial)
+
+- **Law.** `operation/turning_rapids.rs` no longer drops the column law's
+  word on a turned op's axial rapids and stops there: it drops it and
+  judges each axial rapid (no XY travel) in the meridian plane. The
+  rapid's nose disc (nose radius less the gouge tolerance) must not meet
+  material between its two stations: the part and the setup stock
+  revolved about the fitted axis (silhouette envelope per station; a
+  station-span x max-radius box where no silhouette reads), less this
+  path's own earlier feeds' nose sweep (signed radius, mirrored, so a
+  facing pass across the axis counts) and less the stock the program
+  ahead faced (the #89 prior grid read revolved, asked only on a
+  conviction; job.rs now collects the prior for the turned family too).
+- **Chosen:** the declared stock revolved, not the part as stock. The
+  turning kernels ignore the stock (rho_clear is the part's r_max + tol),
+  so a bar wider than the part is a real crash on the first approach.
+- **Found (held):** the lathe_post fixtures (and very likely the
+  turning_bore / turning_contour ones) set a 40 mm box stock from Z 0 to
+  40 round a 12 mm bar: their approaches at r 6.85 from Z 25 run inside
+  that box, so they are convicted - real by the declared stock, which the
+  kernels never cut. Owed: decide fixtures (stock the bar's size) vs a
+  kernel that roughs from the stock; the groove/part (Mode::Revolve)
+  kinds are inside the law's scope too and convict the same way.
+- **Dropped:** a sim-side Revolve rapid law (the sim has no stock solid
+  of revolution; the app has the frame and the prior); reading the stock
+  bore (a tube stock reads solid - conservative, owed).
+
+### #103 resumed: fixtures, not the law
+
+- **Fixtures.** The lathe suites' 40 mm box stock (Z 0 up) round 12-20
+  mm bars is replaced by bar-sized stock - a Cylinder of the bar's
+  diameter over its Z span - in lathe_post (profile, groove/part; a
+  `bar_world` helper), turning_contour (r 10 blank; the stepped r 6 bar
+  gets its own r 6 world, `contour_world_in`), turning_blade,
+  turning_form, turning_thread and turning_bore. The convictions were
+  real against the declared box: the turning kernels never cut stock
+  beyond the part, filed as #130. No NC golden changed.
+- **One wiring fix, found by turning_form:** the nose disc is the
+  tool's `nose_radius` only for Turning and Bore inserts (their moves
+  carry the nose centre); a groove/thread blade or form gauge carries
+  its tip with the body outward, so it is judged as the tip point (a
+  form's `nose_radius` is its crown arc - read as a 6 mm ball it
+  convicted every clean form traverse). Owed: a blade's band along the
+  axis past the rapid's ends is not read.
+- **Held: turning_bore (3 tests).** The boring ride's approach runs down
+  the axis (r 0, Z 60 -> -10) into the bar. Against the declared solid
+  bar that is a real crash (no pilot hole); against honest stock (a tube,
+  or a drill ahead) the law still convicts it, because both readings
+  fill the bore: the stock and the part are each read as their OUTER
+  silhouette, and the lathe prior credits facing only. A boring op can
+  therefore never post - a false refusal class the law must lose before
+  #103 closes: read each body's meridian section (inner and outer
+  radius per station), and credit an axial drill ahead.
+
+### #103 closed out: the bore reads as air, a pilot drill ahead is credited
+
+- **Annulus, not disc.** `operation/turning_outline.rs` reads the part
+  and the stock per station as material between r_in and r_out: r_out
+  from the turned silhouette (span fallback), r_in by ray parity from
+  the axis point (Moller-Trumbore, four skewed directions, read a hair
+  either side of the station so an end face's own plane never counts
+  edge-on): an odd count in any direction is a core to the axis (r_in
+  0), else r_in is the nearest wall (no wall: nothing there). A bored
+  part's hole and a tube's bore are air; a Cylinder with no bore is
+  solid to the axis. Cached per station; read only inside the outer
+  skin and only after the cheap credits miss. Owed: cost on very large
+  meshes (a facet scan per station read, span-filtered).
+- **Pilot credit.** An axial Drill ahead in the setup (`rest::drills_ahead`,
+  on a lathe too; drill_prior's facing-only prior unchanged) is a removed
+  cylinder of the drill radius over its plunge's stations, its point a
+  cone of the tool's tip angle (#89's drill atom). Off-axis holes credit
+  nothing. Like the facing prior, the turned op's stamp does not digest
+  the drill ahead (#109 scope).
+- **turning_bore fixture:** the bored bar now has its pilot - an axial
+  r 2 drill (AX0, a 70 mm flute DR-0400; names sort ahead of the bore
+  ops, which is program order) from the top to Z -12, under the ride's
+  -10 window. Chosen over a tube stock: the fixture models a finished
+  bore in solid bar, and a pilot is how a bore pass starts. Pinned:
+  `a_boring_approach_into_a_solid_bar_with_no_pilot_is_convicted_and_blocks_the_post`.
+
+### #103 review (PR #135): the body, the band, arcs, the point
+
+- **B1, the bar's body.** A Bore tool is judged by its nose disc (the
+  cutting tip) AND its body: a disc of max(diameter, shank) / 2 about
+  the nose in the meridian, carried up the axis by flute + shank length.
+  A pilot credits only the body points inside its cylinder and cone, so
+  a Ø10 bar down a Ø4 pilot is convicted (`a_ten_mm_bar_down_a_four_mm_pilot_is_convicted`).
+  The turning_bore pilot is now Ø11 to Z -16 (its 118-degree point clear
+  under the ride's -10 window). *Assumption:* the body is centred on the
+  nose. A bar whose tip sits at its body's edge reaches a full diameter
+  off the axis; the catalog does not say which, and the kernel puts the
+  nose on the axis for the approach - if that geometry is wanted, the
+  body offset joins the tool data (follow-up, not guessed here).
+- **B2, the blade's band.** Groove / part / form tools sample ±width/2
+  along the axis about the move (the band's centre); a thread samples
+  its crest half-width. Pinned by the reviewer's scenario
+  (`a_single_groove_at_the_bars_end_is_judged_across_its_band`: one 5 mm
+  groove at the end of a bar running 2 mm past the part - convicted; the
+  centre point alone is not).
+- **S1:** arc feeds credit nothing (a threading half-turn's chord crosses
+  the axis). Conservative; an arc's true sweep is owed if it ever
+  false-convicts.
+- **S3:** a drill with no stated point is read as 118 degrees, not flat
+  (a flat point credits MORE); the DrillAhead doc says so.
+- **S2** (a pilot deleted after the bore leaves it Ok) is #109's - a
+  lathe pin was added there, not fixed here.
+
+### #109: a verdict that reads earlier ops digests them
+
+- **Chosen: the stamp, not a live re-check at the post.** Every op whose
+  verdict reads the program ahead now writes the existing rest digest
+  (`rest::prior_digest`, the same term Pocket3D and Drill already wrote)
+  into its generation stamp, so editing, regenerating, deleting or
+  reordering an earlier op of its setup marks it Stale, and the post
+  gate - which already refuses Stale - refuses it. Which ops: Pocket3D,
+  Drill and every op with no 3+2 frame (`drill_prior::reads_prior`) -
+  exactly the set `job::collect_job` hands `verify_prior` (the prior
+  acquittal) and the turned family's pilot/facing credits ride. The
+  stale reason names the moved predecessor, the same story as Pocket3D's.
+- **Dropped: re-running `acquit_by_prior` / `judge_axial_rapids` live at
+  the post.** It would keep stamps unchurned, but the post would cut the
+  prior grid (the costly half) for every op every post, and two
+  readings of one verdict could disagree; the stamp is the one source.
+- **Cost, accepted:** every non-first op of a saved project reads Stale
+  once on load and clears on regenerate (release notes say so). A posed
+  (3+2) op reads no prior and keeps its stamp bit-for-bit. The digest
+  reads predecessors' cached paths, so an edited-but-not-regenerated
+  predecessor is its own Stale (the post refuses it first), and the
+  dependent goes Stale when it is regenerated.
+- **RegenerateAll converges in one click (#145).** The digest made a
+  frozen batch leave a dependent Stale behind a predecessor regenerated
+  in the same batch (a second click). Chosen: rounds inside the
+  constructor - stage every Stale op in program order, finish in
+  parallel, write the round so the next reads it, stop when nothing is
+  Stale (cap: the op count; an op still Stale is named in `skipped`),
+  then invert every write so `apply` replays the batch as ONE undo unit.
+  Dropped: staging strictly one op at a time (loses M5.3 B's parallel
+  finish for independent ops) and leaving two clicks (a user hits it).
+  The constructor now writes the world transiently and restores it;
+  every caller builds and executes on the main thread.
+- **#153 review B1: the path signature is stored at the write.**
+  `schema::Toolpath` carries a private `sig` (`path_sig::of`, the old
+  `rest::path_hash`) computed in `Toolpath::new`, its only constructor,
+  so `prior_digest` reads one word per op ahead and clones nothing -
+  O(M) cheap reads per `status_of`, not M full path clones. Chosen
+  over a sibling component (every writer would have to keep two
+  components in step) and a flecs on-set observer (none exist in app;
+  hooks writing components mid-set were not worth the risk). Caches
+  are rebuilt whole, never edited in place (the one test that spliced
+  a move now rebuilds). N3: the kind tag joins the digest.
+  N1: a round defers an op that reads the program ahead when an op
+  ahead of it in its setup is staged in that round - each op generates
+  once; setups still run side by side.
+- Pins: `a_face_regenerated_shallower_marks_the_acquitted_contour_stale`,
+  `one_regenerate_all_brings_a_dependent_pair_current`,
+  `the_program_ahead_digest_moves_only_with_the_path`,
+  `a_reorder_marks_the_dependent_stale`,
+  `a_posed_op_keeps_its_stamp_when_the_program_ahead_moves`
+  (vertical_rapid_stock), `a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale`
+  (turning_bore). turning_bore's fixture moved to `tests/common/bore.rs`
+  to keep the suite under the 400-line law.
+
+### #103 re-review B3: the bar's body lies toward the axis
+
+- **Law.** The Bore body is no longer centred on the nose: the insert
+  sits at the body's edge and the body lies toward the axis, signed
+  radius [rho - d, rho] (d the body diameter, max of diameter and shank).
+  A bar with its nose on the axis reaches a whole diameter off it.
+  Supersedes the "centred" assumption above - the kernel's own ride (a
+  Ø10 bar riding r 5.6 in a Ø12 wall) rules it out, as the reviewer
+  showed.
+- **Kernel** (`motion::turning::bore`). `BoreParams.bar_radius` (half the
+  body diameter; 0 keeps the old on-axis rapids) puts the approach and
+  the retract at nose r = bar_radius - nose/2 on the cutting side,
+  clipped to the ride's own end radii: the bar spans
+  [r - 2 bar_radius, r + nose], centred on the spindle, so a pilot just
+  over the bar's size admits it. Chosen over r = bar_radius (the nose
+  then pokes nose-radius past the body, into a Ø11 pilot with a 0.8
+  nose) and over a full disc of radius d about the nose (convicts every
+  honest bore). The off-wall retract is now radial to that line, not to
+  the axis.
+- **Fixture.** turning_bore keeps the Ø11 pilot to Z -16 (Ø10 body plus
+  clearance, under the Ø12 finished bore; a 0.8 regrind still fits:
+  ±5.4 inside 5.5). Pinned: `a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted`
+  (law, nose on the axis convicted, the kernel's centred line clean) and
+  motion's `a_stated_bar_enters_and_leaves_with_its_own_axis_on_the_spindle`.
+  No golden carries a bore path; none changed.
+- The law's unit pins moved to `operation/turning_rapids_tests.rs`
+  (size budget).
+
+### #103 re-review B4: head and shank modelled apart
+
+- **Law and kernel share one shape**, `motion::turning::bar_spans`: the
+  insert sits at the head's edge, so the head spans [-head_d, 0]
+  outward of the nose, over `flute_len` up the axis. The shank is read
+  both ways a tool record can mean it, with its edge on the insert's or
+  its axis on the head's, and the union kept:
+  [-max(shank_d, (head_d + shank_d)/2), max(0, (shank_d - head_d)/2)],
+  over `shank_len` above the flute. A shank wider than the head reaches
+  past the nose. `centred_nose` puts the kernel's rapids where the whole
+  bar (head, shank and the nose past the head's edge) is centred on the
+  spindle. `BoreParams.bar_radius` became `head_d` / `shank_d`.
+- **Chosen:** modelling over refusing (a stepped-shank bar is an ordinary
+  tool, per the coordinator), and the union over the coaxial reading
+  alone. The union is conservative: the reviewer's Ø8/Ø12 bar centred
+  spans 14 mm, so it is refused in a Ø13 pilot even though the coaxial
+  reading (12 mm) would fit. The tool record does not say which reading
+  holds. If that false refusal bites, an explicit shank-offset field
+  joins the tool data.
+- **Pins:** `a_bar_whose_shank_outgrows_its_head_is_judged_by_its_shank`
+  (law: the reviewer's scenario convicted centred and on the old line,
+  clean in a pilot it fits), `a_bar_whose_shank_outgrows_its_head_is_judged_by_its_full_shank`
+  (app: fails when generate passes half the diameters, checked by
+  reverting the line), and `a_twelve_mm_bar_in_the_eleven_mm_pilot_is_convicted`.
+- **Filed:** #146, the bar's body during cutting feeds (P1).
+
 ## #117 - the cross drill is judged against the finished part (2026-11-07, Prime Directive)
 
 - **Chosen:** the cross arm refuses by name (a `GenError`, so nothing
@@ -13273,3 +13489,92 @@ revolved (follow-up material if users hit it with long keyways).
   them. Dropped: an exact disc-versus-polygon minimum of the lifted
   surface (needs a lifted-tool / stock-edge distance per wall segment;
   the ring bound d / 8 plus the chord bulge is stated instead).
+
+### #103 after merging #106 (rapid footprint): the facing approach and the lathe's radial rapids
+
+- **Verdict on facing.nc's new 1/5/9/13/17 (inward `G00 X14.6 -> X11.6`
+  at each face depth): REAL.** The fixture's declared stock was a 40 mm
+  box from Z 0 to 40, never faced (the Facing kind faces the model,
+  #130). A rapid at Z 16.8..14.8 runs inside it, and below the previous
+  pass's floor the nose ball meets uncut material between r 5 and 6 of
+  any bar wider than the neck. The kernel rapided from rho_clear to the
+  model's reach at the cut depth. The model is air there; the stock is
+  not. **Fixed in the kernel** (`motion::turning::face`): that move is
+  now a feed. Rapids stay outside the work; the approach feeds in. The
+  fixture also moves to bar-sized stock (`bar_world`, like the other
+  lathe goldens).
+- **Main's 11/15/19 (outward `G00 X0 -> X14.6` after each pass): FALSE.**
+  The column's footprint law (#106) reads the turning insert as a
+  vertical-axis disc of the tool's radius about the nose. A lathe pass's
+  radial retract back along the plane it just cut is in its own kerf in
+  the meridian. The same misreading convicted turning_bore's off-wall
+  rapid and turning_contour's chamfer retract after the merge. **Rule:**
+  for the turned family the meridian law judges every axial rapid, and
+  RE-READS any in-plane radial rapid the column convicted. It may
+  acquit; it adds no conviction on radial rapids the column did not
+  make. Generalising it to judge every radial rapid was tried and
+  dropped: it convicts a finish pass's retract across the rough's
+  uncut-by-credit band, because the lathe prior credits facing only
+  (review N5, #130).
+- **Blade kerf:** a groove or part feed's own kerf is credited across
+  its band, not at its centre point.
+- **turning_bore pilot is now Ø11.2.** The meridian re-read of the
+  off-wall rapid found the bar's head 20 mm above the nose standing at
+  r 5.54 in the r 5.5..6 band the ride never cut (above the window
+  top). It is a real 0.04 mm overlap, already there during the ride's
+  feed (#146).
+- **Golden:** facing.nc. The only diff is the five inward moves going
+  G00 to G01 F0.05, and main's three false warnings removed. No other
+  golden changed.
+
+### #159: the meridian law owns every turning rapid
+
+- **Rule.** For the turned family the column/footprint law (#106) no
+  longer judges any rapid in the turning plane, axial or radial. The
+  meridian law judges them all and its word stands. Supersedes the
+  "re-read only" rule above; a rapid off the turning plane (no current
+  kernel makes one) keeps the column's word. The footprint disc of the
+  tool's radius about the nose is a mill's reading: it convicted main's
+  turning_bore off-wall rapid (move 18), the chamfer's retract (55) and
+  facing's own-kerf retracts (11/15/19), all FALSE in the meridian.
+- **What the meridian now credits, so it judges radial rapids honestly:**
+  - the turning ops ahead in the setup (`rest::turned_ahead`, each at its
+    nose; blades at their centre line);
+  - a thread's helix arc as constant radius over its stations (the S1
+    chord is still never credited);
+  - a groove blade's band, and a thread's V, outward of its tip along
+    this path's own feeds;
+  - a thread's band sampled as its V, not a flat edge at the tip.
+- **Real convictions it found, kept:**
+  - *TaperTurning on the Ø20 bar*: the ride ends at r 8.8 on Z 40, its
+    nose clears r <= 9.6, the bar stands to r 10, and the radial retract
+    to r 10.85 drives through that ring. Pinned in
+    `a_taper_rides_the_modeled_cone_and_a_square_bar_refuses` (TP0,
+    convicted by name). The clean rides now stand on a blank turned to
+    the cone (stock from model, `taper_blank_world`).
+  - *profile_rough_finish golden*: program order reads names, so P1 (the
+    finish) posts ahead of R1 and rides the raw Ø12 bar. Its radial
+    retract at Z 16 (r 4.3 -> 6.85) sweeps the neck's uncut r 5.1..6
+    band. Recorded as one added WARN line in the golden; the program
+    text is unchanged and the gate refuses it. The fixture's op naming is
+    the cause; it was left as is to keep the translation golden stable.
+- **Split for the size budget:** the drill-pilot credit moved to
+  `operation/turning_credit.rs`.
+
+### PR #135 fifth review
+
+- **B2:** the blade-band widening of a kerf now applies only to THIS op's
+  own cuts. An op ahead keeps its own reach, so another tool's cut is
+  never measured by this blade's band. Pinned:
+  `a_banded_rapid_just_under_an_earlier_face_cut_is_convicted`.
+- **Fixture:** `profile_rough_and_finish_post_to_the_lathe_golden` names
+  its finish S1, so the rough (R1) posts first and the golden is a
+  program the gate accepts. Its diff is the two sections swapped (the G50
+  clamp stays on the first) and P1's WARN line gone; checked by script.
+  Finish ahead of rough is pinned on its own:
+  `a_finish_posted_ahead_of_its_rough_is_convicted_by_name`.
+- **Docs:** `kerf_of` states the helix approximation (constant radius
+  credits the crests; safe only for today's thread kernel). `outward`
+  states the OD assumption (an internal blade must flip it or pass None).
+- **B1** (the turned op's stamp does not digest the ops ahead) is covered
+  by PR #153, stacked on this branch; not duplicated here.

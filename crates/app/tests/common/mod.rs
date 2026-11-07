@@ -9,6 +9,7 @@
 
 #![allow(dead_code)] // each test binary uses part of the surface
 
+pub mod bore;
 pub mod cl_read;
 pub mod engine_consumers;
 pub mod engine_fixtures;

@@ -80,14 +80,16 @@ close anything; do not reply on the contributor's behalf.
 ## 4. Apply outside contributors' claims
 
 Contributors without Triage rights cannot add the `claimed` label or
-assign themselves, so their claim is a comment (AGENTS.md "Outside
+assign themselves, and collaborators often claim by comment alone too, so
+every claim comment from anyone but the owner account (agents post as the
+owner) is checked; its claim is a comment (AGENTS.md "Outside
 contributors' claims count"). On every run, after the PR steps, find
 fresh claim comments that have not been applied yet:
 
 ```bash
 since=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-4H +%Y-%m-%dT%H:%M:%SZ)
 gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
-  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.author_association|test("OWNER|MEMBER|COLLABORATOR")|not))
+  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.user.login != "NeoTech"))
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 
