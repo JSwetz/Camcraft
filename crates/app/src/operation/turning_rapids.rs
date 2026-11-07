@@ -30,3 +30,43 @@ pub(super) fn drop_axial_rapids(params: &OpParams, path: &Toolpath, z_tol: f64, 
         !(m.kind == MoveKind::Rapid && dx * dx + dy * dy <= z_tol * z_tol)
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cl::Move;
+    use crate::geometry::Point3;
+    use crate::operation::Height;
+
+    fn rapid(from: Point3, to: Point3) -> Move {
+        Move { kind: MoveKind::Rapid, from, to, feed: None, arc: None, axis: None }
+    }
+
+    #[test]
+    fn a_turned_path_keeps_its_sideways_conviction_and_drops_only_the_axial_one() {
+        let params = OpParams::ProfileRough {
+            tolerance: 0.05,
+            clearance_z: Height::fixed(25.0),
+            top_z: Height::fixed(16.0),
+            bottom_z: Height::fixed(-16.0),
+            stepdown: 0.8,
+            stock_to_leave: 0.25,
+            feed: 150.0,
+            plunge_feed: 80.0,
+        };
+        let path = Toolpath {
+            moves: vec![
+                // Axial: straight down the spindle axis beside the bar.
+                rapid(Point3::new(20.0, 0.0, 25.0), Point3::new(20.0, 0.0, 10.0)),
+                // Sideways: a radial rapid in toward the axis.
+                rapid(Point3::new(20.0, 0.0, 10.0), Point3::new(5.0, 0.0, 10.0)),
+            ],
+            cycles: Vec::new(),
+            notes: Vec::new(),
+            comps: Vec::new(),
+        };
+        let mut warns = vec![Warning::RapidInStock { at: 0 }, Warning::RapidInStock { at: 1 }];
+        drop_axial_rapids(&params, &path, 1e-6, &mut warns);
+        assert_eq!(warns, vec![Warning::RapidInStock { at: 1 }]);
+    }
+}

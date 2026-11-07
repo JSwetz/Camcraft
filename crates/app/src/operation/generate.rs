@@ -39,6 +39,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         mut contour_sel,
         mut drive_chains,
         mut prior,
+        verify_prior,
         is_mill,
         machine_kind,
         machine_rotaries,
@@ -2683,6 +2684,19 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // not a column dive (#96): the column law's word on them
             // is dropped for the turned family only.
             super::turning_rapids::drop_axial_rapids(&params, &path, Z_TOL, &mut warns);
+            // The program ahead cut too (#96 review): a dive the column
+            // convicted against the raw block is re-read against what
+            // the setup's earlier operations left standing.
+            // Cut only when a rapid was convicted: the simulation is
+            // the costly half, and a clean path needs no second word.
+            if let Some(plan) = verify_prior
+                && warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. }))
+            {
+                match plan.simulate() {
+                    Ok(dex) => verify::acquit_by_prior(&path, &dex, geom.radius, Z_TOL, &mut warns),
+                    Err(e) => eprintln!("camcraft: the program ahead could not be cut for the rapid law, raw stock stands: {e}"),
+                }
+            }
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it

@@ -12933,3 +12933,36 @@ keeps the part-only chain bit for bit.
 | lathe_post: profile_rough_and_finish_post_to_the_lathe_golden | ProfileRough R1, ProfileFinish P1 | move 0, axial rapid (X13.7 Z25 -> Z2) | 40 box | false conviction | law: `turning_rapids`; `fanuc-lathe/profile_rough_finish.nc` unchanged |
 
   No golden changed: every .nc / CL golden matches byte for byte.
+- **Review fixes (PR #105).** (1) *False refusal of programs that post
+  today:* the column read only this op's own cuts and the raw stock top,
+  so a face-then-contour (the face takes the block to the contour's top)
+  or a pocket-then-drill was refused. Verify now reads the setup's prior
+  stock too: `collect_job` collects a `rest::PriorPlan` (the stock grid
+  plus the cached moves and tool atoms of every cutting op ahead in the
+  same setup - the re-machining `ahead_of` law, program order by name)
+  for every untilted, non-turned op; `run_job` cuts it
+  (`PriorPlan::simulate`, the costly half) only when verify convicted a
+  rapid, and `verify::acquit_by_prior` keeps a vertical dive's conviction
+  only while the dive also ends below the prior surface - the same
+  verdict as putting the prior in the column's min. Read conservatively:
+  the highest grid column under the tool's whole disc; off-grid is air;
+  no readable cell, an unbuildable grid or a posed predecessor the grid
+  refuses = raw stock (conviction stands, the reason printed). Lateral
+  convictions are not re-read. Considered and dropped: a `VerifyContext`
+  field (40 constructors), and running `prior_state` for every op at
+  collect (a dexel simulation per generation even for clean paths). The
+  drill side: #91's R-plane law still reads the raw stock at
+  generation, so a pocket-then-drill with R over the pocket floor stays
+  refused there (that is #89); verify adds no second refusal (pinned by
+  the sim unit test on a pocketed grid). *Owed:* a non-Pocket3D op's
+  stamp does not digest the program ahead, so an earlier op regenerated
+  shallower after the acquittal leaves the later op Ok on a stale
+  verdict (not a regression - before #96 every vertical rapid was
+  exempt); the fix is a live re-check at the post gate or the prior
+  digest in every stamp (which re-stales every non-first op of every
+  saved project) - for the main session to file. (2) pocket3d_hsm: the
+  op's `top_z` is raised to 0 (the stock its load reader declares) and
+  the verify stock top is back at 0; the ladder is unchanged (levels -5
+  and -10, `LEVELS` and every pinned number stand). (3) verify's module
+  doc states the vertical-dive law. (4) turning_rapids carries a unit
+  test: one axial and one sideways conviction, only the axial dropped.

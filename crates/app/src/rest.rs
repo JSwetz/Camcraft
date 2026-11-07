@@ -296,6 +296,47 @@ pub fn prior_state(
     })
 }
 
+/// The program ahead of one operation, collected but not yet cut
+/// (issue #96 review): the stock grid and the predecessors' cached
+/// moves with their atoms. Verify's vertical-rapid law needs the rest
+/// surface only when it has convicted a dive, so the simulation - the
+/// costly half of [`prior_state`] - runs on the job thread, and only
+/// then ([`PriorPlan::simulate`]).
+pub struct PriorPlan {
+    grid: Dexel,
+    ahead: Vec<Ahead>,
+}
+
+impl PriorPlan {
+    /// The grid the plan's operations leave standing; a refusal (a
+    /// posed predecessor the column grid cannot cut) is the caller's
+    /// "prior unknown" - the raw stock, never an acquittal.
+    pub fn simulate(self) -> Result<Dexel, String> {
+        let mut dex = self.grid;
+        let ops: Vec<SimOp> = self
+            .ahead
+            .iter()
+            .map(|a| SimOp { moves: &a.moves, radius: a.radius, ball: a.ball, cone: a.cone, corner: a.corner })
+            .collect();
+        stock_sim::simulate(&mut dex, &ops).map_err(|e| e.to_string())?;
+        Ok(dex)
+    }
+}
+
+/// The program ahead of `name` in its setup, collected for verify's
+/// prior reading: `Ok(None)` when nothing ahead has cut (the raw stock
+/// IS the prior), an error when the stock grid cannot be built (the
+/// caller treats that as an unknown prior - raw stock).
+pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -> Result<Option<PriorPlan>, String> {
+    let ahead: Vec<Ahead> = ahead_of(world, name, setup).into_iter().filter(|a| a.cut).collect();
+    if ahead.is_empty() {
+        return Ok(None);
+    }
+    let min_r = ahead.iter().filter(|a| a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
+    let grid = stock_sim::stock_grid(world, setup, min_r)?;
+    Ok(Some(PriorPlan { grid, ahead }))
+}
+
 /// The staleness story re-machining adds to `stale_reason`'s list of
 /// live questions - asked LAST, after every question the operation can
 /// answer about its own inputs. If the dependent still reads Stale
