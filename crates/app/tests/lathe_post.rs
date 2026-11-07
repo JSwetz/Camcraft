@@ -25,8 +25,8 @@ mod common;
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SelectPost,
-    SetStock,
+    AddTool, CreateOperation, DeleteOperation, EditOperationParams, GenerateOperation, History, ImportModel,
+    LoadMachine, ReorderOperation, SelectPost, SetStock,
 };
 use camcraft_app::drilling::{CycleChoice, Hole};
 use camcraft_app::geo2d::Point2;
@@ -197,16 +197,20 @@ fn facing_posts_to_the_lathe_golden() {
     common::write_golden("nc/fanuc-lathe/facing.nc", &text);
 }
 
-#[test]
-fn profile_rough_and_finish_post_to_the_lathe_golden() {
-    // The stage-B flanged bar: neck r3.5 so the rough ladder has rungs.
-    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (3.5, 2.0), (3.5, 16.0), (0.0, 16.0)];
-    let (world, mut history) = bar_world(&bar, &["TN-1600-0R8"]);
+/// The stage-B flanged bar: neck r3.5 so the rough ladder has rungs.
+const FLANGED: [(f64, f64); 6] = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (3.5, 2.0), (3.5, 16.0), (0.0, 16.0)];
+
+fn flanged_world() -> (World, History) {
+    bar_world(&FLANGED, &["TN-1600-0R8"])
+}
+
+/// The flanged bar's rough (down to `rough_bottom`) and its finish.
+fn rough_finish(rough_bottom: f64) -> (OpParams, OpParams) {
     let rough = OpParams::ProfileRough {
         tolerance: 0.05,
         clearance_z: Height::fixed(25.0),
         top_z: Height::fixed(16.0),
-        bottom_z: Height::fixed(-16.0),
+        bottom_z: Height::fixed(rough_bottom),
         stepdown: 0.8,
         stock_to_leave: 0.25,
         feed: 150.0,
@@ -220,6 +224,52 @@ fn profile_rough_and_finish_post_to_the_lathe_golden() {
         feed: 120.0,
         plunge_feed: 60.0,
     };
+    (rough, finish)
+}
+
+#[test]
+fn a_rough_moved_after_deleted_or_made_shallower_stales_its_finish() {
+    // #109 (PR #153 review): S1's retracts are credited by R1 turned
+    // ahead of it (#159), so R1 is an input of S1's verdict. Moving R1
+    // after S1, deleting it, or re-cutting it shallower must mark S1
+    // Stale and refuse the post - never ship the credited retract.
+    for case in ["reorder", "delete", "shallower"] {
+        let (world, mut history) = flanged_world();
+        let (rough, finish) = rough_finish(-16.0);
+        create(&world, &mut history, "R1", "TN-1600-0R8", rough);
+        create(&world, &mut history, "S1", "TN-1600-0R8", finish);
+        match case {
+            "reorder" => {
+                let cmd = ReorderOperation::new(&world, "R1", "S1", true);
+                history.execute(&world, cmd.expect("R1 after S1"));
+            }
+            "delete" => history.execute(&world, DeleteOperation::new(&world, "R1").expect("delete R1")),
+            _ => {
+                let cmd = EditOperationParams::new(&world, "R1", rough_finish(10.0).0);
+                history.execute(&world, cmd.expect("a shallower rough"));
+                history.execute(&world, GenerateOperation::new(&world, "R1").expect("regenerate R1"));
+            }
+        }
+        let e = camcraft_app::model::find_by_name(&world, "S1").expect("op");
+        assert_eq!(
+            camcraft_app::operation::status_of(&world, &e),
+            camcraft_app::operation::OpStatus::Stale,
+            "{case}: the rough ahead of S1 moved"
+        );
+        let out = std::env::temp_dir().join(format!("camcraft-rough-moved-{case}-{}.nc", std::process::id()));
+        let _ = std::fs::remove_file(&out);
+        match posting::post_setup(&world, &out) {
+            Ok(_) => panic!("{case}: a finish credited by a moved rough posted"),
+            Err(e) => assert!(e.contains("regenerate"), "{case}: refused, but not as stale: {e}"),
+        }
+        assert!(!out.exists(), "a refused post writes nothing");
+    }
+}
+
+#[test]
+fn profile_rough_and_finish_post_to_the_lathe_golden() {
+    let (world, mut history) = flanged_world();
+    let (rough, finish) = rough_finish(-16.0);
     // Program order reads names (ops created without an order sort by
     // key): R1 then S1, the rough ahead of the finish - the program the
     // gate accepts. Finish ahead of rough is a real rapid in stock,
@@ -239,28 +289,13 @@ fn a_finish_posted_ahead_of_its_rough_is_convicted_by_name() {
     // The finish then rides the raw Ø12 bar, and its radial retract at
     // Z 16 (r 4.3 -> 6.85) drives the nose through the neck's uncut
     // r 5.1..6 band: a rapid in stock, named on P1, and the post refuses.
-    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (3.5, 2.0), (3.5, 16.0), (0.0, 16.0)];
-    let (world, mut history) = bar_world(&bar, &["TN-1600-0R8"]);
-    let rough = OpParams::ProfileRough {
-        tolerance: 0.05,
-        clearance_z: Height::fixed(25.0),
-        top_z: Height::fixed(16.0),
-        bottom_z: Height::fixed(-16.0),
-        stepdown: 0.8,
-        stock_to_leave: 0.25,
-        feed: 150.0,
-        plunge_feed: 80.0,
-    };
-    let finish = OpParams::ProfileFinish {
-        tolerance: 0.05,
-        clearance_z: Height::fixed(25.0),
-        top_z: Height::fixed(16.0),
-        bottom_z: Height::fixed(2.0),
-        feed: 120.0,
-        plunge_feed: 60.0,
-    };
-    create(&world, &mut history, "R1", "TN-1600-0R8", rough);
+    let (world, mut history) = flanged_world();
+    let (rough, finish) = rough_finish(-16.0);
+    // P1 is made first: R1 runs behind it, so its stamp digests P1
+    // (#109) - made the other way round, R1 would read Stale and the
+    // post would refuse it as stale before P1's rapid is reached.
     create(&world, &mut history, "P1", "TN-1600-0R8", finish);
+    create(&world, &mut history, "R1", "TN-1600-0R8", rough);
     let e = camcraft_app::model::find_by_name(&world, "P1").expect("op");
     let warns = camcraft_app::model::toolpath_of(&world, &e).expect("cache").warnings;
     assert!(
