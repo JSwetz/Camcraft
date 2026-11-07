@@ -288,7 +288,7 @@ fn the_mask_only_ever_removes_cuts() {
 }
 
 #[test]
-fn a_params_edit_converges_in_two_regenerate_rounds() {
+fn a_params_edit_converges_in_one_regenerate_all() {
     let (world, mut history) = job_world();
     create(&world, &mut history, "A", pocket(12.0));
     generate(&world, &mut history, "A");
@@ -313,24 +313,14 @@ fn a_params_edit_converges_in_two_regenerate_rounds() {
         OpStatus::Ok,
         "the recorded-stamp law: an unregenerated A moves nobody's rest"
     );
-    // Round 1 brings A current. B was Ok when the batch was built - it
-    // is not in it - and only A's APPLY moves the stamp B digests.
+    // One Regenerate All brings the job current (#145): its first round
+    // regenerates A, and the next round reads A's new cut, finds B
+    // Stale and regenerates it - one undo unit, B never posted stale.
     let r1 = RegenerateAll::new(&world);
-    assert_eq!(r1.regenerated(), 1, "just A");
+    assert_eq!(r1.regenerated(), 2, "A, then B behind it");
+    assert!(r1.skipped().is_empty(), "{:?}", r1.skipped());
     history.execute(&world, r1);
     assert_eq!(status(&world, "A"), OpStatus::Ok);
-    assert_eq!(status(&world, "B"), OpStatus::Stale);
-    let why = operation::stale_reason(&world, &model::find_by_name(&world, "B").expect("B"));
-    assert!(
-        why.as_ref().is_some_and(|w| w.contains("ahead of it in the program")),
-        "B's reason names the program: {why:?}"
-    );
-    // Round 2 re-generates B against A's new cut and converges. B was
-    // honestly Stale between the rounds, never silently wrong.
-    let r2 = RegenerateAll::new(&world);
-    assert_eq!(r2.regenerated(), 1);
-    assert!(r2.skipped().is_empty(), "{:?}", r2.skipped());
-    history.execute(&world, r2);
     assert_eq!(status(&world, "B"), OpStatus::Ok);
     let zs = planar_z(&cache(&world, "B").expect("B"));
     assert!(

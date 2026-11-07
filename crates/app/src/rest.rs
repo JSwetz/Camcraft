@@ -37,9 +37,8 @@
 //!   so the dependent is asked to describe the program exactly as it
 //!   would ship today. When the earlier op IS regenerated its cache
 //!   moves, the dependent's rest digest moves with it, and the
-//!   dependent reads Stale: the job converges within two
-//!   `RegenerateAll` rounds (M3.1 C), each round honest about what it
-//!   fixed. (A recorded `stamp` term was the first design; the stamp
+//!   dependent reads Stale: one `RegenerateAll` converges, its rounds
+//!   re-reading each predecessor's new path (M3.1 C, #145). (A recorded `stamp` term was the first design; the stamp
 //!   digests the parameters, and `EditOperationParams` drops it to
 //!   None - an edit would have marked every dependent Stale for a path
 //!   that had not moved.)

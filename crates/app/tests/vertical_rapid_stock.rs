@@ -19,7 +19,9 @@
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::MoveKind;
-use camcraft_app::commands::{AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel, SetStock};
+use camcraft_app::commands::{
+    AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel, RegenerateAll, SetStock,
+};
 use camcraft_app::geometry::{cube, Point3};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
@@ -189,12 +191,9 @@ fn a_dive_into_stock_no_earlier_op_removed_is_still_convicted() {
     }
 }
 
-#[test]
-fn a_face_regenerated_shallower_marks_the_acquitted_contour_stale() {
-    // #109: the contour's dive is acquitted by the face ahead of it, so
-    // the face is an input of the contour's verdict. The face re-cut to
-    // Z 8 leaves 1 mm the dive now crosses: the contour reads Stale and
-    // the post refuses it, never posting the cached acquittal.
+/// The 10 mm block faced to Z 5, then the contour whose dive the face
+/// acquits - both generated, both Ok.
+fn faced_world() -> (World, History) {
     let world = camcraft_app::world::new_world();
     let mut history = History::default();
     let cmd = SetStock::new(&world, StockShape::Box { dx: 100.0, dy: 100.0, dz: 10.0 }, Default::default());
@@ -208,7 +207,52 @@ fn a_face_regenerated_shallower_marks_the_acquitted_contour_stale() {
     history.execute(&world, cmd.expect("create contour"));
     history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("generate face"));
     history.execute(&world, GenerateOperation::new(&world, "Op2Contour").expect("generate contour"));
-    let status = |name: &str| camcraft_app::operation::status_of(&world, &model::find_by_name(&world, name).expect("op"));
+    (world, history)
+}
+
+fn status_of(world: &World, name: &str) -> OpStatus {
+    camcraft_app::operation::status_of(world, &model::find_by_name(world, name).expect("op"))
+}
+
+#[test]
+fn one_regenerate_all_brings_a_dependent_pair_current() {
+    // #145: the face's stepover moves, so its regenerated path moves and
+    // the contour behind it (whose verdict reads it, #109) goes Stale
+    // only once the face is re-cut. One Regenerate All must re-cut both,
+    // in order, as one undo unit - never leave the contour for a second
+    // click.
+    let (world, mut history) = faced_world();
+    let mut p = face(5.0);
+    if let OpParams::Face { stepover, .. } = &mut p {
+        *stepover = 3.0;
+    }
+    history.execute(&world, EditOperationParams::new(&world, "Op1Face", p).expect("a legal stepover"));
+    assert_eq!(status_of(&world, "Op1Face"), OpStatus::Stale);
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok, "the face's cache has not moved yet");
+    let batch = RegenerateAll::new(&world);
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok, "building the batch writes nothing");
+    assert_eq!(batch.regenerated(), 2, "the face, then the contour behind it");
+    assert!(batch.skipped().is_empty(), "{:?}", batch.skipped());
+    history.execute(&world, batch);
+    assert_eq!(status_of(&world, "Op1Face"), OpStatus::Ok);
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok);
+    let out = tmp_nc("regen-all");
+    let posted = posting::post_setup(&world, &out);
+    let _ = std::fs::remove_file(&out);
+    assert!(posted.is_ok(), "{posted:?}");
+    assert!(history.undo(&world), "one undo unit");
+    assert_eq!(status_of(&world, "Op1Face"), OpStatus::Stale);
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok, "the contour's old cache is back, against the old face");
+}
+
+#[test]
+fn a_face_regenerated_shallower_marks_the_acquitted_contour_stale() {
+    // #109: the contour's dive is acquitted by the face ahead of it, so
+    // the face is an input of the contour's verdict. The face re-cut to
+    // Z 8 leaves 1 mm the dive now crosses: the contour reads Stale and
+    // the post refuses it, never posting the cached acquittal.
+    let (world, mut history) = faced_world();
+    let status = |name: &str| status_of(&world, name);
     assert_eq!(status("Op2Contour"), OpStatus::Ok, "the faced block acquits the dive");
     history.execute(&world, EditOperationParams::new(&world, "Op1Face", face(8.0)).expect("a legal cut"));
     history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("regenerate face"));

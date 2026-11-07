@@ -13312,14 +13312,19 @@ revolved (follow-up material if users hit it with long keyways).
   reads predecessors' cached paths, so an edited-but-not-regenerated
   predecessor is its own Stale (the post refuses it first), and the
   dependent goes Stale when it is regenerated.
-- **RegenerateAll takes two rounds** when a later op reads an earlier
-  one being regenerated in the same batch (the batch stages every op
-  against the frozen world, so the dependent is stamped against the
-  predecessor's old path) - the M3.1 C convergence Pocket3D already had,
-  now reached by face-then-contour jobs too. Honest (the leftover reads
-  Stale, the post refuses), but a second click; a one-round batch is a
-  follow-up, not done here.
-- Pins: `a_face_regenerated_shallower_marks_the_acquitted_contour_stale`
+- **RegenerateAll converges in one click (#145).** The digest made a
+  frozen batch leave a dependent Stale behind a predecessor regenerated
+  in the same batch (a second click). Chosen: rounds inside the
+  constructor - stage every Stale op in program order, finish in
+  parallel, write the round so the next reads it, stop when nothing is
+  Stale (cap: the op count; an op still Stale is named in `skipped`),
+  then invert every write so `apply` replays the batch as ONE undo unit.
+  Dropped: staging strictly one op at a time (loses M5.3 B's parallel
+  finish for independent ops) and leaving two clicks (a user hits it).
+  The constructor now writes the world transiently and restores it;
+  every caller builds and executes on the main thread.
+- Pins: `a_face_regenerated_shallower_marks_the_acquitted_contour_stale`,
+  `one_regenerate_all_brings_a_dependent_pair_current`
   (vertical_rapid_stock), `a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale`
   (turning_bore). turning_bore's fixture moved to `tests/common/bore.rs`
   to keep the suite under the 400-line law.

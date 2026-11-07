@@ -126,10 +126,10 @@ impl Command for GenerateOperation {
 
 /// The M3.1 payoff command: one click brings the job current after a
 /// model revision, instead of rebuilding it op by op. Construction
-/// decides everything - it finds the Stale operations in tree order and
-/// runs each generator exactly as `GenerateOperation` would (validate
-/// early, errors still land here) - so `apply` and `invert` are the
-/// batch's pure writes. An operation whose regeneration fails is
+/// decides everything - it finds the Stale operations in program order
+/// and runs each generator exactly as `GenerateOperation` would
+/// (validate early, errors still land here) - so `apply` and `invert`
+/// are the batch's pure writes. An operation whose regeneration fails is
 /// SKIPPED, not fatal: one broken pick must not block the rest of the
 /// job (never crash, never gouge - the failed op keeps its old cache and
 /// its STALE tag, honestly). Undo inverts the whole batch in reverse,
@@ -145,23 +145,53 @@ impl RegenerateAll {
     /// `Never` and `Ok` operations are left alone - this command is for
     /// what a revision invalidated, not for first-time generation.
     ///
-    /// The M5.3 B shape: stage every op first (all world reads, tree
-    /// order, the same status gate the serial loop had), then finish the
-    /// jobs through rayon - ordered `collect`, so `parts` is tree order
-    /// and every result is what the serial batch produced, byte for
-    /// byte. `skipped` lists stage failures before run failures; the
-    /// set is unchanged.
+    /// Rounds (#145): an op whose verdict reads the program ahead (#109)
+    /// is stamped against its predecessors' cached paths, so one frozen
+    /// batch would leave it Stale behind a predecessor regenerated in
+    /// the same batch. Each round stages every Stale op in program order
+    /// (M5.3 B: all world reads first, then the jobs through rayon,
+    /// ordered), then writes its results so the next round reads them;
+    /// the loop stops when nothing new is Stale, capped at the op count.
+    /// When construction ends every write is inverted in reverse, so the
+    /// world is untouched until `apply` replays the whole batch - one
+    /// undo unit. An op still Stale at the cap is named in `skipped`.
     pub fn new(world: &World) -> Self {
-        let mut parts = Vec::new();
-        let mut skipped = Vec::new();
-        let mut staged = Vec::new();
-        // THE program order (M3.2 A): a rest-aware op regenerates AFTER
-        // what it re-machines, so one round converges - the same walk
-        // the post makes. Nothing here writes the world (constructors
-        // only read), so the frozen batch every job collects against
-        // is the same frozen batch the serial loop ran on.
+        let mut parts: Vec<GenerateOperation> = Vec::new();
+        let mut skipped: Vec<(String, String)> = Vec::new();
+        let cap = crate::setup::operation_order(world).len().max(1);
+        for _ in 0..cap {
+            let round = Self::round(world, &mut skipped);
+            if round.is_empty() {
+                break;
+            }
+            for part in &round {
+                part.apply(world);
+            }
+            parts.extend(round);
+        }
+        // Still Stale after the cap (a cycle no order converges): named,
+        // never silent - the post refuses it anyway.
         for (name, entity) in crate::setup::operation_order(world) {
-            if operation::status_of(world, &entity) != operation::OpStatus::Stale {
+            if operation::status_of(world, &entity) == operation::OpStatus::Stale
+                && !skipped.iter().any(|(n, _)| *n == name)
+            {
+                skipped.push((name, format!("still stale after {cap} regeneration round(s)")));
+            }
+        }
+        for part in parts.iter().rev() {
+            part.invert(world);
+        }
+        RegenerateAll { parts, skipped }
+    }
+
+    /// One round: every Stale op not yet refused, staged in program
+    /// order against the world as it stands, finished in parallel.
+    fn round(world: &World, skipped: &mut Vec<(String, String)>) -> Vec<GenerateOperation> {
+        let mut staged = Vec::new();
+        for (name, entity) in crate::setup::operation_order(world) {
+            if operation::status_of(world, &entity) != operation::OpStatus::Stale
+                || skipped.iter().any(|(n, _)| *n == name)
+            {
                 continue;
             }
             match stage_generation(world, &name) {
@@ -177,13 +207,14 @@ impl RegenerateAll {
                 (name, job.finish())
             })
             .collect();
+        let mut parts = Vec::new();
         for (name, result) in results {
             match result {
                 Ok(part) => parts.push(part),
                 Err(err) => skipped.push((name, err.to_string())),
             }
         }
-        RegenerateAll { parts, skipped }
+        parts
     }
 
     /// Nothing will be written: the UI skips the history entirely then.
@@ -191,8 +222,13 @@ impl RegenerateAll {
         self.parts.is_empty()
     }
 
+    /// How many distinct operations the batch regenerates (an op a
+    /// later round re-ran counts once).
     pub fn regenerated(&self) -> usize {
-        self.parts.len()
+        let mut names: Vec<&str> = self.parts.iter().map(|p| p.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names.len()
     }
 
     /// The names whose generators refused, with the refusal text.
