@@ -13343,3 +13343,52 @@ revolved (follow-up material if users hit it with long keyways).
   (app: fails when generate passes half the diameters, checked by
   reverting the line), and `a_twelve_mm_bar_in_the_eleven_mm_pilot_is_convicted`.
 - **Filed:** #146, the bar's body during cutting feeds (P1).
+
+## #106 - rapid-in-stock reads the tool's footprint, not its centre (2026-11-07)
+
+- **Chosen:** law (d)'s column reading (the lateral rapid's a / mid / b
+  samples and #96's vertical dive) asks `in_stock && below
+  surface_before` at every sample of the tool's footprint disc of
+  radius `r - gouge_tol` - the centre, 8 points at half radius, 16 on
+  the rim - not at the centre alone. Any sample in stock and under the
+  surface the earlier cuts left convicts. The disc and the sample count
+  are the ones `rapids_radial` (#79) and `hidden_along` already use, so
+  the mill laws read one tool.
+- **Why `r - gouge_tol`:** a dive or link tangent to the stock wall (an
+  approach at exactly r off the outline, a link riding its own kerf's
+  edge) is not a collision; the full radius would convict it on
+  rounding.
+- **Left alone:** `acquit_by_prior` already reads the whole disc
+  (radius r, the highest prior column under it), so it needed no
+  change; the radial (`Mode::Radial`) reading already samples the flute
+  body discs.
+- **Dropped:** an exact disc-versus-polygon / disc-versus-kerf-union
+  test (the kerf union is not built anywhere; sampling with the stated
+  rim bound `r (1 - cos(pi/16))` matches the radial law's promise);
+  sampling only the vertical law (the issue names both, and the lateral
+  law had the same gap).
+- **Review fix (PR #138, tip shape):** each footprint sample is judged
+  at `z_tip + lift(rho)`, the height the tool's own tip stands at that
+  radius - 0 for a square end or inside a bull's flat, the corner arc
+  outside it (a ball is a bull with no flat), `rho / tan(half angle)`
+  up a drill/taper point - against `surface_before`, which already
+  caps at the stock top. The lift comes from the judged `Cutter`
+  (`corner_r`, `tip_angle`; `Cutter::lift_at`), NOT
+  `ToolGeom::nose_radius` as the review suggested: that field is the
+  turning insert's nose and is 0.0 for every mill kind, so a ball mill
+  would have read as square. A context with no stated tip is judged
+  square, which can only over-report. Left as is: `surface_before`
+  still treats every earlier cut as flat to radius r (the column
+  model's own optimism near a ball pass's edge, review item 4), and
+  the overhang backstop `hidden_along` still reads a flat disc - both
+  are pre-existing and model-only.
+- **Re-review fix (PR #138, radial gap):** three sample radii (centre,
+  half, rim) let a wall that fell between the half ring and the rim be
+  judged only by rim samples lifted almost a full corner - a real dive
+  into the wall read clean (the earlier bull "clean" pin asserted a
+  gouge). Now 8 rings at `d k / 8` with `2 k` points each (the rim's
+  16 scaled by radius; 73 samples a station), and ring k is judged at
+  ring k - 1's lift, the lowest the tool stands over the band between
+  them. Dropped: an exact disc-versus-polygon minimum of the lifted
+  surface (needs a lifted-tool / stock-edge distance per wall segment;
+  the ring bound d / 8 plus the chord bulge is stated instead).
