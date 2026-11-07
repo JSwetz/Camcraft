@@ -11,6 +11,8 @@
 //! seam, the cross arm on a lathe, the axial verdict), app::posting.
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod punched_bar;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock};
@@ -27,33 +29,13 @@ use camcraft_app::tools::catalog;
 use camcraft_app::verify::Warning;
 use camcraft_app::world::new_world;
 
-const TAU: f64 = std::f64::consts::TAU;
 const PART_R: f64 = 10.0;
 
-/// A closed bar of radius `r`, z in [-20, 20], revolved about world Z.
+/// The finished bar of radius `r`, z in [-80, 20] (`punched_bar::FOOT`), revolved about
+/// world Z, with the two cross holes of `cross(6.0)` modelled in it
+/// (issue #117: the part law refuses a hole the model lacks).
 fn bar(r: f64) -> Mesh {
-    let meridian = [(0.0, -20.0), (r, -20.0), (r, 20.0), (0.0, 20.0)];
-    let segs = 64;
-    let v = |j: usize, r: f64, z: f64| {
-        let th = TAU * j as f64 / segs as f64;
-        Point3::new(r * th.cos(), r * th.sin(), z)
-    };
-    let mut facets = Vec::new();
-    for seg in meridian.windows(2) {
-        let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
-        for j in 0..segs {
-            let (a1, a2, b1, b2) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
-            if ra <= 1e-12 {
-                facets.push(Triangle::new(a1, b2, b1));
-            } else if rb <= 1e-12 {
-                facets.push(Triangle::new(a1, a2, b2));
-            } else {
-                facets.push(Triangle::new(a1, a2, b2));
-                facets.push(Triangle::new(a1, b2, b1));
-            }
-        }
-    }
-    Mesh::from_facets(facets)
+    punched_bar::punched_bar(r, punched_bar::FOOT, punched_bar::TOP, &cross(6.0))
 }
 
 /// Two stations on the r10 face, plunging toward the axis, `depth` deep.
