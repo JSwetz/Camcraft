@@ -12423,6 +12423,93 @@ contents cannot differ, and the full release gate (~50 min) already passed on
 every shipped file. Dropped: re-running the whole release gate for six test
 lines. The rule stands for any mid-cut change that touches shipped code.
 
+## #79: the rapid law reads radial programs as a solid, not a column (2026-11-07, Prime Directive)
+
+Why it was off: M5.2 F2 stood law (d) down for `Mode::Radial` because the
+column (height-field) reading cannot see a horizontal bore - a retract
+sliding out along its own kerf reads as lateral travel under solid stock -
+and trusted the cross-drill kernel's traverse law instead. That made the
+post gate blind for radial programs: #77's station change 5 mm inside raw
+stock posted silently.
+
+- **Chosen: a solid reading for Radial (`verify/rapids_radial.rs`).** Each
+  rapid's flute body - discs of `r - gouge_tol` square to the pose at the
+  tip and every 1 mm back to the flute length, walked under the modal pose
+  rule (`midpose::intervals`, 0.5 mm of travel at the far end) - is tested
+  against the stock prism (the footprint `Rest::in_stock` already reads,
+  under the stock top) minus the kerf the cuts BEFORE the rapid swept (a
+  tool-radius cylinder about each cutting move, extended back along the
+  pose by the flute length when the move plunges along its own axis).
+  Any sample in stock and in no earlier kerf convicts: `RapidInStock { at }`,
+  the mill law's own blocking word. Retracts up a just-drilled hole and the
+  peck's chip break are acquitted by the kerf - by reading the stock, never
+  by the path's description of itself (the M13.7 swarf finding); the
+  approach to a mouth on the stock surface is clear by geometry.
+- The prism is unbounded below, the same reading the column law takes; a
+  turned bar or box about the spindle is a Z prism, so the footprint is the
+  solid measured about the spindle wherever the work offset puts it.
+- Dropped: a `stock_bottom_z` field on `VerifyContext` (30 constructor
+  sites, motion tests included, for a reading the mill law never had);
+  sweeping the stack against the stock MESH with `SolidIndex` (the raw
+  stock mesh has no holes, so every retract up its own hole crosses the
+  mouth's facet - the kerf exemption needs point samples anyway); an
+  unconditional axial-retract exemption like the mill's vertical one (an
+  inward axial rapid is exactly #77's approach into raw stock).
+- Not covered (as in the mill law): shank and holder bands against stock
+  along a rapid - the flute body is what the law reads.
+- Fixture finding: `drilling_cross`'s 44 mm box stock is REAL #77 - on
+  main the kernel's part-measured approach stops at x 20 inside the x 22
+  box and the hop slides through it (moves 0, 6; move 7 is under the box's
+  Z 0 floor, convicted by the unbounded-below reading). The clean-document
+  test now runs on a stock equal to the bar; a new test pins that the 44 mm
+  box never posts silently (named RapidInStock, post blocked) and owes
+  nothing once #82's planner hops outside the raw stock.
+
+### #79 review fixes (2026-11-07)
+
+An independent review of PR #83 found the law correct but costly and
+fail-open at its edges. Taken:
+
+- **Cost.** The kerf list is built once (cut order, each cylinder with
+  its box) instead of per rapid; a rapid takes only the earlier kerfs
+  whose box meets its swept box (padded by body + radius), newest first;
+  a disc whose box misses the stock footprint's box (or stands above the
+  top) skips the polygon test; a disc wholly inside one kerf cylinder
+  (the retract riding its own hole's axis) is acquitted in one test
+  instead of 25; shared interval ends are sampled once. Reading on a
+  hand-made 40-hole pecked radial program (debug, `radial_rapids::
+  forty_pecked_radial_holes_verify_clean_within_a_wall_time_bound`):
+  **~9.5 s before** (1 mm discs) **-> ~0.25 s after** with the discs
+  tightened to 0.5 mm (`BODY_STEP` now agrees with the module doc). The
+  test holds a 3 s bound. Dropped: a per-point bbox inside
+  `Region::contains` in geo2d (shared by every law; the footprint box
+  reject in the radial law gets the same win locally).
+- **Fail closed, by name.** A non-finite stock top or Z tolerance, or a
+  tool with no finite positive radius, convicts every rapid
+  (`RapidInStock`, the law's own blocking word); a rapid whose stated or
+  held pose is no direction convicts itself instead of reading as
+  upright; a cut with such a pose keeps only its tip's kerf (less kerf,
+  more convictions). A zero or non-finite flute length reads as a body
+  one tool diameter long, never the bare tip. Dropped: a new `Warning`
+  kind ("rapids not judged") - it ripples into the UI's warning table
+  and the project-file serde for a context generation never builds;
+  RapidInStock already blocks and the move index names where.
+- **Sampling bound documented.** Discs 0.5 mm apart, tip travel 0.5 mm
+  between samples, and the 16 rim samples' chord sag `r (1 - cos(pi/16))`
+  ~ 0.019 r: a graze deeper than the gouge tolerance by less than that,
+  between two rim samples, can pass.
+- **Tests.** Sim: past a drilled hole's bottom (flat end convicts), a
+  tangential graze at half the gouge tolerance (clean) and twice it
+  (blocks), a diagonal retract half in the hole (blocks), the non-finite
+  context, the zero-direction pose, the zero/NaN flute. App: the radial
+  tests moved to `drilling_cross_rapids.rs` (fixtures to
+  `tests/cross_support/`, drilling_cross back under 400 lines) and a new
+  deterministic `a_station_hop_spliced_through_the_bar_is_named_and_the_post_refuses`
+  (the clean bar document's path plus one hand-spliced hop through the
+  bar, judged by the real verifier, refused by the gate by move index) -
+  it speaks whatever #82 does to the planner. The 44 mm box test stays as
+  the planner-tracking twin (vacuous after #82, by design).
+
 ## #74: GPU adapter selection on hybrid laptops, frame-time budget (2026-11-07)
 
 User report: Intel UHD + Quadro P3200 laptop never renders on the Intel

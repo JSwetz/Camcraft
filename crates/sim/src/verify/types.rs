@@ -51,12 +51,14 @@ pub enum Mode {
     /// is a vertical slab as wide as the band is long (c/c3 convict
     /// the part's own walls), and a height field cannot SEE a
     /// horizontal bore - the retract sliding out along its own kerf
-    /// stands under solid stock by the column's reading, so (d)
-    /// convicts it too. They all stand down in favor of the kernel's
-    /// construction law - doors measured on the mesh, traverses
-    /// proven clear of the silhouette by the inflation math, exits
+    /// stands under solid stock by the column's reading, so (d)'s
+    /// column convicts it too. (a)-(c3) stand down in favor of the
+    /// kernel's construction law - doors measured on the mesh, exits
     /// along the hole's own axis - exactly the promise Revolve's
-    /// meridian scan keeps for the turned family. The fixture laws
+    /// meridian scan keeps for the turned family; (d) reads the
+    /// rapids as a solid instead (#79, `rapids_radial`): the posed
+    /// flute body against the stock prism minus the earlier kerf, so
+    /// the traverse promise is proved at the post gate. The fixture laws
     /// stay: they are 3-D boxes, no height field in them, and steel
     /// keeps no tangency courtesies.
     Radial,

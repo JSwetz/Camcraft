@@ -65,12 +65,14 @@
 //!   the flanks of its own cut V - as a plunge through solid. The
 //!   turning rapids' safety rides the kernel's clearance radius and
 //!   the meridian scan; fixture steel (d2) still speaks every mode.
-//!   `Mode::Radial` stands it down on the same reading inverted
+//!   `Mode::Radial` leaves the column on the same reading inverted
 //!   (M5.2 F2): a horizontal bore is a tunnel the height field cannot
 //!   see, so the retract sliding out along its own kerf reads as
-//!   lateral travel under solid stock - the kernel's traverse law
-//!   (outside `stock_r`, proved in drilling's cross tests) owns the
-//!   hop's safety instead.
+//!   lateral travel under solid stock. Its rapids answer to a solid
+//!   reading instead (#79, `rapids_radial`): the flute body, posed,
+//!   against the stock prism (footprint under the top) minus the kerf
+//!   the cuts before it swept - a station change through uncut stock
+//!   convicts, a retract up its own hole does not.
 //! - [`Warning::ShankHit`] again, from the cycle list: a hole whose
 //!   entry-to-bottom span exceeds flute + shank + holder pushes the
 //!   assembly below the entry surface no matter what the path looks
@@ -157,6 +159,7 @@ mod posed_steel;
 mod probe;
 mod rapids;
 mod rapids_posed;
+mod rapids_radial;
 mod reach;
 mod rest;
 mod rotary;
