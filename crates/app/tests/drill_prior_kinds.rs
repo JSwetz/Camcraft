@@ -182,3 +182,40 @@ fn a_turned_boring_op_ahead_of_a_lathe_axial_drill_is_not_credited() {
     let e = generate(&world, &mut h, "Op2").err().unwrap_or_else(|| panic!("the boring bar credited the core"));
     assert!(e.contains("stock"), "{e}");
 }
+
+// #89: a turning kind ahead on a mill-turn is read no more generously than on
+// a lathe - the column grid cannot read its undercuts either.
+#[test]
+fn a_turned_boring_op_ahead_of_a_mill_turn_axial_drill_is_not_credited() {
+    let world = new_world();
+    let mut h = History::default();
+    let at = Location { pos: Point3::new(0.0, 0.0, -20.0), ..Location::default() };
+    let s = SetStock::new(&world, StockShape::Box { dx: 24.0, dy: 24.0, dz: 42.0 }, at);
+    h.execute(&world, s.expect("stock"));
+    let lathe = Machine {
+        model: "TestBench mill-turn".into(),
+        vendor: "Camcraft Testbench".into(),
+        kind: Some("mill-turn".into()),
+        spindle_min: Some(25.0),
+        spindle_max: Some(12000.0),
+        ..Default::default()
+    };
+    h.execute(&world, LoadMachine::new(&world, "millturn.mch".into(), Some(lathe)).expect("mill-turn"));
+    add(&world, &mut h, "D4", tool("DR-0400"));
+    add(&world, &mut h, "BAR", Tool { diameter: 13.6, shank_d: 13.6, ..tool("BR-1000") });
+    let bar = revolve(&[(0.0, -20.0), (10.0, -20.0), (10.0, 22.0), (7.0, 22.0), (7.0, 10.0), (0.0, 10.0)], 64);
+    h.execute(&world, ImportModel::from_mesh("bar", bar));
+    let bore = OpParams::BoringTurning {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(30.0),
+        top_z: Height::fixed(22.0),
+        bottom_z: Height::fixed(10.5),
+        feed: 120.0,
+        plunge_feed: 40.0,
+    };
+    create(&world, &mut h, "Op1", "BAR", "bar", bore);
+    generate(&world, &mut h, "Op1").expect("the boring generates");
+    create(&world, &mut h, "Op2", "D4", "bar", drill(2.0, 10.0, 2.0, 12.0));
+    let e = generate(&world, &mut h, "Op2").err().unwrap_or_else(|| panic!("on a mill-turn the boring bar credited the core"));
+    assert!(e.contains("stock"), "{e}");
+}

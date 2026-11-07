@@ -383,10 +383,17 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     // a lip) with everything above it, and a bar or blade cut as a full
     // disc would be revolved round the bar. Only the Facing kind, cut
     // with its nose, never undercuts: any other kind ahead is unknown.
-    if crate::machine::kind_of(world) == crate::machine::Kind::Lathe
-        && let Some(a) = ahead.iter().find(|a| a.kind != crate::operation::OpType::Facing || a.nose.is_none())
-    {
-        return Err(format!("operation '{}' ahead is not a facing pass - a lathe's prior reads only those", a.name));
+    // The same holds for a turning kind on a mill-turn: the column grid
+    // reads its undercuts the same way, so outside a lathe every turning
+    // kind but nose-cut Facing ahead is unknown too.
+    let lathe = crate::machine::kind_of(world) == crate::machine::Kind::Lathe;
+    let facing = |a: &Ahead| a.kind == crate::operation::OpType::Facing && a.nose.is_some();
+    let turning = |a: &Ahead| a.kind.info().family() == crate::operation::Family::Turn;
+    if let Some(a) = ahead.iter().find(|a| !facing(a) && (lathe || turning(a))) {
+        return Err(format!(
+            "operation '{}' ahead is a turning pass other than facing - the column grid cannot read its removal",
+            a.name
+        ));
     }
     let min_r = ahead.iter().map(|a| a.nose.unwrap_or(a.radius)).filter(|r| *r > 0.0).fold(tool_r, f64::min);
     let grid = stock_sim::stock_grid(world, setup, min_r)?;
