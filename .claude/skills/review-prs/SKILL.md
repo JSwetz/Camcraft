@@ -85,21 +85,27 @@ contributors' claims count"). On every run, after the PR steps, find
 fresh claim comments that have not been applied yet:
 
 ```bash
-since=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-6H +%Y-%m-%dT%H:%M:%SZ)
+since=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-4H +%Y-%m-%dT%H:%M:%SZ)
 gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
   --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.author_association|test("OWNER|MEMBER|COLLABORATOR")|not))
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 
-For each line `<N> <login> <time>`:
-- skip if the issue is closed, or already carries `claimed` with a newer
-  claim comment from someone else (first fresh claim wins; say so to the
-  later one);
-- otherwise `gh issue edit N --add-label claimed --add-assignee <login>`
+For each line `<N> <login> <time>` (the window is the 4 h claim
+lifetime, so an older comment is already stale):
+- **already applied** - the issue carries `claimed` and `<login>` is an
+  assignee: skip silently (this keeps each 10-minute tick from replying
+  again);
+- **closed issue**: skip;
+- **held by someone else** - it carries `claimed` and its latest claim
+  comment by another claimant (an agent's `claimed:` comment counts) is
+  younger than 4 h: do not take it; reply once (only if you have not
+  already replied to this comment) that it is in progress, naming the
+  claimant and branch or PR;
+- **otherwise**: `gh issue edit N --add-label claimed --add-assignee <login>`
   (if GitHub refuses the assignee, still add the label) and reply
   `gh issue comment N --body "Claim recorded for @<login> - label and assignee set (contributors without triage rights claim by comment). It goes stale after 4 h with no update from you."`
-- if an agent of this session is already working that issue, do not take
-  it from them: reply that it is in progress and link the branch or PR.
+  If the old claim was stale, say "reclaimed from <old claimant> (stale)".
 
 Report one line per applied claim; nothing found stays silent.
 
