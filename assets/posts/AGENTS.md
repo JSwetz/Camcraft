@@ -78,6 +78,10 @@ write (the gate), so the released program never carries one.
   (stage D). The cycle group suppresses its expanded chain — one
   cycle block per hole, bare X Y continuations when the signature is
   unchanged, `G80` before any cycle-signature change or section end.
+  A dialect whose documented cycles this post was not specced from
+  (Heidenhain DIN/ISO: G200-G209 with Q parameters, #50) posts the
+  expanded chain as plain moves instead and refuses what plain moves
+  cannot do (tapping) - never a cycle word the manual does not list.
   The arc plane (M11.2 A) is modal too: `CircularPlane` XY/XZ/YZ maps
   to G17/G18/G19, written only on change (an XY-only program writes
   nothing new), with the plane's own center words (`IJKIncrement`

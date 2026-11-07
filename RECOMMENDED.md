@@ -11976,3 +11976,96 @@ Left open (not this issue): the manual writes signed words (`X+25`)
 and `N` block numbers with `*` terminators; the post's unsigned,
 unnumbered style is the house choice locked since M3.3 B. Whether a
 real TNC accepts that style is a separate question.
+
+
+## #50: Heidenhain DIN/ISO block form, program frame and drilling - from the manual (2026-11-07, Prime Directive)
+
+Primary source, read as a PDF (not a summary): HEIDENHAIN "TNC 640
+User's Manual, ISO programming", ID 892909-25, English, 9/2016
+(content.heidenhain.de `.../TNC640/34059x-07/diniso/892909-25.pdf`).
+The issue named four items; reading the function overview turned up
+four more words the control reads as something else, so all eight are
+fixed here. Each was "would the TNC reject or misread it?":
+
+(1) **N block numbers and the `*` terminator - fixed.** p. 130: "A
+machining program consists of a series of NC blocks ... The TNC numbers
+the blocks"; every program in the manual is `N<n> words*`. Unnumbered,
+unterminated lines are not this mode's block form, so not relied on.
+Chosen: N10, step 10 (the manual's own programs); a program long enough
+for N to reach 99999999 (the end block's number) is refused by name.
+
+(2) **Signed coordinate words - fixed.** Every coordinate in the
+manual is signed (`X+0 Y+38.5`, `Z-40`, `I+50 J+50`; pp. 66, 131, 267).
+X/Y/Z/I/J now always carry `+`/`-`; F, S, T stay unsigned as there.
+G words are written two-digit (`G00`..`G03`, the overview p. 752).
+
+(3) **Program begin/end - fixed.** p. 130: first block `%name G71 *`
+(G71 = mm "at start of program", p. 755), last `N99999999 %name G71 *`.
+The stream has no program name, so the machine's name stands in, cut
+to the file-name characters of p. 143 (`VMC 3-AXIS` -> `VMC_3-AXIS`).
+The old `(name)` line is gone: parentheses are no TNC comment (p. 172,
+comments are `;`). Dropped: a fixed name `CAMCRAFT` (loses the
+identity line for nothing).
+
+(4) **Drilling - G81-G89 were wrong, and dangerously so.** p. 752 lists
+the drilling cycles as G200-G209 only; p. 756 shows G73 is ROTATION
+(`G73 H+45`) and G80 the tilted WORKING PLANE. The old peck
+`G73 X.. Y.. Z.. R.. Q..` would therefore have been read as a
+coordinate rotation, and the preamble's bare `G80` as a working-plane
+reset. Chosen: no cycle word at all - every hole posts its expanded
+chain (the generator's own plunges, peck retracts and exits, exactly
+what the simulation verified) as G00/G01; a dwell is `FUNCTION DWELL
+TIME<s>` (seconds, p. 456) right after the move reaching the bottom
+(a dwell whose chain never reaches it is refused, never dropped).
+Tapping is refused by name: plain moves cannot reverse the spindle in
+step with the feed. Dropped: `G200`/`G205`/`G207` with Q values -
+their Q meanings (Q200 set-up clearance, Q201 depth sign, Q202
+plunging depth, Q395 depth reference, ...) are defined in the separate
+Cycle Programming manual, not in 892909-25 (p. 71 shows only the
+block shape), so mapping them would be guessing. Reopen with that
+manual if native cycles are wanted (shorter programs, control-side
+peck). BORE and BACKBORE are our own feed-in/rapid-out and
+feed-in/feed-out definitions (`cl::CycleKind`), so the chain IS their
+meaning; nothing is lost.
+
+(5) **Work offset - G54/G55 were wrong.** p. 756: G54 is DATUM SHIFT
+with axis values (`G54 X+20 Y+30 Z+10`); G55 is a touch-probe cycle in
+the overview (p. 754). Chosen: the first work offset is the control's
+active preset (no word); any other is refused by name. Dropped:
+cycle G247 preset selection - its Q parameter is in the Cycle manual.
+
+(6) **Tool call - `T.. M6` replaced.** pp. 71, 218: the tool call is
+the T block `T5 G17 S4500*` (number, spindle axis, speed; it applies
+the tool's length); M6 is "Tool change ... depends on machine"
+(p. 392). Now `T<n> G17 [S<rpm>]`, `M3` in its own block; a speed
+change alone is a T block of `S` only (p. 201). G40 G90 ride the
+section's first positioning block (`G00 G40 G90 Z+250*`, p. 66), the
+old standalone `G17 G90 G54 G40 G80` block is gone.
+
+(7) **Homing - `/G53 Z0` removed.** G53 is DATUM SHIFT from datum
+tables (p. 753); machine-referenced moves are M91/M92 (p. 393), whose
+datum the machine builder sets - an M91 Z0 rapid could go anywhere.
+The program ends `M2` and the end block, where the toolpath's last
+retract left the tool, as the manual's own programs do. Dropped: a
+`/` optional M91 retract (no documented safe position).
+
+(8) **Judged harmless, left:** M8/M9/M5/M2 standalone blocks (p. 392,
+`N20 M30*` p. 133); file extension `.nc` (the TNC's ISO programs are
+`.I`, p. 143 - the extension is a transfer-time rename and the host
+does not read it; worth a follow-up issue); no G30/G31 blank (only
+needed for graphics, p. 131); no spindle axis when the stream has no
+tool call (the active tool's axis stands, as before).
+
+Golden diffs, reviewed by normalizing the new form back (strip N/`*`,
+signs, two-digit G): every contour/face/pocket/slot/trace golden is
+motion-identical; only the frame, the T block and the drilling changed
+(drill_plate/drill_peck/synth now show the chain and the dwell);
+`heidenhain/tap_plate.nc` is deleted (that golden is now a named
+refusal in `conformance::REFUSED`). The Heidenhain synth golden posts
+the synth stream with G54 and without the tap; the stream now carries
+real chains (other dialects' synth goldens byte-identical). Pinned by
+`heidenhain_block_form::heidenhain_posts_the_manuals_numbered_signed_block_form`,
+`..._drilling_posts_its_chain_with_the_dwell_at_the_bottom`,
+`..._refuses_a_dwell_its_chain_never_reaches`,
+`..._refuses_tapping_and_a_non_first_work_offset_by_name`, plus the
+updated `conformance`, `arc_planes`, `heidenhain_arc_centre`.

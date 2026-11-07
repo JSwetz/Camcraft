@@ -55,6 +55,12 @@ const POSTS: &[(&str, &str, &str)] = &[
     ("Mazak", "mazak", "mazak"),
 ];
 
+/// (post stem, golden, named reason): a golden a dialect must REFUSE
+/// rather than post, so it has no `.nc` there. #50: the Heidenhain
+/// DIN/ISO post has no tapping form (G206/G207 are not specced) and a
+/// tap cannot be plain moves.
+const REFUSED: &[(&str, &str, &str)] = &[("heidenhain", "tap_plate", "tapping")];
+
 /// The TURNING dialects (M13.5): their goldens are the lathe
 /// documents' own streams (`lathe_post.rs`); on a mill golden they
 /// must REFUSE by name - never project a Y move onto a diameter.
@@ -97,6 +103,14 @@ fn every_builtin_posts_every_golden_byte_exact() {
             let stream = read(&format!("crates/app/tests/golden/{g}.cl"));
             let out = engine::run(&cps, &mch, &stream)
                 .unwrap_or_else(|e| panic!("{name} on {g}: must post: {e}"));
+            if let Some((_, _, why)) = REFUSED.iter().find(|(s, gg, _)| s == cps_stem && gg == g) {
+                assert!(
+                    out.warnings.iter().any(|w| w.contains(why)),
+                    "{name} on {g}: must refuse by name ({why}), got {:?}",
+                    out.warnings
+                );
+                continue;
+            }
             assert!(
                 out.warnings.is_empty(),
                 "{name} on {g}: the gate counts warnings: {:?}",
@@ -142,7 +156,15 @@ fn every_builtin_posts_every_golden_byte_exact() {
 /// Anchor every cycle at move 0 instead and normalization re-seats
 /// the whole group ahead of the contour, whose moves then die in
 /// that same guard - the stream must be shaped like a real one.
-fn synth_stream() -> String {
+///
+/// #50: each hole carries its real expanded chain (approach, plunges,
+/// peck retracts, exit - the generator's `drilling::cycle` shape), so
+/// a dialect that posts drilling as plain moves (Heidenhain DIN/ISO)
+/// posts the motion a real stream would carry; the cycle dialects
+/// suppress it unchanged. `wcs` and `tap` let the Heidenhain variant
+/// drop the two records its dialect refuses by name (a non-first work
+/// offset, a tap), which `heidenhain_block_form` pins separately.
+fn synth_stream_with(wcs: &str, tap: bool) -> String {
     use cnc::Record as R;
     let rec = |kind: MoveKind, x: f64, y: f64, z: f64, feed: Option<f64>| {
         R::Move(cnc::MoveRec {
@@ -157,9 +179,9 @@ fn synth_stream() -> String {
             abc: None,
         })
     };
-    cnc::serialize(&[
+    let mut recs = vec![
         R::Param { name: "SpindleSpeed".into(), value: json!(12000) },
-        R::Param { name: "WorkOffset".into(), value: json!("G55") },
+        R::Param { name: "WorkOffset".into(), value: json!(wcs) },
         R::Param { name: "OriginX".into(), value: json!(10.0) },
         R::Param { name: "OriginY".into(), value: json!(20.0) },
         R::Param { name: "OriginZ".into(), value: json!(5.0) },
@@ -180,86 +202,76 @@ fn synth_stream() -> String {
             plane: Default::default(),
             abc: None,
         }),
-        // Hole chains: the approach rapid (moves 3..7) then the cycle
-        // anchored on it. The rapids are the chain the cycle replaces
-        // - suppressed by design while the group is open; the goldens
-        // are what prove they stay suppressed identically everywhere.
-        rec(MoveKind::Rapid, 50.0, 50.0, 2.0, None),
-        R::Cycle(cnc::CycleRec {
-            kind: CycleKind::Drill,
-            x: 50.0,
-            y: 50.0,
-            r_z: 2.0,
-            bottom_z: -8.0,
+    ];
+    // (kind, x, y, bottom, peck, dwell, feed): R plane 2 for all.
+    let mut holes = vec![
+        (CycleKind::Drill, 50.0, 50.0, -8.0, 0.0, 0.5, 120.0),
+        (CycleKind::Peck, 60.0, 50.0, -20.0, 5.0, 0.0, 150.0),
+        (CycleKind::Peck, 60.0, 60.0, -20.0, 5.0, 0.0, 150.0),
+        (CycleKind::Deep, 70.0, 60.0, -30.0, 8.0, 0.0, 90.0),
+    ];
+    if tap {
+        holes.push((CycleKind::Tap, 70.0, 70.0, -12.0, 0.0, 0.0, 240.0));
+    }
+    let r_z = 2.0;
+    let mut n = 3usize; // the contour took moves 0..2
+    for (kind, x, y, bottom, peck, dwell, feed) in holes {
+        recs.push(R::Cycle(cnc::CycleRec {
+            kind,
+            x,
+            y,
+            r_z,
+            bottom_z: bottom,
             entry_z: 0.0,
-            peck: 0.0,
-            dwell: 0.5,
-            first_move: 3,
-            feed: Some(120.0),
-        }),
-        rec(MoveKind::Rapid, 60.0, 50.0, 2.0, None),
-        R::Cycle(cnc::CycleRec {
-            kind: CycleKind::Peck,
-            x: 60.0,
-            y: 50.0,
-            r_z: 2.0,
-            bottom_z: -20.0,
-            entry_z: 0.0,
-            peck: 5.0,
-            dwell: 0.0,
-            first_move: 4,
-            feed: Some(150.0),
-        }),
-        rec(MoveKind::Rapid, 60.0, 60.0, 2.0, None),
-        R::Cycle(cnc::CycleRec {
-            kind: CycleKind::Peck,
-            x: 60.0,
-            y: 60.0,
-            r_z: 2.0,
-            bottom_z: -20.0,
-            entry_z: 0.0,
-            peck: 5.0,
-            dwell: 0.0,
-            first_move: 5,
-            feed: Some(150.0),
-        }),
-        rec(MoveKind::Rapid, 70.0, 60.0, 2.0, None),
-        R::Cycle(cnc::CycleRec {
-            kind: CycleKind::Deep,
-            x: 70.0,
-            y: 60.0,
-            r_z: 2.0,
-            bottom_z: -30.0,
-            entry_z: 0.0,
-            peck: 8.0,
-            dwell: 0.0,
-            first_move: 6,
-            feed: Some(90.0),
-        }),
-        rec(MoveKind::Rapid, 70.0, 70.0, 2.0, None),
-        R::Cycle(cnc::CycleRec {
-            kind: CycleKind::Tap,
-            x: 70.0,
-            y: 70.0,
-            r_z: 2.0,
-            bottom_z: -12.0,
-            entry_z: 0.0,
-            peck: 0.0,
-            dwell: 0.0,
-            first_move: 7,
-            feed: Some(240.0),
-        }),
-        R::Section { begin: false },
-    ])
+            peck,
+            dwell,
+            first_move: n,
+            feed: Some(feed),
+        }));
+        let mut chain = vec![rec(MoveKind::Rapid, x, y, r_z, None)];
+        match kind {
+            CycleKind::Peck | CycleKind::Deep => {
+                let mut t = (r_z - peck).max(bottom);
+                loop {
+                    chain.push(rec(MoveKind::Plunge, x, y, t, Some(feed)));
+                    if t <= bottom {
+                        break;
+                    }
+                    let up = if kind == CycleKind::Peck { (t + 1.0).min(r_z) } else { r_z };
+                    chain.push(rec(MoveKind::Rapid, x, y, up, None));
+                    t = (t - peck).max(bottom);
+                }
+                chain.push(rec(MoveKind::Rapid, x, y, r_z, None));
+            }
+            CycleKind::Tap => {
+                chain.push(rec(MoveKind::Feed, x, y, bottom, Some(feed)));
+                chain.push(rec(MoveKind::Feed, x, y, r_z, Some(feed)));
+            }
+            _ => {
+                chain.push(rec(MoveKind::Plunge, x, y, bottom, Some(feed)));
+                chain.push(rec(MoveKind::Rapid, x, y, r_z, None));
+            }
+        }
+        n += chain.len();
+        recs.extend(chain);
+    }
+    recs.push(R::Section { begin: false });
+    cnc::serialize(&recs)
+}
+
+fn synth_stream() -> String {
+    synth_stream_with("G55", true)
 }
 
 #[test]
 fn the_synthesized_stream_locks_the_tool_and_spindle_words() {
     let mch: serde_json::Value =
         serde_json::from_str(&read("assets/machines/3axis-vmc.mch")).expect("machine json");
-    let stream = synth_stream();
     let write = std::env::var_os("WRITE_GOLDEN").is_some();
     for (name, cps_stem, _) in POSTS {
+        // #50: Heidenhain refuses a G55 offset and a tap by name, so
+        // its golden locks the same stream without those two records.
+        let stream = if *cps_stem == "heidenhain" { synth_stream_with("G54", false) } else { synth_stream() };
         let cps = read(&format!("assets/posts/{cps_stem}.cps"));
         let out = engine::run(&cps, &mch, &stream)
             .unwrap_or_else(|e| panic!("{name} on the synth stream: must post: {e}"));

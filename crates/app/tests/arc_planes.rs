@@ -189,11 +189,20 @@ fn the_g_word_posts_state_the_plane_modally() {
     }
 }
 
-/// The Heidenhain G1 fan of one vertical arc: the F600 blocks whose
+/// The Heidenhain blocks' words (#50: `N<n> <words>*`, TNC 640 ISO
+/// manual 892909-25 p. 130), the number and the terminator stripped.
+fn hh_blocks(out: &str) -> Vec<&str> {
+    out.lines()
+        .filter_map(|l| l.strip_prefix('N')?.split_once(' ')?.1.strip_suffix('*'))
+        .collect()
+}
+
+/// The Heidenhain G01 fan of one vertical arc: the F600 blocks whose
 /// normal coordinate (`fixed`, at `at`) holds, read as in-plane pairs.
 fn hh_fan(out: &str, fixed: char, at: f64, a: char, b: char) -> Vec<(f64, f64)> {
-    out.lines()
-        .filter(|l| l.starts_with("G1 ") && l.ends_with("F600"))
+    hh_blocks(out)
+        .into_iter()
+        .filter(|l| l.starts_with("G01 ") && l.ends_with("F600"))
         .filter_map(|l| {
             let g = |k: char| {
                 l.split(' ')
@@ -219,8 +228,8 @@ fn heidenhain_rides_its_vertical_arcs_as_chords_and_never_switches_plane() {
     // #49: the centre is its own block, absolute (TNC 640 ISO manual
     // 892909-25 p. 260); here centre (0, 5) happens to equal the
     // increment from the start (0, 0).
-    let lines: Vec<&str> = out.lines().collect();
-    assert!(lines.windows(2).any(|w| w == ["I0 J5", "G2 X-5 Y5 Z0 F800"]), "{out}");
+    let lines = hh_blocks(&out);
+    assert!(lines.windows(2).any(|w| w == ["I+0 J+5", "G02 X-5 Y+5 Z+0 F800"]), "{out}");
     let fan = hh_fan(&out, 'Y', 0.0, 'X', 'Z');
     assert!(fan.len() > 20, "a fine fan, {} chords", fan.len());
     for (x, z) in &fan {

@@ -98,8 +98,13 @@ fn read_arcs(nc: &str) -> Vec<Read> {
     assert!(!nc.contains("G91"), "this post writes no incremental word:\n{nc}");
     let (mut pos, mut cc) = ((f64::NAN, f64::NAN), None::<(f64, f64)>);
     let mut out = Vec::new();
+    // #50: every block is `N<n> <words>*` (manual p. 130); the program
+    // begin/end blocks (`%..`, `N99999999 %..`) carry no motion.
     for line in nc.lines() {
-        let words: Vec<&str> = line.split(' ').collect();
+        let Some(body) = line.strip_prefix('N').and_then(|l| l.split_once(' ')).and_then(|(_, b)| b.strip_suffix('*')) else {
+            continue;
+        };
+        let words: Vec<&str> = body.split(' ').collect();
         let get = |k: char| {
             words.iter().find(|w| w.starts_with(k)).and_then(|w| w[1..].parse::<f64>().ok())
         };
@@ -112,11 +117,11 @@ fn read_arcs(nc: &str) -> Vec<Read> {
         }
         let g = words.first().copied().unwrap_or("");
         let end = (get('X').unwrap_or(pos.0), get('Y').unwrap_or(pos.1));
-        if g == "G2" || g == "G3" {
+        if g == "G02" || g == "G03" {
             let centre = cc.unwrap_or_else(|| panic!("an arc before any centre: {line}"));
-            out.push(Read { start: pos, centre, end, ccw: g == "G3" });
+            out.push(Read { start: pos, centre, end, ccw: g == "G03" });
         }
-        if matches!(g, "G0" | "G1" | "G2" | "G3") {
+        if matches!(g, "G00" | "G01" | "G02" | "G03") {
             pos = end;
         }
     }
