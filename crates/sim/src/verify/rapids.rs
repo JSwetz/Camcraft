@@ -25,6 +25,28 @@
 //! between two samples of a ring by less than the chord bulge
 //! `rho (1 - cos(pi / (2 k)))` (about `0.019 d` at the rim, the bound
 //! [`super::rapids_radial`] states), can pass.
+//!
+//! Marched (issue #140): a lateral rapid is judged along its whole
+//! length, never at its start, midpoint and end alone - a link at floor
+//! depth whose three samples all stand in cut air can still drive
+//! through a narrow uncut wall between two pockets. The footprint is
+//! read at stations every `s = d / RINGS` (the ring spacing; floored at
+//! [`MIN_STEP`] for a tool no wider than the gouge tolerance), both ends
+//! included, so the step count is `ceil(len / s)`. The bound: the
+//! footprint reaches `d` ahead of and behind each station, so the swept
+//! stations overlap and a wall across the rapid can slip between them
+//! only by being thinner than the step minus that reach - a non-positive
+//! gap here (`s <= d`); what remains is the footprint's own sampling
+//! bound above, the same at every station (stock between two samples
+//! of one footprint by less than `d / RINGS` or the chord bulge). The
+//! centre sample alone, read at the tip plane, already catches any wall
+//! crossing the centre line thicker than `s`. This reading runs with or
+//! without a model: [`Rest::hidden_along`] returns early on a 2.5-D
+//! path, the column reading never does. Cost: a `RINGS`-ring footprint
+//! (73 samples) per station; a rapid longer than [`MAX_STATIONS`]
+//! steps (about 98 m for a 6 mm tool, 2.6 m at the floor step) is not
+//! thinned to fit - it fails closed and is convicted, a refusal with a
+//! name rather than a silent pass.
 use super::laws::xy;
 use super::midpose;
 use super::probe::Cutter;
@@ -102,18 +124,26 @@ pub(super) fn rapids_in_stock(
             if low >= cx.clearance_z - cx.z_tol {
                 continue;
             }
-            let mid = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
             // The overhang backstop (M13.7 B, [`super::hidden`]): the
             // tool disc swept through stock hidden under a ledge, which
             // no column surface shows - asked only when the column law
             // is silent, so it adds convictions, never removes one.
             // Cut order (M13.7): the rapid meets the stock as the cuts
             // BEFORE it left it - a later feed's clearing is no alibi.
-            let bad = [a, mid, b]
-                .into_iter()
-                .flat_map(|c| footprint(c, d))
-                .any(|(q, rho)| rest.in_stock(q) && low + cutter.lift_at(rho) < rest.surface_before(q, i))
-                || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
+            // Issue #140: every station along the rapid, not three.
+            // A rapid at or above the stock top cannot meet the column -
+            // `surface_before` is capped at the stock top and the lift is
+            // never negative - so the march is skipped (PR #160 review):
+            // same verdict, far fewer samples. A NaN height still marches.
+            let above = low >= cx.stock_top_z;
+            let marched = !above
+                && stations(a, b, d).is_none_or(|mut it| {
+                    it.any(|c| {
+                        footprint(c, d)
+                            .any(|(q, rho)| rest.in_stock(q) && low + cutter.lift_at(rho) < rest.surface_before(q, i))
+                    })
+                });
+            let bad = marched || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
             if !bad {
                 continue;
             }
@@ -150,5 +180,36 @@ fn footprint(c: Point2, d: f64) -> impl Iterator<Item = (Point2, f64)> {
             let t = std::f64::consts::TAU * j as f64 / n as f64;
             (Point2::new(c.x + rad * t.cos(), c.y + rad * t.sin()), inner)
         })
+    }))
+}
+
+/// The smallest march step, mm - a tool no wider than the gouge
+/// tolerance still marches at a finite count.
+const MIN_STEP: f64 = 0.01;
+
+/// The most stations one rapid is marched at (issue #140); past it the
+/// rapid fails closed rather than marching at a thinned step.
+const MAX_STATIONS: usize = 1 << 18;
+
+/// The footprint centres along `a -> b` every `d / RINGS` at most
+/// (see the module doc), both ends included. `None` is a rapid that
+/// cannot be marched at that step - a non-finite length or more than
+/// [`MAX_STATIONS`] steps - and the caller convicts it (fail closed).
+fn stations(a: Point2, b: Point2, d: f64) -> Option<impl Iterator<Item = Point2>> {
+    let d = if d.is_finite() && d > 0.0 { d } else { 0.0 };
+    let step = (d / RINGS as f64).max(MIN_STEP);
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len = (dx * dx + dy * dy).sqrt();
+    if !len.is_finite() {
+        return None;
+    }
+    let n = (len / step).ceil();
+    if n > MAX_STATIONS as f64 {
+        return None;
+    }
+    let n = (n as usize).max(1);
+    Some((0..=n).map(move |k| {
+        let t = k as f64 / n as f64;
+        Point2::new(a.x + dx * t, a.y + dy * t)
     }))
 }
