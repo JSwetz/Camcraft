@@ -12069,3 +12069,49 @@ real chains (other dialects' synth goldens byte-identical). Pinned by
 `..._refuses_a_dwell_its_chain_never_reaches`,
 `..._refuses_tapping_and_a_non_first_work_offset_by_name`, plus the
 updated `conformance`, `arc_planes`, `heidenhain_arc_centre`.
+
+## #7 round 8: riding the corner pieces' leads as cuts fixes the island's hops; the spiral's own load near the island still holds it back (2026-11-07)
+
+**Tried, the round-7 proposal**: `LinkLaw::ride_lead` (adaptive/lift_link.rs), the step
+after `late` in `lift::schedule`. A late piece whose lead holds stock right up to its
+first point starts at the lead's first point instead. Its lead is ridden at the floor
+as a cut, the way the spiral rode it, so each lap shaves the west-wall sub-bite slivers.
+That start also holds the slivers in the rim, so the cut begins further back, on the
+walk's own path onto the previous piece: the previous piece's air lead where it runs on
+to it, then the piece itself. The ride steps back 0 / 1 / 2 / 4 / 6 / 9 / 13 / 18 mm on
+the exact walk vertices, never resampled, because a re-ridden stretch resampled at
+0.25 mm posted segments a hair off the posted ones and the crossing law read them as a
+crossing at (6.67, 34.60). The return onto it is `find`, else `high`. The ridden stretch
+must read within `bound` on the stock as it stands. To reach the lift, `WORK_MAX` was
+raised to 40,000 r locally.
+
+**Readings** (release, `hsm_one` island 60x40 with a 12x12 island, D/120):
+- **Baseline:** 9 hops (pieces 197..237 step 4, leads 24.7-24.9 mm), 4 highs, 1 ride.
+- **Lead ride:** 2 hops (cap 8), 30 highs, 9 rides, 6 leads ridden as cuts, 620
+  microlift returns. The ridden leads read 17-31 deg against the bound of 47.5.
+- **The island now plans on HSM, with no ring fallback and the verifier silent.**
+  - Out of cut: air 2,912 + lift 6,429 = 9,341 mm, against 8,221 mm in cut, so
+    x1.14, inside the x1.5 budget. 61,848 moves, rest 3.5 mm2.
+- **Not landed: the island now fails the judge's other laws.**
+  - 176 in-cut breaks past 5 deg (worst 80.2).
+  - 6 descents into stock for 2 levels.
+  - The worst load is 125 deg = 79.4 % D at (43.66, 25.81), and the plan names it ("no
+    step held the load somewhere - the least overload was cut").
+  - The breaks and the overload sit round the island's NE corner (41-47, 26-34), in the
+    spiral's growth, not at the ridden leads (x 5.3-8.4 on the west wall). The spiral
+    itself already reads 125.0 there (the lifted plan reads the same 125.0).
+  - Before this, `hsm_report_full_resolution` skipped the island because it fell back.
+    Landing this would turn that lane red on breaks, load and descents.
+  - The 3D stepped-block island level still falls back. `pocket3d_hsm` passes unchanged,
+    so its reason was not re-read.
+- **Budget:** not recalibrated. The island's growth needs ~31,090 r, and 40,000 was only
+  a probe. That should wait until the plan it buys is legal.
+
+**Chosen:** hold the patch (tmp/issue7-r8-lead-ride.patch in the main checkout,
+including the 40,000 probe), keep the fallback, land nothing in code. The hop law is
+solved by the ride. What blocks the island now is the growth spiral's load and kinks
+round the island's corner. **Next:** the growth near an island corner ("no step held the
+load"), then the extra descents (the 2 remaining hops plus high descents read as
+descents into stock?), then the budget at ~32,000 r with the #13 band test re-timed.
+**Dropped:** riding the lead from its own first point (that point holds stock in the
+rim, so every return was refused); a resampled ride back (it reads as a crossing).
