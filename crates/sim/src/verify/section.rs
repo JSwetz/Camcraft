@@ -210,7 +210,7 @@ fn segments(m: &Move, mode: Mode, chord_tol: f64, wall_top: f64) -> Vec<(Point2,
     let t = ((wall_top - z0) / (z1 - z0)).clamp(0.0, 1.0);
     let lens: Vec<f64> = chords.iter().map(|&(a, b)| ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()).collect();
     let total: f64 = lens.iter().sum();
-    if !(total > 0.0) {
+    if total.is_nan() || total <= 0.0 {
         return chords;
     }
     let cut = t * total;
