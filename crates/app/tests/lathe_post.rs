@@ -222,6 +222,11 @@ fn profile_rough_and_finish_post_to_the_lathe_golden() {
     };
     create(&world, &mut history, "R1", "TN-1600-0R8", rough);
     create(&world, &mut history, "P1", "TN-1600-0R8", finish);
+    // Program order reads names: P1 posts AHEAD of R1, so the finish
+    // rides the raw Ø12 bar, and its radial retract at Z 16 (r 4.3 ->
+    // 6.85) drives its nose through the neck's uncut r 5.1..6 band - a
+    // real rapid in stock (#159), recorded in the golden's WARN lines.
+    // The translation is what this golden locks; the gate refuses it.
     let text = program_of(&world);
     assert_eq!(text.matches("G97 S3000 M03").count(), 2, "one spindle start per section: {text}");
     assert!(text.contains("F0.05"), "150 mm/min at 3000 rpm is 0.05 mm/rev: {text}");

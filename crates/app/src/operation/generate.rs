@@ -56,6 +56,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         mut prior,
         verify_prior,
         drills_ahead,
+        turned_ahead,
         is_mill,
         machine_kind,
         machine_rotaries,
@@ -2748,6 +2749,12 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     margin: GOUGE_TOL,
                     z_tol: Z_TOL,
                     drills: &drills_ahead,
+                    ahead: &turned_ahead,
+                    outward: match tool.kind {
+                        crate::tools::ToolKind::Groove => Some(f64::INFINITY),
+                        crate::tools::ToolKind::Thread => Some((tool.tip_angle.to_radians() * 0.5).tan()).filter(|k| k.is_finite() && *k > 0.0),
+                        _ => None,
+                    },
                     // A blade's move is its band's centre (a thread's,
                     // its crest's): the edge spans half the width.
                     band: if matches!(

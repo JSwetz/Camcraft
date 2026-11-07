@@ -1,6 +1,7 @@
 %
 O0001 (TestBench lathe)
 G21 G18 G40 G80 G99
+(P1: rapid move 73 travels below the clearance plane inside stock)
 G54
 T0101
 G50 S12000

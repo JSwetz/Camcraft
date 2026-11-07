@@ -13429,3 +13429,37 @@ revolved (follow-up material if users hit it with long keyways).
 - **Golden:** facing.nc. The only diff is the five inward moves going
   G00 to G01 F0.05, and main's three false warnings removed. No other
   golden changed.
+
+### #159: the meridian law owns every turning rapid
+
+- **Rule.** For the turned family the column/footprint law (#106) no
+  longer judges any rapid in the turning plane, axial or radial. The
+  meridian law judges them all and its word stands. Supersedes the
+  "re-read only" rule above; a rapid off the turning plane (no current
+  kernel makes one) keeps the column's word. The footprint disc of the
+  tool's radius about the nose is a mill's reading: it convicted main's
+  turning_bore off-wall rapid (move 18), the chamfer's retract (55) and
+  facing's own-kerf retracts (11/15/19), all FALSE in the meridian.
+- **What the meridian now credits, so it judges radial rapids honestly:**
+  - the turning ops ahead in the setup (`rest::turned_ahead`, each at its
+    nose; blades at their centre line);
+  - a thread's helix arc as constant radius over its stations (the S1
+    chord is still never credited);
+  - a groove blade's band, and a thread's V, outward of its tip along
+    this path's own feeds;
+  - a thread's band sampled as its V, not a flat edge at the tip.
+- **Real convictions it found, kept:**
+  - *TaperTurning on the Ø20 bar*: the ride ends at r 8.8 on Z 40, its
+    nose clears r <= 9.6, the bar stands to r 10, and the radial retract
+    to r 10.85 drives through that ring. Pinned in
+    `a_taper_rides_the_modeled_cone_and_a_square_bar_refuses` (TP0,
+    convicted by name). The clean rides now stand on a blank turned to
+    the cone (stock from model, `taper_blank_world`).
+  - *profile_rough_finish golden*: program order reads names, so P1 (the
+    finish) posts ahead of R1 and rides the raw Ø12 bar. Its radial
+    retract at Z 16 (r 4.3 -> 6.85) sweeps the neck's uncut r 5.1..6
+    band. Recorded as one added WARN line in the golden; the program
+    text is unchanged and the gate refuses it. The fixture's op naming is
+    the cause; it was left as is to keep the translation golden stable.
+- **Split for the size budget:** the drill-pilot credit moved to
+  `operation/turning_credit.rs`.

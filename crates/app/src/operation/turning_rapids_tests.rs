@@ -1,6 +1,7 @@
 //! Unit pins of `turning_rapids` (#103): the meridian law on synthetic paths - split out to keep the law's file under the size budget.
 
 use super::*;
+use crate::operation::turning_credit::Pilot;
 
 #[test]
 fn the_meridian_distance_is_to_the_segment_not_the_line() {
@@ -44,7 +45,7 @@ fn convicted(moves: Vec<crate::cl::Move>) -> Vec<Warning> {
     };
     let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() };
     let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, 16.0));
-    let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None };
+    let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None, ahead: &[], outward: None };
     let mut warns = Vec::new();
     judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
     warns
@@ -97,7 +98,7 @@ fn a_single_groove_at_the_bars_end_is_judged_across_its_band() {
     };
     let (part, stock) = (cylinder(11.0, -60.0, 10.0), cylinder(12.5, -60.0, 12.0));
     let judge = |band: f64| {
-        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.0, margin: 0.01, z_tol: 1e-6, drills: &[], band, body: None };
+        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.0, margin: 0.01, z_tol: 1e-6, drills: &[], band, body: None, ahead: &[], outward: None };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
         warns
@@ -162,6 +163,8 @@ fn a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted() {
             drills: &drills,
             band: 0.0,
             body: Some(BarBody { head_d: 10.0, shank_d: 10.0, flute_len: 20.0, shank_len: 40.0 }),
+            ahead: &[],
+            outward: None,
         };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
@@ -206,6 +209,8 @@ fn stepped_bar(r: f64, wall: f64, pilot: f64) -> Vec<Warning> {
         drills: &drills,
         band: 0.0,
         body: Some(BarBody { head_d: 8.0, shank_d: 12.0, flute_len: 20.0, shank_len: 40.0 }),
+            ahead: &[],
+            outward: None,
     };
     let mut warns = Vec::new();
     judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);

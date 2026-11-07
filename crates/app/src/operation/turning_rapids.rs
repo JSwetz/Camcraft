@@ -8,6 +8,7 @@ use crate::verify::Warning;
 
 use super::drill_prior::{PriorCell, PriorRead};
 use super::kinds::Section;
+use super::turning_credit::pilots;
 use super::turning_outline::Revolved;
 use super::OpParams;
 
@@ -35,6 +36,15 @@ pub(super) struct Meridian<'a> {
     /// A boring bar's body (#103 review B1, B3, B4); the nose disc
     /// stays the cutting tip's, the body must fit the hole too.
     pub body: Option<BarBody>,
+    /// The turning ops ahead in the setup: their cuts are this op's
+    /// air (#159).
+    pub ahead: &'a [crate::rest::TurnedAhead],
+    /// A blade's edge outward of its tip (#159): a groove blade's band
+    /// is cut everywhere outward of the tip (`Some(INFINITY)`), a
+    /// thread's V widens by `Some(tan(half angle))` per mm outward up to
+    /// the band. `None` credits no more than the tip's own line (a form
+    /// gauge's crown, an insert's nose disc).
+    pub outward: Option<f64>,
 }
 
 /// A boring bar read about its nose: the head (flute) over `flute_len`
@@ -74,25 +84,16 @@ pub(super) fn judge_axial_rapids(
     }
     let Ok(frame) = Frame::about(cx.part) else { return };
     let sm = SignedMeridian::of(&frame, path);
-    // Judged here (#103): every AXIAL rapid, which the column cannot
-    // see; and a rapid across radii in the turning plane that the
-    // column convicted, re-read - the column's footprint disc of the
-    // tool's radius about the nose (#106) is a mill's reading, and a
-    // lathe's radial retract along its own kerf is not a disc's dive.
-    // The meridian may acquit those; it adds no conviction the column
-    // did not make on them. A rapid off the meridian keeps the column's
-    // word.
-    let column: Vec<usize> = warns.iter().filter_map(|w| match *w {
-        Warning::RapidInStock { at } => Some(at),
-        _ => None,
-    }).collect();
+    // Judged here (#103, #159): EVERY rapid of the turned family that
+    // stands in its turning plane - axial, radial or both. The column
+    // cannot see the meridian, and its footprint disc of the tool's
+    // radius about the nose (#106) is a mill's reading: a lathe's
+    // radial retract along its own kerf is not a disc's dive. The
+    // column's word on these is dropped and the meridian's stands. A
+    // rapid off the turning plane (none of today's kernels makes one)
+    // keeps the column's word.
     let axial = |at: usize| {
-        path.moves.get(at).is_some_and(|m| {
-            let (dx, dy) = (m.to.x - m.from.x, m.to.y - m.from.y);
-            let along = dx * dx + dy * dy <= cx.z_tol * cx.z_tol;
-            let planar = sm.in_plane(m.from, cx.z_tol) && sm.in_plane(m.to, cx.z_tol);
-            m.kind == MoveKind::Rapid && (along || (planar && column.contains(&at)))
-        })
+        path.moves.get(at).is_some_and(|m| m.kind == MoveKind::Rapid && sm.in_plane(m.from, cx.z_tol) && sm.in_plane(m.to, cx.z_tol))
     };
     let Some(part) = Revolved::of(cx.part, &frame) else { return };
     let stock = match cx.stock {
@@ -126,7 +127,7 @@ pub(super) fn judge_axial_rapids(
 
 /// The frame read with a SIGNED radius: the facing passes cross the
 /// axis, and their sweep reaches the other side of it.
-struct SignedMeridian {
+pub(super) struct SignedMeridian {
     origin: Point3,
     dir: Point3,
     radial: Point3,
@@ -165,7 +166,7 @@ impl SignedMeridian {
         off.dot(off).sqrt() <= tol.max(1e-9) * (1.0 + r.abs())
     }
 
-    fn sr(&self, q: Point3) -> (f64, f64) {
+    pub(super) fn sr(&self, q: Point3) -> (f64, f64) {
         let d = q - self.origin;
         let s = d.dot(self.dir);
         let w = Point3::new(d.x - self.dir.x * s, d.y - self.dir.y * s, d.z - self.dir.z * s);
@@ -211,7 +212,13 @@ fn enters(
         .map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4)
         .flat_map(|t| [(rd * t.cos(), rd * t.sin()), (0.5 * rd * t.cos(), 0.5 * rd * t.sin())])
         .chain(std::iter::once((0.0, 0.0)))
-        .chain(spread(band).map(|ds| (ds, 0.0)))
+        // The blade's edge across its band: flat for a groove or a form
+        // gauge's widest reading, a thread's V rising |u| / tan(half
+        // angle) outward of its tip.
+        .chain(spread(band).map(|ds| (ds, match cx.outward {
+            Some(k) if k.is_finite() && k > 0.0 => ds.abs() / k,
+            _ => 0.0,
+        })))
         .collect();
     let (s_lo, s_hi) = (a.0.min(b.0), a.0.max(b.0));
     let mut pieces = vec![(s_lo, s_hi, ring)];
@@ -235,26 +242,47 @@ fn enters(
     let (lo, hi) = pieces.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.0), h.max(p.1)));
     let (lo, hi) = (lo - reach_s, hi + reach_s);
     // This path's own earlier feeds that can reach the rapid's band.
-    let feeds: Vec<((f64, f64), (f64, f64))> = path.moves[..i.min(path.moves.len())]
-        .iter()
-        // An arc's chord is not its sweep (review S1): a threading
-        // half-turn's chord crosses the axis. Arcs credit nothing.
-        .filter(|m| m.kind != MoveKind::Rapid && m.arc.is_none())
-        .map(|m| (sm.sr(m.from), sm.sr(m.to)))
-        .filter(|(p, q)| p.0.max(q.0) + rn >= lo && p.0.min(q.0) - rn <= hi)
+    // ...and the turning ops ahead in the setup (#159: a finish's
+    // retract across the band its rough cleared), each at its own nose.
+    let own = path.moves[..i.min(path.moves.len())].iter().map(|m| (m, rn, true));
+    let ahead = cx.ahead.iter().flat_map(|a| a.moves.iter().map(move |m| (m, a.nose, false)));
+    let wide = rd.max(band);
+    let mut feeds: Vec<Kerf> = own
+        .chain(ahead)
+        .filter(|(m, _, _)| m.kind != MoveKind::Rapid)
+        .filter_map(|(m, nose, mine)| kerf_of(m, sm, cx.z_tol).map(|(p, q)| Kerf { p, q, reach: nose + cx.margin, mine }))
+        .filter(|k| k.p.0.max(k.q.0) + k.reach.max(wide) >= lo && k.p.0.min(k.q.0) - k.reach.max(wide) <= hi)
         .collect();
+    // This path's own first: the flank credit reads only those.
+    feeds.sort_by_key(|k| !k.mine);
+    let own_n = feeds.iter().filter(|k| k.mine).count();
     let pilots = pilots(cx.drills, sm);
     let solid = |s: f64, rho: f64| {
         let r = rho.abs();
-        let reach = rn + cx.margin;
         // A blade's feed sweeps its whole band along the axis, not its
         // centre's point: the kerf is the segment widened by the band.
-        let kerf = |p: (f64, f64), q: (f64, f64)| {
+        let kerf = |p: (f64, f64), q: (f64, f64), reach: f64| {
             spread(band).chain(std::iter::once(0.0)).any(|u| {
                 seg_dist((s + u, rho), p, q) <= reach || seg_dist((s + u, -rho), p, q) <= reach
             })
         };
-        if feeds.iter().any(|&(p, q)| kerf(p, q)) {
+        // The blade's edge outward of its tip, along this path's own
+        // feeds (the threading V behind its tip, the groove's band).
+        let flank = |p: (f64, f64), q: (f64, f64)| {
+            let Some(k) = cx.outward.filter(|k| *k > 0.0) else { return false };
+            let len = (q.0 - p.0).hypot(q.1 - p.1);
+            let m = (len / 0.25).ceil().clamp(1.0, 4000.0) as usize;
+            (0..=m).any(|j| {
+                let t = j as f64 / m as f64;
+                let (sc, rc) = (p.0 + (q.0 - p.0) * t, (p.1 + (q.1 - p.1) * t).abs());
+                let h = r - rc;
+                h >= -cx.margin && (s - sc).abs() <= (h.max(0.0) * k).min(band) + cx.margin
+            })
+        };
+        if feeds.iter().take(own_n).any(|k| flank(k.p, k.q)) {
+            return false; // the blade's own V or band
+        }
+        if feeds.iter().any(|k| kerf(k.p, k.q, k.reach)) {
             return false; // this path's own kerf
         }
         if pilots.iter().any(|p| p.removed(s, r)) {
@@ -299,51 +327,34 @@ fn enters(
     })
 }
 
+/// A cutting move's meridian segment `p`-`q`, credited out to `reach`;
+/// `mine` when it is this path's own (the blade-flank credit's).
+struct Kerf {
+    p: (f64, f64),
+    q: (f64, f64),
+    reach: f64,
+    mine: bool,
+}
+
+/// A cutting move's meridian segment, credited as its nose's kerf. A
+/// straight move is its chord. An arc credits only when it is a turn
+/// about the spindle (an XY arc centred on the axis, both ends at one
+/// radius - a thread's helix): a constant radius across its stations
+/// (review S1's reading). Any other arc's chord is not its sweep, and
+/// credits nothing.
+fn kerf_of(m: &crate::cl::Move, sm: &SignedMeridian, tol: f64) -> Option<((f64, f64), (f64, f64))> {
+    let (p, q) = (sm.sr(m.from), sm.sr(m.to));
+    let Some(arc) = m.arc.as_ref() else { return Some((p, q)) };
+    let on_axis = (arc.center.x - sm.origin.x).hypot(arc.center.y - sm.origin.y) <= tol.max(1e-9) * (1.0 + p.1.abs());
+    let round = (p.1.abs() - q.1.abs()).abs() <= tol.max(1e-9) * (1.0 + p.1.abs());
+    (arc.plane.is_xy() && on_axis && round).then(|| ((p.0, p.1.abs()), (q.0, q.1.abs())))
+}
+
 /// Offsets across `[-h, h]`, at most 0.25 mm apart, ends included (none
 /// for `h` = 0).
 fn spread(h: f64) -> impl Iterator<Item = f64> {
     let n = if h > 0.0 { (2.0 * h / 0.25).ceil().min(4000.0) as usize } else { 0 };
     (0..=n).filter(move |_| n > 0).map(move |k| -h + 2.0 * h * k as f64 / n as f64)
-}
-
-/// A drill ahead's cut on the spindle axis, in the meridian plane:
-/// stations `lo` (the point's tip) to `hi`, radius `r`, the point's
-/// cone widening `1/cot` per unit above the tip (#89's drill atom).
-struct Pilot {
-    lo: f64,
-    hi: f64,
-    r: f64,
-    cot: Option<f64>,
-}
-
-impl Pilot {
-    fn removed(&self, s: f64, r: f64) -> bool {
-        if s < self.lo || s > self.hi {
-            return false;
-        }
-        let wide = match self.cot {
-            Some(k) if k > 0.0 => ((s - self.lo) / k).min(self.r),
-            _ => self.r,
-        };
-        r < wide
-    }
-}
-
-/// The drills' cutting moves that run ON the spindle axis (an off-axis
-/// hole on a lathe is not a cylinder about it, and credits nothing).
-fn pilots(drills: &[DrillAhead], sm: &SignedMeridian) -> Vec<Pilot> {
-    const ON_AXIS: f64 = 1e-3;
-    drills
-        .iter()
-        .filter(|d| d.radius.is_finite() && d.radius > 0.0)
-        .flat_map(|d| {
-            d.moves.iter().filter(|m| m.kind != MoveKind::Rapid && m.arc.is_none()).filter_map(move |m| {
-                let (a, b) = (sm.sr(m.from), sm.sr(m.to));
-                (a.1.abs() <= ON_AXIS && b.1.abs() <= ON_AXIS)
-                    .then(|| Pilot { lo: a.0.min(b.0), hi: a.0.max(b.0), r: d.radius, cot: d.cone })
-            })
-        })
-        .collect()
 }
 
 /// Distance from `p` to the segment `a`-`b` in the meridian plane.
