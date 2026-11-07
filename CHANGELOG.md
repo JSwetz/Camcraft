@@ -9,6 +9,7 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 0605698 | 2026-11-07 | fix(app): a whole-part Pocket/Adaptive clears the stock around the part, never its own section (#12) | Unreleased |
 | 3271457 | 2026-11-07 | build(scripts): scripts/gate.ps1 - quick / batch / release tiers and single-test runs | 0.8.2 |
 | b6b584b | 2026-11-07 | fix(app,ui): Circular fits its circle to the selection (#4) | 0.8.2 |
 | 9318355 | 2026-11-07 | fix(app,ui): 2D Adaptive - close an edge loop, the Selection height offset, Outside containment (#1, #2, #3) | 0.8.2 |
