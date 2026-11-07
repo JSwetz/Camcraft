@@ -1,11 +1,7 @@
-# Validate the AUR source recipe on Arch Linux when that recipe changes.
+# Validate the AUR source recipe on Arch Linux when manually dispatched.
 # Provenance: Arch's makepkg and Rust packaging guidelines.
 name: AUR package
 on:
-  pull_request:
-    paths:
-      - aur/**
-      - .github/workflows/aur-package.yml
   workflow_dispatch:
 
 permissions:

@@ -12985,12 +12985,13 @@ keeps the part-only chain bit for bit.
   Dropped `camcraft-bin` for this slice: the current GitHub release has no
   Linux binary asset for every patch tag, while a source tag exists. The AUR
   entry itself will be published after an Arch build validates the recipe.
-- Validate `aur/` in a separate PR workflow on an Arch Linux container:
+- Validate `aur/` in a separate manually dispatched workflow on an Arch Linux container:
   compare `makepkg --printsrcinfo` with the checked-in `.SRCINFO`, run
   `makepkg` through its build and test stages, inspect the package contents,
   and upload the result. Keep this out of `release.yml` because the source
   recipe follows tagged versions and AUR updates, while `release.yml`
-  assembles assets only for a CamCraft release.
+  assembles assets only for a CamCraft release. Manual dispatch also follows
+  the repository policy against running Actions for every PR.
 - The first Arch build reached `ld.lld` but could not resolve Flecs C symbols.
   The likely cause is makepkg's default LTO compiling the bundled Flecs C into
   GCC LTO objects that rust-lld cannot consume. Set `options=('!lto')` in the
