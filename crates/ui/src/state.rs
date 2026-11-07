@@ -3102,6 +3102,11 @@ impl State {
         }
     }
 
+    /// The shell polls a running import on a timer while otherwise idle.
+    pub(crate) fn import_in_progress(&self) -> bool {
+        self.import_rx.is_some() || !self.import_queue.is_empty()
+    }
+
     /// Drop any live/queued imports because the document is being replaced.
     /// A worker still running finishes in the background and discards itself.
     fn abandon_imports(&mut self) {

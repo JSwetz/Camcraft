@@ -13273,3 +13273,18 @@ revolved (follow-up material if users hit it with long keyways).
   them. Dropped: an exact disc-versus-polygon minimum of the lifted
   surface (needs a lifted-tool / stock-edge distance per wall segment;
   the ring bound d / 8 plus the chord bulge is stated instead).
+
+## #164: Idle window redraw and high CPU
+
+- The reported project loads and processes through the CLI in under a second.
+  The windowed shell currently uses `ControlFlow::Poll` and requests another
+  redraw unconditionally after each frame, so an open project keeps rebuilding
+  its scene and browser even when the user is idle.
+- Choose event-driven redraw: request a frame for input and queued commands;
+  honor egui's repaint delay for timed UI work; keep a bounded timer while
+  simulation or import progress needs frames. An idle document then waits for
+  an event. This targets the repeated work while preserving live playback.
+- Review added one follow-up frame after input because the shell collects the
+  scene before the UI can change browser eyes or toolpath visibility. Suspend
+  frame timers while the window is occluded, then redraw when it becomes
+  visible again; hidden surfaces have no useful picture to update.
