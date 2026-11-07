@@ -3,13 +3,14 @@
 use super::params::Pocket3DParams;
 use super::rest::EPS;
 use super::feed::{guard_input, home, sim_of, subtract_upright};
+use super::hsm::Seam;
 use super::ladder::ladder;
 
 use crate::cl::Toolpath;
 use crate::geo2d::Region;
 use crate::geometry::Triangle;
 use crate::machining2d::{
-    cut_levels, GenError, PocketStrategy,
+    cut_levels, GenError,
 };
 use crate::stock_sim::{self, Dexel, StockReport};
 /// The per-level cutter plan and its walk, level after level - the 3-D
@@ -86,7 +87,7 @@ fn run_plain(
 ) -> Result<Toolpath, GenError> {
     guard_input(facets, footprint, p)?;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    ladder(facets, footprint, p, &zs, None, mask, home(p), shell)
+    ladder(facets, footprint, p, &zs, None, mask, home(p), shell, None)
 }
 
 /// The plain ladder with a second, smaller footprint for its AIR
@@ -104,28 +105,34 @@ pub fn pocket3d_air_split(
     air_footprint: &Region,
     footprint: &Region,
     air_above: f64,
+    seam: Option<(f64, f64)>,
     p: &Pocket3DParams,
 ) -> Result<Toolpath, GenError> {
     guard_input(facets, footprint, p)?;
-    // The wrap ladder keeps the rings under Adaptive: its developed
-    // levels are channels the HSM planner refuses by name, and the
-    // rotary programs it posted stay byte for byte (their per-level
-    // port is owed, RECOMMENDED M11.4).
-    let rings = Pocket3DParams { strategy: PocketStrategy::OffsetRings, ..*p };
-    let p = if p.strategy == PocketStrategy::Adaptive { &rings } else { p };
+    // Under Adaptive every developed level goes to the HSM planner
+    // (issue #9, lifting M11.4's pin); `seam` - (period, reach) - names
+    // the levels whose area the wrap's seam cuts, each leg reading its
+    // own cover's ends. OffsetRings and every other strategy run as
+    // they always did.
+    let seam_of = |fp: &Region| -> Option<Seam> {
+        let (period, reach) = seam?;
+        let (lo, hi) = fp.bounds()?;
+        Some(Seam { lo: lo.x, hi: hi.x, period, reach })
+    };
+    let (sm_air, sm_cut) = (seam_of(air_footprint), seam_of(footprint));
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let k = zs.iter().take_while(|z| **z > air_above).count();
     if k == 0 || air_footprint.is_empty() {
-        return ladder(facets, footprint, p, &zs, None, None, home(p), false);
+        return ladder(facets, footprint, p, &zs, None, None, home(p), false, sm_cut.as_ref());
     }
-    let air = ladder(facets, air_footprint, p, &zs[..k], None, None, home(p), false)?;
+    let air = ladder(facets, air_footprint, p, &zs[..k], None, None, home(p), false, sm_air.as_ref())?;
     if k == zs.len() {
         return Ok(air);
     }
     let start = air.moves.last().map_or_else(|| home(p), |m| m.to);
     let mut moves = air.moves;
     let mut notes = air.notes;
-    match ladder(facets, footprint, p, &zs[k..], None, None, start, false) {
+    match ladder(facets, footprint, p, &zs[k..], None, None, start, false, sm_cut.as_ref()) {
         Ok(rest) => {
             moves.extend(rest.moves);
             notes.extend(rest.notes);
@@ -212,7 +219,7 @@ fn run_rest(
     guard_input(facets, footprint, p)?;
     let r = p.tool_diameter * 0.5;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    let coarse = ladder(facets, footprint, p, &zs, None, mask, home(p), shell)?;
+    let coarse = ladder(facets, footprint, p, &zs, None, mask, home(p), shell, None)?;
 
     // What the coarse ladder leaves standing, column by column: the
     // op-frame grid simulated from raw stock, or - when the program
@@ -239,7 +246,7 @@ fn run_rest(
     // order (M8.1): the status line reads the substitutions as the
     // machine lived them.
     let mut notes = coarse.notes;
-    match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start, shell) {
+    match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start, shell, None) {
         Ok(rp) => {
             moves.extend(rp.moves);
             notes.extend(rp.notes);

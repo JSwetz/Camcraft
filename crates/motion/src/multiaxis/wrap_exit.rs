@@ -25,12 +25,19 @@
 //!   plane is not missing, the azimuth supplies it, and the lead
 //!   rides the constant-`s` plane the wrap itself lives in.
 //!
+//! Issue #9 (review): under Adaptive the developed XY arcs chord at an
+//! ANGULAR cap as well as the sagitta ([`ADAPTIVE_TURN_DEG`] a chord,
+//! end chords 0.01 mm of arc): the planner's ~1.5 mm lead and smoothing
+//! arcs chorded by sagitta alone turn ~13 degrees at each chord vertex,
+//! past the 5 degree in-cut law the developed plan was proved under.
+//!
 //! Provenance: unwrapped-to-developed toolpath reconstruction from
 //! public multi-axis turning-milling literature; composed on this
 //! codebase's own axis fit and lean laws. Nothing of any vendor's
 //! consulted.
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::geo2d::Point2;
 use crate::geometry::Point3;
 use crate::machining2d::{GenError, ARC_FIT_TOL};
 
@@ -40,10 +47,17 @@ use super::rotary_links;
 use super::tilt::{command_axis, AxisControl};
 use crate::cl::normalize_axis;
 
+/// The most a developed arc's chord may turn from the last under an
+/// Adaptive wrap: under the 5 degree in-cut kink law, with the arc's
+/// end chords short ([`trim_ends`]) so a junction gains next to nothing.
+pub(super) const ADAPTIVE_TURN_DEG: f64 = 4.0;
+
 /// The world exit: `base` is the ladder's plan in wrap coordinates
 /// (x = s, y = v, z = ρ), mapped and posed about `ax`; `rho_ref` is
 /// the development's arc-length radius and `r` the tool radius the
-/// plan was offset by.
+/// plan was offset by. `turn_cap` (radians), when given, bounds the
+/// sweep of each developed XY arc chord on top of the sagitta.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn wrap_exit(
     base: &Toolpath,
     ax: &Axis,
@@ -52,6 +66,7 @@ pub(super) fn wrap_exit(
     rho_ref: f64,
     r: f64,
     c: &AxisControl,
+    turn_cap: Option<f64>,
 ) -> Result<Toolpath, GenError> {
     if !base.cycles.is_empty() {
         return Err(GenError::Invalid(
@@ -165,8 +180,29 @@ pub(super) fn wrap_exit(
                 poly.push(mv.from);
                 poly.extend(mv.segments3(ARC_FIT_TOL).into_iter().map(|(_, e)| e));
             }
-            Some(_) => {
-                let ch = mv.chords(ARC_FIT_TOL);
+            Some(a) if turn_cap.is_some() => {
+                let ch = mv.chords(arc_tol(mv.from, a.center, turn_cap));
+                let mut pts: Vec<Point2> = vec![Point2::new(mv.from.x, mv.from.y)];
+                pts.extend(ch.iter().map(|(_, e)| *e));
+                trim_ends(&mut pts, a.center, a.ccw);
+                // Z rides the chord length (a helix's descent stays
+                // uniform along the travel; a planar arc keeps its z).
+                let len: Vec<f64> = pts.windows(2).map(|w| (w[1].x - w[0].x).hypot(w[1].y - w[0].y)).collect();
+                let total: f64 = len.iter().sum();
+                let mut run = 0.0;
+                poly.push(mv.from);
+                for (i, q) in pts.iter().enumerate().skip(1) {
+                    run += len.get(i - 1).copied().unwrap_or(0.0);
+                    let f = if total > 0.0 { (run / total).clamp(0.0, 1.0) } else { 1.0 };
+                    let z = if i + 1 == pts.len() { mv.to.z } else { mv.from.z + (mv.to.z - mv.from.z) * f };
+                    poly.push(Point3::new(q.x, q.y, z));
+                }
+                if pts.len() < 2 {
+                    poly.push(mv.to);
+                }
+            }
+            Some(a) => {
+                let ch = mv.chords(arc_tol(mv.from, a.center, turn_cap));
                 let n = ch.len().max(1) as f64;
                 poly.push(mv.from);
                 for (i, (_a, e)) in ch.iter().enumerate() {
@@ -230,6 +266,55 @@ pub(super) fn wrap_exit(
     }
     Ok(path)
 }
+
+/// The chord sagitta for an XY arc about `o` from `from`: the arc-fit
+/// tolerance, tightened under `turn_cap` so no chord sweeps more than
+/// the cap (sagitta r(1 - cos(cap/2)) is a chord of exactly cap).
+fn arc_tol(from: Point3, o: Point2, turn_cap: Option<f64>) -> f64 {
+    let Some(cap) = turn_cap.filter(|c| c.is_finite() && *c > 0.0) else { return ARC_FIT_TOL };
+    let ra = (from.x - o.x).hypot(from.y - o.y);
+    let t = ra * (1.0 - (0.5 * cap).cos());
+    if t.is_finite() && t > 0.0 { t.min(ARC_FIT_TOL) } else { ARC_FIT_TOL }
+}
+
+/// The posted end chords of a capped arc are short: an end chord stands
+/// off the tangent the neighbouring move meets by half its sweep, so a
+/// full-step end chord would add up to half the cap to a junction the
+/// plan held just under the kink law. Each end chord is split at
+/// [`END_SWEEP_MM`] of arc (never under a post's resolution) when it
+/// sweeps more than twice that.
+fn trim_ends(pts: &mut Vec<Point2>, o: Point2, ccw: bool) {
+    let n = pts.len();
+    if n < 2 {
+        return;
+    }
+    let rot = |p: Point2, ang: f64| {
+        let (sn, cs) = ang.sin_cos();
+        let (dx, dy) = (p.x - o.x, p.y - o.y);
+        Point2::new(o.x + dx * cs - dy * sn, o.y + dx * sn + dy * cs)
+    };
+    let sweep = |a: Point2, b: Point2| {
+        let (u, v) = ((a.x - o.x, a.y - o.y), (b.x - o.x, b.y - o.y));
+        (u.0 * v.1 - u.1 * v.0).abs().atan2(u.0 * v.0 + u.1 * v.1)
+    };
+    let dir = if ccw { 1.0 } else { -1.0 };
+    let h_at = |p: Point2| {
+        let ra = (p.x - o.x).hypot(p.y - o.y);
+        if ra.is_finite() && ra > 0.0 { END_SWEEP_MM / ra } else { 0.0 }
+    };
+    let (first, last) = (pts[0], pts[n - 1]);
+    let (hs, he) = (h_at(first), h_at(last));
+    let tail = (he > 0.0 && sweep(pts[n - 2], last) > 2.0 * he).then(|| rot(last, -dir * he));
+    if let Some(q) = tail {
+        pts.insert(n - 1, q);
+    }
+    if hs > 0.0 && sweep(first, pts[1]) > 2.0 * hs {
+        pts.insert(1, rot(first, dir * hs));
+    }
+}
+
+/// The arc length of a capped arc's posted end chords.
+const END_SWEEP_MM: f64 = 0.01;
 
 fn normalize(v: &Point3) -> Option<Point3> {
     let l = (v.dot(*v)).sqrt();
