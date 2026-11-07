@@ -1,11 +1,15 @@
 //! M6.2 acceptance: the ribbon's taxonomy is the registry (one
 //! Section column, a derived Family, a machine-filtered section list),
-//! the pins are a document setting that rides no command, and the
-//! project file carries them under the v42 law - absent key = unpinned.
+//! the pins are a document setting changed through the `SetRibbonPins`
+//! command (issue #143: undoable, so it counts as a document change),
+//! and the project file carries them under the v42 law - absent key =
+//! unpinned.
 //!
 //! Gate map (M4.4): covers app::operation (kinds table), app::ribbon,
-//! app::schema (RibbonPins), app::project (pinned key, v42).
+//! app::commands::ribbon_pins, app::schema (RibbonPins), app::project
+//! (pinned key, v42).
 
+use camcraft_app::commands::{History, SetRibbonPins};
 use camcraft_app::machine::Kind;
 use camcraft_app::operation::{self, Family, KindInfo, Section, KIND_COUNT};
 use camcraft_app::project;
@@ -294,4 +298,32 @@ fn the_probe_appends_its_id_and_lists_in_drilling() {
     assert_eq!(drilling, [operation::OpType::Drill, operation::OpType::Bore, operation::OpType::Probe]);
     assert!(Section::Drilling.kinds_for(Kind::Mill).contains(&(KIND_COUNT - 1)));
     assert!(!Section::Drilling.kinds_for(Kind::Lathe).contains(&(KIND_COUNT - 1)), "a lathe has no probe row");
+}
+
+/// Issue #143: a pin goes through the history. Undo puts the previous
+/// pins back, redo re-applies, the list is cleaned like `pinned_set`, and
+/// a list equal to the current one is refused so no no-op lands on the
+/// undo stack.
+#[test]
+fn a_pin_is_a_command_undo_restores_the_previous_pins() {
+    let world = new_world();
+    let mut history = History::default();
+    let pin = SetRibbonPins::new(&world, &[3, 3, KIND_COUNT, 7]).expect("a new pin list");
+    history.execute(&world, pin);
+    assert_eq!(pinned_of(&world), vec![3, 7], "the command writes the cleaned list");
+    assert!(history.can_undo(), "the pin is on the undo stack");
+
+    let unpin = SetRibbonPins::new(&world, &[7]).expect("an unpin");
+    history.execute(&world, unpin);
+    assert_eq!(pinned_of(&world), vec![7]);
+
+    assert!(history.undo(&world));
+    assert_eq!(pinned_of(&world), vec![3, 7], "undo restores the unpinned kind");
+    assert!(history.undo(&world));
+    assert!(pinned_of(&world).is_empty(), "undo restores the unpinned ribbon");
+    assert!(history.redo(&world));
+    assert_eq!(pinned_of(&world), vec![3, 7], "redo re-applies the pin");
+
+    // The same list again (after cleaning) is refused, not pushed.
+    assert!(SetRibbonPins::new(&world, &[3, 7, 3]).is_err(), "a no-op pin is refused");
 }

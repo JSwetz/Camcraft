@@ -135,38 +135,7 @@ pub fn current_stamp(
             h.write_u8(b'S');
             let stock_name = crate::setup::stock_entity_name(world, setup);
             let entity = model::find_by_name(world, &stock_name)?;
-            let loc = model::transform_of(world, &entity).unwrap_or_default();
-            for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]]
-            {
-                w(&mut h, v);
-            }
-            match model::stock_def_of(world, &entity)? {
-                StockShape::Box { dx, dy, dz } => {
-                    h.write_u8(0);
-                    for v in [dx, dy, dz] {
-                        w(&mut h, v);
-                    }
-                }
-                StockShape::Cylinder { diameter, height } => {
-                    h.write_u8(1);
-                    w(&mut h, diameter);
-                    w(&mut h, height);
-                }
-                StockShape::FromModel { source } => {
-                    h.write_u8(2);
-                    h.write(source.as_bytes());
-                    // M3.1 B: the name is provenance; what gets milled is
-                    // the stock's own copy, so the copy is what the digest
-                    // reads. UpdateModel re-derives the copy inside the
-                    // update command (the propagation law), so an update to
-                    // the source lands here as a moved signature - and a
-                    // stock whose source was deleted stays honestly Ok,
-                    // because the material it describes never changed.
-                    // (M5.3 A: via the per-entity memo - the same digest,
-                    // recomputed only when the facets actually moved.)
-                    h.write_u64(model::geometry_signature(world, &entity)?);
-                }
-            }
+            super::stamp_stock::write_stock_source(world, &entity, &mut h)?;
         }
         SrcRef::Entity(name) => {
             h.write_u8(b'E');
@@ -231,27 +200,14 @@ pub fn current_stamp(
             }
         }
     }
-    // Issue #77: a cross drill stands off the setup's RAW stock as well
-    // as its part, so the stock it read is an input - a bar re-sized
-    // after generation must stale the op, never post the old hops.
-    // #89 review: an axial drill's reach, R-plane and holder laws read
-    // the stock too, so every Drill writes it; other stamps keep their bits.
-    if matches!(params, OpParams::Drill { .. })
-        && !matches!(src, SrcRef::Stock)
-    {
-        h.write_u8(b'X');
-        let stock = model::find_by_name(world, &crate::setup::stock_entity_name(world, setup));
-        match stock {
-            None => h.write_u8(0),
-            Some(e) => {
-                h.write_u8(1);
-                let loc = model::transform_of(world, &e).unwrap_or_default();
-                for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]] {
-                    w(&mut h, v);
-                }
-                h.write_u64(model::geometry_signature(world, &e)?);
-            }
-        }
+    // Issue #156 (generalising #77/#91's Drill term): every op whose
+    // verdict reads the setup's stock beside its source - the rapid-in-
+    // stock laws, the prior acquittal, the reach, R-plane and meridian
+    // laws - digests that stock, so a stock edit after generation reads
+    // Stale and the post refuses until it is regenerated. The set is
+    // `stamp_stock::reads_setup_stock`'s.
+    if super::stamp_stock::reads_setup_stock(src) {
+        super::stamp_stock::write_setup_stock(world, setup, &mut h)?;
     }
     // M3.1 D re-machining: the program AHEAD is an input too - a 3D
     // pocket consumes what earlier operations leave standing, so when

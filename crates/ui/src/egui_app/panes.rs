@@ -698,12 +698,11 @@ fn run_cmd(c: Cmd, state: &mut State) {
 }
 
 /// The pin gesture (M6.2): toggle one kind's presence in the document's
-/// pinned list, through the app's `ribbon` seam - the only home of the
-/// singleton write. Deliberately NOT a command: ROADMAP's law for pins
-/// is "layout, not cuts" - undo replays the toolpath edits, and a pin
-/// neither cuts stock nor changes a program. The status line says what
-/// happened, because a silent toggle is a half-answer.
-fn toggle_pin(state: &mut State, i: usize) {
+/// pinned list. The pins are saved with the project, so the toggle is a
+/// `SetRibbonPins` command on the history (issue #143): Ctrl+Z puts the
+/// previous pins back and the document counts as changed. The status
+/// line says what happened, because a silent toggle is a half-answer.
+pub(super) fn toggle_pin(state: &mut State, i: usize) {
     let Some(k) = operation::KindInfo::ALL.get(i) else {
         debug_assert!(false, "toggle_pin({i}) past the kind table");
         eprintln!("ribbon: unknown op kind {i}");
@@ -729,8 +728,15 @@ fn toggle_pin(state: &mut State, i: usize) {
             "pinned"
         }
     };
-    camcraft_app::ribbon::pinned_set(&state.world, &pins);
-    state.status = format!("{verb} {} on the ribbon", k.caption);
+    match camcraft_app::commands::SetRibbonPins::new(&state.world, &pins) {
+        Ok(command) => {
+            state.history.execute(&state.world, command);
+            state.status = format!("{verb} {} on the ribbon", k.caption);
+        }
+        // Unreachable from the toggle (it always changes the list), but a
+        // refusal is named, never swallowed.
+        Err(err) => state.status = format!("ribbon pin not changed: {err}"),
+    }
 }
 
 /// One laid-out ribbon cell: which command, where, and its id salt.
