@@ -44,7 +44,7 @@ pub mod thread;
 pub use blade::{
     groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams, PartParams,
 };
-pub use bore::{bore, BoreParams};
+pub use bore::{bar_spans, bore, centred_nose, BoreParams};
 pub use contour::{
     chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
 };
