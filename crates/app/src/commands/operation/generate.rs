@@ -81,7 +81,7 @@ impl Staged {
             prev_operation: self.prev_operation,
             prev_cache: self.prev_cache,
             next_operation,
-            output: Toolpath { path, warnings },
+            output: Toolpath::new(path, warnings),
         })
     }
 }
@@ -148,7 +148,7 @@ impl RegenerateAll {
     /// Rounds (#145): an op whose verdict reads the program ahead (#109)
     /// is stamped against its predecessors' cached paths, so one frozen
     /// batch would leave it Stale behind a predecessor regenerated in
-    /// the same batch. Each round stages every Stale op in program order
+    /// the same batch. Each round stages the Stale ops in program order
     /// (M5.3 B: all world reads first, then the jobs through rayon,
     /// ordered), then writes its results so the next round reads them;
     /// the loop stops when nothing new is Stale, capped at the op count.
@@ -185,17 +185,32 @@ impl RegenerateAll {
     }
 
     /// One round: every Stale op not yet refused, staged in program
-    /// order against the world as it stands, finished in parallel.
+    /// order against the world as it stands, finished in parallel. An op
+    /// that reads the program ahead waits for a later round when an op
+    /// ahead of it in its setup is staged in this one (#153 review N1):
+    /// it would be stamped against that op's old path and re-run, so
+    /// each op generates once and setups still run side by side.
     fn round(world: &World, skipped: &mut Vec<(String, String)>) -> Vec<GenerateOperation> {
         let mut staged = Vec::new();
+        let mut staged_setups: Vec<Option<String>> = Vec::new();
         for (name, entity) in crate::setup::operation_order(world) {
             if operation::status_of(world, &entity) != operation::OpStatus::Stale
                 || skipped.iter().any(|(n, _)| *n == name)
             {
                 continue;
             }
+            let Some(op) = model::operation_of(world, &entity) else {
+                continue;
+            };
+            let setup = crate::setup::effective(world, op.setup.as_deref());
+            if operation::reads_prior(&op.params) && staged_setups.contains(&setup) {
+                continue; // its program ahead moves this round
+            }
             match stage_generation(world, &name) {
-                Ok(job) => staged.push(job),
+                Ok(job) => {
+                    staged.push(job);
+                    staged_setups.push(setup);
+                }
                 Err(err) => skipped.push((name, err.to_string())),
             }
         }

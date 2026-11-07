@@ -57,6 +57,7 @@ use crate::cl::Move;
 use crate::machining2d::GenError;
 use crate::stock_sim::{self, Dexel, SimOp};
 use crate::model;
+use flecs_ecs::core::EntityViewGet;
 use flecs_ecs::prelude::World;
 
 /// What the program in front of one operation contributes: the grid it
@@ -99,50 +100,6 @@ struct Ahead {
     moves: Vec<Move>,
 }
 
-/// Identity of a cached path: every field a move carries, bit-exact.
-/// The generators are deterministic functions of what the stamp
-/// digests, so equal paths here means the mask below builds identically.
-fn path_hash(moves: &[Move]) -> u64 {
-    use std::hash::Hasher;
-    let mut h = std::hash::DefaultHasher::new();
-    h.write(b"camcraft-rest-path-v1");
-    h.write_u64(moves.len() as u64);
-    for m in moves {
-        h.write_u8(match m.kind {
-            crate::cl::MoveKind::Rapid => 0,
-            crate::cl::MoveKind::Feed => 1,
-            crate::cl::MoveKind::Plunge => 2,
-        });
-        for p in [m.from, m.to] {
-            h.write(&p.x.to_bits().to_le_bytes());
-            h.write(&p.y.to_bits().to_le_bytes());
-            h.write(&p.z.to_bits().to_le_bytes());
-        }
-        match m.feed {
-            Some(f) => {
-                h.write_u8(1);
-                h.write(&f.to_bits().to_le_bytes());
-            }
-            None => h.write_u8(0),
-        }
-        match &m.arc {
-            Some(a) => {
-                h.write_u8(1);
-                h.write(&a.center.x.to_bits().to_le_bytes());
-                h.write(&a.center.y.to_bits().to_le_bytes());
-                h.write_u8(u8::from(a.ccw));
-                // M11.2 A: only a vertical plane adds a byte, so every
-                // XY arc hashes exactly as it always did.
-                if !a.plane.is_xy() {
-                    h.write_u8(a.plane.g_code());
-                }
-            }
-            None => h.write_u8(0),
-        }
-    }
-    h.finish()
-}
-
 /// The operations in program order ahead of `name` in the consumer's
 /// setup. The ordering law is shared with the post BY CALL - both walk
 /// [`crate::setup::operation_order`] - and the sequence is cut at the
@@ -150,7 +107,10 @@ fn path_hash(moves: &[Move]) -> u64 {
 /// itself is not called: it refuses whole programs over a `Never`
 /// operation, and an operation later in the program is nobody's
 /// business here.
-fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahead> {
+/// `with_moves` clones each cutting predecessor's moves; the digest and
+/// the stale story pass `false` and read only the stored path signature
+/// (#109 review B1: `status_of` asks every frame).
+fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, with_moves: bool) -> Vec<Ahead> {
     let ops = crate::setup::operation_order(world);
     let consumer = crate::setup::effective(world, consumer_setup);
     let Some(self_ix) = ops
@@ -169,18 +129,22 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
         }
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t));
-        let cache = model::toolpath_of(world, e);
         // The cached PATH is the truth for the digest: an edited op's
         // moved parameters are its OWN staleness, and its cache still
         // says exactly what the program would post today. Cutting
         // nothing - never generated, or an empty path - is what
         // contributes no mask.
-        let moves = cache.map_or_else(Vec::new, |c| c.path.moves);
-        let cut = !moves.is_empty();
+        let (cut, sig, moves) = e
+            .entity_view(world)
+            .try_get::<&crate::schema::Toolpath>(|t| {
+                let cut = !t.path.moves.is_empty();
+                (cut, t.path_sig(), if cut && with_moves { t.path.moves.clone() } else { Vec::new() })
+            })
+            .unwrap_or((false, 0, Vec::new()));
         out.push(Ahead {
             name: n.clone(),
             kind: op.params.kind(),
-            path: if cut { path_hash(&moves) } else { 0 },
+            path: if cut { sig } else { 0 },
             radius: tool.as_ref().map_or(0.0, |t| t.diameter * 0.5),
             ball: tool
                 .as_ref()
@@ -219,6 +183,9 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
     h.write(b"camcraft-rest-v1");
     for a in ahead {
         h.write(a.name.as_bytes());
+        // The kind (review N3): the prior plan and the pilot credit
+        // branch on it (Facing, Drill).
+        h.write_u8(a.kind.info().tag);
         if a.cut {
             h.write_u8(1);
             h.write_u64(a.path);
@@ -257,7 +224,7 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
 /// `status_of` can ask every frame (M3.1 C's live-questions law).
 #[must_use]
 pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u64> {
-    let ahead = ahead_of(world, name, setup);
+    let ahead = ahead_of(world, name, setup, false);
     (!ahead.is_empty()).then(|| digest_of(&ahead))
 }
 
@@ -273,7 +240,7 @@ pub fn prior_state(
     setup: Option<&str>,
     tool_r: f64,
 ) -> Result<PriorState, GenError> {
-    let ahead = ahead_of(world, name, setup);
+    let ahead = ahead_of(world, name, setup, true);
     if ahead.is_empty() {
         return Ok(PriorState {
             grid: None,
@@ -373,7 +340,7 @@ impl PriorPlan {
 /// IS the prior), an error when the stock grid cannot be built (the
 /// caller treats that as an unknown prior - raw stock).
 pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -> Result<Option<PriorPlan>, String> {
-    let ahead: Vec<Ahead> = ahead_of(world, name, setup).into_iter().filter(|a| a.cut).collect();
+    let ahead: Vec<Ahead> = ahead_of(world, name, setup, true).into_iter().filter(|a| a.cut).collect();
     if ahead.is_empty() {
         return Ok(None);
     }
@@ -411,7 +378,7 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
 /// not run). The order law above is what makes "ahead" mean what the
 /// machine means.
 pub fn prior_stale(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
-    ahead_of(world, name, setup)
+    ahead_of(world, name, setup, false)
         .into_iter()
         .find(|a| a.cut)
         .map(|a| {
@@ -441,7 +408,7 @@ const STANDARD_POINT_COT: f64 = 0.600_860_619_027_560_4;
 /// the meridian law reads it without the column grid (the prior plan's
 /// facing-only rule is unchanged).
 pub fn drills_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<DrillAhead> {
-    ahead_of(world, name, setup)
+    ahead_of(world, name, setup, true)
         .into_iter()
         .filter(|a| a.cut && a.kind == crate::operation::OpType::Drill && a.radius > 0.0)
         .map(|a| DrillAhead { radius: a.radius, cone: a.cone.or(Some(STANDARD_POINT_COT)), moves: a.moves })

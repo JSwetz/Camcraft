@@ -20,7 +20,7 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::MoveKind;
 use camcraft_app::commands::{
-    AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel, RegenerateAll, SetStock,
+    AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel, RegenerateAll, ReorderOperation, SetStock,
 };
 use camcraft_app::geometry::{cube, Point3};
 use camcraft_app::machining2d::{Lead, Side};
@@ -264,6 +264,75 @@ fn a_face_regenerated_shallower_marks_the_acquitted_contour_stale() {
         Err(e) => assert!(e.contains("Op2Contour") && e.contains("regenerate"), "refused, but not as stale: {e}"),
     }
     assert!(!out.exists(), "a refused post writes nothing");
+}
+
+#[test]
+fn the_program_ahead_digest_moves_only_with_the_path() {
+    // #153 review B1: the digest reads the signature stored when the
+    // cache was built - an unchanged regeneration keeps it (and the
+    // contour Ok), a moved path moves it.
+    let (world, mut history) = faced_world();
+    let digest = |w: &World| camcraft_app::rest::prior_digest(w, "Op2Contour", None);
+    let before = digest(&world).expect("the face is ahead");
+    let face_e = model::find_by_name(&world, "Op1Face").expect("face");
+    let cached = model::toolpath_of(&world, &face_e).expect("cache");
+    let rebuilt = camcraft_app::schema::Toolpath::new(cached.path.clone(), Vec::new());
+    assert_eq!(rebuilt.path_sig(), cached.path_sig(), "the signature is the path's, not the warnings'");
+    history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("regenerate face"));
+    assert_eq!(digest(&world), Some(before), "the same path, the same digest");
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok);
+    let mut p = face(5.0);
+    if let OpParams::Face { stepover, .. } = &mut p {
+        *stepover = 3.0;
+    }
+    history.execute(&world, EditOperationParams::new(&world, "Op1Face", p).expect("a legal stepover"));
+    assert_eq!(digest(&world), Some(before), "an unregenerated edit moves no path");
+    history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("regenerate face"));
+    assert_ne!(digest(&world), Some(before), "a moved path moves the digest");
+    let moved = model::toolpath_of(&world, &face_e).expect("cache");
+    assert_ne!(moved.path_sig(), cached.path_sig());
+}
+
+#[test]
+fn a_reorder_marks_the_dependent_stale() {
+    // #109: the program ahead is part of the input - moving the
+    // contour before the face changes both ops' programs ahead.
+    let (world, mut history) = faced_world();
+    history.execute(&world, ReorderOperation::new(&world, "Op2Contour", "Op1Face", false).expect("reorder"));
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Stale, "the face no longer runs ahead of it");
+    assert_eq!(status_of(&world, "Op1Face"), OpStatus::Stale, "the contour now runs ahead of it");
+    let out = tmp_nc("reordered");
+    assert!(posting::post_setup(&world, &out).is_err(), "a reordered program posts only regenerated");
+    assert!(!out.exists(), "a refused post writes nothing");
+}
+
+#[test]
+fn a_posed_op_keeps_its_stamp_when_the_program_ahead_moves() {
+    // #109's inert-data law: a 3+2-posed op reads no prior (verify's
+    // acquittal and the credits run only without a frame), so it
+    // digests none - a re-cut face ahead leaves its stamp unchanged,
+    // while the unposed contour's moves.
+    let (world, mut history) = faced_world();
+    let mut posed = face(5.0);
+    if let OpParams::Face { tilt, .. } = &mut posed {
+        *tilt = Some(camcraft_app::operation::Tilt { a_deg: 90.0, b_deg: 0.0, origin: [0.0; 3] });
+    }
+    let cmd = CreateOperation::new(&world, "Op3Posed", "EM-0600-4FL", SrcRef::Stock, posed);
+    history.execute(&world, cmd.expect("create posed face"));
+    let stamp = |name: &str| {
+        let op = model::operation_of(&world, &model::find_by_name(&world, name).expect("op")).expect("op");
+        camcraft_app::operation::op_stamp(&world, &op, name)
+    };
+    let (posed_before, contour_before) = (stamp("Op3Posed"), stamp("Op2Contour"));
+    assert!(posed_before.is_some() && contour_before.is_some());
+    let mut p = face(5.0);
+    if let OpParams::Face { stepover, .. } = &mut p {
+        *stepover = 3.0;
+    }
+    history.execute(&world, EditOperationParams::new(&world, "Op1Face", p).expect("a legal stepover"));
+    history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("regenerate face"));
+    assert_eq!(stamp("Op3Posed"), posed_before, "a posed op reads no program ahead");
+    assert_ne!(stamp("Op2Contour"), contour_before, "the unposed contour does");
 }
 
 fn tmp_nc(tag: &str) -> std::path::PathBuf {

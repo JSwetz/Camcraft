@@ -13323,8 +13323,24 @@ revolved (follow-up material if users hit it with long keyways).
   finish for independent ops) and leaving two clicks (a user hits it).
   The constructor now writes the world transiently and restores it;
   every caller builds and executes on the main thread.
+- **#153 review B1: the path signature is stored at the write.**
+  `schema::Toolpath` carries a private `sig` (`path_sig::of`, the old
+  `rest::path_hash`) computed in `Toolpath::new`, its only constructor,
+  so `prior_digest` reads one word per op ahead and clones nothing -
+  O(M) cheap reads per `status_of`, not M full path clones. Chosen
+  over a sibling component (every writer would have to keep two
+  components in step) and a flecs on-set observer (none exist in app;
+  hooks writing components mid-set were not worth the risk). Caches
+  are rebuilt whole, never edited in place (the one test that spliced
+  a move now rebuilds). N3: the kind tag joins the digest.
+  N1: a round defers an op that reads the program ahead when an op
+  ahead of it in its setup is staged in that round - each op generates
+  once; setups still run side by side.
 - Pins: `a_face_regenerated_shallower_marks_the_acquitted_contour_stale`,
-  `one_regenerate_all_brings_a_dependent_pair_current`
+  `one_regenerate_all_brings_a_dependent_pair_current`,
+  `the_program_ahead_digest_moves_only_with_the_path`,
+  `a_reorder_marks_the_dependent_stale`,
+  `a_posed_op_keeps_its_stamp_when_the_program_ahead_moves`
   (vertical_rapid_stock), `a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale`
   (turning_bore). turning_bore's fixture moved to `tests/common/bore.rs`
   to keep the suite under the 400-line law.
