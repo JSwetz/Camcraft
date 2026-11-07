@@ -47,6 +47,11 @@ mod lift_link;
 mod lift_split;
 mod link;
 mod loops;
+// Issue #5: the trochoidal fallback's medial line and loops, proven by
+// their unit tests; NOT yet wired into `pocket_hsm` (gated off until the
+// lifted returns and the wall lap pass the verifier end to end).
+#[cfg_attr(not(test), allow(dead_code))]
+mod medial;
 mod morph;
 mod near;
 mod raster;
@@ -57,6 +62,8 @@ mod slit;
 mod spiral;
 mod star;
 mod tidy;
+#[cfg_attr(not(test), allow(dead_code))]
+mod trochoid;
 mod wall;
 
 use crate::geo2d::{Point2, Region};
