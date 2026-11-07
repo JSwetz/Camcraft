@@ -2679,6 +2679,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // (M13.11); empty for one body.
                 &material.bodies,
             );
+            // A turned path's axial rapids are the lathe's traverse,
+            // not a column dive (#96): the column law's word on them
+            // is dropped for the turned family only.
+            super::turning_rapids::drop_axial_rapids(&params, &path, Z_TOL, &mut warns);
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it

@@ -126,6 +126,7 @@ pub(crate) mod spindle_law;
 pub use spindle_law::{spindle_reading, SpindleReading, SPINDLE_TOL};
 mod rotary_gate;
 mod air_law;
+mod turning_rapids;
 pub use air_law::AIR_NOTE;
 pub use generate::*;
 #[cfg(test)]

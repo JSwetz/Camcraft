@@ -122,7 +122,10 @@ fn verified(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<Warnin
         tool: &tool,
         cutter: None,
         mode: Mode::Area,
-        stock_top_z: 0.0,
+        // The stock stands to the cut's own top (#96): `top_z` -5 is the
+        // op's word that the air above it is air, and the plunge-height
+        // rapid lands there - a stock top over it would be uncut stock.
+        stock_top_z: -5.0,
         clearance_z: 5.0,
         stock_to_leave: 0.0,
         gouge_tol: 0.01,

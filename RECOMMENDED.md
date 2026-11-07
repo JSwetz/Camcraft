@@ -12882,3 +12882,54 @@ keeps the part-only chain bit for bit.
   GPU, and project-file access. Both are downloadable release files; store
   publication and runtime validation still require a successful runner build
   and desktop hand test.
+
+## #96: a vertical rapid down into declared stock is a rapid in stock
+
+- **Law.** Verify's rapid law (d) no longer skips every vertical rapid as
+  "a retract through the tool's own kerf": a rapid going DOWN whose end
+  is below the surface the cuts before it left at its column, inside the
+  stock, is `RapidInStock` (the held patch, unchanged). A peck or a later
+  level's re-entry down its own earlier plunge stays clean - the cut-order
+  chords acquit it; a retract up stays clean. Pinned by
+  `crates/sim/tests/vertical_rapids.rs` (4 tests) and
+  `crates/app/tests/vertical_rapid_stock.rs` (the contour under a 10 mm
+  block is named at generation and refused at the post; over stock to its
+  top it posts).
+- **One false conviction found, fixed in the app, not the sim.** The
+  turned family's Envelope kinds (ProfileRough/Finish, Facing, Chamfer,
+  Taper, MultiPass, Boring) put the spindle axis on world Z, so their
+  axial rapids are vertical in the column's eye: the column over a point
+  beside the bar holds the blank (box or bar) all the way down, whatever
+  radius the part or the earlier rungs leave - the column cannot see the
+  meridian (the `Mode::Revolve` doctrine, which already stands law (d)
+  down for the blade kinds). `operation/turning_rapids.rs` drops the
+  column law's verdict on a turned path's axial rapids only, so that
+  family reads exactly as before #96 (lateral rapids still judged).
+  Considered and dropped: a `VerifyContext` flag (40 constructors across
+  the crates for one family's carve-out), and switching those kinds to
+  `Mode::Revolve` (it would also stand down their envelope and gouge
+  laws). A meridian rapid law for the turned family is follow-up work.
+- **No generation-time refusal added.** The common case here was not a
+  clearance or retract under the stock top - it was an op whose `top_z`
+  (5) sat under a taller block (10), so its plunge-height rapid (top + 2)
+  dived into stock with clearance and retract both legal. Verify already
+  runs at generation, so the conviction is named on the op the moment it
+  generates ("rapid move N travels below the clearance plane inside
+  stock") and blocks the post. A named "top of cut below the stock top
+  over the op's region" warning would be friendlier but needs the
+  op's region and earlier-op removal (#89) to avoid false refusals -
+  left for a follow-up.
+- **Triage** (every test the law newly failed, full app/ui/motion/sim
+  debug suites):
+
+| Test(s) | Op | Rapid | Stock top at the column | Verdict | Change |
+|---|---|---|---|---|---|
+| posting: two_ops_post_to_one_program_cycles_stay_in_their_section, a_stale_operation_blocks_the_post_and_leaves_the_file_untouched, a_user_script_is_validated_on_choice_undone_cleanly_and_missed_loudly, posted_carries_line_positions_matching_the_move_chain, the_built_in_is_the_default_post_and_needs_no_choice, the_trace_rides_the_program_it_wrote | Contour1, top 5, clearance 10, retract 8 | move 1, Z10 -> Z7 at (13, -1) beside the 5 mm box | 10 (box 100x100x10) | real collision | `contour_and_drill` stock 10 -> 5 mm (the part's top); the Deep1 shank fixture likewise so its one warning is the shank |
+| control_comp: in_computer_records_no_span_and_posts_a_centre_path_without_comp_words, the_lathe_and_the_other_mill_posts_refuse_a_control_op_by_name_and_the_gate_blocks, in_control_posts_the_part_contour_under_g42_through_fanuc_to_the_golden | the same contour | move 1, Z10 -> Z7 | 10 | real collision | stock 10 -> 5 mm; `contour_control_comp.nc` unchanged (stock is not in the program) |
+| operations: the_shell_switch_sends_the_pocket_to_the_offset_engine | Pocket3D, top 5, clearance 10 | move 1, down from clearance | 20 (box 60x60x20) | real collision | stock 20 -> 5 mm (the cube's top) |
+| motion pocket3d_hsm: an_open_level_holds_the_planner_laws, offset_rings_are_the_waterline_tiling_at_the_load_step | Pocket3D, top -5 | move 1, clearance 5 -> plunge height over -5 | 0 (the test's own verify context, stockless) | real by the fixture (the op says air above -5) | verify context stock_top_z 0 -> -5 |
+| turning_bore: a_bored_op_runs_clean_in_the_document, the_bore_seed_stands, a_regrind_of_the_nose_convicts_through_the_digest | BoringTurning | move 0, axial rapid down the hole's axis | 110 box over a bored bar | false conviction (column vs meridian) | law: `turning_rapids` |
+| turning_contour: a_taper_rides_the_modeled_cone_and_a_square_bar_refuses, a_chamfered_face_rides_clean_in_the_document, the_multipass_program_runs_ladder_and_springs_silent, the_seeds_of_the_contour_kinds_stand, a_nose_regrind_marks_the_rides_stale_both_ways | Taper / Chamfer / MultiPass turning | move 0, axial rapid | box over the bar | false conviction | law: `turning_rapids` |
+| lathe_post: profile_rough_and_finish_post_to_the_lathe_golden | ProfileRough R1, ProfileFinish P1 | move 0, axial rapid (X13.7 Z25 -> Z2) | 40 box | false conviction | law: `turning_rapids`; `fanuc-lathe/profile_rough_finish.nc` unchanged |
+
+  No golden changed: every .nc / CL golden matches byte for byte.
