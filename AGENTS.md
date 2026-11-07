@@ -64,9 +64,14 @@ design context, never add work to them. Decisions still go to
   issue, one branch; every commit for it lands there, never on `main`.
 - **Overlapping issues stack.** Fixes wait unmerged until the cut, so an
   issue touching code an open PR changes branches off that PR's branch
-  (not main) and its PR says "stacked on #M"; the parent merges first, then
-  the child is retargeted (`gh pr edit <child> --base main`) and takes
-  `git merge origin/main`. An overlap that can't stack waits for the cut.
+  (not main) and its PR says "stacked on #M". Before the parent merges (any
+  time while it is unmerged), retarget the child FIRST (`gh pr edit <child>
+  --base main`); then merge the parent; then the child takes `git merge
+  origin/main`, is re-gated and merges. Never the other way round: `gh pr
+  merge --delete-branch` on the parent deletes the child's base branch and
+  GitHub closes the child PR; recovering it means restoring the deleted
+  branch, reopening and retargeting (0.12.1 lost #82 that way and replaced it
+  with #86). An overlap that can't stack waits for the cut.
 - **Claim before any code.** One command, so every agent sees it at once:
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
@@ -417,7 +422,9 @@ a tag"):
    `gh pr merge M --merge --delete-branch` - merge commits, never squash or
    rebase, so branch commits keep the hashes the issue comments name. A
    worktree still holding the branch is removed first (the local delete
-   fails otherwise). From step 1 to the tag, nothing else merges to main.
+   fails otherwise). From step 1 to the tag, nothing else merges to main. Stacked PRs: retarget each child to `main`
+   before merging its parent (Issue Law, "Overlapping issues stack"), then
+   merge parent-first.
 2. **Release branch.** Sync main (`git pull --ff-only`), then
    `git switch -c release/vX.Y.Z`. The version is the highest bump among
    the merged PRs' commits (table above). Write `RELEASE_NOTES.md` and the
@@ -470,7 +477,8 @@ issue PRs are not reviewed here; the cut reviews them (step 1 above).
 
 Docs-, process- and CI-only PRs (no behaviour, no release) merge once
 reviewed by a subagent that did not write them, without waiting for a cut;
-the main session merges them (`gh pr merge --merge --delete-branch`),
+the main session merges them (`gh pr merge --merge --delete-branch`,
+retargeting any stacked child to `main` first),
 never while a cut is between step 1 and its tag.
 
 **Every cut tag is published.** A release cut is not done until its tag is
