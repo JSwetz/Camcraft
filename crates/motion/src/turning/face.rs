@@ -187,9 +187,13 @@ pub fn facing(facets: &[Triangle], p: &FacingParams) -> Result<Toolpath, GenErro
         let s = s_face + (k as f64) * p.stepdown;
         // The controlled axial stationing, outside the whole work.
         b.push(MoveKind::Feed, f.point(rho_clear, center(s)), Some(p.plunge_feed));
-        // Where this rung's air begins, from the reach sweep above.
+        // Where this rung's air begins, from the reach sweep above - fed
+        // in, not rapided (#103): the band is the MODEL's reach, and a
+        // stock wider than the model stands between it and rho_clear at
+        // this rung, below the last pass's floor. A feed through air is
+        // slow; a rapid through the bar's corner is a crash.
         let r_band = bands[k];
-        b.push(MoveKind::Rapid, f.point(r_band + p.nose_radius, center(s)), None);
+        b.push(MoveKind::Feed, f.point(r_band + p.nose_radius, center(s)), Some(p.feed));
         // The pass itself: inward, tangent to the station, to the axis.
         b.push(MoveKind::Feed, f.point(0.0, center(s)), Some(p.feed));
         if k > 0 {

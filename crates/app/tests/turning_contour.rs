@@ -176,6 +176,18 @@ fn contour_world_in(diameter: f64, height: f64) -> (World, History) {
     (world, history)
 }
 
+/// [`contour_world`] with the stock taken from the taper itself: a blank
+/// already turned to the cone (#159). On the r 10 bar a taper ride alone
+/// leaves the ring between its nose and the bar at the cone's small end,
+/// and its radial retract there drives through it - a real crash, pinned
+/// below; a finishing ride on a pre-turned cone has no such ring.
+fn taper_blank_world() -> (World, History) {
+    let (world, mut history) = contour_world();
+    let cmd = SetStock::new(&world, camcraft_app::stock::StockShape::FromModel { source: "taper".into() }, Location::default());
+    history.execute(&world, cmd.expect("stock from the cone"));
+    (world, history)
+}
+
 fn ch_params(angle_deg: f64) -> OpParams {
     OpParams::Chamfering {
         tolerance: TOL,
@@ -304,7 +316,19 @@ fn a_taper_rides_the_modeled_cone_and_a_square_bar_refuses() {
     // offset bottom-up, a nose off the skin at both ends. The same
     // numbers over a cylinder are a promise the model does not
     // keep, and that refusal reads by name too.
+    // On the Ø20 bar the ride ends at r 8.8 on Z 40 - its nose clears
+    // r <= 9.6 there, the bar stands to r 10 - and the radial retract
+    // out to r 10.85 drives through that ring: convicted by name.
     let (world, mut history) = contour_world();
+    create_on(&world, &mut history, "TP0", "TN-1600-0R8", "taper", tp_params(20.0, 16.0));
+    let c = cache(&world, "TP0").expect("cached");
+    let last = c.warnings.iter().find_map(|w| match w {
+        camcraft_app::verify::Warning::RapidInStock { at } => Some(*at),
+        _ => None,
+    });
+    let m = last.and_then(|at| c.path.moves.get(at)).expect("the retract through the ring is named");
+    assert!(m.kind == camcraft_app::cl::MoveKind::Rapid && rho(m.from) < 9.0 && rho(m.to) > 10.0, "the radial retract: {m:?}");
+    let (world, mut history) = taper_blank_world();
     create_on(&world, &mut history, "TP1", "TN-1600-0R8", "taper", tp_params(20.0, 16.0));
     let c = cache(&world, "TP1").expect("cached");
     assert_eq!(status(&world, "TP1"), OpStatus::Ok);
@@ -399,6 +423,8 @@ fn the_seeds_of_the_contour_kinds_stand() {
     assert_eq!(status(&world, "SD1"), OpStatus::Ok, "the chamfer seed's numbers stand");
     assert!(c.warnings.is_empty(), "the seeded face reported: {:?}", c.warnings);
     let s = seed(OpType::TaperTurning, carried(40.0, -16.0, 48.0));
+    // The cone's finishing ride on a blank turned to it (#159).
+    let (world, mut history) = taper_blank_world();
     create_on(&world, &mut history, "SD2", "TN-1600-0R8", "taper", s);
     let c = cache(&world, "SD2").expect("cached");
     assert_eq!(status(&world, "SD2"), OpStatus::Ok, "the taper seed states dia 20/16 and the bar keeps it");

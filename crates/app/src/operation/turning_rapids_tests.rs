@@ -1,6 +1,7 @@
 //! Unit pins of `turning_rapids` (#103): the meridian law on synthetic paths - split out to keep the law's file under the size budget.
 
 use super::*;
+use crate::operation::turning_credit::Pilot;
 
 #[test]
 fn the_meridian_distance_is_to_the_segment_not_the_line() {
@@ -44,7 +45,7 @@ fn convicted(moves: Vec<crate::cl::Move>) -> Vec<Warning> {
     };
     let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() };
     let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, 16.0));
-    let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None };
+    let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None, ahead: &[], outward: None };
     let mut warns = Vec::new();
     judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
     warns
@@ -97,7 +98,7 @@ fn a_single_groove_at_the_bars_end_is_judged_across_its_band() {
     };
     let (part, stock) = (cylinder(11.0, -60.0, 10.0), cylinder(12.5, -60.0, 12.0));
     let judge = |band: f64| {
-        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.0, margin: 0.01, z_tol: 1e-6, drills: &[], band, body: None };
+        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.0, margin: 0.01, z_tol: 1e-6, drills: &[], band, body: None, ahead: &[], outward: None };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
         warns
@@ -162,6 +163,8 @@ fn a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted() {
             drills: &drills,
             band: 0.0,
             body: Some(BarBody { head_d: 10.0, shank_d: 10.0, flute_len: 20.0, shank_len: 40.0 }),
+            ahead: &[],
+            outward: None,
         };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
@@ -206,6 +209,8 @@ fn stepped_bar(r: f64, wall: f64, pilot: f64) -> Vec<Warning> {
         drills: &drills,
         band: 0.0,
         body: Some(BarBody { head_d: 8.0, shank_d: 12.0, flute_len: 20.0, shank_len: 40.0 }),
+            ahead: &[],
+            outward: None,
     };
     let mut warns = Vec::new();
     judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
@@ -228,6 +233,54 @@ fn a_bar_whose_shank_outgrows_its_head_is_judged_by_its_shank() {
     assert_eq!(stepped_bar(5.8, 7.0, 6.5), at0, "the old max-diameter line drives the shank into the pilot wall");
     // Centred in a pilot that fits the bar (Ø14.8 under a Ø15 bore) it is clear.
     assert!(stepped_bar(centred, 7.5, 7.4).is_empty(), "the centred bar in a pilot it fits");
+}
+
+#[test]
+fn a_banded_rapid_just_under_an_earlier_face_cut_is_convicted() {
+    // Review B2: a face op ahead takes the r 10 bar's end from Z 16 down
+    // to 15.0 (one pass at 15.8, nose 0.8). A 3 mm blade (band 1.5)
+    // then rapids down at r 8 to a centre at Z 16: its band reaches Z
+    // 14.5, half a millimetre into the bar under the faced end. The
+    // ahead kerf is the face's own reach - widening it by THIS blade's
+    // band would read that half millimetre as air.
+    let params = OpParams::ProfileRough {
+        tolerance: 0.05,
+        clearance_z: crate::operation::Height::fixed(25.0),
+        top_z: crate::operation::Height::fixed(10.0),
+        bottom_z: crate::operation::Height::fixed(-20.0),
+        stepdown: 0.8,
+        stock_to_leave: 0.25,
+        feed: 150.0,
+        plunge_feed: 80.0,
+    };
+    let p = Point3::new;
+    let (part, stock) = (cylinder(6.0, -60.0, 10.0), cylinder(10.0, -60.0, 16.0));
+    let ahead = [crate::rest::TurnedAhead { nose: 0.8, moves: vec![mv(MoveKind::Feed, p(11.0, 0.0, 15.8), p(0.0, 0.0, 15.8))] }];
+    let judge = |c: f64| {
+        let path = Toolpath {
+            moves: vec![mv(MoveKind::Rapid, p(8.0, 0.0, 25.0), p(8.0, 0.0, c))],
+            cycles: Vec::new(),
+            notes: Vec::new(),
+            comps: Vec::new(),
+        };
+        let cx = Meridian {
+            part: &part,
+            stock: Some(&stock),
+            nose: 0.0,
+            margin: 0.01,
+            z_tol: 1e-6,
+            drills: &[],
+            band: 1.5,
+            body: None,
+            ahead: &ahead,
+            outward: None,
+        };
+        let mut warns = Vec::new();
+        judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
+        warns
+    };
+    assert_eq!(judge(16.0), vec![Warning::RapidInStock { at: 0 }], "the band under the faced end went unnamed");
+    assert!(judge(16.6).is_empty(), "the band clear of the faced end is air");
 }
 
 #[test]

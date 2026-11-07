@@ -317,9 +317,9 @@ pub struct WorkMaterialDef(pub Option<crate::tools::WorkMaterial>);
 
 /// Ribbon pins (M6.2): the kind indices the user pinned, in pin order -
 /// the ribbon's own Pinned section reads this singleton. A document
-/// SETTING like the theme reference (saved with the project), but NOT
-/// an undoable command: undo replays cuts, not layout, and this is
-/// layout (ROADMAP M6.2's law, stated against the command law). The
+/// SETTING like the theme reference (saved with the project), so like
+/// the theme it changes only through a command - `SetRibbonPins`
+/// (issue #143), undoable and counted as a document change. The
 /// indices are registry-stable - the row order is the product order -
 /// so a pin names its kind the way the theme names its built-in;
 /// an index past the table (a document from a larger registry) is

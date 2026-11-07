@@ -94,11 +94,6 @@ fn lathe() -> Machine {
     }
 }
 
-/// Bar in box stock, the lathe mounted, the named tools on the rack.
-fn lathe_world(bar: Mesh, stock: (f64, f64, f64), tools: &[&str]) -> (World, History) {
-    lathe_world_at(bar, stock, Location::default(), tools)
-}
-
 /// The bar in stock of its own size (#103): a cylinder of the
 /// meridian's widest diameter over its Z span - the turning kernels
 /// never cut stock beyond the part (#130), so a wider blank is a real
@@ -121,7 +116,8 @@ fn bar_world(meridian: &[(f64, f64)], tools: &[&str]) -> (World, History) {
     (world, history)
 }
 
-/// [`lathe_world`] with the stock box's base at `at`.
+/// Bar in box stock with the box's base at `at`, the lathe mounted, the
+/// named tools on the rack.
 fn lathe_world_at(bar: Mesh, stock: (f64, f64, f64), at: Location, tools: &[&str]) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
@@ -180,8 +176,8 @@ fn program_of(world: &World) -> String {
 #[test]
 fn facing_posts_to_the_lathe_golden() {
     // The stage-A bar: wall r6 to z 2, neck r5 to the top, z -16..16.
-    let bar = revolve(&[(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)], 16);
-    let (world, mut history) = lathe_world(bar, (40.0, 40.0, 40.0), &["TN-1600-0R8"]);
+    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)];
+    let (world, mut history) = bar_world(&bar, &["TN-1600-0R8"]);
     let params = OpParams::Facing {
         tolerance: 0.05,
         clearance_z: Height::fixed(25.0),
@@ -224,13 +220,60 @@ fn profile_rough_and_finish_post_to_the_lathe_golden() {
         feed: 120.0,
         plunge_feed: 60.0,
     };
+    // Program order reads names (ops created without an order sort by
+    // key): R1 then S1, the rough ahead of the finish - the program the
+    // gate accepts. Finish ahead of rough is a real rapid in stock,
+    // pinned by `a_finish_posted_ahead_of_its_rough_is_convicted_by_name`.
     create(&world, &mut history, "R1", "TN-1600-0R8", rough);
-    create(&world, &mut history, "P1", "TN-1600-0R8", finish);
+    create(&world, &mut history, "S1", "TN-1600-0R8", finish);
     let text = program_of(&world);
     assert_eq!(text.matches("G97 S3000 M03").count(), 2, "one spindle start per section: {text}");
     assert!(text.contains("F0.05"), "150 mm/min at 3000 rpm is 0.05 mm/rev: {text}");
     assert!(text.contains("F0.04"), "120 mm/min at 3000 rpm is 0.04 mm/rev: {text}");
     common::write_golden("nc/fanuc-lathe/profile_rough_finish.nc", &text);
+}
+
+#[test]
+fn a_finish_posted_ahead_of_its_rough_is_convicted_by_name() {
+    // #159: ops created without an order post by name - P1 ahead of R1.
+    // The finish then rides the raw Ø12 bar, and its radial retract at
+    // Z 16 (r 4.3 -> 6.85) drives the nose through the neck's uncut
+    // r 5.1..6 band: a rapid in stock, named on P1, and the post refuses.
+    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (3.5, 2.0), (3.5, 16.0), (0.0, 16.0)];
+    let (world, mut history) = bar_world(&bar, &["TN-1600-0R8"]);
+    let rough = OpParams::ProfileRough {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(25.0),
+        top_z: Height::fixed(16.0),
+        bottom_z: Height::fixed(-16.0),
+        stepdown: 0.8,
+        stock_to_leave: 0.25,
+        feed: 150.0,
+        plunge_feed: 80.0,
+    };
+    let finish = OpParams::ProfileFinish {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(25.0),
+        top_z: Height::fixed(16.0),
+        bottom_z: Height::fixed(2.0),
+        feed: 120.0,
+        plunge_feed: 60.0,
+    };
+    create(&world, &mut history, "R1", "TN-1600-0R8", rough);
+    create(&world, &mut history, "P1", "TN-1600-0R8", finish);
+    let e = camcraft_app::model::find_by_name(&world, "P1").expect("op");
+    let warns = camcraft_app::model::toolpath_of(&world, &e).expect("cache").warnings;
+    assert!(
+        warns.iter().any(|w| matches!(w, camcraft_app::verify::Warning::RapidInStock { .. })),
+        "the finish ahead of its rough went unnamed: {warns:?}"
+    );
+    let out = std::env::temp_dir().join(format!("camcraft-finish-first-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&out);
+    match posting::post_setup(&world, &out) {
+        Ok(_) => panic!("a finish ahead of its rough posted"),
+        Err(e) => assert!(e.contains("post blocked") && e.contains("P1: rapid move"), "refused, but not by the rapid law on P1: {e}"),
+    }
+    assert!(!out.exists(), "a refused post writes nothing");
 }
 
 #[test]
