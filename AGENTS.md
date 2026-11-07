@@ -96,8 +96,10 @@ design context, never add work to them. Decisions still go to
   rather than burying it (and `source:agent`).
 - **Done on a branch = pushed + PR, never merged to main** (user,
   2026-11-07: "when closing an issue we should push the branch, not merge
-  to main"); issue PRs merge only at a cut (docs/process/CI-only PRs are
-  the one carve-out - "Commits and Releases"). The fixing commit ends its body with `Fixes #N` (`Refs #N` for
+  to main"). A `fix` / `perf` / `refactor` PR merges once its independent
+  review is clean and its quick gate green, with no cut (patch cuts are
+  retired - "Commits and Releases"); a `feat` or breaking PR merges at the
+  minor/major cut; docs/process/CI-only PRs merge once reviewed. The fixing commit ends its body with `Fixes #N` (`Refs #N` for
   partial work, which never closes). When its gate is green:
   `git push -u origin issue/N-<slug>`, then
   `gh pr create --base main --head issue/N-<slug> --title "<conventional
@@ -105,7 +107,8 @@ design context, never add work to them. Decisions still go to
   the pinning test(s), a `Changelog:` line (the one-line row text, or
   `none` for docs/test-only) and ends `Fixes #N`. Then, in the same step:
   swap `claimed` for `in-review`, and comment `fix on issue/N-<slug> · PR #M
-  · pinned by <test name(s)> · merges at the next cut`. The issue closes
+  · pinned by <test name(s)> · merges when reviewed` (a `feat`: `merges at
+  the next cut`). The issue closes
   when the PR merges to `main` (GitHub closes it from the keyword). A
   review finding is fixed on the same branch and pushed (plain push, never
   force); whoever fixes it re-adds `claimed` with a claim comment while
@@ -392,22 +395,29 @@ A cut takes the highest bump among the commits since the last tag:
 |---|---|---|
 | a breaking change (`!` or `BREAKING CHANGE:`) | MAJOR | 1.4.2 → 2.0.0 |
 | any `feat` | MINOR | 0.8.2 → 0.9.0 |
-| only `fix` / `perf` / `refactor` (behaviour-neutral or corrective) | PATCH | 0.8.2 → 0.8.3 |
+| only `fix` / `perf` / `refactor` (behaviour-neutral or corrective) | no cut - ships in the next minor | - |
 | only `docs` / `test` / `ci` / `build` / `chore` | no release | - |
 
 While the major is 0 (until the clean-room audit releases 1.0.0), a breaking
 change bumps MINOR instead and its release notes say "breaking" first.
 
-**When to cut.** Fixing an issue ends in a patch release; landing a feature
-ends in a minor one - cut as soon as one or more issue PRs are gated and
-waiting, not on a calendar (the release train in the frozen ROADMAP.md is
-retired). Several fixes from one sitting share one cut. **Only MAJOR and
-MINOR tags build on GitHub**: `release.yml` triggers on `vX.Y.0` alone, so a
-patch tag is pushed as a marker (and its local zip is the hand-test build)
-while GitHub builds and publishes an artifact only for a feature release -
-each such build costs ~30-40 billed minutes of the Actions budget. To ship a
-patch artifact anyway, run Release by hand (`workflow_dispatch`). PRs run no
-Actions (no `pull_request` trigger), so the PR flow costs no minutes.
+**When to cut: only MAJOR and MINOR.** Patch cuts are retired (user,
+2026-11-07: "No patch cuts at all is the way to go, do not spend time or
+tokens on those. Make sure they are tested but do that as a subtask that we
+are not waiting for"). A fix merges to `main` once reviewed and gated and
+ships in the next minor or major release; no PATCH version, tag or zip is
+made. Landing a feature (or a breaking change) ends in a minor (or major)
+cut - cut as soon as the `feat` PRs are gated and waiting, not on a
+calendar. `release.yml` builds and publishes on `vX.Y.0` tags only (~30-40
+billed Actions minutes each); PRs run no Actions (no `pull_request`
+trigger), so the PR flow costs no minutes.
+
+**Fixes are tested in the background.** After a fix merges, the main
+session dispatches a gate-runner subagent (in its own worktree) to run the
+batch tier on `origin/main` and does not wait for it: it claims the next
+issue at once. A red result is a new issue (`P0` if it is wrong output or a
+gouge, else `P1`, `source:agent`) naming the failing tests and the merge
+that broke them. The full release tier runs only at a minor/major cut.
 
 **A cut goes PR review → merge to main → tag** (user, 2026-11-07: "when
 cutting a tag, we are doing that by PR review, merging to main, then we cut
@@ -475,7 +485,7 @@ once** ("make sure we are not running concurrent PR reviews"): one PR per
 stale and is cleared with its leftover `../cc-pr<N>-review` worktree. Our own
 issue PRs are not reviewed here; the cut reviews them (step 1 above).
 
-Docs-, process- and CI-only PRs (no behaviour, no release) merge once
+`fix` / `perf` / `refactor` PRs and docs-, process- and CI-only PRs (no release) merge once
 reviewed by a subagent that did not write them, without waiting for a cut;
 the main session merges them (`gh pr merge --merge --delete-branch`,
 retargeting any stacked child to `main` first),
@@ -483,9 +493,8 @@ never while a cut is between step 1 and its tag.
 
 **Every cut tag is published.** A release cut is not done until its tag is
 on GitHub: the tag is made on `main` after the release PR merges (step 4)
-and pushed at once - `git push origin vX.Y.Z` - which, for a MAJOR or MINOR
-tag, fires `release.yml` and attaches the built artifact to a GitHub
-release (a patch tag is pushed without a build). A tag that exists only
+and pushed at once - `git push origin vX.Y.0` - which fires `release.yml`
+and attaches the built artifact to a GitHub release. A tag that exists only
 locally is an unfinished cut. Never move or re-push an existing tag; a fix
-after a cut is the next patch version. Never force-push - not `main`, not a
-branch with an open PR.
+after a cut merges to `main` and ships in the next minor. Never force-push -
+not `main`, not a branch with an open PR.
