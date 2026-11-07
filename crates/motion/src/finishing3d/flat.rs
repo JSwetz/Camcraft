@@ -63,7 +63,7 @@ pub fn flat(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenErro
     let sups = build_sups(facets, r);
     let fsups: Vec<Sup> = sups
         .iter()
-        .map(|s| Sup { shallow: is_floor(s, p.tolerance), ..*s })
+        .map(|s| Sup { shallow: is_floor(s, p.tolerance), folds: [None; 3], ..*s })
         .collect();
     let region = shadow_region(&fsups, r)?;
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));

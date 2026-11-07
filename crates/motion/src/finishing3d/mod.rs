@@ -87,6 +87,7 @@ mod center_cut;
 mod crease;
 mod deburr;
 mod drape;
+mod edge;
 mod flat;
 mod geodesic;
 mod ladder;

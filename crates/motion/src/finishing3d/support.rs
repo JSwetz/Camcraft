@@ -3,6 +3,7 @@
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 
+use super::edge::{flag_folds, fold_best};
 use super::params::{SPLIT_MZ, TOUCH_EPS};
 /// A facet prepared for the raster's support scan. `m` is the unit
 /// normal pointed into the sky (the ball rests on the plane from
@@ -13,6 +14,10 @@ pub(super) struct Sup {
     pub(super) tri: [Point3; 3],
     pub(super) m: Point3,
     pub(super) shallow: bool,
+    /// Edge `i` (`tri[i] → tri[i+1]`) is a convex fold onto another
+    /// shallow facet - the neighbour's sky normal, kept on one of the
+    /// two (#36, `edge.rs`).
+    pub(super) folds: [Option<Point3>; 3],
     pub(super) xmin: f64,
     pub(super) ymin: f64,
     pub(super) xmax: f64,
@@ -20,7 +25,7 @@ pub(super) struct Sup {
 }
 
 pub(super) fn build_sups(facets: &[Triangle], r: f64) -> Vec<Sup> {
-    facets
+    let mut sups: Vec<Sup> = facets
         .iter()
         .map(|f| {
             let mut m = f.normal();
@@ -31,6 +36,7 @@ pub(super) fn build_sups(facets: &[Triangle], r: f64) -> Vec<Sup> {
             Sup {
                 tri,
                 shallow: m.is_finite() && m.z >= SPLIT_MZ,
+                folds: [None; 3],
                 xmin: tri[0].x.min(tri[1].x.min(tri[2].x)) - r,
                 xmax: tri[0].x.max(tri[1].x.max(tri[2].x)) + r,
                 ymin: tri[0].y.min(tri[1].y.min(tri[2].y)) - r,
@@ -38,7 +44,9 @@ pub(super) fn build_sups(facets: &[Triangle], r: f64) -> Vec<Sup> {
                 m,
             }
         })
-        .collect()
+        .collect();
+    flag_folds(&mut sups);
+    sups
 }
 
 /// Point-to-triangle squared distance by the classic Voronoi-region
@@ -192,6 +200,10 @@ pub(super) fn support_grad(q: Point2, u: Point2, r: f64, floor_tip: f64, sups: &
             best = Some((cz, -(s.m.x * u.x + s.m.y * u.y) / s.m.z));
         }
     }
+    // The convex folds' edge contacts (#36), judged by the same law.
+    if let Some(e) = fold_best(sups, x, y, r, floor_tip, (u.x, u.y), best.map(|b| b.0)) {
+        best = Some(e);
+    }
     best
 }
 
@@ -244,11 +256,10 @@ pub(super) fn plunge_support(
 /// projection is never degenerate), and the center sits at
 /// `q_z + r·m_z`. None when this facet owns no tangent here.
 ///
-/// The MARCH's law is the strict one: a foot a hair past a facet edge
-/// answers nothing, and that silence is load-bearing - on corrugated
-/// ground the crease's straddle annulus is a VALIDITY GAP the march
-/// breaks runs at, and the minimum-step floor is specced against that
-/// staircase (`minimum_step_floors_the_refinement_not_the_edges`).
+/// The facet law is the strict one: a foot a hair past a facet edge
+/// answers nothing here. A convex fold's straddle annulus is answered
+/// by the edge contact instead (`edge::fold_best`, #36), never by
+/// slack in this test.
 pub(super) fn tangent_z(s: &Sup, x: f64, y: f64, r: f64) -> Option<f64> {
     tangent_z_at(s, x, y, r, false)
 }
@@ -346,11 +357,11 @@ fn tangent_z_at(s: &Sup, x: f64, y: f64, r: f64, fold: bool) -> Option<f64> {
 /// over anything whose tangent sits below the programmed floor: the
 /// floor outranks the surface, nothing cuts below `bottom_z`. The
 /// clearance is exact (`r - TOUCH_EPS` through `ball_clear`), and the
-/// candidate law is HEAD's strict tangency: where the contact circle
-/// straddles a fold of a tessellated skin the plane test answers
-/// nothing, the march BREAKS, and the band stands as reported rest -
-/// the staircase that floors the minimum-step law is specced against
-/// exactly this silence. The folded candidate belongs to
+/// candidates are the strict facet tangency plus, since #36, the
+/// drop-cutter edge contact on CONVEX folds between shallow facets
+/// (`edge.rs`): the `r·|Δm|` annulus a fold leaves is ridden on the
+/// edge, not broken at. A concave fold, a mesh rim, or a shallow-steep
+/// edge still answers nothing there. The folded candidate belongs to
 /// `tangent_z_folded`, the gradient table's question, which runs no
 /// cut. Slack in the clearance itself would forgive a real bite;
 /// slack in a candidate would only admit a question.
@@ -371,5 +382,7 @@ pub(super) fn support_at(x: f64, y: f64, r: f64, floor_tip: f64, sups: &[Sup]) -
             best = Some(cz);
         }
     }
-    best
+    // The convex folds' edge contacts (#36): where the strict tangency
+    // leaves its `r·|Δm|` annulus the ball rests on the shared edge.
+    fold_best(sups, x, y, r, floor_tip, (1.0, 0.0), best).map(|e| e.0).or(best)
 }
