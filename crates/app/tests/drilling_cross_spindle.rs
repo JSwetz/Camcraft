@@ -156,13 +156,18 @@ fn about(t: &Toolpath, ox: f64, oy: f64) -> Vec<(Point3, Point3, Option<[f64; 3]
 fn a_cross_drill_off_the_world_origin_under_a_moved_g54_drills_the_on_origin_chain() {
     for word in ["lathe", "mill-turn"] {
         let (world, _h) = world_with(word, bar(0.0, 0.0));
-        let (plain, _) = operation::generate(&world, &op(holes(0.0, 0.0)), "")
+        let (plain, pw) = operation::generate(&world, &op(holes(0.0, 0.0)), "")
             .unwrap_or_else(|e| panic!("{word}: the on-origin bar drills: {e}"));
 
         let (world, mut history) = world_with(word, bar(AT.0, AT.1));
         place_g54(&world, &mut history, AT.0, AT.1);
-        let (moved, _) = operation::generate(&world, &op(holes(AT.0, AT.1)), "")
+        let (moved, mw) = operation::generate(&world, &op(holes(AT.0, AT.1)), "")
             .unwrap_or_else(|e| panic!("{word}: the bar on its work offset drills: {e}"));
+        // Issue #80: the clear chain is not convicted - on a lathe the
+        // axial-hole verdict once judged the radial path and blocked it.
+        for w in [&pw, &mw] {
+            assert!(!w.iter().any(|w| w.blocks_post()), "{word}: a clear cross drill is convicted: {w:?}");
+        }
 
         let (a, b) = (about(&plain, 0.0, 0.0), about(&moved, AT.0, AT.1));
         assert_eq!(a.len(), b.len(), "{word}: the same chain, move for move");

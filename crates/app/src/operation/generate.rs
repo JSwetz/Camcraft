@@ -96,8 +96,12 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // override: a Z drill on a turned bar is a meridian cut no
     // height field can judge, so `Mode::Revolve` stands the column
     // laws down and `drilling::axial_warnings` judges it below.
-    let lathe_axial =
-        matches!(&params, OpParams::Drill { .. }) && machine_kind == crate::machine::Kind::Lathe;
+    // Issue #80: a lathe drill with cross holes is radial work - its
+    // laws live in `cross_spindle` (spindle, raw-stock standoffs,
+    // reach) - so the axial verdict judges the Z holes only. A list
+    // mixing both kinds is refused by name in the drill arm.
+    let lathe_axial = matches!(&params, OpParams::Drill { cross, .. } if cross.is_empty())
+        && machine_kind == crate::machine::Kind::Lathe;
     let mode = match &params {
         OpParams::Drill { cross, .. } if !cross.is_empty() => {
             crate::verify::Mode::Radial

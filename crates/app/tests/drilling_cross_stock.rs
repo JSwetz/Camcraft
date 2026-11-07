@@ -178,8 +178,9 @@ fn rapid_floor(t: &Toolpath) -> f64 {
 fn a_cross_drill_on_raw_stock_wider_than_the_part_hops_outside_the_stock() {
     for word in ["lathe", "mill-turn"] {
         let (world, _h) = world_with(word, raw_bar());
-        let (t, _) = operation::generate(&world, &op(), "")
+        let (t, tw) = operation::generate(&world, &op(), "")
             .unwrap_or_else(|e| panic!("{word}: the raw-stock cross drill generates: {e}"));
+        assert!(!tw.iter().any(|w| w.blocks_post()), "{word}: a clear raw-stock cross drill is convicted: {tw:?}");
         let floor = rapid_floor(&t);
         let first = t.moves.first().map(|m| m.from.x.hypot(m.from.y)).unwrap_or(0.0);
         // The drill's rim (d/2 = 2), not only its centre line, stays out.
@@ -195,8 +196,10 @@ fn a_cross_drill_on_raw_stock_wider_than_the_part_hops_outside_the_stock() {
 fn a_cross_drill_with_the_stock_equal_to_the_part_drills_the_part_only_chain() {
     for word in ["lathe", "mill-turn"] {
         let (world, _h) = world_with(word, None);
-        let (plain, _) = operation::generate(&world, &op(), "")
+        let (plain, pw) = operation::generate(&world, &op(), "")
             .unwrap_or_else(|e| panic!("{word}: the part-only cross drill generates: {e}"));
+        // Issue #80: the clear chain is not convicted on either machine.
+        assert!(!pw.iter().any(|w| w.blocks_post()), "{word}: a clear cross drill is convicted: {pw:?}");
         // The stock modeled as the part itself (stock from model).
         let (world, mut history) = world_with(word, None);
         let same = SetStock::new(&world, StockShape::FromModel { source: "bar".into() }, Location::default());
