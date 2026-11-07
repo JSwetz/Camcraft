@@ -119,6 +119,8 @@ pub use job::*;
 mod generate;
 mod plunge_solid;
 mod rotary_law;
+pub(crate) mod spindle_law;
+pub use spindle_law::{spindle_reading, SpindleReading, SPINDLE_TOL};
 mod rotary_gate;
 mod air_law;
 pub use air_law::AIR_NOTE;

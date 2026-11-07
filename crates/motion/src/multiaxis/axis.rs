@@ -67,13 +67,16 @@ const REL_TOL: f64 = 0.03;
 /// normals are concurrent at a POINT, so no axis claims the fit over
 /// any other and both candidate axes would pass the concurrency test.
 const ISO: f64 = 0.5;
+/// Below this angle (radians) the refined direction is the eigen one
+/// rounded differently, and the eigen bits stand.
+const REFINE_FLOOR: f64 = 1e-12;
 
 /// One facet's claim: its plane normal, the circumcenter it belongs
 /// at, and its area.
-struct Datum {
-    n: Point3,
-    p: Point3,
-    a: f64,
+pub(super) struct Datum {
+    pub(super) n: Point3,
+    pub(super) p: Point3,
+    pub(super) a: f64,
 }
 
 /// Read the rotation axis off the mesh, or refuse by name with the
@@ -145,6 +148,23 @@ pub fn fit(facets: &[Triangle]) -> Result<Axis, GenError> {
             best = Some(sol);
         }
     }
+    // The eigen direction is exact only on an even tessellation; the
+    // concurrency rows refine it (axis_refine.rs) and the refined line
+    // replaces it only past the noise floor and when the fit's own
+    // residual does not grow - an even revolve keeps its bits.
+    let best = best.map(|(r, ax)| {
+        let Some(v) = super::axis_refine::refine_dir(&data, ax.dir, ax.origin) else {
+            return (r, ax);
+        };
+        let (c, d) = (v.dot(ax.dir), v.cross(ax.dir));
+        if d.dot(d).sqrt().atan2(c.abs()) <= REFINE_FLOOR {
+            return (r, ax);
+        }
+        match try_axis(&data, v, a_total) {
+            Some((r2, ax2)) if r2 <= r => (r2, ax2),
+            _ => (r, ax),
+        }
+    });
     match best {
         Some((_, ax)) => Ok(ax),
         None => Err(GenError::Invalid(

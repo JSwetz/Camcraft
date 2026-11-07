@@ -116,6 +116,19 @@ pub fn current_stamp(
         h.write_u8(0xCC);
     }
     params.stamp_with(world, setup, Some(src), &mut h);
+    // Issue #62: a kind that turns about the spindle measures every
+    // diameter from its work offset's origin, so moving that origin is
+    // a moved input - the op goes Stale. Written only off the world
+    // origin, so no digest of an op on an untouched offset changes.
+    if super::spindle_law::turns(world, params) {
+        let (_, o) = crate::posting::wcs_context(world, setup, params);
+        if o != [0.0; 3] {
+            h.write(b"spindle-origin");
+            for v in o {
+                w(&mut h, v);
+            }
+        }
+    }
     match src {
         SrcRef::Stock => {
             h.write_u8(b'S');

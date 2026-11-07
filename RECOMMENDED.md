@@ -12170,3 +12170,86 @@ the mechanics (AGENTS.md Issue Law and "A cut goes PR review"):
 8. **Overlapping issues stack** on the open PR's branch (parent merges
    first, child retargeted to main), since fixes stay unmerged until the
    cut; an issue PR closed unmerged leaves `in-review` with a comment.
+
+## #62: a turning op's fitted axis must be the lathe spindle, or generation refuses it (2026-11-07, Prime Directive)
+
+The turning kernels fit their axis from the part's facets (any position,
+lean up to ~89 deg), while the Fanuc lathe post writes X as the diameter
+about the work offset's origin and Z as world Z. A part leaning a few
+degrees in Y with its X on the origin keeps every move in one meridian
+half-plane, so the post's off-meridian check passes and a taper is posted
+silently (pinned: before the fix, a 3-degree lean faced and posted with
+no script refusal).
+
+1. **Chosen: refuse at generation** (`operation/spindle_law.rs`, called
+   from `collect_job`) every turning-family op, and the lathe's axial
+   Drill, whose fitted axis is not world Z through the op's work-offset
+   origin - the same `posting::wcs_context` origin the post receives, so
+   generation and post can never read two different spindles. The
+   message names the lean (degrees), the offset (mm, at the part's
+   mid-height), the slot, and the fix (align the part's axis with world
+   Z, move the work offset onto it).
+2. **Tolerance: one law, 0.0005 mm of radius**, measured as the axis
+   line's XY distance from the origin at the part's lowest and highest Z
+   (so lean and offset share one budget, scaled by the part's height).
+   0.0005 mm radius is half the diameter word's last digit (X at 0.001 mm
+   of diameter), i.e. a part that passes posts every word within one
+   last digit of what a perfectly placed part would; an honest revolve
+   fits far below it (measured in the review fixes, below).
+   Dropped: a separate angular tolerance (0.01 deg was suggested) - over
+   a 100 mm part it allows 17 um of radius drift, 35x the output digit,
+   so it would admit a visible taper; a length-scaled single budget is
+   the honest form.
+3. **Lying axes and non-revolved models pass this door** so the turning
+   frame's own refusals (LEAN_MIN "off vertical", axis::fit's "not
+   revolved") keep their wording and precedence.
+4. **Dropped: transforming the program** into the part's frame (posting
+   diameters about the fitted axis). A lathe cannot turn about a leaned
+   axis anyway; an off-origin plumb axis is fixed by moving the work
+   offset, which the refusal names. Refusal is the smaller, safer change.
+5. **Dropped: a post-side meridian check.** The post sees only points:
+   a plumb frame's radial direction is +Y, so valid programs already ride
+   the YZ meridian, and a leaned axis's points are indistinguishable from
+   a plumb profile per move. Detecting it would need a new stream PARAM
+   (the fitted axis), which changes every lathe stream/golden for a check
+   generation already makes; the existing both-X-and-Y refusal stays as
+   the post's defence. Only one lathe post exists (`fanuc-lathe.cps`).
+6. **Field sim / verify**: on main neither reads the turning axis (the
+   rotary kinds' `fixture::rotary_axis_of` is a different family); with
+   generation refusing off-spindle parts, any sim that turns about the
+   fitted axis (#19 / PR #60) and the post now describe the same line.
+7. **Review fixes (PR #65).**
+   - *Post-time door.* The stamp held nothing of the work offset's XY,
+     so generating on a plumb bar and THEN moving G54 1 mm in Y left
+     the op Ok and the post wrote every diameter 2 mm small. Now both:
+     `posting::program_ops` re-reads the law against the live
+     `wcs_context` origin for every turning op and the lathe Drill
+     (before the freshness check, like the tool gate, since
+     "regenerate" alone is not the fix), refusing by name; and
+     `current_stamp` digests the selected slot's origin for those kinds
+     (only when it is off the world origin, so no existing digest moves),
+     so the op also reads Stale. Dropped: stamp-only (the post must not
+     trust a cache key for a law it can read directly).
+   - *Measure = rigid displacement.* The old law bounded the axis line
+     at the part's Z extremes only; a lean `a` also cones every face by
+     `R*a` (a 30 mm washer 0.4 mm thick at 2 mrad: 0.4 um axis drift,
+     passed; 30 um coned face). Now every part vertex is read about the
+     fitted axis (radius, station height) and about world Z through the
+     origin (radius, Z); the worst disagreement of either word must be
+     within 0.0005 mm. Equivalent to the reviewer's "drift at the
+     extremes AND lean x largest radius", but exact per vertex.
+   - *Fit noise.* Measured on plumb revolves tessellated like an STL
+     export (uneven bearings, a micro-seam sliver, f32 vertices, at the
+     origin and at (123.456, -78.9)): the eigen-only direction read a
+     24-segment stepped shaft 0.0018 deg off, 1.1 um of radius - a
+     FALSE refusal (2.2x the tolerance). Fixed by refining, not by
+     loosening: `multiaxis/axis_refine.rs` solves the normal lines'
+     Plucker concurrency rows (4x4 Gauss-Newton on two tilts and two
+     shifts); the refined line is kept only past a 1e-12 rad floor and
+     when the fit's own residual does not grow, so even revolves (every
+     golden) keep their bits. Worst measured noise after: 3.3e-6 mm
+     (~150x under the tolerance); 1.4e-7 mm at the origin. No real
+     lathe STL exists in the repo's fixtures; the synthetic STL-like
+     revolve stands in.
+   - Wording: "posts every word within one last digit", not "the same
+     digits".
