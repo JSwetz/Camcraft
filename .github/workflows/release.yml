@@ -54,7 +54,13 @@ jobs:
           dpkg-deb --contents dist/*.deb | grep '/usr/lib/camcraft/camcraft-ui$'
           rpm -qpl dist/*.rpm | grep '/usr/lib/camcraft/camcraft-ui$'
           test -s dist/*.AppImage
-          APPIMAGE_EXTRACT_AND_RUN=1 dist/*.AppImage --headless
+          # This runner has no GPU adapter, so compare the packaged ELF to
+          # the binary we just built. This catches linuxdeploy's .init damage.
+          appimage_check=$(mktemp -d "$RUNNER_TEMP/camcraft-appimage.XXXXXX")
+          (cd "$appimage_check" && "$GITHUB_WORKSPACE"/dist/*.AppImage --appimage-extract)
+          cmp target/release/camcraft-ui "$appimage_check/squashfs-root/usr/bin/camcraft-ui"
+          test -x "$appimage_check/squashfs-root/AppRun"
+          test -d "$appimage_check/squashfs-root/usr/bin/assets/themes"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages

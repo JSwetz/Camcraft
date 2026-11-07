@@ -12885,5 +12885,7 @@ keeps the part-only chain bit for bit.
 - The first AppImage crashed before `main`: linuxdeploy rewrote the executable
   and replaced its `.init` instructions with ELF header data. Assemble the
   AppDir directly and use the appimagetool already bundled in the pinned
-  linuxdeploy download. The release job now runs the finished AppImage in
-  headless mode so a packaged startup crash fails the build.
+  linuxdeploy download. The release job extracts the finished AppImage and
+  compares its ELF to the built binary byte for byte. The Ubuntu runner has
+  no graphics adapter for a headless launch; the desktop run was checked on
+  Fedora.
