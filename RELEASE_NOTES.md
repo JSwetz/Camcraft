@@ -1,3 +1,22 @@
+# CamCraft 0.9.0 (clean-room implementation)
+
+A minor release: one new capability and one measurement fix (issues #11, #10).
+
+## New
+- **Adaptive arc output covers the growing spiral** (#11). Where a single
+  arc could not follow the spiral's changing curvature, the path is now
+  fitted with pairs of tangent arcs (biarcs), each proved inside the area,
+  crossing-free and kink-free - about a third fewer moves: rectangle
+  18,372 → 12,730, L-pocket 51,788 → 34,582, slot 23,382 → 14,748.
+
+## Fixed
+- **The load reader reads chord paths at their true engagement** (#10): it
+  faces the path's real direction at each corner, not the lagging chord, so
+  readings on straight-segment paths dropped (e.g. the L-pocket from 22.2 %
+  to 21.4 % of the tool diameter at the coarse grid).
+
+---
+
 # CamCraft 0.8.4 (clean-room implementation)
 
 A patch release: three fixes (issues #13, #36, #46).
