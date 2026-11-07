@@ -11704,3 +11704,19 @@ whole-chord law for every mode, and point sampling along the move
 (a step size only shrinks the miss, it never closes it). Owed: a
 Contour G1 cut across a convex corner of its own wall is still read at
 its endpoint only; that needs open-edge awareness and has its own issue.
+
+## #40: the control-comp room law - inside corners and necks refused by name (2026-11-07)
+
+Closes M13.11's owed "concave-corner-vs-tool check" (`machining2d/contour_comp_room.rs`,
+run in `push_span` on the programmed ring the walked centre ring pairs with). **Chosen:**
+(1) every edge must hold the offset trims of its inside ends, r * tan(turn/2) apiece
+(the controller's line-intersection rule) - a sharp inside corner between long edges
+passes, a facet run tighter than r is named as an arc of radius `len / 2 sin(phi/2)`;
+(2) every fitted G2/G3 that curves toward the tool must have R >= r; (3) the ring alone,
+offset by r toward the tool, must stay one ring (`Region::offset`), the gap named at the
+midpoint of the closest pair between the split pieces. **Dropped:** the brief's flat
+"edge shorter than r beside an inside vertex" - it refuses legal 90-deg corners whose
+edges are between r and 2r and passes 150-deg turns it cannot cut; the trim rule is the
+exact one. Rings the centre offset drops (an island the tool cannot reach) are not
+judged - computer comp skips them too. Two bosses closer than 2r (Outside merge) stay
+on the existing seam / distance / `is_sane` refusals.

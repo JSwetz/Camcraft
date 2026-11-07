@@ -32,6 +32,7 @@ mod contour;
 mod contour_bore;
 mod contour_chain;
 mod contour_comp;
+mod contour_comp_room;
 mod contour_depth;
 mod contour_entry;
 mod contour_link;

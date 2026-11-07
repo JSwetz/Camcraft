@@ -20,6 +20,7 @@ use crate::geometry::Point3;
 use crate::links::{Compensation, Link};
 
 use super::arcs::{fit_arcs, Seg};
+use super::contour_comp_room as room;
 use super::contour::{ContourParams, Lead, Side};
 use super::face::GenError;
 use super::ring::dist;
@@ -189,6 +190,12 @@ pub(super) fn push_span(b: &mut PathBuilder, ctx: &SpanCtx, first: usize, last: 
     let Some((li, ei, s_p, d)) = closest(ctx.prog, s_c) else {
         return Err(refused("found no part contour to program"));
     };
+    // The room law (#40): the control must be able to offset this ring
+    // by the register - inside corners and necks are judged here, by name.
+    if let Some(l) = ctx.prog.loops().get(li) {
+        room::corners(l, p)?;
+        room::neck(l, p)?;
+    }
     // The seam law: the ring's first and last cuts are straight and
     // the centre stands square to both at the seam, so the offset the
     // control builds on the engage block is the one it withdraws on
@@ -244,6 +251,7 @@ pub(super) fn push_span(b: &mut PathBuilder, ctx: &SpanCtx, first: usize, last: 
         poly.push(s_p);
     }
     let walk = fit_arcs(&poly, p.tolerance);
+    room::arcs(&walk, s_p, p)?;
     let feed = moves.get(first + 1).and_then(|m| m.feed).unwrap_or(p.feed);
     let mut programmed = Vec::with_capacity(walk.len() + 2);
     let s3 = Point3::new(s_p.x, s_p.y, z);

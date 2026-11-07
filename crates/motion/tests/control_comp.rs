@@ -183,6 +183,75 @@ fn every_lead_the_control_cannot_engage_on_is_refused_by_name() {
     }
 }
 
+/// Control comp with a Ø10 tool on `side`.
+fn d10(side: Side) -> ContourParams {
+    ContourParams { tool_diameter: 10.0, ..params(side, Lead::Linear { length: 8.0 }, true, Compensation::Control) }
+}
+
+fn refused_on(region: &Region, p: &ContourParams) -> String {
+    match contour(region, p) {
+        Ok(t) => panic!("expected a refusal, got {} moves with {} spans", t.moves.len(), t.comps.len()),
+        Err(e) => e.to_string(),
+    }
+}
+
+#[test]
+fn sharp_inside_corners_between_long_edges_still_ride_the_control() {
+    // An L boss: its inner corner turns toward the tool, its edges are
+    // far longer than the r * tan(45 deg) the offset trims off them.
+    let ell = Region::new(vec![lp(&[(0.0, 0.0), (60.0, 0.0), (60.0, 20.0), (20.0, 20.0), (20.0, 60.0), (0.0, 60.0)])]).unwrap();
+    let t = contour(&ell, &d10(Side::Outside)).unwrap();
+    assert_eq!(t.comps.len(), cut_levels(&t).len(), "{:?}", t.notes);
+    // A square pocket: four sharp inside corners, the control rounds them.
+    let t = contour(&square(), &d10(Side::Inside)).unwrap();
+    assert_eq!(t.comps.len(), cut_levels(&t).len(), "{:?}", t.notes);
+}
+
+/// A 40 x 40 pocket with corner fillets of radius `rf`, 8 facets each.
+fn filleted(rf: f64) -> Region {
+    let s = 40.0f64;
+    let mut pts = Vec::new();
+    for (cx, cy, a0) in [(s - rf, rf, -90.0f64), (s - rf, s - rf, 0.0), (rf, s - rf, 90.0), (rf, rf, 180.0)] {
+        for k in 0..=8 {
+            let a = (a0 + 90.0 * k as f64 / 8.0).to_radians();
+            pts.push((cx + rf * a.cos(), cy + rf * a.sin()));
+        }
+    }
+    Region::new(vec![lp(&pts)]).unwrap()
+}
+
+#[test]
+fn an_inside_fillet_tighter_than_the_tool_is_refused_by_name() {
+    // A fillet at least the tool radius offsets cleanly: the control cuts it.
+    let t = contour(&filleted(6.0), &d10(Side::Inside)).unwrap();
+    assert_eq!(t.comps.len(), cut_levels(&t).len(), "{:?}", t.notes);
+    // r 2 fillets under a Ø10 tool cannot be offset by the register.
+    let pocket = filleted(2.0);
+    let why = refused_on(&pocket, &d10(Side::Inside));
+    assert!(why.contains("control compensation cannot cut the inside corner at ("), "{why}");
+    assert!(why.contains("its radius 2.0") || why.contains("its radius 1.9"), "{why}");
+    assert!(why.contains("under the tool's 5.000 mm") && why.contains("Compensation: In computer"), "{why}");
+    // The same pocket in computer generates (the centre path rounds it).
+    let mut p = d10(Side::Inside);
+    p.links.approach.compensation = Compensation::Computer;
+    contour(&pocket, &p).unwrap();
+}
+
+#[test]
+fn a_neck_narrower_than_the_tool_is_refused_by_name() {
+    // Two 30 x 30 lobes joined by a 6 mm neck, Ø10 tool: the centre
+    // offset splits in two, the control's offset of the one programmed
+    // ring would cross itself in the neck.
+    let bell = Region::new(vec![lp(&[
+        (0.0, 0.0), (30.0, 0.0), (30.0, 12.0), (40.0, 12.0), (40.0, 0.0), (70.0, 0.0),
+        (70.0, 30.0), (40.0, 30.0), (40.0, 18.0), (30.0, 18.0), (30.0, 30.0), (0.0, 30.0),
+    ])])
+    .unwrap();
+    let why = refused_on(&bell, &d10(Side::Inside));
+    assert!(why.contains("control compensation cannot cut the gap at (35.000, 15.000)"), "{why}");
+    assert!(why.contains("narrower than the tool's 10.000 mm diameter") && why.contains("In computer"), "{why}");
+}
+
 #[test]
 fn tabs_blends_overlap_and_keep_down_links_are_refused_by_name() {
     let base = params(Side::Auto, Lead::Linear { length: 8.0 }, true, Compensation::Control);
