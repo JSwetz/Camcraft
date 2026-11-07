@@ -236,6 +236,54 @@ fn a_bar_whose_shank_outgrows_its_head_is_judged_by_its_shank() {
 }
 
 #[test]
+fn a_banded_rapid_just_under_an_earlier_face_cut_is_convicted() {
+    // Review B2: a face op ahead takes the r 10 bar's end from Z 16 down
+    // to 15.0 (one pass at 15.8, nose 0.8). A 3 mm blade (band 1.5)
+    // then rapids down at r 8 to a centre at Z 16: its band reaches Z
+    // 14.5, half a millimetre into the bar under the faced end. The
+    // ahead kerf is the face's own reach - widening it by THIS blade's
+    // band would read that half millimetre as air.
+    let params = OpParams::ProfileRough {
+        tolerance: 0.05,
+        clearance_z: crate::operation::Height::fixed(25.0),
+        top_z: crate::operation::Height::fixed(10.0),
+        bottom_z: crate::operation::Height::fixed(-20.0),
+        stepdown: 0.8,
+        stock_to_leave: 0.25,
+        feed: 150.0,
+        plunge_feed: 80.0,
+    };
+    let p = Point3::new;
+    let (part, stock) = (cylinder(6.0, -60.0, 10.0), cylinder(10.0, -60.0, 16.0));
+    let ahead = [crate::rest::TurnedAhead { nose: 0.8, moves: vec![mv(MoveKind::Feed, p(11.0, 0.0, 15.8), p(0.0, 0.0, 15.8))] }];
+    let judge = |c: f64| {
+        let path = Toolpath {
+            moves: vec![mv(MoveKind::Rapid, p(8.0, 0.0, 25.0), p(8.0, 0.0, c))],
+            cycles: Vec::new(),
+            notes: Vec::new(),
+            comps: Vec::new(),
+        };
+        let cx = Meridian {
+            part: &part,
+            stock: Some(&stock),
+            nose: 0.0,
+            margin: 0.01,
+            z_tol: 1e-6,
+            drills: &[],
+            band: 1.5,
+            body: None,
+            ahead: &ahead,
+            outward: None,
+        };
+        let mut warns = Vec::new();
+        judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
+        warns
+    };
+    assert_eq!(judge(16.0), vec![Warning::RapidInStock { at: 0 }], "the band under the faced end went unnamed");
+    assert!(judge(16.6).is_empty(), "the band clear of the faced end is air");
+}
+
+#[test]
 fn a_pilot_removes_its_cylinder_and_its_point_cone_only() {
     let p = Pilot { lo: -10.0, hi: 20.0, r: 2.0, cot: Some(0.6) };
     assert!(p.removed(0.0, 1.9));

@@ -39,7 +39,11 @@ pub(super) struct Meridian<'a> {
     /// The turning ops ahead in the setup: their cuts are this op's
     /// air (#159).
     pub ahead: &'a [crate::rest::TurnedAhead],
-    /// A blade's edge outward of its tip (#159): a groove blade's band
+    /// A blade's edge outward of its tip (#159) - "outward" is LARGER
+    /// radius, right for every OD blade kind (groove, part, thread). An
+    /// internal (ID) groover or thread insert stands its body toward the
+    /// axis instead: adding one must flip this side (or pass `None`), or
+    /// the credit runs into the wall beyond its tip. A groove blade's band
     /// is cut everywhere outward of the tip (`Some(INFINITY)`), a
     /// thread's V widens by `Some(tan(half angle))` per mm outward up to
     /// the band. `None` credits no more than the tip's own line (a form
@@ -260,9 +264,12 @@ fn enters(
     let solid = |s: f64, rho: f64| {
         let r = rho.abs();
         // A blade's feed sweeps its whole band along the axis, not its
-        // centre's point: the kerf is the segment widened by the band.
-        let kerf = |p: (f64, f64), q: (f64, f64), reach: f64| {
-            spread(band).chain(std::iter::once(0.0)).any(|u| {
+        // centre's point: THIS path's kerf is the segment widened by the
+        // band. An op ahead keeps its own reach (review B2): this blade's
+        // band is no measure of what another tool cut.
+        let kerf = |p: (f64, f64), q: (f64, f64), reach: f64, mine: bool| {
+            let width = if mine { band } else { 0.0 };
+            spread(width).chain(std::iter::once(0.0)).any(|u| {
                 seg_dist((s + u, rho), p, q) <= reach || seg_dist((s + u, -rho), p, q) <= reach
             })
         };
@@ -282,7 +289,7 @@ fn enters(
         if feeds.iter().take(own_n).any(|k| flank(k.p, k.q)) {
             return false; // the blade's own V or band
         }
-        if feeds.iter().any(|k| kerf(k.p, k.q, k.reach)) {
+        if feeds.iter().any(|k| kerf(k.p, k.q, k.reach, k.mine)) {
             return false; // this path's own kerf
         }
         if pilots.iter().any(|p| p.removed(s, r)) {
@@ -342,6 +349,15 @@ struct Kerf {
 /// radius - a thread's helix): a constant radius across its stations
 /// (review S1's reading). Any other arc's chord is not its sweep, and
 /// credits nothing.
+///
+/// *The helix approximation* (PR #135 review): a helix is a groove that
+/// winds, not a tube; read as constant radius over its stations it
+/// credits the crests between the turns as cut. On the thread's own path
+/// the flank credit along that chord makes the V a continuous trough
+/// over the threaded length. That is safe only for today's thread
+/// kernel, which rapids axially outside the work and radially out of
+/// its own groove at the helix's end station. A kernel that rapids
+/// ACROSS the threaded length below the crests must not lean on it.
 fn kerf_of(m: &crate::cl::Move, sm: &SignedMeridian, tol: f64) -> Option<((f64, f64), (f64, f64))> {
     let (p, q) = (sm.sr(m.from), sm.sr(m.to));
     let Some(arc) = m.arc.as_ref() else { return Some((p, q)) };

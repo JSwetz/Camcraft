@@ -13463,3 +13463,21 @@ revolved (follow-up material if users hit it with long keyways).
     the cause; it was left as is to keep the translation golden stable.
 - **Split for the size budget:** the drill-pilot credit moved to
   `operation/turning_credit.rs`.
+
+### PR #135 fifth review
+
+- **B2:** the blade-band widening of a kerf now applies only to THIS op's
+  own cuts. An op ahead keeps its own reach, so another tool's cut is
+  never measured by this blade's band. Pinned:
+  `a_banded_rapid_just_under_an_earlier_face_cut_is_convicted`.
+- **Fixture:** `profile_rough_and_finish_post_to_the_lathe_golden` names
+  its finish S1, so the rough (R1) posts first and the golden is a
+  program the gate accepts. Its diff is the two sections swapped (the G50
+  clamp stays on the first) and P1's WARN line gone; checked by script.
+  Finish ahead of rough is pinned on its own:
+  `a_finish_posted_ahead_of_its_rough_is_convicted_by_name`.
+- **Docs:** `kerf_of` states the helix approximation (constant radius
+  credits the crests; safe only for today's thread kernel). `outward`
+  states the OD assumption (an internal blade must flip it or pass None).
+- **B1** (the turned op's stamp does not digest the ops ahead) is covered
+  by PR #153, stacked on this branch; not duplicated here.
