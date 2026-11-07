@@ -113,6 +113,7 @@ fn params(bottom_z: f64, top_z: f64) -> BoreParams {
         feed: 120.0,
         plunge_feed: 40.0,
         nose_radius: D,
+        bar_radius: 0.0,
     }
 }
 
@@ -161,6 +162,22 @@ fn the_bar_rides_the_wall() {
     let off = &path.moves[path.moves.len() - 2];
     assert_eq!(off.kind, MoveKind::Rapid);
     assert!((off.to.x * off.to.x + off.to.y * off.to.y).sqrt() < 1e-9);
+}
+
+#[test]
+fn a_stated_bar_enters_and_leaves_with_its_own_axis_on_the_spindle() {
+    // #103: the insert sits at the body's edge - a Ø10 body with its
+    // nose stands centred, the nose r 5 - D/2 off the spindle, both rapids.
+    let path = bore(&blind(-20.0), &BoreParams { bar_radius: 5.0, ..params(-10.0, 40.0) }).expect("bores");
+    let r = |q: Point3| (q.x * q.x + q.y * q.y).sqrt() - (5.0 - D * 0.5) + 5.0;
+    let n = path.moves.len();
+    for m in [&path.moves[0], &path.moves[n - 1]] {
+        assert_eq!(m.kind, MoveKind::Rapid);
+        assert!((r(m.from) - 5.0).abs() < 1e-9 && (r(m.to) - 5.0).abs() < 1e-9, "a rapid off the bar's centred line: {m:?}");
+    }
+    // Off the wall back to that line before the bar climbs out.
+    assert_eq!(path.moves[n - 2].kind, MoveKind::Rapid);
+    assert!((r(path.moves[n - 2].to) - 5.0).abs() < 1e-9);
 }
 
 #[test]

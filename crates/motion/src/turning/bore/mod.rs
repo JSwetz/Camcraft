@@ -65,6 +65,13 @@ pub struct BoreParams {
     pub feed: f64,
     pub plunge_feed: f64,
     pub nose_radius: f64,
+    /// Half the bar's body diameter (#103): the insert sits at the
+    /// body's edge, so the rapids ride the nose `bar_radius - nose/2`
+    /// off the spindle on the cutting side - the bar and its nose
+    /// centred in the hole, the only posture a bar enters and leaves a
+    /// hole barely wider than itself in. 0 rides the nose on the axis
+    /// (a bar of no stated body).
+    pub bar_radius: f64,
 }
 
 /// The float tie that says "just inside" - the reach tests stand a
@@ -79,7 +86,7 @@ pub fn bore(facets: &[Triangle], p: &BoreParams) -> Result<Toolpath, GenError> {
     if facets.is_empty() {
         return Err(GenError::Invalid("no facets to bore".into()));
     }
-    if ![p.clearance_z, p.top_z, p.bottom_z, p.nose_radius, p.tolerance]
+    if ![p.clearance_z, p.top_z, p.bottom_z, p.nose_radius, p.tolerance, p.bar_radius]
         .iter()
         .all(|v| v.is_finite())
     {
@@ -155,21 +162,27 @@ pub fn bore(facets: &[Triangle], p: &BoreParams) -> Result<Toolpath, GenError> {
         )));
     }
 
-    // The ride: in on the axis (the only air a boring bar owns
-    // before it is in the hole), out to the wall at the plunge
-    // feed, up the offset, off the wall and back up the axis.
+    // The ride: in with the bar centred on the spindle, out to the
+    // wall at the plunge feed, up the offset, off the wall and back up
+    // the same line (#103). The insert sits at the body's edge: the
+    // bar spans the body toward the axis and the nose past the edge,
+    // [r - 2 bar_radius, r + nose], centred at r = bar_radius - nose/2
+    // - never past the ride's own first radius.
+    let centred = (p.bar_radius - p.nose_radius * 0.5).max(0.0);
+    let r_in = centred.min(cl[0].1.max(0.0));
+    let r_out = centred.min(cl[cl.len() - 1].1.max(0.0));
     let s_home = f.station_of(p.clearance_z);
-    let mut b = PathBuilder::new(f.point(0.0, s_home));
-    b.push(MoveKind::Rapid, f.point(0.0, cl[0].0), None);
+    let mut b = PathBuilder::new(f.point(r_in, s_home));
+    b.push(MoveKind::Rapid, f.point(r_in, cl[0].0), None);
     b.push(MoveKind::Feed, f.point(cl[0].1, cl[0].0), Some(p.plunge_feed));
     for q in &cl[1..] {
         b.push(MoveKind::Feed, f.point(q.1, q.0), Some(p.feed));
     }
     b.push(
         MoveKind::Rapid,
-        f.point(0.0, cl[cl.len() - 1].0),
+        f.point(r_out, cl[cl.len() - 1].0),
         None,
     );
-    b.push(MoveKind::Rapid, f.point(0.0, s_home), None);
+    b.push(MoveKind::Rapid, f.point(r_out, s_home), None);
     Ok(b.finish())
 }

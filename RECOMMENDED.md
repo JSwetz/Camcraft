@@ -13289,3 +13289,31 @@ revolved (follow-up material if users hit it with long keyways).
   (a flat point credits MORE); the DrillAhead doc says so.
 - **S2** (a pilot deleted after the bore leaves it Ok) is #109's - a
   lathe pin was added there, not fixed here.
+
+### #103 re-review B3: the bar's body lies toward the axis
+
+- **Law.** The Bore body is no longer centred on the nose: the insert
+  sits at the body's edge and the body lies toward the axis, signed
+  radius [rho - d, rho] (d the body diameter, max of diameter and shank).
+  A bar with its nose on the axis reaches a whole diameter off it.
+  Supersedes the "centred" assumption above - the kernel's own ride (a
+  Ø10 bar riding r 5.6 in a Ø12 wall) rules it out, as the reviewer
+  showed.
+- **Kernel** (`motion::turning::bore`). `BoreParams.bar_radius` (half the
+  body diameter; 0 keeps the old on-axis rapids) puts the approach and
+  the retract at nose r = bar_radius - nose/2 on the cutting side,
+  clipped to the ride's own end radii: the bar spans
+  [r - 2 bar_radius, r + nose], centred on the spindle, so a pilot just
+  over the bar's size admits it. Chosen over r = bar_radius (the nose
+  then pokes nose-radius past the body, into a Ø11 pilot with a 0.8
+  nose) and over a full disc of radius d about the nose (convicts every
+  honest bore). The off-wall retract is now radial to that line, not to
+  the axis.
+- **Fixture.** turning_bore keeps the Ø11 pilot to Z -16 (Ø10 body plus
+  clearance, under the Ø12 finished bore; a 0.8 regrind still fits:
+  ±5.4 inside 5.5). Pinned: `a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted`
+  (law, nose on the axis convicted, the kernel's centred line clean) and
+  motion's `a_stated_bar_enters_and_leaves_with_its_own_axis_on_the_spindle`.
+  No golden carries a bore path; none changed.
+- The law's unit pins moved to `operation/turning_rapids_tests.rs`
+  (size budget).

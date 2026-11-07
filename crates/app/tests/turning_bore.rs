@@ -214,7 +214,7 @@ fn a_bored_op_runs_clean_in_the_document() {
     // verdict comes back silent, so the op reads Ok with nothing
     // attached. The cached path from the world's side: every ride
     // center stands inside the modeled wall by the bar's own nose,
-    // and the bar travels to and from the cut down the hole's AXIS -
+    // and the bar travels to and from the cut centred on the hole's AXIS -
     // the rapids are the hole's air, not the blank's outside.
     let (world, mut history) = bore_world();
     pilot(&world, &mut history);
@@ -228,8 +228,11 @@ fn a_bored_op_runs_clean_in_the_document() {
     for m in &feeds {
         assert!(rho(m.to) <= WALL - D + 1e-9, "center stands inside the wall: {:?}", m.to);
     }
+    // The bar travels with its own axis on the spindle (#103 review
+    // B3): the insert at the Ø10 body's edge, bar and nose centred -
+    // the nose r 5 - D/2 off the axis.
     for m in t.moves.iter().filter(|m| m.kind == camcraft_app::cl::MoveKind::Rapid) {
-        assert!(rho(m.to) < 1e-6, "a boring rapid leaves the axis - through steel: {:?}", m.to);
+        assert!((rho(m.to) - (5.0 - D * 0.5)).abs() < 1e-6, "a boring rapid off the bar's centred line: {:?}", m.to);
     }
     assert!((feeds.last().unwrap().to.z - 40.0).abs() < 0.05, "the ride spends the window's top");
     assert!(t.is_chained(), "the chain holds");
