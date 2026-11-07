@@ -4519,7 +4519,7 @@ fn copying_and_pasting_an_operation_keeps_settings_and_is_undoable() {
 
     let pasted = model::find_by_name(&shell.state.world, "Contour1 Copy").expect("pasted operation");
     let mut copied = model::operation_of(&shell.state.world, &pasted).expect("copied settings");
-    copied.stamp = source.stamp.clone();
+    copied.stamp = source.stamp;
     assert_eq!(copied, source, "tool, source, setup, area, and parameters are copied");
     assert!(model::toolpath_of(&shell.state.world, &pasted).is_none(), "paste needs generation");
     assert_eq!(camcraft_app::setup::operation_order(&shell.state.world)
