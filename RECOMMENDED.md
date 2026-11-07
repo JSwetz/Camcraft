@@ -13578,3 +13578,28 @@ revolved (follow-up material if users hit it with long keyways).
   states the OD assumption (an internal blade must flip it or pass None).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
+
+
+## #54: the rotary wrap closes a flatted bar's seam with curtains, and refuses an open mesh up front (2026-11-08)
+
+**Chosen:** the developed sheet's two free seam ends are closed by a CURTAIN per free
+seam edge (`multiaxis::rotary_seam`): the vertical quad from the developed edge down to
+the floor radius. A seam edge is an edge the two facets sharing it develop one period
+apart; its lower version (first copy) and its upper version (second copy) are the
+cover's ends. This replaces the meridian wall that stood in the plane of the cover's
+extreme column. On a revolve the curtain is that wall, split on the same diagonal (the
+OffsetRings digest is unchanged). On a D-flat across the seam the seam column is ragged
+(the flat's vertices sit at their own azimuths), and the plane wall met none of its
+edges: the "mesh is open, 4/8/16 dangling chord ends" of #9 round 2.
+
+**Also chosen:** the wrap refuses an open mesh by name before it develops it ("the
+rotary wrap needs a closed solid, but the mesh is open: N edges bound one facet only").
+On main a hole in the skin that no ladder level slices through wrapped silently.
+
+**Dropped:**
+- Widening the plane wall to the ragged column (a skirt from each seam edge to the
+  s_lo plane): two surfaces where one does, and the wall's profile had to stay a single
+  valued function of the station.
+- Curtaining every free edge: it would close a real hole silently.
+- Putting the seam end-to-end test in `rotary_adaptive.rs` (the issue's "Done means"):
+  that file sits at the 400-line budget, so the D-flat suite `rotary_dflat.rs` carries it.
