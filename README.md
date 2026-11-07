@@ -159,7 +159,13 @@ version.
   (`graphify update`).
 - **`scripts/gate.ps1`** runs the test gates: `-Tier quick` per change,
   `-Tier batch` before a batch of commits, `-Tier release` at a release cut,
-  and `-Test <name>` for a single test.
+  and `-Test <name>` for a single test. It is plain cross-platform
+  PowerShell that only drives `cargo` and `git`, so it runs on macOS and
+  Linux too, under PowerShell 7 (`pwsh`). Install it with
+  `brew install --cask powershell` on macOS, or your distribution's
+  `powershell` package on Linux (see Microsoft's "Installing PowerShell"
+  guide). Then run `pwsh scripts/gate.ps1 -Tier quick`. Windows
+  PowerShell 5.1 (`powershell`) works as well.
 - Project agents and skills for Claude Code live in `.claude/agents/` and
   `.claude/skills/` (gate runner, graph updater, PR reviewer).
 
@@ -194,7 +200,8 @@ more `area:*` labels. Issues opened by an agent also carry `source:agent`.
   partial work. Do not edit `CHANGELOG.md` in the PR; rows are written at
   release time.
 - Gate it locally before asking for review:
-  `powershell -File scripts/gate.ps1 -Tier quick`.
+  `pwsh scripts/gate.ps1 -Tier quick` (on Windows,
+  `powershell -File scripts/gate.ps1 -Tier quick` also works).
 - Follow the engineering rules in `AGENTS.md`: the clean-room protocol, never
   crash and never gouge (no `unwrap`, `expect` or `panic!` outside tests;
   refuse bad input by name), every UI change as an undoable command, files
