@@ -12493,3 +12493,30 @@ keeps the part-only chain bit for bit.
   the finish surface" - `lathe_axial` is true for any lathe Drill, so
   `axial_warnings` judges the radial chain as a meridian cut. Safe-side
   (blocks), but a false refusal; worth its own issue.
+- *Bit-identical, scoped.* "Bit for bit" is pinned on the existing
+  fixtures; elsewhere the radius now read with `hypot` (where #67's reading
+  took `sqrt(dx^2 + dy^2)`) may differ in the last ulp.
+- *Stamp churn, once.* The new stock term changes every existing cross
+  drill's stamp, so a saved document opens its cross drills Stale once and
+  they regenerate - accepted over a versioned stamp (one regenerate, then
+  quiet; a stale op never posts, so it is safe-side).
+- *Review fixes (PR #82).* (1) An off-centre hole's mouth is now where the
+  drill's edge nearest the axis (transverse `max(|t| - d/2, 0)`) meets the
+  raw surface, not its centre line, and the proof's along-the-hole branch
+  checks the swept drill slab (and, behind the flutes, a wider shank's)
+  against the raw radius: r10 part, r20 raw, t 9, d 6, `r_d` 1 had the edge
+  at r19.792 (0.2 mm in the bar, posted); now r20.956. (2) The proof uses
+  the body rim `max(d, shank_d)/2`; the clearance and hop handed to the
+  kernel are raised to `shank_d/2 + 0.1` in `cross_stock::body_clear` when
+  the shank is wider than the drill (the kernel's margin is `d/2 + 0.1`), so
+  a 3 mm drill on a 6 mm shank swings at z 23.1 over a z20 end face, not
+  z 21.6 (shank 1.4 mm in it). Kept out of the kernel; a shank no wider than
+  the drill moves nothing. (3) A hole plunging away from the spindle is
+  refused by name in `to_raw_mouths`. (4) Found on the way: the proof read
+  the opposite-station swing (which runs along the new pose's own axis) as
+  an along-the-hole approach and refused every raw-stock opposite pair;
+  the end-face check now runs first. Dropped: refusing a wide shank by name
+  instead of raising the planes (a valid tool, only more standoff needed).
+  Left open: the holder (`holder_d`) over the end face on a diametral swing
+  is not in the body rim; the along-the-hole edge check covers raw stock
+  only (a part-only off-centre hole's mouth is the user's).

@@ -21,7 +21,7 @@ use camcraft_app::machine::{AxisLimits, Machine};
 use camcraft_app::operation::{self, Height, OpParams, SrcRef};
 use camcraft_app::schema::{Location, Operation};
 use camcraft_app::stock::StockShape;
-use camcraft_app::tools::catalog;
+use camcraft_app::tools::{Tool, catalog};
 use camcraft_app::world::new_world;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -99,17 +99,26 @@ fn op() -> Operation {
 /// A world on `word`'s machine with the finished r10 bar and `stock` as
 /// the setup's raw material (`None`: no stock declared).
 fn world_with(word: &str, stock: Option<(StockShape, f64)>) -> (World, History) {
+    world_on(word, stock, (0.0, 0.0), |_| {})
+}
+
+/// `world_with` with the bar (and its stock) centred on `at`, and the
+/// catalog DR-0400 re-ground by `grind` (a wider drill, a fatter shank).
+fn world_on(word: &str, stock: Option<(StockShape, f64)>, at: (f64, f64), grind: impl Fn(&mut Tool)) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
     if let Some((shape, z0)) = stock {
-        let at = Location { pos: Point3::new(0.0, 0.0, z0), rot: IDENTITY_Q };
+        let at = Location { pos: Point3::new(at.0, at.1, z0), rot: IDENTITY_Q };
         history.execute(&world, SetStock::new(&world, shape, at).expect("stock"));
     }
     let m = Machine { model: format!("TestBench {word}"), kind: Some(word.into()), axes: rotaries(), ..Default::default() };
     history.execute(&world, LoadMachine::new(&world, "bench.mch".into(), Some(m)).expect("machine"));
-    let tool = catalog().into_iter().find(|(n, _)| *n == "DR-0400").map(|(_, t)| t).expect("catalog entry");
+    let mut tool = catalog().into_iter().find(|(n, _)| *n == "DR-0400").map(|(_, t)| t).expect("catalog entry");
+    grind(&mut tool);
     history.execute(&world, AddTool::new(&world, "DR-0400", tool).expect("catalog tool"));
-    history.execute(&world, ImportModel::from_mesh("bar", bar(PART_R)));
+    let shift = |p: Point3| Point3::new(p.x + at.0, p.y + at.1, p.z);
+    let moved = bar(PART_R).facets.iter().map(|t| Triangle::new(shift(t.a), shift(t.b), shift(t.c))).collect();
+    history.execute(&world, ImportModel::from_mesh("bar", Mesh::from_facets(moved)));
     (world, history)
 }
 
@@ -170,9 +179,10 @@ fn a_cross_drill_on_raw_stock_wider_than_the_part_hops_outside_the_stock() {
             .unwrap_or_else(|e| panic!("{word}: the raw-stock cross drill generates: {e}"));
         let floor = rapid_floor(&t);
         let first = t.moves.first().map(|m| m.from.x.hypot(m.from.y)).unwrap_or(0.0);
+        // The drill's rim (d/2 = 2), not only its centre line, stays out.
         assert!(
-            floor >= STOCK_R - 1e-9,
-            "{word}: a rapid reaches r {floor:.3} inside the r{STOCK_R} raw stock"
+            floor >= STOCK_R + 2.0 - 1e-9,
+            "{word}: a rapid reaches r {floor:.3}, the r2 rim inside the r{STOCK_R} raw stock"
         );
         assert!(first >= STOCK_R + 5.0 - 1e-9, "{word}: the clearance stands off the stock: {first:.3}");
     }
@@ -258,5 +268,121 @@ fn re_sizing_the_raw_stock_stales_the_cross_drill_and_the_post_refuses_it() {
     assert_eq!(status(), OpStatus::Stale, "the stock the standoffs read moved");
     let posted = posting::post_setup(&world, &path);
     let _ = std::fs::remove_file(&path);
-    assert!(posted.is_err(), "a cross drill whose stock moved never posts");
+    let e = posted.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        e.contains("CD1") && e.contains("inputs moved since generation"),
+        "a cross drill whose stock moved never posts - refused as stale: {e:?}"
+    );
+}
+
+/// One hole on `dir`'s station at `origin`, 3 mm deep.
+fn one(origin: Point3, dir: Point3) -> CrossHole {
+    CrossHole { origin, dir, radius: 3.0, entry_d: 0.0, floor_d: -3.0, through: false }
+}
+
+/// `op()` with `cross` and the clearance plane `clear` mm above Top Z.
+fn op_with(cross: Vec<CrossHole>, clear: f64) -> Operation {
+    let mut o = op();
+    if let OpParams::Drill { cross: c, clearance_z, .. } = &mut o.params {
+        *c = cross;
+        *clearance_z = Height::fixed(20.0 + clear);
+    }
+    o
+}
+
+/// An off-centre hole's drill edge nearest the axis meets the raw bar
+/// before its centre line does. r10 part, r20 raw, the hole 9 mm off
+/// its station's centre line, a 6 mm drill, the feed-entry standoff
+/// at its 1 mm floor: before the review fix the mouth stood where the
+/// CENTRE line meets r20 (x 17.86), the rapid ended at x 18.86 and the
+/// drill's inner edge (18.86, 6) stood at r19.79 - 0.2 mm inside the
+/// raw bar at rapid speed. Now the mouth is where the edge meets it.
+#[test]
+fn an_off_centre_hole_s_drill_edge_stays_outside_the_raw_stock_on_the_approach() {
+    let hole = one(Point3::new((PART_R * PART_R - 81.0).sqrt(), 9.0, 0.0), Point3::new(-1.0, 0.0, 0.0));
+    for word in ["lathe", "mill-turn"] {
+        let (world, _h) = world_on(word, raw_bar(), (0.0, 0.0), |t| {
+            t.diameter = 6.0;
+            t.shank_d = 6.0;
+        });
+        let (t, _) = operation::generate(&world, &op_with(vec![hole], 1.0), "")
+            .unwrap_or_else(|e| panic!("{word}: the off-centre hole drills: {e}"));
+        let entry = t.moves.iter().position(|m| m.kind == MoveKind::Plunge).map(|i| t.moves[i].from);
+        let entry = entry.unwrap_or_else(|| panic!("{word}: the chain plunges"));
+        let edge = entry.x.hypot(entry.y.abs() - 3.0);
+        assert!(edge >= STOCK_R - 1e-9, "{word}: the drill's edge stands at r{edge:.3} inside the r{STOCK_R} raw bar");
+    }
+}
+
+/// A 3 mm drill on a 6 mm shank swinging over the end face between
+/// opposite stations at the minimum clearance: the planner's margin
+/// (d/2 + 0.1) put the swing 1.6 mm above the stock's top - the shank,
+/// lying across the end face, 1.4 mm into it. The swing now clears the
+/// shank's own rim.
+#[test]
+fn the_end_face_swing_clears_a_shank_wider_than_the_drill() {
+    let cross = vec![
+        one(Point3::new(PART_R, 0.0, 0.0), Point3::new(-1.0, 0.0, 0.0)),
+        one(Point3::new(-PART_R, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)),
+    ];
+    let cross: Vec<CrossHole> = cross.into_iter().map(|h| CrossHole { radius: 1.5, ..h }).collect();
+    for (word, stock) in [("lathe", None), ("mill-turn", None), ("lathe", raw_bar()), ("mill-turn", raw_bar())] {
+        let (world, _h) = world_on(word, stock, (0.0, 0.0), |t| {
+            t.diameter = 3.0;
+            t.shank_d = 6.0;
+        });
+        let (t, _) = operation::generate(&world, &op_with(cross.clone(), 0.0), "")
+            .unwrap_or_else(|e| panic!("{word}: the opposite pair drills: {e}"));
+        let swing = t.moves.iter().filter(|m| m.kind == MoveKind::Rapid && m.from.z.min(m.to.z) > 20.0);
+        let low = swing.map(|m| m.from.z.min(m.to.z)).fold(f64::INFINITY, f64::min);
+        assert!(low.is_finite(), "{word}: the opposite pair swings over the end face");
+        assert!(low >= 20.0 + 3.0 - 1e-9, "{word}: the swing at z {low:.3} puts the r3 shank into the z20 end face");
+    }
+}
+
+/// A box of raw stock reads its circumscribed radius (40 x 40: r28.28);
+/// a bar off the world origin with G54 moved onto it and a wider r30
+/// raw bar reads that bar about the spindle. Every rapid stands off
+/// the raw stock plus the drill's rim, about the spindle the post turns.
+#[test]
+fn a_box_stock_and_an_off_origin_spindle_stand_off_the_raw_stock_plus_the_rim() {
+    use camcraft_app::commands::SetWcsOrigin;
+    let boxed = Some((StockShape::Box { dx: 40.0, dy: 40.0, dz: 40.0 }, -20.0));
+    let wide = Some((StockShape::Cylinder { diameter: 60.0, height: 40.0 }, -20.0));
+    let at = (37.0, -12.0);
+    for word in ["lathe", "mill-turn"] {
+        for (stock, (ox, oy), raw) in [(boxed.clone(), (0.0, 0.0), 800.0_f64.sqrt()), (wide.clone(), at, 30.0)] {
+            let (world, mut history) = world_on(word, stock, (ox, oy), |_| {});
+            let g54 = Location { pos: Point3::new(ox, oy, 0.0), rot: IDENTITY_Q };
+            history.execute(&world, SetWcsOrigin::new(&world, "G54", g54).expect("set G54"));
+            let mut o = op();
+            if let OpParams::Drill { cross, .. } = &mut o.params {
+                for h in cross.iter_mut() {
+                    h.origin = Point3::new(h.origin.x + ox, h.origin.y + oy, h.origin.z);
+                }
+            }
+            let (t, _) = operation::generate(&world, &o, "")
+                .unwrap_or_else(|e| panic!("{word} raw r{raw:.2}: the cross drill generates: {e}"));
+            let rel = |p: Point3| Point3::new(p.x - ox, p.y - oy, p.z);
+            let mut local = t.clone();
+            for m in &mut local.moves {
+                (m.from, m.to) = (rel(m.from), rel(m.to));
+            }
+            let floor = rapid_floor(&local);
+            assert!(floor >= raw + 2.0 - 1e-9, "{word} raw r{raw:.2}: a rapid reaches r{floor:.3}");
+            let first = local.moves.first().map(|m| m.from.x.hypot(m.from.y)).unwrap_or(0.0);
+            assert!(first >= raw + 5.0 - 1e-9, "{word} raw r{raw:.2}: the clearance stands off the stock: {first:.3}");
+        }
+    }
+}
+
+#[test]
+fn a_hole_pointing_away_from_the_spindle_on_raw_stock_is_refused_by_name() {
+    let away = one(Point3::new(PART_R, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+    for word in ["lathe", "mill-turn"] {
+        let (world, _h) = world_with(word, raw_bar());
+        let e = operation::generate(&world, &op_with(vec![away], 5.0), "").err().map(|e| e.to_string());
+        let e = e.unwrap_or_else(|| panic!("{word}: a hole plunging outward drilled"));
+        assert!(e.contains("plunges away from the spindle"), "{word}: the refusal names it: {e}");
+    }
 }

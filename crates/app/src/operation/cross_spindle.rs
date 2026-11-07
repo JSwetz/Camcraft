@@ -73,16 +73,20 @@ pub(super) fn cross_drill(
             .collect()
     };
     let local = match st.raw {
-        Some(raw) => super::cross_stock::to_raw_mouths(&local, raw),
+        Some(raw) => super::cross_stock::to_raw_mouths(&local, raw, d)?,
         None => local,
     };
+    // A shank wider than the drill raises the planes to clear it.
+    let (clearance_d, hop_d) = super::cross_stock::body_clear(p.clearance_d, p.hop_d, p.tool);
     let mut t = drilling::cross_drill(&CrossParams {
+        clearance_d,
+        hop_d,
         stock_r: st.r.max(1.0),
         stock_z_max: st.z_max,
         holes: &local,
         ..p
     })?;
-    super::cross_stock::rapids_clear(&t, &st, d)?;
+    super::cross_stock::rapids_clear(&t, &st, p.tool)?;
     if on_origin {
         return Ok(t);
     }

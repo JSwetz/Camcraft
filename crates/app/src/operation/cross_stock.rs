@@ -23,6 +23,7 @@ use crate::cl::{MoveKind, Toolpath};
 use crate::drilling::CrossHole;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
+use crate::tools::Tool;
 
 /// What the cross drill stands off, measured about world Z through the
 /// spindle origin `(ox, oy)` (already the kernel's frame).
@@ -62,27 +63,63 @@ pub(super) fn standoff(part: &[Triangle], stock: Option<&[Triangle]>, ox: f64, o
     Standoff { r: raw.unwrap_or(part_r), z_max, raw }
 }
 
-/// Each hole's mouth moved out along its own axis to the raw stock's
-/// radius `raw` (the floor unchanged: `floor_d` deepens by the shift).
-/// A hole whose line misses the stock radius, or whose mouth already
-/// stands outside it, is untouched. `holes` are in the spindle frame.
-pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64) -> Vec<CrossHole> {
+/// The tool body's half-width the proof stands off: the drill's own
+/// rim, or its shank's when the shank is the wider (a 3 mm drill on a
+/// 6 mm shank lies across the end face on the swing at r3, not r1.5).
+fn body_rim(tool: &Tool) -> f64 {
+    let shank = if tool.shank_d.is_finite() { tool.shank_d } else { 0.0 };
+    0.5 * tool.diameter.max(shank)
+}
+
+/// The clearance and hop standoffs handed to the kernel, raised so a
+/// shank wider than the drill clears what it sweeps: the kernel's own
+/// margin is the drill's `d / 2 + 0.1`, and its end-face swing, hop
+/// and end planes all take `.max(margin)` of these - so lifting them
+/// to the shank's `shank_d / 2 + 0.1` moves nothing for a shank no
+/// wider than the drill (bit for bit) and clears the shank otherwise.
+pub(super) fn body_clear(clearance_d: f64, hop_d: Option<f64>, tool: &Tool) -> (f64, Option<f64>) {
+    if !(tool.shank_d.is_finite() && tool.shank_d > tool.diameter) {
+        return (clearance_d, hop_d);
+    }
+    let floor = 0.5 * tool.shank_d + 0.1;
+    (clearance_d.max(floor), hop_d.map(|h| h.max(floor)))
+}
+
+/// Each hole's mouth moved out along its own axis to where the drill
+/// of diameter `d` first meets the raw stock's radius `raw` (the floor
+/// unchanged: `floor_d` deepens by the shift). An off-centre hole's
+/// drill edge nearest the axis - transverse offset `|t| - d/2` -
+/// meets the raw surface before its centre line does, further out, so
+/// the mouth is taken there. A hole whose drill misses the stock
+/// radius, or whose mouth already stands outside it, is untouched; a
+/// hole plunging away from the spindle is refused by name (moving its
+/// mouth "out" would move it in). `holes` are in the spindle frame.
+pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, d: f64) -> Result<Vec<CrossHole>, GenError> {
     holes
         .iter()
         .map(|h| {
             // Axis-aligned XY plunges (the kernel refuses anything
-            // else): the plunge coordinate and the transverse offset.
-            let (c, t) = if h.dir.x.abs() >= h.dir.y.abs() {
-                (h.origin.x, h.origin.y)
+            // else): the plunge coordinate, its direction, and the
+            // transverse offset.
+            let (c, dc, t) = if h.dir.x.abs() >= h.dir.y.abs() {
+                (h.origin.x, h.dir.x, h.origin.y)
             } else {
-                (h.origin.y, h.origin.x)
+                (h.origin.y, h.dir.y, h.origin.x)
             };
-            let surf = (raw * raw - t * t).max(0.0).sqrt();
+            if c * dc > 0.0 {
+                return Err(GenError::Invalid(format!(
+                    "cross hole at ({:.3}, {:.3}, {:.3}) plunges away from the spindle - a cross \
+                     drill feeds toward the bar's axis; flip the hole's direction",
+                    h.origin.x, h.origin.y, h.origin.z
+                )));
+            }
+            let edge = (t.abs() - 0.5 * d).max(0.0);
+            let surf = (raw * raw - edge * edge).max(0.0).sqrt();
             let shift = surf - c.abs();
             if !(shift.is_finite() && shift > 0.0) {
-                return *h;
+                return Ok(*h);
             }
-            CrossHole {
+            Ok(CrossHole {
                 origin: Point3::new(
                     h.origin.x - h.dir.x * shift,
                     h.origin.y - h.dir.y * shift,
@@ -90,7 +127,7 @@ pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64) -> Vec<CrossHole> {
                 ),
                 floor_d: h.floor_d - shift,
                 ..*h
-            }
+            })
         })
         .collect()
 }
@@ -110,17 +147,42 @@ fn on_line(q: Point3, p: Point3, dir: [f64; 3]) -> bool {
     perp.iter().map(|c| c * c).sum::<f64>() <= 1e-12
 }
 
+/// Closest XY approach to the spindle of a tool body of half-width
+/// `w` swept from `a` to `b` along its own `axis`: the rectangle its
+/// cross-section (`w` either side of the axis, across it in XY) sweeps.
+/// An axis with no XY part sweeps a disk of radius `w`.
+fn slab_approach(a: Point3, b: Point3, axis: [f64; 3], w: f64) -> f64 {
+    let l = axis[0].hypot(axis[1]);
+    if l.is_nan() || l <= 1e-9 {
+        return (approach(a, b) - w).max(0.0);
+    }
+    let (ux, uy) = (axis[0] / l, axis[1] / l);
+    let (nx, ny) = (-uy, ux);
+    let (s0, s1) = (-(a.x * ux + a.y * uy), (b.x - a.x) * ux + (b.y - a.y) * uy);
+    let across = -(a.x * nx + a.y * ny);
+    if across.abs() <= w && s0 >= s1.min(0.0) && s0 <= s1.max(0.0) {
+        return 0.0;
+    }
+    let off = |p: Point3, k: f64| Point3::new(p.x + k * nx, p.y + k * ny, p.z);
+    [(off(a, w), off(b, w)), (off(a, -w), off(b, -w)), (off(a, w), off(a, -w)), (off(b, w), off(b, -w))]
+        .iter()
+        .map(|&(p, q)| approach(p, q))
+        .fold(f64::INFINITY, f64::min)
+}
+
 /// Every rapid of the kernel's chain (spindle frame) proven clear of
 /// the stock it stood off: a retract up the line its own cut just
-/// drilled is the kerf; a rapid along its pose axis (the approach to a
-/// feed-entry point) stays outside the raw stock when there is one;
-/// a swing above the stock's Z top (plus the tool's rim) is the end-
-/// face detour; every other rapid keeps the tool's rim (`d / 2`)
-/// outside `st.r`. Anything else is a rapid through material, refused
-/// by name.
-pub(super) fn rapids_clear(t: &Toolpath, st: &Standoff, d: f64) -> Result<(), GenError> {
+/// drilled is the kerf; a swing above the stock's Z top by the tool
+/// body's rim (the wider of drill and shank, `body_rim`) is the end-
+/// face detour (checked first: the swing between opposite stations
+/// runs along the new pose's own axis); a rapid along its pose axis
+/// (the approach to a feed-entry point) keeps the drill's edge - and,
+/// behind the flutes, a wider shank's - outside the raw stock when
+/// there is one; every other rapid keeps the body's rim outside
+/// `st.r`. Anything else is a rapid through material, refused by name.
+pub(super) fn rapids_clear(t: &Toolpath, st: &Standoff, tool: &Tool) -> Result<(), GenError> {
     let tol = 1e-6;
-    let rim = 0.5 * d;
+    let (d, rim) = (tool.diameter, body_rim(tool));
     let mut kerf: Option<(Point3, [f64; 3])> = None;
     for (i, m) in t.moves.iter().enumerate() {
         let axis = m.axis.unwrap_or([0.0, 0.0, 1.0]);
@@ -132,16 +194,22 @@ pub(super) fn rapids_clear(t: &Toolpath, st: &Standoff, d: f64) -> Result<(), Ge
             continue;
         }
         kerf = None;
-        let along_pose = on_line(m.to, m.from, axis);
-        let (need, what) = if along_pose {
-            (st.raw.unwrap_or(0.0), "radius")
-        } else if st.z_max.is_some_and(|z| m.from.z.min(m.to.z) >= z + rim - tol) {
+        if st.z_max.is_some_and(|z| m.from.z.min(m.to.z) >= z + rim - tol) {
             continue;
+        }
+        let (got, need, what) = if on_line(m.to, m.from, axis) {
+            let Some(raw) = st.raw else { continue };
+            let mut got = slab_approach(m.from, m.to, axis, 0.5 * d);
+            if tool.shank_d.is_finite() && tool.shank_d > d && tool.flute_len.is_finite() {
+                let fl = tool.flute_len.max(0.0);
+                let back = |p: Point3| Point3::new(p.x + fl * axis[0], p.y + fl * axis[1], p.z + fl * axis[2]);
+                got = got.min(slab_approach(back(m.from), back(m.to), axis, 0.5 * tool.shank_d));
+            }
+            (got, raw, "radius at the tool's edge")
         } else {
-            (st.r + rim, "radius plus the tool's rim")
+            (approach(m.from, m.to), st.r + rim, "radius plus the tool's rim")
         };
-        let got = approach(m.from, m.to);
-        if got < need - tol {
+        if got.is_nan() || got < need - tol {
             return Err(GenError::Invalid(format!(
                 "cross-drill rapid {i} passes {got:.3} mm from the spindle, inside the stock's \
                  {what} ({need:.3} mm) - a rapid through material; raise the clearance or \
