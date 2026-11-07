@@ -73,6 +73,16 @@ pub enum Record {
     /// does not define the hook at all - a centre-less contour posted
     /// without its G41 is an undersize part, the silent wrong answer.
     Comp { side: Option<CompSide>, radius_mm: f64 },
+    /// A probing move (#108): probe toward the target, stop on contact,
+    /// G38.2 on a control that speaks NIST RS274NGC. A script that
+    /// cannot voice it is refused by name: a touch posted as a feed
+    /// drives the stylus through the part.
+    Touch(super::probe_rec::TouchRec),
+    /// The probing result (#108): set a work offset from the measured
+    /// trips or stop for the operator, and stop when out of tolerance.
+    Found(super::probe_rec::FoundRec),
+    /// The incremental back-off after a trip (#108).
+    Retreat(super::probe_rec::RetreatRec),
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -259,6 +269,16 @@ impl Record {
             Record::Comp { side: Some(CompSide::Left), radius_mm } => format!("comp left · r {radius_mm:.3} mm"),
             Record::Comp { side: Some(CompSide::Right), radius_mm } => format!("comp right · r {radius_mm:.3} mm"),
             Record::Comp { side: None, .. } => "comp off".into(),
+            Record::Touch(t) => format!(
+                "probe → {}{}",
+                pos(t.target[0], t.target[1], t.target[2]),
+                t.measure.map_or_else(String::new, |k| format!(" · measure {k}"))
+            ),
+            Record::Retreat(r) => format!("probe retreat Δ {}", pos(r.delta[0], r.delta[1], r.delta[2])),
+            Record::Found(f) => match f.set_wcs {
+                Some(w) => format!("probe result · set G{} · tol {:.3} mm", 54 + u32::from(w), f.tol_mm),
+                None => format!("probe result · confirm · tol {:.3} mm", f.tol_mm),
+            },
         }
     }
 
@@ -396,6 +416,9 @@ pub fn serialize(records: &[Record]) -> String {
                     None => "COMP OFF\n".to_string(),
                 });
             }
+            Record::Touch(t) => s.push_str(&super::probe_rec::write_touch(t)),
+            Record::Found(f) => s.push_str(&super::probe_rec::write_found(f)),
+            Record::Retreat(r) => s.push_str(&super::probe_rec::write_retreat(r)),
         }
     }
     s
@@ -883,6 +906,22 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     return Err(fail(format!("PROBE tolerance {w:?} is negative")));
                 }
                 out.push(Record::Probe { tol_mm: v / 1000.0 });
+            }
+            "TOUCH" => {
+                let t = super::probe_rec::parse_touch(&mut it).map_err(fail)?;
+                out.push(Record::Touch(t));
+                move_idx += 1;
+                in_section = true;
+            }
+            "RETREAT" => {
+                let r = super::probe_rec::parse_retreat(&mut it).map_err(fail)?;
+                out.push(Record::Retreat(r));
+                move_idx += 1;
+                in_section = true;
+            }
+            "FOUND" => {
+                let f = super::probe_rec::parse_found(&mut it).map_err(fail)?;
+                out.push(Record::Found(f));
             }
             other => {
                 return Err(fail(format!("unknown record {other:?}")));

@@ -130,6 +130,10 @@ pub enum OpType {
     /// [`crate::machining2d::bore`]); a counterbore-folded hole is
     /// declined for it by name, the cycle's own word.
     Bore,
+    /// Probing (#108): face / edge / corner / bore-boss centre finding
+    /// with a touch probe, closing the Drilling run (see
+    /// [`crate::probing`]).
+    Probe,
     /// Mesh-driven Z-level pocketing: the model is the final part, every
     /// level's islands are computed from it (see [`crate::machining3d`]).
     Pocket3D,

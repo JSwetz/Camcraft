@@ -113,6 +113,9 @@ mod params;
 pub use params::*;
 mod entity;
 mod params_impl;
+// #108: the Probe operation's file mirror.
+mod probe_dto;
+pub use probe_dto::*;
 mod approach;
 pub use approach::*;
 mod links;

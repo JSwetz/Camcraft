@@ -1,0 +1,327 @@
+//! #108 acceptance: the Probe operation - face / edge / outside corner /
+//! bore / boss centre finding with a touch probe. Each touch is a fast
+//! seek, an incremental back-off and a slow measuring re-probe; the
+//! post writes the touches as G38.2 (NIST RS274NGC) on the generic
+//! Fanuc-style dialect and refuses the op by name on a dialect that
+//! cannot probe; the stylus path is judged as protected moves; the op
+//! files and undoes like every other.
+//!
+//! Provenance: NIST RS274NGC (NISTIR 6556) G38.2 and touch-probe
+//! practice; our own fixtures.
+//!
+//! Gate map (M4.4): covers app::operation (probe_op, kinds), app::posting,
+//! app::project (probe DTO, v51), app::commands (create / edit / undo),
+//! motion::probing, post::probe_rec, cl::touch.
+
+mod common;
+
+use flecs_ecs::prelude::World;
+
+use camcraft_app::cl::MoveKind;
+use camcraft_app::commands::{AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, SetStock};
+use camcraft_app::geometry::Point3;
+use camcraft_app::model;
+use camcraft_app::operation::{Height, HeightReference, OpParams, OpType, SrcRef};
+use camcraft_app::post::{self, cnc, engine};
+use camcraft_app::probing::{probe_cycle, ProbeDir, ProbeMode, ProbeParams};
+use camcraft_app::schema::Location;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::probe_tool;
+use camcraft_app::world::new_world;
+use camcraft_app::{posting, project};
+
+const FANUC: &str = include_str!("../../../assets/posts/fanuc.cps");
+const HEIDENHAIN: &str = include_str!("../../../assets/posts/heidenhain.cps");
+
+fn cycle(mode: ProbeMode, dir: ProbeDir, dir_y: ProbeDir, target: Point3, radius: f64) -> ProbeParams {
+    ProbeParams {
+        mode,
+        dir,
+        dir_y,
+        target,
+        radius,
+        ball_diameter: 4.0,
+        approach: 5.0,
+        overtravel: 5.0,
+        backoff: 1.0,
+        fast_feed: 300.0,
+        slow_feed: 30.0,
+        depth: 3.0,
+        inset: 5.0,
+        clearance_z: 50.0,
+    }
+}
+
+/// The measured trips of a path: (measure ordinal, nominal trip).
+fn measures(t: &camcraft_app::cl::Toolpath) -> Vec<(u32, Point3)> {
+    t.probes
+        .iter()
+        .filter_map(|p| p.measure.map(|k| (k, t.moves[p.index].to)))
+        .collect()
+}
+
+fn close(a: Point3, b: Point3) -> bool {
+    (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9 && (a.z - b.z).abs() < 1e-9
+}
+
+#[test]
+fn each_mode_lays_down_its_touches() {
+    let r = 2.0; // ball radius
+    // Face -Z on the top at Z 20: one seek + one measure, trip a ball
+    // radius above the contact.
+    let t = probe_cycle(&cycle(ProbeMode::Face, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(10.0, 5.0, 20.0), 0.0))
+        .expect("face");
+    assert_eq!(t.probes.len(), 2, "a seek and a measure");
+    assert_eq!(measures(&t), vec![(0, Point3::new(10.0, 5.0, 20.0 + r))]);
+    assert!(t.probes.iter().all(|p| p.is_sane(&t.moves)));
+    assert!(t.is_chained() && t.all_finite());
+    // Every probe move is a feed; nothing the stylus does is a rapid
+    // toward the part.
+    assert!(t.probes.iter().all(|p| t.moves[p.index].kind == MoveKind::Feed));
+
+    // Edge +X at the top edge X 0: the touch rides `depth` below it.
+    let t = probe_cycle(&cycle(ProbeMode::Edge, ProbeDir::XPos, ProbeDir::YPos, Point3::new(0.0, 5.0, 20.0), 0.0))
+        .expect("edge");
+    assert_eq!(measures(&t), vec![(0, Point3::new(-r, 5.0, 17.0))]);
+
+    // Outside corner at the vertex (0, 0, 20), part toward +X +Y: an X
+    // touch inset along Y and a Y touch inset along X.
+    let t = probe_cycle(&cycle(ProbeMode::Corner, ProbeDir::XPos, ProbeDir::YPos, Point3::new(0.0, 0.0, 20.0), 0.0))
+        .expect("corner");
+    let m = measures(&t);
+    assert_eq!(m.len(), 2);
+    assert!(close(m[0].1, Point3::new(-r, 5.0, 17.0)), "{m:?}");
+    assert!(close(m[1].1, Point3::new(5.0, -r, 17.0)), "{m:?}");
+
+    // Bore of radius 10 about (30, 30), rim Z 20: four touches outward.
+    let t = probe_cycle(&cycle(ProbeMode::Bore, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0))
+        .expect("bore");
+    let m = measures(&t);
+    assert_eq!(m.len(), 4);
+    let want = [
+        Point3::new(38.0, 30.0, 17.0),
+        Point3::new(22.0, 30.0, 17.0),
+        Point3::new(30.0, 38.0, 17.0),
+        Point3::new(30.0, 22.0, 17.0),
+    ];
+    for (k, w) in want.iter().enumerate() {
+        assert!(close(m[k].1, *w), "bore touch {k}: {:?} != {w:?}", m[k].1);
+    }
+    assert_eq!(t.probes.len(), 8, "each touch seeks then measures");
+
+    // Boss of radius 10 about (30, 30): four touches inward from outside.
+    let t = probe_cycle(&cycle(ProbeMode::Boss, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0))
+        .expect("boss");
+    let m = measures(&t);
+    assert!(close(m[0].1, Point3::new(42.0, 30.0, 17.0)), "{m:?}");
+    assert!(close(m[1].1, Point3::new(18.0, 30.0, 17.0)), "{m:?}");
+    // The stylus never descends inside the boss's circle.
+    for mv in &t.moves {
+        let d = ((mv.to.x - 30.0).powi(2) + (mv.to.y - 30.0).powi(2)).sqrt();
+        assert!(mv.to.z >= 49.0 || d >= 10.0 + r - 1e-9, "inside the boss at {:?}", mv.to);
+    }
+}
+
+#[test]
+fn degenerate_probe_numbers_are_refused() {
+    let mut p = cycle(ProbeMode::Bore, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(0.0, 0.0, 20.0), 2.5);
+    assert!(probe_cycle(&p).is_err(), "a bore too small for the ball is refused");
+    p.radius = 10.0;
+    p.slow_feed = 900.0;
+    assert!(probe_cycle(&p).is_err(), "a measure faster than the seek is refused");
+    p.slow_feed = 30.0;
+    p.approach = f64::NAN;
+    assert!(probe_cycle(&p).is_err(), "a NaN is refused");
+    let mut e = cycle(ProbeMode::Edge, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(0.0, 0.0, 20.0), 0.0);
+    assert!(probe_cycle(&e).is_err(), "an edge is not probed along Z");
+    e.mode = ProbeMode::Face;
+    e.clearance_z = 21.0;
+    assert!(probe_cycle(&e).is_err(), "a safe plane under the ball is refused");
+}
+
+/// The generic dialect's golden: a bore centre setting G55 through the
+/// whole post seam (dump -> stream text -> engine -> fanuc.cps).
+#[test]
+fn bore_centre_posts_g38_2_on_the_generic_dialect() {
+    let t = probe_cycle(&cycle(ProbeMode::Bore, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0))
+        .expect("bore");
+    let d = post::Dump {
+        op_name: "Probe1",
+        tool_number: 7,
+        tool_name: "PROBE-4",
+        tool_diameter: 4.0,
+        rpm: 0.0,
+        clearance_z: 50.0,
+        retract_z: 50.0,
+        probe_result: Some(post::probe_rec::ProbeResult { set_wcs: Some(1), tol_mm: 0.5 }),
+        ..post::Dump::default()
+    };
+    let recs = post::dump(&t, &d);
+    assert!(!recs.iter().any(|r| matches!(r, cnc::Record::Warn { .. })), "a sane probe path carries no WARN");
+    let stream = cnc::serialize(&recs);
+    // The stream round-trips: what the dump says is what the engine reads.
+    assert_eq!(cnc::parse(&stream).expect("parse"), recs, "TOUCH / RETREAT / FOUND round-trip");
+    let out = engine::run(FANUC, &serde_json::Value::Null, &stream).expect("post");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    assert!(out.program.contains("G38.2"), "the touches are probing blocks");
+    assert!(
+        !out.program.lines().any(|l| l.split_whitespace().any(|w| w == "M3" || w == "M8")),
+        "a touch probe starts no spindle and no coolant"
+    );
+    assert!(out.program.contains("G10 L2 P2"), "the result sets G55");
+    common::write_golden("nc/fanuc/probe_bore_centre.nc", &out.program);
+}
+
+fn probe_world(top: Height) -> (World, History) {
+    let world = new_world();
+    let mut h = History::default();
+    h.execute(
+        &world,
+        SetStock::new(&world, StockShape::Box { dx: 40.0, dy: 40.0, dz: 20.0 }, Location::default()).expect("stock"),
+    );
+    h.execute(&world, AddTool::new(&world, "PROBE-4", probe_tool(4.0, 30.0)).expect("tool"));
+    let params = face_params(top);
+    h.execute(&world, CreateOperation::new(&world, "Probe1", "PROBE-4", SrcRef::Stock, params).expect("create"));
+    (world, h)
+}
+
+fn stock_top(world: &World) -> f64 {
+    model::stock_world_aabb(world).map(|b| b.max.z).expect("stock box")
+}
+
+fn face_params(_top: Height) -> OpParams {
+    let mut p = camcraft_app::operation::retype_params(
+        &OpParams::Probe {
+            clearance_z: Height::of(HeightReference::TopOfStock, 15.0),
+            mode: ProbeMode::Face,
+            dir: ProbeDir::ZNeg,
+            dir_y: ProbeDir::YPos,
+            target: [0.0; 3],
+            radius: 0.0,
+            approach: 5.0,
+            overtravel: 5.0,
+            backoff: 1.0,
+            fast_feed: 300.0,
+            slow_feed: 30.0,
+            depth: 3.0,
+            inset: 5.0,
+            set_wcs: Some(0),
+            tolerance: 0.5,
+        },
+        OpType::Probe as usize,
+    );
+    if let OpParams::Probe { clearance_z, .. } = &mut p {
+        *clearance_z = Height::of(HeightReference::TopOfStock, 15.0);
+    }
+    p
+}
+
+fn set_target(world: &World, h: &mut History, z: f64) -> OpParams {
+    let e = model::find_by_name(world, "Probe1").expect("op");
+    let mut p = model::operation_of(world, &e).expect("operation").params;
+    if let OpParams::Probe { target, .. } = &mut p {
+        let b = model::stock_world_aabb(world).expect("stock");
+        *target = [(b.min.x + b.max.x) * 0.5, (b.min.y + b.max.y) * 0.5, z];
+    }
+    h.execute(world, EditOperationParams::new(world, "Probe1", p.clone()).expect("edit"));
+    p
+}
+
+fn generate(world: &World, h: &mut History) -> Vec<camcraft_app::verify::Warning> {
+    h.execute(world, GenerateOperation::new(world, "Probe1").expect("generate"));
+    let e = model::find_by_name(world, "Probe1").expect("op");
+    model::toolpath_of(world, &e).expect("cached").warnings
+}
+
+#[test]
+fn a_face_touch_on_the_stock_top_generates_clean_and_cuts_nothing() {
+    let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
+    let top = stock_top(&world);
+    set_target(&world, &mut h, top);
+    let warns = generate(&world, &mut h);
+    assert!(warns.is_empty(), "a tangent touch is clean: {warns:?}");
+    // The probe op removes no stock: the program plan skips it.
+    let report = posting::verification_report(&world);
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+}
+
+#[test]
+fn a_stylus_driven_through_material_is_a_gouge() {
+    // The expected contact 4 mm under the stock top: the seek runs the
+    // ball through the block before it - the protected-move law convicts.
+    let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
+    let top = stock_top(&world);
+    set_target(&world, &mut h, top - 4.0);
+    let warns = generate(&world, &mut h);
+    assert!(
+        warns.iter().any(|w| matches!(w, camcraft_app::verify::Warning::Gouge { .. })),
+        "the stylus through material is refused: {warns:?}"
+    );
+}
+
+#[test]
+fn a_dialect_without_probing_refuses_the_op_by_name() {
+    let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
+    let top = stock_top(&world);
+    set_target(&world, &mut h, top);
+    generate(&world, &mut h);
+    let path = std::env::temp_dir().join(format!("camcraft_probe_refuse_{}.nc", std::process::id()));
+    let err = posting::post_script(&world, &path, HEIDENHAIN).expect_err("Heidenhain cannot probe here");
+    assert!(err.contains("onProbeMove") && err.contains("Probe1"), "refused by name: {err}");
+    assert!(!path.exists(), "nothing is written");
+    // The generic dialect posts the same document.
+    let ok = posting::post_script(&world, &path, FANUC).expect("fanuc probes");
+    assert!(ok.program.contains("G38.2"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn the_probe_round_trips_through_the_project_file() {
+    let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
+    let top = stock_top(&world);
+    let params = set_target(&world, &mut h, top);
+    generate(&world, &mut h);
+    let path = std::env::temp_dir().join(format!("camcraft_probe_rt_{}.camproj", std::process::id()));
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert!(text.contains("\"probe\""), "the params carry their tag");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    let e = model::find_by_name(&world2, "Probe1").expect("op");
+    assert_eq!(model::operation_of(&world2, &e).expect("op").params, params);
+    let tool = model::find_by_name(&world2, "PROBE-4").and_then(|t| model::tool_of(&world2, &t)).expect("tool");
+    assert_eq!(tool, probe_tool(4.0, 30.0), "the probe tool files as a probe");
+    // The cached touches survive the file: a touch lost on load would
+    // post as a feed.
+    let a = model::toolpath_of(&world, &model::find_by_name(&world, "Probe1").expect("op")).expect("cache");
+    let b = model::toolpath_of(&world2, &e).expect("cache");
+    assert_eq!(a.path.probes, b.path.probes);
+    assert!(!b.path.probes.is_empty());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_probe_param_edit_undoes_and_redoes() {
+    let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
+    let e = model::find_by_name(&world, "Probe1").expect("op");
+    let before = model::operation_of(&world, &e).expect("op").params;
+    let mut edited = before.clone();
+    if let OpParams::Probe { tolerance, set_wcs, .. } = &mut edited {
+        *tolerance = 0.05;
+        *set_wcs = None;
+    }
+    h.execute(&world, EditOperationParams::new(&world, "Probe1", edited.clone()).expect("edit"));
+    assert_eq!(model::operation_of(&world, &e).expect("op").params, edited);
+    assert!(h.undo(&world));
+    assert_eq!(model::operation_of(&world, &e).expect("op").params, before, "undo restores the old numbers");
+    assert!(h.redo(&world));
+    assert_eq!(model::operation_of(&world, &e).expect("op").params, edited);
+}
+
+#[test]
+fn the_probe_row_closes_the_drilling_run() {
+    use camcraft_app::operation::{KindInfo, Section};
+    assert_eq!(KindInfo::ALL[13].ty, OpType::Probe);
+    assert_eq!(OpType::Probe.info().section, Section::Drilling);
+    assert_eq!(OpType::Probe.info().tool_kinds, &[camcraft_app::tools::ToolKind::Probe]);
+}

@@ -183,8 +183,8 @@ fn v42_pins_shift_for_the_twins_row_insert() {
     let pins = pinned_of(&world);
     assert_eq!(
         pins,
-        vec![4, 11, 37],
-        "Trace stays; the Drill row takes three rungs, the turning tail a fourth"
+        vec![4, 11, 38],
+        "Trace stays; the Drill row takes three rungs, the turning tail a fourth and the v51 probe seat"
     );
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
@@ -206,7 +206,7 @@ fn v43_pins_shift_for_the_m24b_row_insert() {
     )
     .expect("a v43 pinned file steps up");
     let pins = pinned_of(&world);
-    assert_eq!(pins, vec![6, 11, 37], "below the insert stays, from Drill up shifts");
+    assert_eq!(pins, vec![6, 11, 38], "below the insert stays, from Drill up shifts");
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Offset2D);
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
@@ -233,7 +233,7 @@ fn v44_pins_take_the_two_boundary_step() {
     let pins = pinned_of(&world);
     assert_eq!(
         pins,
-        vec![4, 11, 32, 37],
+        vec![4, 11, 33, 38],
         "below Thread stays, Drill +1, from Pocket3D up +2, from the seat up +1 more"
     );
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Trace);
@@ -259,7 +259,8 @@ fn v47_pins_take_the_deburr_seat_shift() {
     )
     .expect("a v47 pinned file steps up");
     let pins = pinned_of(&world);
-    assert_eq!(pins, vec![4, 14, 16, 37], "below the seat stays, from Contour5D up slides");
+    // The v51 probe seat (#108) chains after: everything from 13 up +1.
+    assert_eq!(pins, vec![4, 15, 17, 38], "below the seat stays, from Contour5D up slides");
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Trace);
     assert_eq!(
         KindInfo::ALL[pins[1]].ty,
@@ -278,8 +279,25 @@ fn v47_pins_take_the_deburr_seat_shift() {
     );
     // And the new row sits where the rung's arithmetic says.
     assert_eq!(
-        KindInfo::ALL[15].ty,
+        KindInfo::ALL[16].ty,
         operation::OpType::Deburr,
         "Deburr seats in the Mill3D run"
     );
+}
+
+#[test]
+fn v50_pins_take_the_probe_seat_shift() {
+    // #108 seats Probe at 13, closing the Drilling run (the partition
+    // law's contiguity): below the seat the names stand - Bore was 12
+    // and stays 12 - and from the old Pocket3D row (13) up every index
+    // slides +1.
+    let world = new_world();
+    project::open(&world, r#"{"version": 50, "pinned": [12, 13, 37], "entities": []}"#)
+        .expect("a v50 pinned file steps up");
+    let pins = pinned_of(&world);
+    assert_eq!(pins, vec![12, 14, 38]);
+    assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Bore);
+    assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Pocket3D);
+    assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
+    assert_eq!(KindInfo::ALL[13].ty, operation::OpType::Probe, "Probe closes Drilling");
 }

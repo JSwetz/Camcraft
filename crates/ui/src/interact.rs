@@ -1285,7 +1285,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // The deburr ride says it too: every run starts and ends at
         // the clearance plane by the kernel's own word - no hop
         // height exists to author or draw (M2.5 E B).
-        | operation::OpParams::Deburr { .. } => None,
+        | operation::OpParams::Deburr { .. }
+        // The probe travels at its clearance plane only (#108).
+        | operation::OpParams::Probe { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z_in(world, None, src), draft.clearance().z_in(world, None, src))
@@ -1432,6 +1434,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                 });
             }
         }
+        // The probe draws only its clearance plane (#108): its touches
+        // are points, not a window.
+        operation::OpParams::Probe { .. } => {}
         // Parting draws one plane: the parting station itself, the
         // kerf's only promise (M5.2 C). Its Top of Part bound is a
         // sanity gate on the parameter, not geometry - the column the

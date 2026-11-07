@@ -994,6 +994,8 @@ pub enum ParamsDto {
         climb: bool,
         holes: Vec<HoleDto>,
     },
+    /// The probe (#108), filed since v51.
+    Probe(ProbeDto),
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

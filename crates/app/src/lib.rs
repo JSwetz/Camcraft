@@ -25,6 +25,7 @@ pub mod operation;
 pub mod pick;
 pub use camcraft_post::post;
 pub mod posting;
+pub use camcraft_motion::probing;
 pub mod project;
 pub mod rest;
 pub mod ribbon;

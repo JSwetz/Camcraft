@@ -31,6 +31,10 @@ pub struct Toolpath {
     /// default, and every path before the option. The moves stay the
     /// cutter-centre truth; the spans say what the post writes instead.
     pub comps: Vec<CompSpan>,
+    /// The probing touches (#108, [`super::ProbeTouch`]): empty for
+    /// every cutting path. A post that cannot write a probing block
+    /// refuses the path rather than posting the touch as a feed.
+    pub probes: Vec<super::touch::ProbeTouch>,
 }
 
 impl Toolpath {
@@ -40,6 +44,7 @@ impl Toolpath {
             cycles: Vec::new(),
             notes: Vec::new(),
             comps: Vec::new(),
+            probes: Vec::new(),
         }
     }
 
@@ -365,6 +370,7 @@ impl PathBuilder {
             cycles: self.cycles,
             notes: self.notes,
             comps: self.comps,
+            probes: Vec::new(),
         }
     }
 }

@@ -176,7 +176,9 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
         // says exactly what the program would post today. Cutting
         // nothing - never generated, or an empty path - is what
         // contributes no mask.
-        let moves = cache.map_or_else(Vec::new, |c| c.path.moves);
+        let probe = tool.as_ref().is_some_and(|t| t.kind == crate::tools::ToolKind::Probe);
+        // A probe cuts nothing (#108): it contributes no mask.
+        let moves = if probe { Vec::new() } else { cache.map_or_else(Vec::new, |c| c.path.moves) };
         let cut = !moves.is_empty();
         out.push(Ahead {
             name: n.clone(),

@@ -40,7 +40,7 @@ fn mv(kind: MoveKind, z0: f64, z1: f64) -> Move {
 
 /// `moves` on a drill over a stock box whose top is Z 25, clearance 35.
 fn judge(moves: Vec<Move>) -> Vec<Warning> {
-    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() };
+    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), probes: Vec::new() };
     let region = rect();
     let tool = ToolGeom {
         radius: 2.0,

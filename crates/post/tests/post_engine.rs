@@ -397,6 +397,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         warnings: vec!["drill vs hole dia advisory".into()],
         part_transfer: false,
         probe_tol: None,
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -459,6 +460,7 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         warnings: vec![],
         part_transfer: false,
         probe_tol: None,
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -742,6 +744,7 @@ fn dump_brackets_the_section_with_the_feeder() {
         warnings: vec![],
         part_transfer: false,
         probe_tol: None,
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -838,6 +841,7 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
         warnings: vec![],
         part_transfer: true,
         probe_tol: None,
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| {
@@ -934,6 +938,7 @@ fn dump_places_the_probe_after_the_cut_before_the_handoff() {
         warnings: vec![],
         part_transfer: true,
         probe_tol: Some(0.05),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| recs.iter().position(pat).expect("record present");

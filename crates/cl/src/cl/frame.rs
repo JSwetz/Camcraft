@@ -321,7 +321,7 @@ impl TiltedFrame {
             }
             Vec::new()
         };
-        Toolpath { moves, cycles: local.cycles.clone(), notes, comps }
+        Toolpath { moves, cycles: local.cycles.clone(), notes, comps, probes: local.probes.clone() }
     }
 
     /// A local planar region (the cut's footprint at local height

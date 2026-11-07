@@ -13182,3 +13182,63 @@ revolved (follow-up material if users hit it with long keyways).
   clamps) a ring count past 1e5, and drops vertical-plane arcs from the
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
+
+## #108 - Probe: face, edge, corner and bore / boss centre finding (2026-11-07)
+
+- **Chosen:** one new kind, `Probe`, seated at 13 to close the Drilling
+  run (point-located, Z-axial, protected-move work like the hole cycles;
+  the partition's contiguity law forbids a tail-append past Turning).
+  Rows from Pocket3D up slide one: the v50 -> v51 rung shifts pins >= 13
+  by +1 and the digest tags move with the table (every op behind the
+  seat regenerates once). A new tool kind `ToolKind::Probe`: `diameter`
+  is the stylus ball, `flute_len` the stylus length, corner = ball
+  radius by law. The starter catalog gains one, `PRB-0400` (4 mm ball,
+  30 mm stylus), so the empty-rack refusal names a real entry for the
+  Probe kind like every other (the M13.4 law).
+- **Modes:** face (one touch, +-X / +-Y / -Z), edge (side face under a
+  picked edge, `depth` below it, X or Y), outside corner (an X and a Y
+  touch, each `inset` from the vertex), bore centre (four touches out
+  from the centre), boss centre (four touches in from outside). The op
+  stores the expected contact (`target`) and every number has a default
+  (approach 5, probe distance 5, back-off 1, seek 300, measure 30 mm/min,
+  depth 3, inset 5, tolerance 0.5, set G54).
+- **Motion stream:** not a new `MoveKind` (68 exhaustive match sites
+  across seven crates). The moves stay the nominal truth - the stylus
+  runs to the EXPECTED trip - and `Toolpath::probes` (`cl::ProbeTouch`,
+  the `CompSpan` precedent) marks which feeds are probing moves, their
+  probe target (trip + overtravel) and the measurement ordinal. The
+  path cache files the touches (`PathDto.probes`); a touch that does not
+  sit on its move is dropped on load and the dump refuses a probe op
+  with no touches - a probing move must never post as G1.
+- **Post:** three stream records - `TOUCH` (probe toward the target),
+  `RETREAT` (the back-off after a trip, INCREMENTAL so a part nearer than
+  the model is never driven into by an absolute back-off) and `FOUND`
+  (the axes the measured trips find, the mean of opposite touches for a
+  centre, plus the action and tolerance). Hooks `onProbeMove`,
+  `onProbeRetreat`, `onProbeResult` have NO prelude default: a script
+  without them is refused by name (`probing: operation "Probe1": ...`).
+  Only `fanuc.cps` voices them this slice: G38.2 per NIST RS274NGC
+  (trip in #5061-#5063, copied to #100+3k), the deviation and its
+  tolerance stop in macro-B form (`IF[ABS[..]GT tol]THEN#3000=1`), the
+  set-offset as `G10 L2 Pn` from the active offset's RS274NGC parameters
+  (#5221 + 20 x slot), and report-and-stop as `#3006=1`. A touch probe
+  section writes no spindle start and no coolant.
+- **Verify:** the probe op skips the cutting laws; its own law
+  (`operation::probe_op::stylus_hits`) sweeps the ball along every move
+  against the model and convicts any move that comes nearer than the
+  ball radius (0.01 mm slack for the tangent touch) as a `Gouge`, which
+  holds the post. The stock sim and the rest masks skip probe ops: a
+  probe removes no stock.
+- **Dropped:** a `MoveKind::Probe` (blast radius); posting the touches
+  as G31 skip moves (the brief named G38.2; G31 is the per-control
+  follow-up); judging the stylus against the stock (a probe at the
+  model's contact on unmachined stock would always "collide" - the
+  expectation is the model's); a prelude default that comments the
+  probe out (a silently skipped measurement then sets no offset while
+  the program runs on).
+- **Owed (follow-up issues):** creating the op from a picked
+  face / edge / vertex / cylinder (the op page takes the contact point
+  typed today); the stylus shank and probe body in the protected-move
+  law (the ball alone is judged); probing hooks for the Haas (G31),
+  Mazak, Siemens and Heidenhain dialects (they refuse by name now);
+  protected positioning moves (G38.3-style) for the approach descent.

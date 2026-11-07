@@ -40,7 +40,7 @@ use super::*;
 /// before (the arrival law).
 /// v50: operation labels and within-setup order become persisted. An old
 /// reader must refuse the file rather than silently post in name order.
-pub const PROJECT_VERSION: u32 = 50;
+pub const PROJECT_VERSION: u32 = 51;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -304,6 +304,8 @@ pub enum ToolKindDto {
     /// (the cone's INCLUDED angle, the Drill's law restated) has been
     /// filed since v10.
     Taper,
+    /// The touch probe (#108), filed since v51.
+    Probe,
 }
 
 impl ToolDto {
@@ -321,6 +323,7 @@ impl ToolDto {
                 ToolKind::Thread => ToolKindDto::Thread,
                 ToolKind::Form => ToolKindDto::Form,
                 ToolKind::Taper => ToolKindDto::Taper,
+                ToolKind::Probe => ToolKindDto::Probe,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -359,6 +362,7 @@ impl ToolDto {
                 ToolKindDto::Thread => ToolKind::Thread,
                 ToolKindDto::Form => ToolKind::Form,
                 ToolKindDto::Taper => ToolKind::Taper,
+                ToolKindDto::Probe => ToolKind::Probe,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,

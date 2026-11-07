@@ -1100,6 +1100,33 @@ pub enum OpParams {
         climb: bool,
         holes: Vec<Hole>,
     },
+    /// Probing (#108): a spindle touch probe finds a face, an edge, an
+    /// outside corner or a bore / boss centre, then sets a work offset
+    /// or stops for the operator (see [`crate::probing`]). It cuts
+    /// nothing: every move is a protected probe move. `target` is the
+    /// expected contact (face), the picked edge point / vertex (edge /
+    /// corner) or the circle centre at its rim (bore / boss).
+    Probe {
+        clearance_z: Height,
+        mode: crate::probing::ProbeMode,
+        dir: crate::probing::ProbeDir,
+        dir_y: crate::probing::ProbeDir,
+        target: [f64; 3],
+        radius: f64,
+        approach: f64,
+        overtravel: f64,
+        backoff: f64,
+        fast_feed: f64,
+        slow_feed: f64,
+        depth: f64,
+        inset: f64,
+        /// Some(slot 0..=5): set G54..G59 from the found position;
+        /// None: report the deviation and stop for the operator.
+        set_wcs: Option<u8>,
+        /// The found position may stray this far (mm) from the model's
+        /// before the program stops with a message.
+        tolerance: f64,
+    },
 }
 
 impl OpParams {
@@ -1144,6 +1171,7 @@ impl OpParams {
             OpParams::BoringTurning { .. } => OpType::BoringTurning,
             OpParams::Bore { .. } => OpType::Bore,
             OpParams::Thread { .. } => OpType::Thread,
+            OpParams::Probe { .. } => OpType::Probe,
         }
     }
 
@@ -1166,6 +1194,8 @@ impl OpParams {
             | OpParams::Circular { tilt, .. }
             | OpParams::Slot { tilt, .. }
             | OpParams::Trace { tilt, .. } => *tilt,
+            // The probe touches along the machine's axes (#108).
+            OpParams::Probe { .. } => None,
             // The 5-axis kinds (M5.1 C) are the third answer, not the
             // second: the PART stands still and the TOOL AXIS moves -
             // a 3+2 index inside them would command the machine to
@@ -1272,7 +1302,8 @@ impl OpParams {
             | OpParams::FormTurning { clearance_z, .. }
             | OpParams::BoringTurning { clearance_z, .. }
             | OpParams::Bore { clearance_z, .. }
-            | OpParams::Thread { clearance_z, .. } => *clearance_z,
+            | OpParams::Thread { clearance_z, .. }
+            | OpParams::Probe { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -1283,6 +1314,9 @@ impl OpParams {
     #[must_use]
     pub fn region_height(&self) -> Height {
         match self {
+            // The probe's region plane is its safe plane (#108): it
+            // cuts no section.
+            OpParams::Probe { clearance_z, .. } => *clearance_z,
             OpParams::Face { top_z, cut_z, .. } => top_z.unwrap_or(*cut_z),
             OpParams::Contour { top_z, .. }
             | OpParams::Pocket { top_z, .. }
@@ -1351,6 +1385,7 @@ impl OpParams {
             }
         }
         match self {
+            OpParams::Probe { clearance_z, .. } => f(*clearance_z),
             OpParams::Face { clearance_z, cut_z, top_z, .. } => {
                 f(*clearance_z);
                 f(*cut_z);

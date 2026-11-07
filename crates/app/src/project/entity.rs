@@ -101,6 +101,23 @@ pub struct PathDto {
     /// before the option. The same additive law as the notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comps: Vec<CompSpanDto>,
+    /// The probing touches (#108, `crate::cl::ProbeTouch`): absent is
+    /// none - every cutting path. A touch lost on load would post as a
+    /// plain feed through the part, so a touch that does not sit on
+    /// its move is dropped AND the path's probe op re-generates (its
+    /// cache no longer matches: see `to_cache`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<ProbeTouchDto>,
+}
+
+/// One cached probing touch: the move index, the measurement ordinal
+/// (absent for a seek) and the probe target on the micron lattice.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ProbeTouchDto {
+    pub index: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measure: Option<u32>,
+    pub target: [f64; 3],
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -362,6 +379,16 @@ impl PathDto {
             cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
             notes: t.path.notes.clone(),
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
+            probes: t
+                .path
+                .probes
+                .iter()
+                .map(|p| ProbeTouchDto {
+                    index: p.index as u64,
+                    measure: p.measure,
+                    target: [lattice(p.target.x), lattice(p.target.y), lattice(p.target.z)],
+                })
+                .collect(),
         }
     }
 
@@ -383,6 +410,23 @@ impl PathDto {
             .map(CompSpanDto::to_span)
             .filter(|c| c.is_sane(&path.moves))
             .collect();
+        let touches: Vec<crate::cl::ProbeTouch> = self
+            .probes
+            .iter()
+            .filter_map(|p| {
+                Some(crate::cl::ProbeTouch {
+                    index: usize::try_from(p.index).ok()?,
+                    measure: p.measure,
+                    target: Point3::new(p.target[0], p.target[1], p.target[2]),
+                })
+            })
+            .collect();
+        // A touch that does not sit on its move is not trusted; a path
+        // that loses any touch keeps none, and the post refuses a path
+        // whose probe op states touches it lost (`posting`).
+        if touches.len() == self.probes.len() && touches.iter().all(|t| t.is_sane(&path.moves)) {
+            path.probes = touches;
+        }
         ToolpathCache {
             path,
             warnings: self.warnings.clone(),

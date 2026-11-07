@@ -64,6 +64,7 @@ mod tests {
             cycles: Vec::new(),
             notes: Vec::new(),
             comps: Vec::new(),
+            probes: Vec::new(),
         };
         let mut warns = vec![Warning::RapidInStock { at: 0 }, Warning::RapidInStock { at: 1 }];
         drop_axial_rapids(&params, &path, 1e-6, &mut warns);
