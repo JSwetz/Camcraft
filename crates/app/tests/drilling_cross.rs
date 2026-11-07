@@ -3,7 +3,8 @@
 //! drill op wearing typed cross holes on a mill-turn document
 //! generates Ok with every XY-only verify law silent (Mode::Radial
 //! stands them down - the kernel's construction law judges this
-//! chain); the cached path carries the pose tags tip-toward-shank
+//! chain - and reads its rapids as a solid against the raw stock,
+//! #79: a rapid inside the raw box never posts silently); the cached path carries the pose tags tip-toward-shank
 //! and its tips reach the promised depths; the station change
 //! traverses outside the stock's silhouette; the three refusals
 //! (mixed lists, a plain mill's turret, a bottom plane on radial
@@ -244,17 +245,21 @@ fn cross_params(cross: Vec<CrossHole>, bottom_z: Option<Height>) -> OpParams {
 }
 
 fn cross_world(word: &str) -> (World, History) {
+    cross_world_on(word, StockShape::Box { dx: 44.0, dy: 44.0, dz: 44.0 }, Location::default())
+}
+
+/// The bar's own envelope as raw stock: X [-15, 15], Y [-5, 5],
+/// Z [-15, 15] - a turned blank finished on its faces, so the
+/// kernel's part-measured standoffs are the stock's too (#79).
+fn bar_stock_world(word: &str) -> (World, History) {
+    let at = Location { pos: Point3::new(0.0, 0.0, -15.0), ..Location::default() };
+    cross_world_on(word, StockShape::Box { dx: 30.0, dy: 10.0, dz: 30.0 }, at)
+}
+
+fn cross_world_on(word: &str, stock: StockShape, at: Location) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
-    history.execute(
-        &world,
-        SetStock::new(
-            &world,
-            StockShape::Box { dx: 44.0, dy: 44.0, dz: 44.0 },
-            Location::default(),
-        )
-        .expect("box stock"),
-    );
+    history.execute(&world, SetStock::new(&world, stock, at).expect("box stock"));
     let cmd = LoadMachine::new(&world, "bench.mch".into(), Some(machine(word)));
     history.execute(&world, cmd.expect("machine"));
     add_tool(&world, &mut history, "DR-0400");
@@ -291,11 +296,14 @@ fn a_cross_drill_op_runs_clean_in_the_document() {
     // inward -X plunge), the chain is closed, no Z cycles (the
     // chain IS the radial truth), and the tips reach the promised
     // depths: blind floor x = 5, through bottom x = -16 (floor
-    // -15 minus the exit allowance).
-    let (world, mut history) = cross_world("mill-turn");
+    // -15 minus the exit allowance). The raw stock is the bar's own
+    // envelope: on the 44 mm box the kernel's part-measured approach
+    // stands inside the raw stock (#77), which the rapid law now
+    // convicts (#79) - see the never-posts-silently test below.
+    let (world, mut history) = bar_stock_world("mill-turn");
     create(&world, &mut history, "CD1", cross_params(typed(), None));
     let c = cache(&world, "CD1").expect("cached");
-    assert_eq!(status(&world, "CD1"), OpStatus::Ok, "Radial laws stand down: {:?}", c.warnings);
+    assert_eq!(status(&world, "CD1"), OpStatus::Ok, "the radial rapids read clean: {:?}", c.warnings);
     assert!(c.warnings.is_empty(), "a clean radial chain reported: {:?}", c.warnings);
     let t = c.path;
     assert!(t.is_chained() && t.all_finite());
@@ -422,6 +430,59 @@ fn recognition_finds_the_bar_two_holes_and_they_generate() {
     create(&world, &mut history, "CD1", cross_params(found, None));
     let c = cache(&world, "CD1").expect("cached");
     assert_eq!(status(&world, "CD1"), OpStatus::Ok, "{:?}", c.warnings);
+}
+
+/// Whether `p` stands inside the 44 mm raw box (X/Y [-22, 22],
+/// Z [0, 44]) and on no plunge line (tip or trailing body) cut
+/// before move `upto` - the test's own measure of "a rapid in uncut
+/// stock", independent of the verifier's.
+fn in_uncut_box(t: &camcraft_app::cl::Toolpath, upto: usize, p: Point3) -> bool {
+    let inside = p.x.abs() < 22.0 - 1e-6 && p.y.abs() < 22.0 - 1e-6 && p.z > 1e-6 && p.z < 44.0 - 1e-6;
+    let kerf = t.moves[..upto].iter().filter(|m| m.kind != MoveKind::Rapid).any(|m| {
+        let on_line = (p.y - m.to.y).abs() < 1e-6 && (p.z - m.to.z).abs() < 1e-6;
+        // Every plunge here runs -X with its body trailing out +X.
+        on_line && p.x >= m.to.x.min(m.from.x) - 1e-6
+    });
+    inside && !kerf
+}
+
+#[test]
+fn a_rapid_inside_the_raw_box_stock_never_posts_silently() {
+    // #79: the 44 mm box is the setup's raw stock. Wherever the cross
+    // drill's rapids stand (the test's own measure: every rapid
+    // endpoint inside the box and off any earlier plunge line), each
+    // is named RapidInStock and the post refuses - the gate's rapid
+    // law sees radial programs now. A planner that hops outside the
+    // raw stock (#77) owes nothing here: no rapid inside, no verdict
+    // asked.
+    let (world, mut history) = cross_world("mill-turn");
+    create(&world, &mut history, "CD1", cross_params(typed(), None));
+    let c = cache(&world, "CD1").expect("cached");
+    let t = &c.path;
+    let through_stock: Vec<usize> = t
+        .moves
+        .iter()
+        .enumerate()
+        .filter(|(i, m)| m.kind == MoveKind::Rapid && (in_uncut_box(t, *i, m.from) || in_uncut_box(t, *i, m.to)))
+        .map(|(i, _)| i)
+        .collect();
+    if through_stock.is_empty() {
+        return;
+    }
+    for i in &through_stock {
+        assert!(
+            c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: *i }),
+            "rapid {i} in raw stock went unnamed: {:?}",
+            c.warnings
+        );
+    }
+    let out = std::env::temp_dir().join(format!("camcraft_cross_box_{}.nc", std::process::id()));
+    let posted = camcraft_app::posting::post_setup(&world, &out);
+    let _ = std::fs::remove_file(&out);
+    match posted {
+        Ok(_) => panic!("a radial program with rapids {through_stock:?} in raw stock posted"),
+        Err(e) => assert!(e.contains("post blocked"), "refused, but not by the gate: {e}"),
+    }
 }
 
 fn tmp_path(tag: &str) -> PathBuf {

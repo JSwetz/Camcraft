@@ -5,7 +5,8 @@
 //! verification reads the path's own truth - and the truth is a
 //! horizontal chain the vertical height field cannot judge: the
 //! kernel's caller verifies it in `Mode::Radial`, whose doctrine
-//! (stands (a),(b),(c),(c3),(d) down to the construction law, keeps
+//! (stands (a),(b),(c),(c3) down to the construction law, reads
+//! (d)'s rapids as a solid against the raw stock - #79 - and keeps
 //! the fixture laws) is stated where the mode lives. There is no
 //! canned `Cycle` record for a radial hole yet: the chain is the
 //! single truth until the post learns G8x-style radial vocabulary.

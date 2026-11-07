@@ -12422,3 +12422,45 @@ usual. Why: the change is a test file - the zip ships no tests, so its
 contents cannot differ, and the full release gate (~50 min) already passed on
 every shipped file. Dropped: re-running the whole release gate for six test
 lines. The rule stands for any mid-cut change that touches shipped code.
+
+## #79: the rapid law reads radial programs as a solid, not a column (2026-11-07, Prime Directive)
+
+Why it was off: M5.2 F2 stood law (d) down for `Mode::Radial` because the
+column (height-field) reading cannot see a horizontal bore - a retract
+sliding out along its own kerf reads as lateral travel under solid stock -
+and trusted the cross-drill kernel's traverse law instead. That made the
+post gate blind for radial programs: #77's station change 5 mm inside raw
+stock posted silently.
+
+- **Chosen: a solid reading for Radial (`verify/rapids_radial.rs`).** Each
+  rapid's flute body - discs of `r - gouge_tol` square to the pose at the
+  tip and every 1 mm back to the flute length, walked under the modal pose
+  rule (`midpose::intervals`, 0.5 mm of travel at the far end) - is tested
+  against the stock prism (the footprint `Rest::in_stock` already reads,
+  under the stock top) minus the kerf the cuts BEFORE the rapid swept (a
+  tool-radius cylinder about each cutting move, extended back along the
+  pose by the flute length when the move plunges along its own axis).
+  Any sample in stock and in no earlier kerf convicts: `RapidInStock { at }`,
+  the mill law's own blocking word. Retracts up a just-drilled hole and the
+  peck's chip break are acquitted by the kerf - by reading the stock, never
+  by the path's description of itself (the M13.7 swarf finding); the
+  approach to a mouth on the stock surface is clear by geometry.
+- The prism is unbounded below, the same reading the column law takes; a
+  turned bar or box about the spindle is a Z prism, so the footprint is the
+  solid measured about the spindle wherever the work offset puts it.
+- Dropped: a `stock_bottom_z` field on `VerifyContext` (30 constructor
+  sites, motion tests included, for a reading the mill law never had);
+  sweeping the stack against the stock MESH with `SolidIndex` (the raw
+  stock mesh has no holes, so every retract up its own hole crosses the
+  mouth's facet - the kerf exemption needs point samples anyway); an
+  unconditional axial-retract exemption like the mill's vertical one (an
+  inward axial rapid is exactly #77's approach into raw stock).
+- Not covered (as in the mill law): shank and holder bands against stock
+  along a rapid - the flute body is what the law reads.
+- Fixture finding: `drilling_cross`'s 44 mm box stock is REAL #77 - on
+  main the kernel's part-measured approach stops at x 20 inside the x 22
+  box and the hop slides through it (moves 0, 6; move 7 is under the box's
+  Z 0 floor, convicted by the unbounded-below reading). The clean-document
+  test now runs on a stock equal to the bar; a new test pins that the 44 mm
+  box never posts silently (named RapidInStock, post blocked) and owes
+  nothing once #82's planner hops outside the raw stock.

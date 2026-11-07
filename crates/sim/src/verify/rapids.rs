@@ -4,6 +4,7 @@ use super::laws::xy;
 use super::midpose;
 use super::probe::Cutter;
 use super::rapids_posed::{self, PartIndex};
+use super::rapids_radial;
 use super::rest::Rest;
 use super::types::{Mode, VerifyContext, Warning};
 
@@ -21,12 +22,13 @@ use crate::geo2d::Point2;
 /// turning rapids' safety promise is the kernel's own: radial exits
 /// from cut stations and traverses at rho_clear, asserted by each
 /// family's tests. Fixture steel (d2) still stands - it is a box.
-/// Mode::Radial stands down on the same reading (M5.2 F2): the
+/// Mode::Radial leaves the column on the same reading (M5.2 F2): the
 /// bore is a tunnel a height field cannot see, so the retract
 /// sliding out along its own kerf reads as lateral travel under
-/// solid stock; the exit-the-hole-along-its-axis and outside-
-/// stock_r traverse promises are the kernel's, asserted in
-/// drilling's cross tests.
+/// solid stock. It is judged instead by the solid reading of
+/// [`super::rapids_radial`] (#79): the flute body against the stock
+/// prism minus the kerf of the cuts before it - the kernel's
+/// traverse promise is proved again at the post gate, never trusted.
 ///
 /// A POSED rapid (held or stated pose off the upright) that the
 /// column reading convicts is re-read against the solid before the
@@ -41,7 +43,11 @@ pub(super) fn rapids_in_stock(
     cutter: &Cutter,
     warns: &mut Vec<Warning>,
 ) {
-    if !matches!(cx.mode, Mode::Revolve | Mode::Radial | Mode::Rotary) {
+    if cx.mode == Mode::Radial {
+        rapids_radial::radial_rapids(path, cx, rest, warns);
+        return;
+    }
+    if !matches!(cx.mode, Mode::Revolve | Mode::Rotary) {
         let poses = midpose::poses(path);
         let mut part = PartIndex::new();
         for (i, m) in path.moves.iter().enumerate() {
