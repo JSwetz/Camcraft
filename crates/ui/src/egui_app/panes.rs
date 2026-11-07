@@ -512,7 +512,7 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
 /// Command to bundled glyph: the same table the retired imgui icons.rs
 /// store keyed (and ribbon.rs's `Item.icon` chose per cell), so the ribbon,
 /// the browser's `spec.icon` slots and the store name one set of pixels.
-fn icon_of(c: Cmd) -> Option<Icon> {
+pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
     match c {
         Cmd::New => Some(Icon::New),
         Cmd::Model => Some(Icon::OpenModel),
@@ -536,14 +536,27 @@ fn icon_of(c: Cmd) -> Option<Icon> {
                 Some(Icon::Generate)
             }
         },
-        // The overflow button carries no glyph (M6.2): the ellipsis in
-        // its label is the whole affordance, so no asset is minted for
-        // it and no font subset is trusted with a chevron.
-        Cmd::More(_) => None,
-        // The machine door carries no glyph either (the no-new-asset
-        // law): its caption *is* the machine, and every word of it
-        // names a workspace - an icon would repeat the cell's own text.
-        Cmd::Machine => None,
+        // A section door wears its family's signature glyph (#207: with
+        // no pins, glyph-less doors left every Create cell of a fresh
+        // install text-only - users read it as missing icons). No new
+        // asset: an op glyph that says what the family makes, distinct
+        // from the machine door's beside it; the caption still names
+        // the section.
+        Cmd::More(s) => Some(match s {
+            operation::Section::Mill2D => Icon::Pocket,
+            operation::Section::Mill3D => Icon::Finish3D,
+            operation::Section::Drilling => Icon::Drill,
+            operation::Section::MultiAxis => Icon::MultiAxisRough,
+            operation::Section::Turning => Icon::Face,
+        }),
+        // The machine door wears its workspace's glyph (#207), from the
+        // existing set: the face mill for Milling, the turned bar for
+        // Turning, the rotary bar for Mill-turning.
+        Cmd::Machine => Some(match camcraft_app::machine::kind_of(&state.world) {
+            camcraft_app::machine::Kind::Lathe => Icon::RotaryContour,
+            camcraft_app::machine::Kind::MillTurn => Icon::RotaryParallel,
+            camcraft_app::machine::Kind::Mill => Icon::Face,
+        }),
         Cmd::Undo => Some(Icon::Undo),
         Cmd::Redo => Some(Icon::Redo),
         Cmd::Run => Some(Icon::Generate),
@@ -952,7 +965,7 @@ pub fn ribbon(
             pal,
             enabled(c, state),
             toggled(c, state),
-            icon_of(c).and_then(|i| icons.and_then(|s| s.texture(i))),
+            icon_of(c, state).and_then(|i| icons.and_then(|s| s.texture(i))),
         );
         // The pin gesture lives at the cell, not in a command: the
         // right-click that answers it names itself in every live tip
