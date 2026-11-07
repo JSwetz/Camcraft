@@ -113,6 +113,36 @@ pub fn rotary_offset_in(
     p: &Pocket3DParams,
     c: &AxisControl,
 ) -> Result<Toolpath, GenError> {
+    let (base, d) = develop(facets, stock, p)?;
+    wrap_exit::wrap_exit(&base, &d.ax, &d.e1, &d.e2, d.rho_ref, d.r, c)
+}
+
+/// The DEVELOPED program [`rotary_offset_in`] wraps (issue #9): the
+/// ladder's own path in wrap space - s the arc length at the stock's
+/// radius, v the station, height the radius - before the world exit
+/// poses it. The plane the planner's load and kink laws are read on.
+pub fn rotary_offset_developed(
+    facets: &[Triangle],
+    stock: Option<&[Triangle]>,
+    p: &Pocket3DParams,
+) -> Result<Toolpath, GenError> {
+    develop(facets, stock, p).map(|(base, _)| base)
+}
+
+/// What the world exit needs of the development.
+struct Developed {
+    ax: axis::Axis,
+    e1: Point3,
+    e2: Point3,
+    rho_ref: f64,
+    r: f64,
+}
+
+fn develop(
+    facets: &[Triangle],
+    stock: Option<&[Triangle]>,
+    p: &Pocket3DParams,
+) -> Result<(Toolpath, Developed), GenError> {
     if facets.is_empty() {
         return Err(GenError::Invalid("no facets to wrap".into()));
     }
@@ -336,8 +366,10 @@ pub fn rotary_offset_in(
     // part keeps both, the seam copy closing its rings.
     let one_lap = wrap_rect(s_lo - pad, (s_lo + period + pad).min(s_hi + pad), v_lo, v_hi);
     let air_above = rho_max + q.stock_to_leave.max(0.0);
-    let base = machining3d::pocket3d_air_split(&wrap, &one_lap, &rect, air_above, &q)?;
-    wrap_exit::wrap_exit(&base, &ax, &e1, &e2, rho_ref, r, c)
+    // The seam (issue #9): a level whose area a cover end cuts short of
+    // a whole lap is refused Adaptive by name (`machining3d::hsm::Seam`).
+    let base = machining3d::pocket3d_air_split(&wrap, &one_lap, &rect, air_above, Some((period, 2.0 * pad)), &q)?;
+    Ok((base, Developed { ax, e1, e2, rho_ref, r }))
 }
 
 /// The wrap's footprint: one rectangle over the covered development

@@ -38,9 +38,43 @@ use crate::machining2d::{
 pub const REST_RINGS: &str =
     "adaptive: the rest pass cuts Offset rings at the load step - its targets are what the simulation left, entered by plunges";
 
+/// Said per developed level whose area the rotary wrap's seam cuts.
+pub const SEAM_RINGS: &str =
+    "adaptive: the developed level crosses the wrap's seam (its area is cut by the seam, not by a wall of the work)";
+
 /// Said once per path where the offset shells run under Adaptive.
 pub const SHELL_RINGS: &str =
     "adaptive: the offset shells cut Offset rings at the load step - the HSM plan's lifted returns are proved on the plane, not on the shell";
+
+/// The rotary wrap's seam (issue #9): the developed cover runs from
+/// `lo` to `hi` in s and repeats every `period`. A level's center area
+/// whose component reaches a cover end within `reach` (the seam pad
+/// plus the erosion off the end wall) is cut there by the seam, not by
+/// a wall of the work - unless the component spans a whole period,
+/// where the stock wraps fully and the duplicated lap covers every
+/// azimuth (the seam pad law). Such a level is refused by name.
+#[derive(Clone, Copy, Debug)]
+pub struct Seam {
+    pub lo: f64,
+    pub hi: f64,
+    pub period: f64,
+    pub reach: f64,
+}
+
+impl Seam {
+    /// Does any component of `center` cross the seam?
+    pub fn crossed_by(&self, center: &Region) -> bool {
+        let tol = 1e-6 * self.period.abs().max(1.0) + 0.05 * self.reach.abs();
+        center.loops().iter().filter(|l| l.is_ccw()).any(|l| {
+            let (a, b) = l
+                .points()
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.x), b.max(q.x)));
+            let at_end = a <= self.lo + self.reach + tol || b >= self.hi - self.reach - tol;
+            at_end && b - a < self.period - tol
+        })
+    }
+}
 
 /// One level's plan: its cutter-center walks, the microlift return each
 /// pass after the first is reached by (`None`: the ladder's pass link),
@@ -73,6 +107,10 @@ impl LevelPlan {
 /// The level's passes at plane `z` over the cutter-center area `center`:
 /// the strategy's tiling, or under Adaptive the HSM plan - with the
 /// planner's notes on the builder.
+// One slot per law the level threads (the ladder's own shape): the
+// builder, the area, the params, the plane, the hop, the rest and shell
+// flags, and the wrap's seam (issue #9).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn plan_level(
     b: &mut PathBuilder,
     center: &Region,
@@ -81,6 +119,7 @@ pub(super) fn plan_level(
     hop_z: f64,
     rest: bool,
     shell: bool,
+    seam: Option<&Seam>,
 ) -> Result<LevelPlan, GenError> {
     let step = p.tiling_step();
     if p.strategy != PocketStrategy::Adaptive {
@@ -88,6 +127,11 @@ pub(super) fn plan_level(
     }
     if rest || shell {
         b.note_once(if rest { REST_RINGS } else { SHELL_RINGS });
+        let passes = plan_passes(center, step, p.climb, PocketStrategy::OffsetRings)?;
+        return Ok(LevelPlan::rings(passes, p.helix_radius));
+    }
+    if seam.is_some_and(|sm| sm.crossed_by(center)) {
+        b.note(format!("{SEAM_RINGS} - Offset rings cut the developed level at radius {z:.3} instead"));
         let passes = plan_passes(center, step, p.climb, PocketStrategy::OffsetRings)?;
         return Ok(LevelPlan::rings(passes, p.helix_radius));
     }
@@ -111,7 +155,10 @@ pub(super) fn plan_level(
         blend_turns: false,
         links: p.links,
     };
-    let what = format!("the level at Z {z:.3}");
+    let what = match seam {
+        Some(_) => format!("the developed level at radius {z:.3}"),
+        None => format!("the level at Z {z:.3}"),
+    };
     let (passes, notes, s, room, joins) = adaptive_passes(center, &pp, &what, false)?;
     for n in notes {
         b.note(n);
@@ -151,4 +198,30 @@ pub(super) fn plan_level(
 /// The microlift return onto the next pass's start at plane `z`.
 pub(super) fn microlift(b: &mut PathBuilder, ret: &Return, z: f64, hop_z: f64, feed: f64) {
     microlift_link(b, ret, z, hop_z, feed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Seam;
+    use crate::geo2d::{Loop, Point2, Region};
+
+    fn rect(x0: f64, x1: f64) -> Region {
+        let pts = vec![Point2::new(x0, 0.0), Point2::new(x1, 0.0), Point2::new(x1, 10.0), Point2::new(x0, 10.0)];
+        let Ok(l) = Loop::new(pts) else { panic!("rect loop") };
+        let Ok(r) = Region::new(vec![l]) else { panic!("rect region") };
+        r
+    }
+
+    /// Issue #9's seam law on the developed plane: a cover from 0 to 100
+    /// (two laps of 50), reach 7. An area within reach of a cover end and
+    /// short of a lap is cut by the seam; one standing inside, or one
+    /// spanning a whole lap (the seam pad law), is not.
+    #[test]
+    fn the_seam_cuts_an_area_at_a_cover_end_short_of_a_lap() {
+        let sm = Seam { lo: 0.0, hi: 100.0, period: 50.0, reach: 7.0 };
+        assert!(sm.crossed_by(&rect(4.0, 20.0)), "at the low end");
+        assert!(sm.crossed_by(&rect(80.0, 95.0)), "at the high end");
+        assert!(!sm.crossed_by(&rect(30.0, 60.0)), "inside the cover");
+        assert!(!sm.crossed_by(&rect(2.0, 98.0)), "a whole lap band");
+    }
 }

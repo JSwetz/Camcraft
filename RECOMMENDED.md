@@ -12115,3 +12115,72 @@ load"), then the extra descents (the 2 remaining hops plus high descents read as
 descents into stock?), then the budget at ~32,000 r with the #13 band test re-timed.
 **Dropped:** riding the lead from its own first point (that point holds stock in the
 rim, so every return was refused); a resampled ride back (it reads as a crossing).
+
+
+## #9 round 2: Adaptive runs on the rotary developed wrap - the M11.4 pin is lifted, refused levels are named by radius (2026-11-07)
+
+**Chosen:** this round resumes round 1's WIP. `machining3d::pocket3d_air_split` no
+longer rewrites Adaptive to OffsetRings. Each developed level now goes to
+`hsm::plan_level`. The HSM planner either plans it, or refuses it as "the developed
+level at radius R" and Offset rings cut it. The seam law (`hsm::Seam`) is round 1's:
+under Adaptive, a centre component within 2*(r+leave) of a cover end that spans less
+than one lap is refused by name. OffsetRings is untouched.
+
+**Why the measuring changed (round 1's 0.0 % D):**
+- The ladder's first level stands *on* the stock's own skin. `cut_levels` includes
+  top_z = rho_ref.
+- With the r6.2 clamp stock, that skin level is the only one the planner plans. The
+  levels that cut material (5.7, 5.2) are refused on out-of-cut travel. So "0 % D" was
+  true, but it proved nothing.
+- Raising the measuring stock above the skin is no fix. The plan at the top level posts
+  no entry descent, so the reading becomes a phantom 100 % D at its dive.
+- The fixture now clamps an r7 bar, and is measured from its own skin. Levels 6.5, 6.0
+  and 5.5 cut real stock and are HSM-planned.
+- The reader also applies the bore law that pocket3d_hsm uses: planar moves inside a
+  helical descent's circle count as entry engagement. Without it, the 180-deg readings
+  were the helix's closing orbit.
+
+**Entry:** Helix (r1). Under Plunge the planner itself named a 76.8 % D overload out of
+the tool-size bore. Under Helix it names none.
+
+**Readings** (release, turned bar wall r6 / neck r5, r7 stock, BN D6, leave 0.5,
+stepdown 0.5, law 14.6 % D + 35 % = 19.7 %):
+
+| Radius | Planar moves | Proved arcs | Load | Breaks past 5 deg |
+|---|---|---|---|---|
+| 6.500 | 22,528 | 8,694 | 19.5 % D | 0 |
+| 6.000 | 22,528 | 8,694 | 19.5 % D | 0 |
+| 5.500 | 7,416 | 2,620 | 18.8 % D | 0 |
+
+- 5.000 is refused by name: the planning budget runs out after 86 revolutions, and
+  Offset rings cut it.
+- The planner's own overload notes: none.
+- Every world move is posed radial, and no arc survives the wrap.
+- **Load margin is thin:** 19.5 against a 19.7 bound.
+
+**Rings digest:**
+- Read on a build of db95014 *without* the patch: Helix (5263, 2919766036457321567),
+  Plunge (5194, 6097177489831100083).
+- Plunge matches round 1's patched reading, and the pinned Helix digest passes on the
+  patched build. The rings are byte-identical.
+
+**Lanes:**
+- `rotary_adaptive::adaptive_plans_the_developed_levels_under_the_load_and_kink_laws`
+  (~10 min debug) is heavy.
+- `the_developed_window_reaches_the_planner_and_names_each_refusal` is a 12 long neck
+  window. It still took 190 s in debug, so it is heavy too. Both run in about 110 s in
+  release with --ignored.
+- Debug keeps `offset_rings_on_the_wrap_are_the_program_they_always_were` and the
+  seam-law unit test `machining3d::hsm::tests::the_seam_cuts_an_area_at_a_cover_end_short_of_a_lap`.
+
+**Dropped:**
+- An end-to-end seam fixture. A D-flat bar fails the axis fit's sphere guard when it is
+  short (20 long). At 40 long it passes the guard, but the wrap's slicer reports "the
+  mesh is open" at every level between the flat and the wall: 8, 4 and 16 dangling
+  chord ends across three variants (flat through the ends, a closed flat across the
+  seam, a closed flat beside it). The wrap development has not met a non-revolved
+  feature before. That belongs in its own issue, not under #9. The seam law is pinned at
+  unit level instead.
+- A slimmer debug window. A 10 long window at a 2 mm stepdown still took 130 s. It also
+  made the planner narrow the helix to 0.9 and then name an overload. That is a second
+  finding to follow up: a narrowed helix bore under Adaptive.
