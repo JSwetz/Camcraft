@@ -16,6 +16,15 @@ use crate::geo2d::Point2;
 use crate::rest::PriorPlan;
 use crate::stock_sim::Dexel;
 
+/// Whether an operation's verdict reads the program ahead, so its stamp
+/// must digest it (issue #109): Pocket3D's rest and the Drill laws, and
+/// every unposed op - verify's prior acquittal and the turned family's
+/// pilot and facing credits are read exactly when no 3+2 frame stands
+/// (`job::collect_job`'s `verify_prior`). A posed op reads none of it.
+pub(crate) fn reads_prior(params: &super::OpParams) -> bool {
+    matches!(params.kind(), super::OpType::Pocket3D | super::OpType::Drill) || params.tilt().is_none()
+}
+
 /// The plan, simulated on first [`PriorCell::get`]. A plan that cannot
 /// be cut (a posed predecessor the column grid refuses) is logged and
 /// read as unknown - the raw stock, never air.

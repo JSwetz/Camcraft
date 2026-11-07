@@ -114,8 +114,9 @@ fn a_station_hop_spliced_through_the_bar_is_named_and_the_post_refuses() {
     let at = c.path.moves.len() - 1;
     let w = judge_on_bar_stock(&c.path);
     assert_eq!(w, vec![Warning::RapidInStock { at }], "{w:?}");
-    c.warnings = w;
-    e.entity_view(&world).set(c);
+    // Rebuilt, never edited in place: the cache's path signature is
+    // taken at construction (#109 review B1).
+    e.entity_view(&world).set(camcraft_app::schema::Toolpath::new(c.path, w));
     assert_eq!(status(&world, "CD1"), OpStatus::Ok, "the splice must not stale the op");
     match post(&world, "bar_spliced") {
         Ok(()) => panic!("a rapid through the bar posted"),
