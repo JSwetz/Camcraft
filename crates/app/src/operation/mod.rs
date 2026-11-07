@@ -64,7 +64,6 @@ use crate::machining2d::{
 use crate::machining3d::{self, Entry3D, Pocket3DParams};
 use crate::model;
 use crate::schema::Operation;
-use crate::stock::StockShape;
 use crate::verify::{self, VerifyContext, Warning};
 
 mod heights;
@@ -78,6 +77,8 @@ pub mod tool_gate;
 mod params;
 mod stamp;
 pub use stamp::*;
+mod stamp_stock;
+pub use stamp_stock::reads_setup_stock;
 mod material;
 pub use material::*;
 mod material_region;
