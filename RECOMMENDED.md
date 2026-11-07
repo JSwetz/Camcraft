@@ -12882,3 +12882,10 @@ keeps the part-only chain bit for bit.
   GPU, and project-file access. Both are downloadable release files; store
   publication and runtime validation still require a successful runner build
   and desktop hand test.
+- The first AppImage crashed before `main`: linuxdeploy rewrote the executable
+  and replaced its `.init` instructions with ELF header data. Assemble the
+  AppDir directly and use the appimagetool already bundled in the pinned
+  linuxdeploy download. The release job extracts the finished AppImage and
+  compares its ELF to the built binary byte for byte. The Ubuntu runner has
+  no graphics adapter for a headless launch; the desktop run was checked on
+  Fedora.
