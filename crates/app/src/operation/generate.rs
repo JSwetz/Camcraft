@@ -165,6 +165,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // M11.3: the tool says whether an entry may plunge into solid - laid
     // over the generation's copy only, never stored in the op.
     lk.approach.center_cutting = tool.center_cutting;
+    // The bar the turning kinds approach from (#130), read once.
+    let (turn_stock, turn_note) = super::turning_stock::read(&params, &material.facets, stock_facets.as_deref());
     let (region, path) = match &params {
         OpParams::Face {
             stepover,
@@ -2034,7 +2036,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::profile_rough(
+            let path = crate::turning::profile_rough_in(
                 &material.facets,
                 &crate::turning::ProfileRoughParams {
                     clearance_z: hl.clearance,
@@ -2047,6 +2049,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2070,7 +2073,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::profile_finish(
+            let path = crate::turning::profile_finish_in(
                 &material.facets,
                 &crate::turning::ProfileFinishParams {
                     clearance_z: hl.clearance,
@@ -2081,6 +2084,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2113,7 +2117,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::groove_rough(
+            let path = crate::turning::groove_rough_in(
                 &material.facets,
                 &crate::turning::GrooveRoughParams {
                     clearance_z: hl.clearance,
@@ -2126,6 +2130,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blade_width: tool.width,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2149,7 +2154,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::groove_finish(
+            let path = crate::turning::groove_finish_in(
                 &material.facets,
                 &crate::turning::GrooveFinishParams {
                     clearance_z: hl.clearance,
@@ -2160,6 +2165,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blade_width: tool.width,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2184,7 +2190,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::part(
+            let path = crate::turning::part_in(
                 &material.facets,
                 &crate::turning::PartParams {
                     clearance_z: hl.clearance,
@@ -2196,6 +2202,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blade_width: tool.width,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2229,7 +2236,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::thread(
+            let path = crate::turning::thread_in(
                 &material.facets,
                 &crate::turning::ThreadParams {
                     tolerance: *tolerance,
@@ -2244,6 +2251,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     insert_width: tool.width,
                     form_angle: tool.tip_angle,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2397,7 +2405,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::form(
+            let path = crate::turning::form_in(
                 &material.facets,
                 &crate::turning::FormParams {
                     tolerance: *tolerance,
@@ -2409,6 +2417,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     band_width: tool.width,
                     crown_radius: tool.nose_radius,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2457,6 +2466,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             (region, path)
         }
     };
+    let path = super::turning_stock::noted(path, turn_note);
 
     // M3.2 stage B: what the program clamps to. The op's setup context
     // decides - user fixtures bound to it (tagged models, implicit-

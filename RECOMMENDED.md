@@ -13578,3 +13578,33 @@ revolved (follow-up material if users hit it with long keyways).
   states the OD assumption (an internal blade must flip it or pass None).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
+
+## Issue #130 - turning kinds approach from the stock
+
+- **Envelope = one radius.** The kernels get `StockEnv { r_out, clearance }`:
+  the stock's widest radius about the part's fitted axis (vertex max, the
+  same reading the meridian law's outline starts from). Chosen over a
+  per-station outline: a scalar is conservative for every rapid, and the
+  extra rungs it adds over a pre-turned blank are air cuts, never gouges.
+- **Only a bar wider than the part counts** (`r_out > part r_max + 1e-6`).
+  A bar-sized stock keeps today's part-based program bit for bit, so the
+  lathe goldens did not move. Dropped: always adding the clearance, which
+  would have moved every snug-bar program by a millimetre for no safety.
+- **Retract clearance = 1.0 mm on radius** (`turning_stock::STOCK_CLEARANCE`),
+  a constant for now. It belongs as a per-op parameter with that default
+  (CAM choices are user parameters); a follow-up issue should expose it.
+- **Profile rough** counts its rungs from the bar's OD down to the part
+  plus leave, and drops a rung whose nose never reaches under the OD
+  (pure air). Groove rough and parting peck from the OD. Profile finish,
+  groove finish, threading and form only move their rapids out.
+- **Not touched:** Facing (#122, claimed by an outside contributor), the
+  contour rides (chamfer, taper, multi-pass - not in the issue), and the
+  boring bar, whose approach is already centred on the spindle - the most
+  room any stock ID allows; a stock hole too small for the bar stays the
+  meridian law's refusal.
+- **No stock readable** (no setup stock, an empty mesh, an axis fit that
+  fails): the part-based path stands and carries the note "no setup stock
+  could be read about the spindle ...".
+- **Fixture:** `turning_profile.rs` moved from a 40 mm box to bar-sized
+  stock (as #103 did for the other lathe fixtures): with #130 the box's
+  28 mm revolved corner made its ladder-count pins a 30-rung job.
