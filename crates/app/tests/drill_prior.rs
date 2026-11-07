@@ -9,13 +9,14 @@
 //! shop rule "measure the drill's reach from the surface it enters"; no
 //! vendor material.
 //!
-//! Gate map (#89): covers app::operation (drill_reach, drill_top,
+//! Gate map (#89, #122): covers app::operation (drill_reach, drill_top,
 //! drill_prior, the Drill arm of generate, the Drill stamp), app::rest
 //! (PriorPlan), app::posting (the gate).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
 
+use camcraft_app::cl::MoveKind;
 use camcraft_app::commands::{
     AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, SetStock,
 };
@@ -298,10 +299,18 @@ fn revolve(meridian: &[(f64, f64)], segs: usize) -> Mesh {
 /// r2.05 to Z 10, in its box stock (z -20..22), on a lathe. The
 /// finished end face is Z 20.
 fn lathe_world() -> (World, History) {
+    lathe_world_with(22.0, StockShape::Box { dx: 24.0, dy: 24.0, dz: 42.0 })
+}
+
+/// The lathe fixture with the part's end at `part_top` (the bore and
+/// the stock's z -20..22 unchanged): 22 models the allowance on the
+/// part, 20 is the part at its finished length with the allowance
+/// declared only in the stock (#122).
+fn lathe_world_with(part_top: f64, stock: StockShape) -> (World, History) {
     let world = new_world();
     let mut h = History::default();
     let at = Location { pos: Point3::new(0.0, 0.0, -20.0), ..Location::default() };
-    let s = SetStock::new(&world, StockShape::Box { dx: 24.0, dy: 24.0, dz: 42.0 }, at);
+    let s = SetStock::new(&world, stock, at);
     h.execute(&world, s.expect("stock"));
     let lathe = Machine {
         model: "TestBench lathe".into(),
@@ -315,7 +324,10 @@ fn lathe_world() -> (World, History) {
     for t in ["DR-0400", "TN-1600-0R8", "GT-0300"] {
         add_tool(&world, &mut h, t);
     }
-    let bar = revolve(&[(0.0, -20.0), (10.0, -20.0), (10.0, 22.0), (2.05, 22.0), (2.05, 10.0), (0.0, 10.0)], 64);
+    let bar = revolve(
+        &[(0.0, -20.0), (10.0, -20.0), (10.0, part_top), (2.05, part_top), (2.05, 10.0), (0.0, 10.0)],
+        64,
+    );
     h.execute(&world, ImportModel::from_mesh("bar", bar));
     (world, h)
 }
@@ -342,9 +354,9 @@ fn a_lathe_axial_drill_after_facing_posts() {
     create(&world, &mut h, "Op2", "DR-0400", "bar", drill(TOP, 10.0, TOP + 1.0));
     generate(&world, &mut h, "Op2").unwrap_or_else(|e| panic!("the drill on the faced end generates: {e}"));
     // The drill's own verdict: Ok. (The whole program's post is not
-    // asserted - the Facing kind faces the work MODEL, so this fixture's
-    // facing pass reads as a gouge of the modelled allowance; a facing
-    // of stock above the part is its own gap, not this law's.)
+    // asserted - this fixture models the allowance on the part, so its
+    // facing pass reads as a gouge of it; the stock-allowance fixture
+    // below (#122) posts the whole program.)
     assert_eq!(status(&world, "Op2"), OpStatus::Ok);
 }
 
@@ -392,4 +404,43 @@ fn a_parting_op_ahead_does_not_credit_the_lathe_end_face() {
     create(&world, &mut h, "Op2", "DR-0400", "bar", drill(TOP, 10.0, TOP + 1.0));
     let e = generate(&world, &mut h, "Op2").err().unwrap_or_else(|| panic!("the kerf credited the end face"));
     assert!(e.contains("below the stock top Z 22.000"), "{e}");
+}
+
+/// #122: the bar at its finished length (end Z 20), the 2 mm facing
+/// allowance declared only in the setup's round stock (to Z 22). The
+/// Facing faces the stock's allowance down to the part's end - it no
+/// longer reports "nothing to face" - and the axial drill after it is
+/// judged against that faced end and stands Ok. (The whole program's
+/// post is not asserted yet: the footprint rapid law convicts lathe
+/// facing's inward rapids on main too - #159, riding #103's meridian
+/// law - and this pin grows its post line when that lands.)
+#[test]
+fn a_stock_facing_allowance_is_faced_and_the_drill_after_it_stands() {
+    let (world, mut h) = lathe_world_with(TOP, StockShape::Cylinder { diameter: 24.0, height: 42.0 });
+    create(&world, &mut h, "Op1", "TN-1600-0R8", "bar", facing());
+    generate(&world, &mut h, "Op1").unwrap_or_else(|e| panic!("the stock allowance faces: {e}"));
+    let e = model::find_by_name(&world, "Op1").expect("Op1");
+    let path = model::toolpath_of(&world, &e).expect("the facing's path").path;
+    let feeds_to_axis: Vec<f64> = path
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed && m.to.x.hypot(m.to.y) < 1e-6)
+        .map(|m| m.to.z)
+        .collect();
+    assert_eq!(feeds_to_axis.len(), 5, "five passes over the 2 mm allowance: {feeds_to_axis:?}");
+    let nose = 0.8;
+    assert!(feeds_to_axis.iter().all(|z| *z >= TOP + nose - 1e-6), "a pass below the finished end: {feeds_to_axis:?}");
+    create(&world, &mut h, "Op2", "DR-0400", "bar", drill(TOP, 10.0, TOP + 1.0));
+    generate(&world, &mut h, "Op2").unwrap_or_else(|e| panic!("the drill on the faced end generates: {e}"));
+    assert_eq!(status(&world, "Op2"), OpStatus::Ok);
+}
+
+#[test]
+fn a_finished_part_with_no_stock_allowance_has_nothing_to_face() {
+    // The stock's end level with the part's: neither has material
+    // above the facing plane, and the refusal names it.
+    let (world, mut h) = lathe_world_with(TOP, StockShape::Cylinder { diameter: 24.0, height: 40.0 });
+    create(&world, &mut h, "Op1", "TN-1600-0R8", "bar", facing());
+    let e = generate(&world, &mut h, "Op1").err().unwrap_or_else(|| panic!("a facing of nothing generated"));
+    assert!(e.contains("nothing to face"), "{e}");
 }
