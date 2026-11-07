@@ -192,7 +192,10 @@ fn tilted_world() -> World {
     };
     history.execute(
         &world,
-        CreateOperation::new(&world, "P", "EM-0600-4FL", SrcRef::Entity("part".into()), params).expect("create"),
+        // The stock is the volume to remove (it coincides with the part
+        // box): a whole-PART source would keep the part and refuse
+        // (issue #12).
+        CreateOperation::new(&world, "P", "EM-0600-4FL", SrcRef::Stock, params).expect("create"),
     );
     history.execute(&world, GenerateOperation::new(&world, "P").expect("generate"));
     mount(&world, &mut history, "tilthead.mch");

@@ -124,6 +124,19 @@ fn region_turn_core(
     {
         return controlled(selection_region(world, op.setup.as_deref(), items, &op.params, &op.area).ok()).map(|(r, t)| (r, t, None));
     }
+    // A whole part under the pocket family: the stock around it, drawn
+    // as generation cuts it (issue #12) - local under a tilt.
+    if let Some(r) = whole_model_pocket(world, op.setup.as_deref(), &op.src, &op.params, frame) {
+        let (r, turn) = controlled(r.ok())?;
+        return match frame {
+            None => Some((r, turn, None)),
+            Some(f) => {
+                let zl = resolve_height(world, op.setup.as_deref(), Some(&op.src), op.params.region_height())?
+                    - f.origin.z;
+                f.world_region(&r, zl).ok().map(|w| (w, turn, Some((r, zl))))
+            }
+        };
+    }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
     match frame {
         None => controlled(

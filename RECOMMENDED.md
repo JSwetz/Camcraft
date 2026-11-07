@@ -11672,3 +11672,16 @@ accepted when every vertex is within 0.01 mm of the mean radius about the
 area centroid); a non-round selection refuses with the deviation and where;
 no selection keeps the typed circle byte-identical. The boundary group stays
 refused for Circular (one change at a time).
+
+## Issue #12: a whole-part Pocket source clears the stock around the part (2026-11-07)
+
+Closes "M11.4 A+B" (6). A 2D Pocket / 2D Adaptive / 2D Offset whose
+source is a whole part (Entity, not the stock) with a setup stock now
+clears the stock's outline minus every part section standing at the
+ladder planes - the M11.4 island law the picked pockets ride
+(`area::whole_model_pocket`). A part covering the whole stock outline is
+refused by name. Kept: a Stock source, the stock entity itself, and a
+model with no stock set up still read as "the volume to remove" (no
+stock means no "around"; the tilt suite pockets such models).
+Dropped: refusing every whole-model pocket (breaks that documented
+contract) and the old reading (it machined the part).

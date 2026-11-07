@@ -155,7 +155,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         {
             Some(selection_region(world, setup, items, params, &op.area))
         }
-        _ => None,
+        // A whole PART under the pocket family clears the stock around
+        // it, never the part's own section (issue #12).
+        (params, src) => whole_model_pocket(world, setup, src, params, frame.as_ref()),
     };
     let contour_sel = match (&op.params, &op.src) {
         (OpParams::Contour { .. }, SrcRef::Selection(items)) => {

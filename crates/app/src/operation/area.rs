@@ -95,23 +95,105 @@ pub(super) fn pocket_region_on_part(
     if enclosed.is_empty() {
         return Err(GenError::Empty("nothing in the selection bounds an area".into()));
     }
+    let full = |z: f64| {
+        format!(
+            "the part fills the whole selection at Z {z:.3} - Bottom Z sits below the selected pocket's floor; raise Bottom Z to the floor"
+        )
+    };
+    match minus_standing(&enclosed, part, planes, full)? {
+        Some(r) => Ok(r),
+        None => Ok(Region::new(loops)?),
+    }
+}
+
+/// `enclosed` minus ALL the part material standing in it at each of
+/// `planes`; `None` when nothing stands inside (the caller keeps its own
+/// byte-stable reading). A plane where the part fills the whole area is
+/// the named refusal `full` spells - never a cut into the part.
+fn minus_standing(
+    enclosed: &Region,
+    part: &[Triangle],
+    planes: &[f64],
+    full: impl Fn(f64) -> String,
+) -> Result<Option<Region>, GenError> {
     let mut standing = Region::empty();
     for &z in planes {
-        let inside = standing_inside(&enclosed, part, z)?;
+        let inside = standing_inside(enclosed, part, z)?;
         if inside.area().abs() < ISLAND_AREA_MIN {
             continue;
         }
         if enclosed.difference(&inside)?.area().abs() < ISLAND_AREA_MIN {
-            return Err(GenError::Invalid(format!(
-                "the part fills the whole selection at Z {z:.3} - Bottom Z sits below the selected pocket's floor; raise Bottom Z to the floor"
-            )));
+            return Err(GenError::Invalid(full(z)));
         }
         standing = standing.union(&inside)?;
     }
     if standing.area().abs() < ISLAND_AREA_MIN {
-        return Ok(Region::new(loops)?);
+        return Ok(None);
     }
-    Ok(enclosed.difference(&standing)?)
+    Ok(Some(enclosed.difference(&standing)?))
+}
+
+/// The pocket family on a WHOLE PART source (issue #12): the part is
+/// material to keep, so the area to clear is the setup stock's outline
+/// minus every part section standing at the ladder planes - the stock
+/// AROUND the part, the same island law the picked pockets ride. `None`
+/// where the reading does not apply (not a pocket-family kind, a Stock
+/// or Selection source, the source IS the stock, no stock set up: there
+/// the model stays the volume to remove, as documented) or where a
+/// height is unresolvable (the generator's refusal of record). Under a
+/// 3+2 index the answer is in the frame's local coordinates, exactly
+/// where `region_core` would have built it.
+pub(super) fn whole_model_pocket(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+    params: &OpParams,
+    frame: Option<&crate::cl::TiltedFrame>,
+) -> Option<Result<Region, GenError>> {
+    let (top, bottom, stepdown) = match params {
+        OpParams::Pocket { top_z, bottom_z, stepdown, .. }
+        | OpParams::Adaptive2D { top_z, bottom_z, stepdown, .. }
+        | OpParams::Offset2D { top_z, bottom_z, stepdown, .. } => (*top_z, *bottom_z, *stepdown),
+        _ => return None,
+    };
+    let SrcRef::Entity(name) = src else { return None };
+    let stock_name = crate::setup::stock_entity_name(world, setup);
+    if *name == stock_name {
+        return None;
+    }
+    let stock = model::find_by_name(world, &stock_name).and_then(|e| model::world_facets(world, &e))?;
+    if stock.is_empty() {
+        return None;
+    }
+    let t = resolve_height(world, setup, Some(src), top)?;
+    let b = resolve_height(world, setup, Some(src), bottom)?;
+    let part = match material_of(world, setup, src) {
+        Ok(m) => m.facets,
+        Err(e) => return Some(Err(e)),
+    };
+    let oz = frame.map_or(0.0, |f| f.origin.z);
+    let (part, stock) = match frame {
+        Some(f) => (f.local_facets(&part), f.local_facets(&stock)),
+        None => (part, stock),
+    };
+    Some(around_part(&part, &stock, &ladder_planes(t - oz, b - oz, stepdown)))
+}
+
+/// [`whole_model_pocket`]'s pure law: the stock's silhouette minus the
+/// part standing at `planes`. A part that covers the whole stock at a
+/// plane leaves nothing to clear around it - refused by name.
+pub(super) fn around_part(part: &[Triangle], stock: &[Triangle], planes: &[f64]) -> Result<Region, GenError> {
+    let enclosed = slice::project(stock, FOOTPRINT_SAMPLES).map_err(from_slice)?;
+    if enclosed.is_empty() {
+        return Err(GenError::Empty("the stock casts no outline to clear around the part".into()));
+    }
+    let full = |z: f64| {
+        format!(
+            "a whole-model pocket clears the stock around the part, and the part fills the whole stock \
+             outline at Z {z:.3} - pick the pocket's faces instead"
+        )
+    };
+    Ok(minus_standing(&enclosed, part, planes, full)?.unwrap_or(enclosed))
 }
 
 /// The part material standing above `z` inside `enclosed`: the plane's
