@@ -1,11 +1,14 @@
 // Tormach PathPilot 3X milling post (#131). Provenance: the G-dialect
-// from the public LinuxCNC G-code reference (linuxcnc.org/docs, the
-// interpreter PathPilot is built on) and Tormach's published PathPilot
-// and mill operator documentation - behavior only, per this repo's
-// Clean-Room Protocol; the hook contract from Autodesk's published post
-// docs. No vendor script text and no other post's output consulted;
-// original work. Structure follows our own haas.cps; the goldens lock
-// this file's decisions, not any vendor's.
+// from Tormach's "UM10587: 770MX Operator's Manual" (Version 0626A),
+// chapter 10 (Programming: G-codes, canned cycles, M-codes), and §7.2.7 /
+// §7.5.10 (G30); Tormach's published PathPilot pages; and the public
+// LinuxCNC G-code reference (linuxcnc.org/docs, the interpreter PathPilot
+// is built on) - behavior only, per this repo's Clean-Room Protocol.
+// Cross-checked against programs PathPilot's own Conversational screens
+// write. The hook contract from Autodesk's published post docs. No
+// vendor post script text and no CAM post's output used; original work.
+// Structure follows our own haas.cps; the goldens lock this file's
+// decisions, not any vendor's.
 description = "Tormach PathPilot (3-axis mill, G20/G21 from the machine, G73/G81/G82/G83/G84/G86/G89, G2/G3, G98)";
 vendor = "Camcraft";
 legal = "Original clean-room work; public documentation only";
