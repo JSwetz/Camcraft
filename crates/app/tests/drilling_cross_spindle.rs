@@ -122,17 +122,22 @@ fn op(cross: Vec<CrossHole>) -> Operation {
 fn world_with(word: &str, part: Mesh) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
-    let stock = SetStock::new(
-        &world,
-        camcraft_app::stock::StockShape::Box { dx: 60.0, dy: 60.0, dz: 44.0 },
-        Location::default(),
-    );
-    history.execute(&world, stock.expect("box stock"));
     let m = Machine { model: format!("TestBench {word}"), kind: Some(word.into()), ..Default::default() };
     history.execute(&world, LoadMachine::new(&world, "bench.mch".into(), Some(m)).expect("machine"));
     let tool = catalog().into_iter().find(|(n, _)| *n == "DR-0400").map(|(_, t)| t).expect("catalog entry");
     history.execute(&world, AddTool::new(&world, "DR-0400", tool).expect("catalog tool"));
     history.execute(&world, ImportModel::from_mesh("bar", part));
+    // The stock IS the bar (stock from model): a raw stock wider than
+    // the part moves every standoff out to it (issue #77,
+    // drilling_cross_stock), and a box centred on the world origin
+    // would read differently about each spindle - the law pinned here
+    // is the spindle frame's alone.
+    let stock = SetStock::new(
+        &world,
+        camcraft_app::stock::StockShape::FromModel { source: "bar".into() },
+        Location::default(),
+    );
+    history.execute(&world, stock.expect("stock from the bar"));
     (world, history)
 }
 

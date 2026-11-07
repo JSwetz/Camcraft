@@ -12451,3 +12451,45 @@ unsnapped chord points off the on-origin chain).
 - Left open: the standoff radius reads the part's facets, not the setup's
   stock - a cross drill run before the bar is turned to size would hop
   inside the raw stock. Worth its own issue.
+
+## #77: the cross drill stands off the raw stock, not only the part (2026-11-07)
+
+Step-1 finding: on a mill-turn with A/B rotaries declared, an r10 bar in an
+r20 raw cylinder generated Ok and POSTED SILENTLY with its start/approach at
+r15 and its station-change chord passing r15 from the spindle - 5 mm inside
+uncut stock (`G00 X15 Y0 Z10`, `G00 X21.213 Y0 Z10` -> `G00 X0 Y21.213 Z0`).
+The verify crate's rapid-in-stock law stands down in `Mode::Radial`, so no
+gate saw it (P0). Chosen: `operation/cross_stock.rs` measures the part and
+the setup's stock (`GenJob::stock_facets`, the vertex hull: a box's
+circumscribed radius, a cylinder's own) about the spindle and stands off
+the larger; when the stock reaches past the part, each mouth moves out
+along its own axis to the raw surface with the floor kept (the drill feeds
+the uncut skin; the Auto cycle reads the true depth); the stock's Z top
+feeds the end-face detour. Then every rapid of the chain is proven clear
+(kerf retracts excused, the axial approach outside the raw stock, the
+detour above the Z top plus the rim, everything else outside the radius
+plus the rim) - refused by name otherwise. A stock that does not reach past
+the part, or none (the op's source IS the stock, or no stock declared),
+keeps the part-only chain bit for bit.
+
+- *Stamp.* A cross drill's stamp now digests the setup stock (placement and
+  geometry signature) - re-sizing the bar after generation stales it, so
+  the old hops never post. Only that kind writes the term; every other
+  stamp keeps its bits.
+- *The proof found a kernel gap.* The quarter-turn chord law assumes mouths
+  on the station's centre line; mouths off it (an (8, -6) / (-6, 8) pair on
+  an r10 bar) chord 10.757 mm from the spindle, the r2 drill's rim 1.24 mm in
+  the bar. Today that is refused by name; inflating the hop for offset
+  mouths is a follow-up issue, not this fix.
+- *Fixtures.* drilling_cross_spindle's world declared a 60x60 box stock
+  centred on the world origin; read as raw stock it differs about each
+  spindle, so that suite now uses stock-from-the-bar (its law is the
+  spindle frame's alone).
+- Dropped: bumping `r_d` by the stock/part gap (one number for all holes,
+  and the kernel's margin follows `r_d`, pushing every hop out twice), and
+  reviving the rapid-in-stock law in `Mode::Radial` (its height field cannot
+  see a bore - the doctrine the sim crate states).
+- Left open: a lathe cross drill is blocked at the post by "move 1 cuts past
+  the finish surface" - `lathe_axial` is true for any lathe Drill, so
+  `axial_warnings` judges the radial chain as a meridian cut. Safe-side
+  (blocks), but a false refusal; worth its own issue.

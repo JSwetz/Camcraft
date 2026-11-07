@@ -42,40 +42,50 @@ pub(super) fn lathe_reads(facets: &[Triangle], origin: [f64; 3]) -> Result<(), G
 
 /// Run the radial kernel about world Z through `origin`: `p` carries the
 /// heights, the cycle, the tool and the world-frame hole list; its
-/// `stock_r` and `stock_z_max` are recomputed here from `facets` about
-/// that line. An origin on the world Z axis runs the kernel untouched,
-/// so every on-origin path keeps its bits.
+/// `stock_r` and `stock_z_max` are recomputed here about that line from
+/// the larger of the part's `facets` and the setup's `stock` (issue
+/// #77, `cross_stock`: a raw bar wider than the part moves the mouths
+/// out to it, and the chain is proven clear of it). An origin on the
+/// world Z axis runs the kernel unshifted, and a stock that does not
+/// reach past the part (or none) keeps the part-only chain's bits.
 pub(super) fn cross_drill(
     p: CrossParams<'_>,
     facets: &[Triangle],
+    stock: Option<&[Triangle]>,
     origin: [f64; 3],
 ) -> Result<Toolpath, GenError> {
     let (ox, oy) = (origin[0], origin[1]);
     if !(ox.is_finite() && oy.is_finite()) {
         return Err(GenError::Invalid("the work offset's origin is not usable".into()));
     }
-    let verts = || facets.iter().flat_map(|t| [t.a, t.b, t.c]);
-    let stock_r = verts()
-        .map(|v| ((v.x - ox).powi(2) + (v.y - oy).powi(2)).sqrt())
-        .fold(0.0_f64, f64::max);
-    // The bar's Z top: known, the kernel may route an opposite-station
-    // travel over the end face (M5.2 G); a solid with no vertices says
-    // so honestly. Z is the spindle's own coordinate - no shift.
-    let stock_z_max = verts().map(|v| v.z).reduce(f64::max);
-    if ox == 0.0 && oy == 0.0 {
-        return drilling::cross_drill(&CrossParams { stock_r: stock_r.max(1.0), stock_z_max, ..p });
-    }
-    let local: Vec<CrossHole> = p
-        .holes
-        .iter()
-        .map(|h| CrossHole { origin: Point3::new(h.origin.x - ox, h.origin.y - oy, h.origin.z), ..*h })
-        .collect();
+    // Z is the spindle's own coordinate - no shift. A Z top known lets
+    // the kernel route an opposite-station travel over the end face
+    // (M5.2 G); a solid with no vertices says so honestly.
+    let st = super::cross_stock::standoff(facets, stock, ox, oy);
+    let d = p.tool.diameter;
+    let on_origin = ox == 0.0 && oy == 0.0;
+    let local: Vec<CrossHole> = if on_origin {
+        p.holes.to_vec()
+    } else {
+        p.holes
+            .iter()
+            .map(|h| CrossHole { origin: Point3::new(h.origin.x - ox, h.origin.y - oy, h.origin.z), ..*h })
+            .collect()
+    };
+    let local = match st.raw {
+        Some(raw) => super::cross_stock::to_raw_mouths(&local, raw),
+        None => local,
+    };
     let mut t = drilling::cross_drill(&CrossParams {
-        stock_r: stock_r.max(1.0),
-        stock_z_max,
+        stock_r: st.r.max(1.0),
+        stock_z_max: st.z_max,
         holes: &local,
         ..p
     })?;
+    super::cross_stock::rapids_clear(&t, &st, d)?;
+    if on_origin {
+        return Ok(t);
+    }
     // The kernel's chain is straight, cycle-free and computer-
     // compensated; anything else would need its own carry back, so it
     // refuses by name rather than post half-shifted.

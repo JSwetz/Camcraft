@@ -230,6 +230,28 @@ pub fn current_stamp(
             }
         }
     }
+    // Issue #77: a cross drill stands off the setup's RAW stock as well
+    // as its part, so the stock it read is an input - a bar re-sized
+    // after generation must stale the op, never post the old hops.
+    // Only that kind writes the term: every other stamp keeps its bits.
+    if let OpParams::Drill { cross, .. } = params
+        && !cross.is_empty()
+        && !matches!(src, SrcRef::Stock)
+    {
+        h.write_u8(b'X');
+        let stock = model::find_by_name(world, &crate::setup::stock_entity_name(world, setup));
+        match stock {
+            None => h.write_u8(0),
+            Some(e) => {
+                h.write_u8(1);
+                let loc = model::transform_of(world, &e).unwrap_or_default();
+                for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]] {
+                    w(&mut h, v);
+                }
+                h.write_u64(model::geometry_signature(world, &e)?);
+            }
+        }
+    }
     // M3.1 D re-machining: the program AHEAD is an input too - a 3D
     // pocket consumes what earlier operations leave standing, so when
     // their recorded PATHS or their order move, its cached path no
