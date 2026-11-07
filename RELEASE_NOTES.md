@@ -1,3 +1,32 @@
+# CamCraft 0.12.1 (clean-room implementation)
+
+A patch release: four fixes, one of them a collision (issues #77, #79, #67,
+#74).
+
+## Fixed
+- **Cross drilling no longer rapids through uncut stock** (#77). On raw stock
+  wider than the finished part, a mill-turn cross drill used to hop between
+  stations inside the stock at rapid feed, and nothing caught it. Hops and
+  approaches now stand off the raw stock (and a shank wider than the drill),
+  hole mouths start at the raw surface, every rapid is proved clear or the job
+  is refused by name, and resizing the stock marks the drilling stale.
+- **The post check now covers cross-drill rapids** (#79). The rapid-in-stock
+  check that blocks a post was switched off for radial programs; it now
+  judges them against the raw stock (retracts up a drilled hole stay clean).
+- **Cross drilling measures about the machine spindle** (#67). On a bar off
+  the world origin under a moved work offset, clearance and hops were measured
+  about the wrong axis. A mill-turn bar off its work offset, a hole plunging
+  away from the spindle, and on a lathe a part that cannot be read as turned
+  are refused by name.
+- **GPU startup on dual-GPU laptops** (#74, in progress). Every adapter is
+  listed and tried in turn (your `--gpu <name>` choice, then the
+  high-performance GPU, discrete before integrated, DX12 before Vulkan on
+  Windows); each must draw a test frame, and a failure moves on to the next.
+  If none works, a dialog names every adapter tried. Frames over 100 ms are
+  logged by phase - please send those log lines if you see lag.
+
+---
+
 # CamCraft 0.12.0 (clean-room implementation)
 
 A minor release, breaking first: Heidenhain NC output and the project file

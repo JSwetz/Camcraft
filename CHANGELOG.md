@@ -10,6 +10,10 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 685b0e7 | 2026-11-07 | fix(sim): the post gate's rapid-in-stock law now judges radial (cross-drill) programs against the raw stock - a rapid through uncut stock is named RapidInStock and blocks the post; retracts up a drilled hole stay clean (#79, PR #83) | 0.12.1 |
+| 4fb33d3 | 2026-11-07 | fix(app): cross drill stands off the larger of the raw stock and the part, so no rapid between stations passes through uncut stock; refuses by name any rapid that would; resizing the stock stales the op (#77, PR #86) | 0.12.1 |
+| 053e0c7 | 2026-11-07 | fix(app): cross drill measures its clearance and standoffs about the work offset's spindle, refuses a mill-turn bar off its work offset, and refuses on a lathe a part that can't be read as turned (#67, PR #78) | 0.12.1 |
+| c50835f | 2026-11-07 | fix(ui): GPU startup tries adapters one by one (named choice, high-performance, discrete before integrated, native backend first), configures the surface from its reported capabilities, adds --gpu/CAMCRAFT_GPU, refuses by name listing every adapter tried, and logs frames over 100 ms by phase (#74 part, PR #76) | 0.12.1 |
 | 8a959b1 | 2026-11-07 | fix(app): turning ops (and the lathe axial drill) whose fitted axis is not world Z through the work offset within 0.0005 mm are refused by name at generation and at posting, instead of posting a taper or eccentric (#62, PR #65) | 0.12.0 |
 | 7e013e7 | 2026-11-07 | feat(sim,app): turning programs (facing, profile, contour, boring) simulate on the field stock view about their fitted spindle with meridian parity; blade/thread/form tools refuse by name (#19, PR #60) | 0.12.0 |
 | 5956e98 | 2026-11-07 | feat(motion): Adaptive clears the rotary developed wrap level by level under the load and kink laws; refused levels named by radius, cut by Offset rings (#9, PR #57) | 0.12.0 |
