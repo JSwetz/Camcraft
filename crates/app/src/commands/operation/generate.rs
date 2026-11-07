@@ -159,9 +159,15 @@ impl RegenerateAll {
         let mut parts: Vec<GenerateOperation> = Vec::new();
         let mut skipped: Vec<(String, String)> = Vec::new();
         let cap = crate::setup::operation_order(world).len().max(1);
-        for _ in 0..cap {
-            let round = Self::round(world, &mut skipped);
-            if round.is_empty() {
+        let mut rounds = 0;
+        while rounds < cap {
+            let (round, staged_any) = Self::round(world, &mut skipped);
+            rounds += 1;
+            // Stop only when nothing was STAGED (#153 re-review): a round
+            // whose every job refused still frees the ops it deferred -
+            // a refusal is final, so they run next round against the
+            // world as it stands.
+            if !staged_any {
                 break;
             }
             for part in &round {
@@ -175,7 +181,7 @@ impl RegenerateAll {
             if operation::status_of(world, &entity) == operation::OpStatus::Stale
                 && !skipped.iter().any(|(n, _)| *n == name)
             {
-                skipped.push((name, format!("still stale after {cap} regeneration round(s)")));
+                skipped.push((name, format!("still stale after {rounds} regeneration round(s)")));
             }
         }
         for part in parts.iter().rev() {
@@ -190,9 +196,12 @@ impl RegenerateAll {
     /// ahead of it in its setup is staged in this one (#153 review N1):
     /// it would be stamped against that op's old path and re-run, so
     /// each op generates once and setups still run side by side.
-    fn round(world: &World, skipped: &mut Vec<(String, String)>) -> Vec<GenerateOperation> {
+    /// The bool says whether anything was staged (or refused at the
+    /// stage door) this round - the loop's progress signal.
+    fn round(world: &World, skipped: &mut Vec<(String, String)>) -> (Vec<GenerateOperation>, bool) {
         let mut staged = Vec::new();
         let mut staged_setups: Vec<Option<String>> = Vec::new();
+        let mut attempted = false;
         for (name, entity) in crate::setup::operation_order(world) {
             if operation::status_of(world, &entity) != operation::OpStatus::Stale
                 || skipped.iter().any(|(n, _)| *n == name)
@@ -206,6 +215,7 @@ impl RegenerateAll {
             if operation::reads_prior(&op.params) && staged_setups.contains(&setup) {
                 continue; // its program ahead moves this round
             }
+            attempted = true;
             match stage_generation(world, &name) {
                 Ok(job) => {
                     staged.push(job);
@@ -229,7 +239,7 @@ impl RegenerateAll {
                 Err(err) => skipped.push((name, err.to_string())),
             }
         }
-        parts
+        (parts, attempted)
     }
 
     /// Nothing will be written: the UI skips the history entirely then.

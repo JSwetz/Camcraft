@@ -335,6 +335,44 @@ fn a_posed_op_keeps_its_stamp_when_the_program_ahead_moves() {
     assert_ne!(stamp("Op2Contour"), contour_before, "the unposed contour does");
 }
 
+#[test]
+fn a_refused_op_ahead_does_not_hold_back_the_ops_behind_it() {
+    // #153 re-review: the batch defers a dependent behind an op ahead
+    // staged in the same round; when that op's generator then refuses,
+    // the dependent must still be regenerated in a later round, and
+    // only the refusal is named - one broken op never blocks the job.
+    let (world, mut history) = faced_world();
+    // A staged face from the stock's top: when the block grows past its
+    // clearance (Z 20), the face reads Stale and its generator refuses
+    // the plane.
+    let mut staged = face(5.0);
+    if let OpParams::Face { top_z, stepdown, .. } = &mut staged {
+        *top_z = Some(Height { reference: camcraft_app::operation::HeightReference::TopOfStock, offset: 0.0 });
+        *stepdown = Some(5.0);
+    }
+    history.execute(&world, EditOperationParams::new(&world, "Op1Face", staged).expect("a legal staged face"));
+    history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("generate face"));
+    history.execute(&world, GenerateOperation::new(&world, "Op2Contour").expect("generate contour"));
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok);
+    let cmd = SetStock::new(&world, StockShape::Box { dx: 100.0, dy: 100.0, dz: 30.0 }, Default::default());
+    history.execute(&world, cmd.expect("taller stock"));
+    let mut c = contour();
+    if let OpParams::Contour { feed, .. } = &mut c {
+        *feed = 600.0;
+    }
+    history.execute(&world, EditOperationParams::new(&world, "Op2Contour", c).expect("a legal feed"));
+    assert_eq!(status_of(&world, "Op1Face"), OpStatus::Stale);
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Stale);
+    let batch = RegenerateAll::new(&world);
+    let skipped: Vec<String> = batch.skipped().iter().map(|(n, w)| format!("{n}: {w}")).collect();
+    assert_eq!(batch.regenerated(), 1, "the contour, behind the refusal: {skipped:?}");
+    assert_eq!(skipped.len(), 1, "only the face is named: {skipped:?}");
+    assert!(skipped[0].starts_with("Op1Face: ") && !skipped[0].contains("still stale"), "the refusal itself: {skipped:?}");
+    history.execute(&world, batch);
+    assert_eq!(status_of(&world, "Op2Contour"), OpStatus::Ok, "regenerated and judged");
+    assert_eq!(status_of(&world, "Op1Face"), OpStatus::Stale, "the refused face keeps its tag");
+}
+
 fn tmp_nc(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("camcraft-vrapid-{tag}-{}.nc", std::process::id()));
     let _ = std::fs::remove_file(&p);
