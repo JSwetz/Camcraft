@@ -74,11 +74,21 @@ design context, never add work to them. Decisions still go to
   carries `claimed` unless its last claim comment is older than 4 hours with
   no newer comment from the claimant - then it is stale: comment "reclaimed
   from <old claimant> (stale)" and take it.
+- **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
+  an Agent should have the tag source:agent"). Every issue an agent opens
+  carries the `source:agent` label alongside its `P*` and `area:*` labels -
+  including a bug the user reported in chat and an agent filed for them.
+  An issue a human opens on GitHub never gets it. Agents and the user share
+  one GitHub account, so the label, not the author, tells them apart.
+- **Outside contributors' claims count.** A claim comment from a
+  contributor without label rights is a claim: the main session sets
+  `claimed` and the assignee for them and replies, and their issue is not
+  picked while the claim is fresh (4 h rule).
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
   work, open a new issue for it (labels: one `P*`, one or more `area:*`)
-  rather than burying it.
+  rather than burying it (and `source:agent`).
 - **Done on a branch = pushed + PR, never merged to main** (user,
   2026-11-07: "when closing an issue we should push the branch, not merge
   to main"); issue PRs merge only at a cut (docs/process/CI-only PRs are
