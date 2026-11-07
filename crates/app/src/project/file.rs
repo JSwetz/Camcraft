@@ -120,6 +120,10 @@ pub struct ProjectFile {
     /// step): an absent key is off - what every older document posted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub skip_stops: bool,
+    /// "One file per operation" at post (#111), additive like
+    /// `skip_stops`: an absent key is one combined program.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_op_files: bool,
     pub entities: Vec<EntityDto>,
 }
 

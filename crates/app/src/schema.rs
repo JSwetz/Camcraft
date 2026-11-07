@@ -243,9 +243,12 @@ pub enum PostRef {
 /// the `SetPostOptions` command. `skip_stops` posts the program without
 /// any operation's after-action (no M0 / M1, no trips home) - a
 /// debugged program runs straight through, the ops keep their choices.
+/// `per_op` (#111) is the Output choice: off (the default) posts one
+/// combined program, on writes one standalone program per operation.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PostOptions {
     pub skip_stops: bool,
+    pub per_op: bool,
 }
 
 /// Which theme the document wears (M6.1 C), a flecs singleton like

@@ -27,6 +27,10 @@ var properties = {};
 var W = properties;
 var currentPosition = { X: 0, Y: 0, Z: 0 };
 var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false };
+// The program's number (#111): 1 for a whole-job program; one file
+// per operation counts 1, 2, 3... in program order. A dialect that
+// writes an O-word reads it at onOpen.
+var programNumber = 1;
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
 function write(s) { if (s !== undefined) LINE += String(s); }
@@ -175,6 +179,19 @@ impl Script {
     pub fn set_machine(&mut self, m: &Value) -> Result<(), PostError> {
         self.eval(&format!("machine = {m};"))?;
         Ok(())
+    }
+
+    /// Publish the program's number (#111) before `onOpen` reads it.
+    pub fn set_program_number(&mut self, n: u32) -> Result<(), PostError> {
+        self.eval(&format!("programNumber = {n};"))?;
+        Ok(())
+    }
+
+    /// A top-level string the script states (a manifest entry such as
+    /// `extension`), or `None` when it states none.
+    pub fn string_global(&mut self, name: &str) -> Result<Option<String>, PostError> {
+        let v = self.eval(&format!("(typeof {name} === \"string\") ? {name} : null"))?;
+        Ok(v.as_string().map(|s| s.to_std_string_escaped()))
     }
 
     /// Publish this record's property object (params + record +

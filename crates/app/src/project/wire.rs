@@ -187,6 +187,8 @@ pub fn collect(world: &World) -> ProjectFile {
         material: crate::cutting::material_of(world).map(|m| m.word().to_owned()),
         // Off writes no key (the material's law, #110).
         skip_stops: crate::posting::post_options_of(world).skip_stops,
+        // One combined program writes no key (#111).
+        per_op_files: crate::posting::post_options_of(world).per_op,
         entities,
     }
 }

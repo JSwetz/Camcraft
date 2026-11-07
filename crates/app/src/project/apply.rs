@@ -576,7 +576,10 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     // Opening lands the material too - including None (the units law).
     crate::cutting::material_set(world, material);
     // Opening lands the post options too - including the default (#110).
-    crate::posting::post_options_set(world, crate::schema::PostOptions { skip_stops: file.skip_stops });
+    crate::posting::post_options_set(world, crate::schema::PostOptions {
+        skip_stops: file.skip_stops,
+        per_op: file.per_op_files,
+    });
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);

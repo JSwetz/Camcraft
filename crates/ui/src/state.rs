@@ -34,6 +34,9 @@ use camcraft_app::stock::{self, StockShape};
 use camcraft_app::tools::{Tool, ToolKind, catalog};
 use camcraft_app::units::{self, Unit};
 use camcraft_app::{machine, model, posting, project, world::new_world};
+
+#[path = "state_per_op.rs"]
+mod per_op;
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -54,6 +57,9 @@ pub enum CommandKind {
     PostProgramDialog,
     /// The same post at a known path - what the headless tests run.
     PostProgramFile(PathBuf),
+    /// One file per operation into a known folder (#111) - the
+    /// headless twin of the folder dialog.
+    PostProgramFolder(PathBuf),
     Undo,
     Redo,
     DeleteSelected,
@@ -187,6 +193,8 @@ pub enum CommandKind {
     SuppressOperation { name: String, suppressed: bool },
     /// The post page's "Skip pauses and homes" switch (#110).
     SetSkipStops(bool),
+    /// The post page's Output choice (#111): `true` = one file per op.
+    SetPerOpOutput(bool),
     /// The op's context-menu retype (M9.1): change the operation's kind
     /// in place, numbers carried by the one retype law, one undo unit.
     ChangeOperationKind {
@@ -2201,12 +2209,9 @@ impl State {
                 }
             }
             CommandKind::SaveProjectFile(path) => self.save_project_path(path),
-            CommandKind::PostProgramDialog => {
-                if let Some(path) = post_program_dialog() {
-                    self.post_program_path(path);
-                }
-            }
+            CommandKind::PostProgramDialog => self.post_program_dialog(),
             CommandKind::PostProgramFile(path) => self.post_program_path(path),
+            CommandKind::PostProgramFolder(dir) => self.post_program_folder(dir),
             CommandKind::Undo => {
                 self.status = if self.history.undo(&self.world) {
                     self.doc_version += 1;
@@ -2583,8 +2588,9 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Operation, format!("suppression not changed: {err}")),
                 }
             }
+            CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
             CommandKind::SetSkipStops(skip) => {
-                let next = camcraft_app::schema::PostOptions { skip_stops: skip };
+                let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options_of(&self.world) };
                 match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
                     Ok(command) => {
                         self.history.execute(&self.world, command);

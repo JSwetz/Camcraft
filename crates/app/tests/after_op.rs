@@ -208,7 +208,7 @@ fn the_lathe_post_homes_x_then_z_and_stops_in_its_own_words() {
 fn skip_pauses_and_homes_mutes_every_after_action_and_undoes() {
     let (world, mut history) = two_faces(AfterOperation::ProgramStop);
     assert!(cnc::serialize(&posting::stream_records(&world).expect("streams")).contains("AfterOperation"));
-    let cmd = SetPostOptions::new(&world, PostOptions { skip_stops: true }).expect("switch");
+    let cmd = SetPostOptions::new(&world, PostOptions { skip_stops: true, ..Default::default() }).expect("switch");
     history.execute(&world, cmd);
     let text = cnc::serialize(&posting::stream_records(&world).expect("streams"));
     assert!(!text.contains("AfterOperation"), "the switch mutes the stream: {text}");
@@ -217,7 +217,7 @@ fn skip_pauses_and_homes_mutes_every_after_action_and_undoes() {
         assert!(!out.program.lines().any(|l| has_word(l, "M0")), "{name}: no stop: {}", out.program);
     }
     assert_eq!(op(&world, "Face1").after, AfterOperation::ProgramStop, "the op keeps its choice");
-    assert!(SetPostOptions::new(&world, PostOptions { skip_stops: true }).is_err(), "a no-op is refused");
+    assert!(SetPostOptions::new(&world, PostOptions { skip_stops: true, ..Default::default() }).is_err(), "a no-op is refused");
     history.undo(&world);
     assert!(!posting::post_options_of(&world).skip_stops, "undo restores the switch");
     assert!(cnc::serialize(&posting::stream_records(&world).expect("streams")).contains("AfterOperation"));
@@ -291,7 +291,7 @@ fn after_and_suppressed_edits_undo_and_redo() {
 fn after_suppressed_and_skip_round_trip_and_old_files_load_defaults() {
     let (world, mut history) = two_faces(AfterOperation::GoHome);
     history.execute(&world, EditOperationParams::with_suppressed(&world, "Face2", true).expect("suppress"));
-    history.execute(&world, SetPostOptions::new(&world, PostOptions { skip_stops: true }).expect("switch"));
+    history.execute(&world, SetPostOptions::new(&world, PostOptions { skip_stops: true, ..Default::default() }).expect("switch"));
     let path = std::env::temp_dir().join(format!("camcraft-after-op-{}.json", std::process::id()));
     camcraft_app::project::save(&world, &path).expect("save");
     let text = std::fs::read_to_string(&path).expect("written");

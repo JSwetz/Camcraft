@@ -31,7 +31,7 @@ argument semantics in `docs/CNC-INTERMEDIATE.md`):
 
 | hook | fires |
 |---|---|
-| `onOpen` | once, before all records (write the header here) |
+| `onOpen` | once, before all records (write the header here; the global `programNumber` is the program's number - 1 for a whole job, 1, 2, 3... per file when posting one file per operation (#111) - for a dialect with an O-word) |
 | `onParameter(name, value)` | per `PARAM`; `onSpindleSpeed` follows the `SpindleSpeed` one |
 | `onToolChange(number, name)` | per `TOOL` |
 | `onSection` / `onSectionEnd` | per operation span (preamble bookends) |

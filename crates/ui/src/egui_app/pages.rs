@@ -404,6 +404,24 @@ fn post_section(ui: &mut Ui, state: &mut State) {
     if want != skip {
         state.pending.push_back(CommandKind::SetSkipStops(want));
     }
+    // #111: one combined program, or one standalone file per operation
+    // (a folder at post time). A command, like the switch above.
+    let per_op = posting::post_options_of(&state.world).per_op;
+    let mut pick = per_op;
+    ui.horizontal(|ui| {
+        ui.label("Output");
+        egui::ComboBox::from_id_salt("post_output")
+            .selected_text(if per_op { "One file per operation" } else { "One program" })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut pick, false, "One program");
+                ui.selectable_value(&mut pick, true, "One file per operation");
+            })
+            .response
+            .on_hover_text("one file per operation writes each operation as its own standalone program into a folder, so it can be rerun on its own");
+    });
+    if pick != per_op {
+        state.pending.push_back(CommandKind::SetPerOpOutput(pick));
+    }
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not
