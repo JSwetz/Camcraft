@@ -12988,10 +12988,17 @@ facet (the 90 % concurrency share and coarseness gates), so it only moves an
 axis the part already earns. Nothing set aside -> the plain fit returns
 untouched (bit-identical; every rotary/turning golden stands). Guard: inliers
 under 50 % of the answering area or under 8 facets -> plain fit, marked
-untrusted. `axis::fit_report` exposes the plain axis, the set-aside share and
+untrusted. The guard is a backstop: it rarely fires, because `judge` already
+requires a 90 % concurrency share, so a part the plain fit earned seldom loses
+half its area to the trim. `axis::fit_report` exposes the plain axis, the set-aside share and
 the trust bit; the spindle law names the share and gives the move-the-offset
-advice only for a trusted (misplaced) reading - an untrusted one says moving
-the work offset cannot fix it. Measured on a 72-segment D20 shaft with a
+advice only for a trusted (misplaced) reading - an untrusted one says the
+reading is biased by off-centre features and moving the work offset may not
+fix it (the share is of the turned, non-end-face surface). A trusted pass
+with more than 0.05 % set aside generates with a named, non-blocking path
+note (keyways, flats, holes, eccentric sections are not turned - machine them
+in a later setup), so an eccentric pin turned as a concentric cylinder is
+never silent; a plain revolve carries no note. Measured on a 72-segment D20 shaft with a
 10 mm-long keyway: plain fit 0.153 mm (5.18 mm key) / 0.058 mm (10 mm key)
 off G54, robust fit 0.000 mm.
 

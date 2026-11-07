@@ -23,7 +23,22 @@ pub fn generate(
 /// batch's jobs run on worker threads, where a `&World` cannot exist -
 /// and it is exactly the old body below the old head, so a solo
 /// generation is byte-identical to the file's whole history of them.
-pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
+pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
+    // The spindle law's set-aside note (issue #71 review) rides the
+    // path whichever arm cut it: a note, never a warning - the post
+    // is not held for features the op honestly leaves standing.
+    let note = job.spindle_note.take();
+    let (mut path, warns) = run_job_arms(job)?;
+    if let Some(n) = note
+        && !path.notes.contains(&n)
+    {
+        path.notes.push(n);
+    }
+    Ok((path, warns))
+}
+
+/// [`run_job`]'s body: every arm, unchanged.
+fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let GenJob {
         tool,
         tool_name,
@@ -50,6 +65,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         part_solid,
         area,
         wcs_origin,
+        spindle_note: _,
     } = job;
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;

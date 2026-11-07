@@ -58,6 +58,9 @@ fn keyed_shaft(half: i64, dx: f64) -> Vec<Triangle> {
         f.push(Triangle::new(c0, ring(j + 1, Z.0, dx), ring(j, Z.0, dx)));
         f.push(Triangle::new(c1, ring(j, Z.1, dx), ring(j + 1, Z.1, dx)));
     }
+    if half == 0 {
+        return f; // the plain revolve: no keyway
+    }
     let top = ring(half, 0.0, 0.0);
     let (xt, ys) = (top.x, top.y);
     let q = |x: f64, y: f64, z: f64| Point3::new(x + dx, y, z);
@@ -98,8 +101,9 @@ fn lathe_world(part: Vec<Triangle>) -> (World, History) {
     (world, history)
 }
 
-/// Generate a Facing on the shaft's top; Err is the refusal text.
-fn face(part: Vec<Triangle>) -> Result<(), String> {
+/// Generate a Facing on the shaft's top; Err is the refusal text, Ok
+/// the generated path's notes.
+fn face(part: Vec<Triangle>) -> Result<Vec<String>, String> {
     let (world, mut history) = lathe_world(part);
     let p = OpParams::Facing {
         tolerance: 0.05,
@@ -114,8 +118,13 @@ fn face(part: Vec<Triangle>) -> Result<(), String> {
     history.execute(&world, cmd);
     let cmd = GenerateOperation::new(&world, "F1").map_err(|e| e.to_string())?;
     history.execute(&world, cmd);
-    Ok(())
+    let e = camcraft_app::model::find_by_name(&world, "F1").ok_or("no F1")?;
+    let t = camcraft_app::model::toolpath_of(&world, &e).ok_or("F1 has no path")?;
+    Ok(t.path.notes)
 }
+
+/// The set-aside note a trusted fit with features aside carries.
+const ASIDE: &str = "set aside and is not turned";
 
 #[test]
 fn a_keyed_shaft_on_g54_passes_the_spindle_law_and_generates() {
@@ -124,10 +133,26 @@ fn a_keyed_shaft_on_g54_passes_the_spindle_law_and_generates() {
         let r = spindle_reading(&part, [0.0; 3]).expect("a keyed shaft reads as revolved");
         println!("key half {half}: {r:?}");
         assert!(r.worst() <= SPINDLE_TOL, "key half {half}: the keyway dragged the fit: {r:?}");
-        if let Err(e) = face(part) {
-            panic!("key half {half}: a correctly placed keyed shaft must generate: {e}");
-        }
+        let notes = match face(part) {
+            Ok(n) => n,
+            Err(e) => panic!("key half {half}: a correctly placed keyed shaft must generate: {e}"),
+        };
+        // Named, never silent (issue #71 review): the keyway is not
+        // turned, and the note says so with the share it set aside.
+        let pct = format!("{:.1}% of the turned (non-end-face) surface", (100.0 * r.outlier_share).max(0.1));
+        let note = notes.iter().find(|n| n.contains(ASIDE));
+        assert!(note.is_some_and(|n| n.contains(&pct) && n.contains("later setup")), "key half {half}: {notes:?}");
+        assert!(!notes.iter().any(|n| n.contains(" 0.0%")), "key half {half}: {notes:?}");
     }
+}
+
+#[test]
+fn a_plain_revolve_on_g54_generates_with_no_set_aside_note() {
+    let part = keyed_shaft(0, 0.0);
+    let r = spindle_reading(&part, [0.0; 3]).expect("a plain shaft reads as revolved");
+    assert!(r.trusted && r.outlier_share == 0.0, "{r:?}");
+    let notes = face(part).unwrap_or_else(|e| panic!("a plain revolve on G54 generates: {e}"));
+    assert!(!notes.iter().any(|n| n.contains(ASIDE)), "a plain revolve says nothing: {notes:?}");
 }
 
 #[test]
@@ -137,9 +162,9 @@ fn a_keyed_shaft_off_g54_is_refused_as_misplaced_naming_the_set_aside_share() {
         let r = spindle_reading(&part, [0.0; 3]).expect("reads");
         assert!((r.offset_mid - 1.0).abs() < 1e-6, "the robust fit reads the true 1 mm offset: {r:?}");
         let e = face(part).expect_err("a shaft 1 mm off the spindle never generates");
-        for s in ["lathe spindle", "1.000 mm off", "move the work offset", "% of the part's surface"] {
+        for s in ["lathe spindle", "1.000 mm off", "move the work offset", "% of the part's turned (non-end-face) surface"] {
             assert!(e.contains(s), "key half {half}: the refusal names '{s}': {e}");
         }
-        assert!(!e.contains("off-centre features bias"), "a misplaced part is not a biased fit: {e}");
+        assert!(!e.contains("biased by off-centre features"), "a misplaced part is not a biased fit: {e}");
     }
 }

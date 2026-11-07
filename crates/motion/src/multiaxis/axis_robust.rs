@@ -31,8 +31,13 @@ use super::axis::{judge, line, Axis, Datum, REFINE_FLOOR, REL_TOL};
 
 /// Below this share of the answering area kept, the refit is not on
 /// the part's revolved surface but on a remnant, and is declined.
+/// A backstop, with [`MIN_KEPT`]: it rarely fires, because `judge`
+/// already requires 90 % of the answering area to meet the axis, so a
+/// part the plain fit earned seldom loses half its area to the trim;
+/// it guards the refit against a pathological inlier set (few or
+/// tiny facets) the share gate alone would not catch.
 const MIN_KEPT_SHARE: f64 = 0.5;
-/// Fewest non-pole facets a refit may rest on.
+/// Fewest non-pole facets a refit may rest on (backstop, as above).
 const MIN_KEPT: usize = 8;
 /// Reweighting rounds: the inlier set settles in one or two.
 const ROUNDS: usize = 4;
