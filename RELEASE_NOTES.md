@@ -1,3 +1,23 @@
+# CamCraft 0.8.4 (clean-room implementation)
+
+A patch release: three fixes (issues #13, #36, #46).
+
+## Fixed
+- **2D Adaptive no longer hangs on a long thin band** (#13). A channel too
+  long and narrow for the adaptive spiral is refused in about a second with
+  its size named, and Offset rings cut it - instead of planning for minutes.
+- **Finishing passes ride over mesh folds** (#36). On coarse meshes the
+  rows no longer skip a strip at every fold, so the scallop stays within
+  tolerance on curved parts.
+- **Raster passes reach the rim** (#46). Each pass ends with a row where its
+  ground ends, so tilted and flat shelves are finished to the edge.
+
+## Also in this build
+- The 2D Adaptive trochoid fallback is wired but still refused by name in
+  every case (its landings are #47); output is unchanged.
+
+---
+
 # CamCraft 0.8.3 (clean-room implementation)
 
 A patch release: four fixes, three of them safety (issues #12, #42, #43, #40).
