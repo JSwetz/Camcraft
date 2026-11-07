@@ -1,3 +1,37 @@
+# CamCraft 0.12.0 (clean-room implementation)
+
+A minor release, breaking first: Heidenhain NC output and the project file
+format change (issues #50, #45, #62, #9, #19).
+
+## Breaking
+- **Heidenhain DIN/ISO programs take the TNC's own block form** (#50):
+  numbered blocks ending `*`, signed words, the `%NAME G71` frame; drilling
+  posts as plain moves with the dwell at the bottom, because G73/G80/G54/G55
+  mean something else on a TNC. Tapping and any work offset but the first are
+  refused by name on this post until the native cycles land (#51).
+- **Project files are v50** (#45 part, contributed by linuxguy123): older
+  builds refuse them; v49 files load and migrate.
+
+## New
+- **Project and operation workflow** (#45 part, PR #58): Save As and kept
+  filenames; rename, reorder, copy and paste operations, with playback in
+  their order; browser collapse and viewport visibility controls.
+- **Adaptive on the rotary wrap** (#9): each developed level clears on the
+  adaptive planner under the load and kink laws; a level it refuses is named
+  by its radius and cut by Offset rings.
+- **Turning programs in the stock simulation** (#19): facing, profile,
+  contour and boring simulate about the part's spindle; blade, thread and form
+  tools are refused by name until their sweep lands (#21).
+
+## Fixed
+- **A turning part whose axis is not the machine spindle is refused** (#62):
+  a part leaning even slightly, or off the work offset, used to post a taper
+  or an eccentric with no warning. It is now refused by name at generation
+  and again at posting (so moving the work offset afterwards is caught), to
+  within 0.0005 mm over the whole part.
+
+---
+
 # CamCraft 0.11.0 (clean-room implementation)
 
 A minor release, breaking first: Heidenhain NC output changes for every XY

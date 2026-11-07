@@ -12409,3 +12409,16 @@ no script refusal).
      revolve stands in.
    - Wording: "posts every word within one last digit", not "the same
      digits".
+
+## 0.12.0 cut: a test-only PR merged mid-cut (2026-11-07)
+
+PR #69 (linuxguy123, `test(ui): serialize GPU render tests`, +6 lines in
+`crates/ui/tests/gpu_render.rs` only) was merged to `main` by the maintainer
+between the cut's issue-PR merges and the tag. The law (AGENTS.md "A cut goes
+PR review", step 4) says a non-empty `git diff <tip> <merge>` means restart
+from step 2. Chosen instead: merge `main` into `release/v0.12.0`, run the
+suite the change touches (`gpu_render`) and record the new tip, then tag as
+usual. Why: the change is a test file - the zip ships no tests, so its
+contents cannot differ, and the full release gate (~50 min) already passed on
+every shipped file. Dropped: re-running the whole release gate for six test
+lines. The rule stands for any mid-cut change that touches shipped code.
