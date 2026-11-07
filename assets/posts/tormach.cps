@@ -194,6 +194,7 @@ function startPreamble() {
   if (toolWait) {
     block(["G53", "G0", "Z0"]);
     block(["G30"]);
+    xyUnknown = true;        // G30 may have moved X and Y anywhere
     block(["T" + ni(tNo), "M6"]);
     block(["G43", "H" + ni(tNo)]);
     toolWait = false;
@@ -221,22 +222,44 @@ function onSection() { startPreamble(); }
 function onSectionEnd() { endPreamble(); }
 
 // ------------------------------------------------------------- motions
+// X and Y are unknown at the program's start and after every G30: the
+// first move from there would start wherever the table happens to be, a
+// diagonal from an unknown point (PathPilot warns "Axis XY not specified
+// by this or previous motions"). So that move is preceded by a G0 to its
+// X Y alone, made at the current - safe, Z-up - height, and only then
+// does Z come down: PathPilot's own XY-first order. A rapid positions at
+// its target; a feed or arc at the point the stream says it starts from
+// (the target when the stream names none); a cycle at its first hole.
+var xyUnknown = true;
+function xyFirst(x, y) {
+  if (!xyUnknown || !has(x) || !has(y)) return;
+  block(["G0", wo("X", x, orgX), wo("Y", y, orgY)]);
+  xyUnknown = false;
+}
+function startXY(p) {
+  if (has(p.StartX) && has(p.StartY)) xyFirst(p.StartX, p.StartY);
+  else xyFirst(p.X, p.Y);
+}
+
 // While a canned-cycle group is open its expanded hole chain is the
 // cycle block's business only.
 function onRapid() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
+  xyFirst(properties.X, properties.Y);
   block(["G0"].concat(xyz(properties)));
 }
 function onLinear() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
+  startXY(properties);
   block(["G1"].concat(xyz(properties), [fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
   var p = properties;
+  startXY(p);
   block([
     planeWord(planeOf(p)),
     p.CircularDirection === "CW" ? "G2" : "G3",
@@ -264,6 +287,7 @@ function onCycle() {
   // (the stream's synthesized tap feed), no P - PathPilot sizes the
   // bottom dwell itself, and the MX mills tap from the spindle encoder.
   else if (p.CycleType === "TAP") g = "G84";
+  xyFirst(p.X, p.Y);         // a cycle as the first move: its first hole
   var sig = g + "|" + p.Z + "|" + p.R + "|" + p.Q;
   if (inCycle && sig === cycleSig) {
     block([wo("X", p.X, orgX), wo("Y", p.Y, orgY)]);

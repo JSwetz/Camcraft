@@ -326,3 +326,54 @@ fn every_tool_change_lifts_z_before_g30() {
         );
     }
 }
+
+/// X and Y are unknown at the program's start and after every G30, so the
+/// first move after a tool change is preceded by a G0 to its X Y alone,
+/// at the Z-up height: PathPilot otherwise warns "Axis XY not specified
+/// by this or previous motions" and the move starts wherever the table
+/// happens to be.
+#[test]
+fn the_first_move_after_a_tool_change_positions_xy_with_z_up() {
+    let cps = read("assets/posts/tormach.cps");
+    let stream = "PARAM SpindleSpeed 2000\nTOOL 1 T1\nSECTION\nRapid X 25400 Y 12700 Z 5080\nFeed X 25400 Y 12700 Z -2540 F 254000\nENDSECTION\n\
+                  PARAM SpindleSpeed 2000\nTOOL 2 T2\nSECTION\nFeed X 50800 Y 0 Z -2540 F 254000\nENDSECTION\n";
+    let out = engine::run(&cps, &machine_for(TORMACH_MCH), stream).expect("posts");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    let lines: Vec<&str> = out.program.lines().collect();
+    let is_motion = |l: &&str| {
+        ["G0 ", "G1 ", "G2 ", "G3 ", "G8"]
+            .iter()
+            .any(|g| l.starts_with(g))
+            && !l.starts_with("G80")
+    };
+    let mut checked = 0;
+    for (i, l) in lines.iter().enumerate() {
+        if !l.ends_with(" M6") {
+            continue;
+        }
+        let first = lines[i..]
+            .iter()
+            .find(|l| is_motion(l))
+            .unwrap_or_else(|| panic!("{}", out.program));
+        assert!(
+            first.starts_with("G0 X") && first.contains(" Y") && !first.contains('Z'),
+            "XY alone first, not {first}\n{}",
+            out.program
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 2, "{}", out.program);
+    // The rapid's own target, then the rapid itself: Z comes straight down.
+    assert!(
+        out.program.contains("G0 X1 Y0.5\nG0 X1 Y0.5 Z0.2\n"),
+        "{}",
+        out.program
+    );
+    // A feed positions at the point the stream says it starts from (the
+    // second tool's stream carries on from X1 Y0.5), then runs as planned.
+    assert!(
+        out.program.contains("G0 X1 Y0.5\nG1 X2 Y0 Z-0.1 F10\n"),
+        "{}",
+        out.program
+    );
+}
