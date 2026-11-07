@@ -71,6 +71,20 @@ cargo build --release -p camcraft-app --bin camcraft-cli   # headless CLI
 cargo build --release -p camcraft-post --bin post          # standalone post processor
 ```
 
+### Arch Linux package
+
+The `aur/` directory contains a source package recipe for the tagged
+CamCraft release. On Arch Linux, build and install it with:
+
+```sh
+cd aur
+makepkg -si
+```
+
+The recipe installs the desktop app, command-line tools, and assets together.
+Publishing the recipe to the AUR is a separate step after its Arch build is
+validated.
+
 Windows, Linux, and macOS desktop releases are built on GitHub. The core
 crates also build and test on macOS, and the post engine compiles for
 `wasm32-unknown-unknown`.

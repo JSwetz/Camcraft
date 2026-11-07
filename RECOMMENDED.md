@@ -13010,3 +13010,26 @@ is already within tolerance of the true axis. Loosening `OK_SHARE` so parts
 with more than 10 % off-axis area are read: out of scope - a part whose plain
 fit misses by more than the concurrency tolerance is still refused as not
 revolved (follow-up material if users hit it with long keyways).
+
+## #72: Arch Linux source package
+
+- Add a `camcraft` source recipe under `aur/`, pinned to tag `v0.12.1` and
+  the source archive's SHA-256. Arch builds against its own libraries, and the
+  tag includes `Cargo.lock`; `prepare()` fetches locked Rust dependencies and
+  `build()` runs offline. Keep the binary, CLI, and adjacent assets under
+  `/usr/lib/camcraft` with commands in `/usr/bin`, as in the DEB and RPM.
+  Dropped `camcraft-bin` for this slice: the current GitHub release has no
+  Linux binary asset for every patch tag, while a source tag exists. The AUR
+  entry itself will be published after an Arch build validates the recipe.
+- Validate `aur/` in a separate manually dispatched workflow on an Arch Linux container:
+  compare `makepkg --printsrcinfo` with the checked-in `.SRCINFO`, run
+  `makepkg` through its build and test stages, inspect the package contents,
+  and upload the result. Keep this out of `release.yml` because the source
+  recipe follows tagged versions and AUR updates, while `release.yml`
+  assembles assets only for a CamCraft release. Manual dispatch also follows
+  the repository policy against running Actions for every PR.
+- The first Arch build reached `ld.lld` but could not resolve Flecs C symbols.
+  The likely cause is makepkg's default LTO compiling the bundled Flecs C into
+  GCC LTO objects that rust-lld cannot consume. Set `options=('!lto')` in the
+  package recipe, as the Arch Rust package guidelines prescribe for mixed
+  Rust/C projects, and verify the fix with another Arch package build.
