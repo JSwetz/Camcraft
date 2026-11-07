@@ -30,6 +30,12 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::tools::Tool;
 
+#[path = "drill_top.rs"]
+mod top;
+#[cfg(test)]
+use top::{facet_top, meets_disk};
+use top::{r_plane_clear, top_over};
+
 const TOL: f64 = 1e-6;
 
 fn finite_or_zero(v: f64) -> f64 {
@@ -92,49 +98,6 @@ pub(super) fn cross_reach(
     Ok(())
 }
 
-/// The highest material over the XY disk (`c`, `r`): the part's facets
-/// as they stand, the stock's clipped to the cycle's R plane (the
-/// cycle rapids down to R, so stock above it is the rapid laws' word,
-/// not stock this cycle feeds through). A facet counts at its highest
-/// vertex when its projection meets the disk - an over-estimate on a
-/// slope, never an under-estimate.
-fn top_over(part: &[Triangle], stock: &[Triangle], cx: f64, cy: f64, r: f64, r_z: f64) -> Option<f64> {
-    let over = |t: &Triangle| meets_disk(t, cx, cy, r).then(|| t.a.z.max(t.b.z).max(t.c.z));
-    let p = part.iter().filter_map(over).reduce(f64::max);
-    let s = stock.iter().filter_map(over).reduce(f64::max).map(|z| z.min(r_z));
-    match (p, s) {
-        (Some(a), Some(b)) => Some(a.max(b)),
-        (a, b) => a.or(b),
-    }
-}
-
-/// Does the facet's XY projection meet the disk? A facet with no area
-/// (collapsed to a point or a line - a bad facet) is skipped, so one
-/// sliver cannot set a false top. A wall (area in 3D, none in XY) is
-/// read by its edges alone: its projection is a segment, and the
-/// all-same-sign "inside" test would pass every disk on that
-/// segment's line.
-fn meets_disk(t: &Triangle, cx: f64, cy: f64, r: f64) -> bool {
-    let (u, w) = (t.b - t.a, t.c - t.a);
-    let n = [u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x];
-    let area = n[0].hypot(n[1]).hypot(n[2]);
-    if area.is_nan() || area <= 1e-12 {
-        return false;
-    }
-    let v = [(t.a.x - cx, t.a.y - cy), (t.b.x - cx, t.b.y - cy), (t.c.x - cx, t.c.y - cy)];
-    if v.iter().any(|(x, y)| !(x.is_finite() && y.is_finite())) {
-        return false;
-    }
-    let cross = |i: usize| {
-        let (p, q) = (v[i], v[(i + 1) % 3]);
-        p.0 * q.1 - p.1 * q.0
-    };
-    let s = [cross(0), cross(1), cross(2)];
-    let flat = n[2].abs() > 1e-12;
-    let inside = flat && (s.iter().all(|&c| c >= 0.0) || s.iter().all(|&c| c <= 0.0));
-    inside || (0..3).any(|i| seg_dist(v[i], v[(i + 1) % 3]) <= r)
-}
-
 /// Distance from the origin to the segment `p`-`q`.
 fn seg_dist(p: (f64, f64), q: (f64, f64)) -> f64 {
     let (dx, dy) = (q.0 - p.0, q.1 - p.1);
@@ -158,12 +121,15 @@ pub(super) fn axial_reach(
     tool: &Tool,
     name: &str,
 ) -> Result<(), GenError> {
+    // No stock (or the stock is the source): the part alone is the
+    // material - every law below reads the part too (#91 review).
     let stock = stock.unwrap_or(&[]);
     let flute = finite_or_zero(tool.flute_len);
     let body = 0.5 * finite_or_zero(tool.diameter).max(finite_or_zero(tool.shank_d));
     for c in &t.cycles {
         let Cycle { xy, r_z, bottom_z, .. } = *c;
-        let top = top_over(part, stock, xy.x, xy.y, body, r_z).unwrap_or(c.entry_z).max(c.entry_z.min(r_z));
+        r_plane_clear(part, stock, c, body)?;
+        let top = top_over(part, stock, xy.x, xy.y, body).unwrap_or(c.entry_z).max(c.entry_z.min(r_z));
         let depth = top - bottom_z;
         if matches!(c.kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {
             shank_fits(c, holes, depth, flute, tool, name)?;
@@ -178,7 +144,7 @@ pub(super) fn axial_reach(
         }
         if let Some((reach, hr)) = holder(tool, name)? {
             let face = bottom_z + reach;
-            if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr, r_z).filter(|&z| face < z - TOL) {
+            if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr).filter(|&z| face < z - TOL) {
                 return Err(GenError::Invalid(format!(
                     "tool {name}'s holder (dia. {:.3}, {reach:.3} mm above the tip) sinks to Z {face:.3} at the \
                      hole at ({:.3}, {:.3}), below the material top {ht:.3} around it - the holder feeds into \
