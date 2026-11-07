@@ -10,6 +10,7 @@
 //! Gate map (M4.4): covers ui::state, ui::viewport, app::stock.
 
 use std::collections::HashSet;
+use std::sync::Mutex;
 
 use egui_wgpu::wgpu;
 use camcraft_app::stock::{StockShape, stock_mesh};
@@ -18,6 +19,10 @@ use camcraft_ui::viewport::{Camera, GpuPart, View3D};
 
 const SIDE: u32 = 256;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+// Concurrent fallback-device creation and teardown can crash in software
+// Vulkan drivers; keep the entire render/readback lifecycle on one test at
+// a time while leaving the rest of the test suite parallel.
+static GPU_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn device_and_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -107,6 +112,7 @@ fn render_mode(
     cam: &Camera,
     display: DisplayMode,
 ) -> Option<(Vec<u8>, u32, u32)> {
+    let _gpu_guard = GPU_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (device, queue) = device_and_queue()?;
     let mut view = View3D::new(&device, FORMAT, SIDE, SIDE);
     view.set_document(&device, &queue, parts);
