@@ -61,7 +61,7 @@ pub use parallel5d::parallel5d;
 pub use rough::{multiaxis_rough, multiaxis_rough_prev};
 pub use rotary::{rotary_contour, rotary_parallel};
 pub use rotary_bar::revolved_bar;
-pub use rotary_offset::{rotary_offset, rotary_offset_in};
+pub use rotary_offset::{rotary_offset, rotary_offset_developed, rotary_offset_in};
 pub use stamp_link::{guard_turns, link_swings, LINK_TURN_DEG};
 pub use swarf::{swarf5d, swarf5d_advanced};
 pub use tilt::{command_axis, AxisControl};
