@@ -1,4 +1,8 @@
-# CamCraft 0.8.0 - hand-test checklist
+# CamCraft 0.8.2 - hand-test checklist
+
+**0.8.2 first** (the four fixes): A. Edges mode, Shift+click one pocket rim edge - the whole loop is picked and 2D Adaptive generates. B. Pick a flat face, Heights - Bottom From: Selection reads the face's Z (offset 0). C. 2D Adaptive/Pocket, Containment Outside on the block's underside - no moves enter the round recess. D. Circular, pick a bore rim - rings centred on the bore; a square pocket is refused.
+
+## The 0.8.0 checklist
 
 About 12 checks, roughly 30 minutes, aimed at what changed since 0.7.0. For
 each, do the steps and compare with **Expect**. Anything that differs is worth

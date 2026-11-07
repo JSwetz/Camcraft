@@ -1,3 +1,32 @@
+# CamCraft 0.8.2 (clean-room implementation)
+
+A bug-fix release from hand-testing 0.8.0/0.8.1.
+
+## Fixed
+- **Closing an edge loop.** In Edges mode, Shift+click takes the whole loop
+  an edge lies on, and Ctrl+click adds or removes one edge. The Selection
+  group shows the hint, and the "open run" error says how to close the loop.
+- **The Bottom height after picking a face.** Switching Bottom's *From* to
+  Selection kept the previous reference's offset (e.g. +18.7), which put the
+  floor above the picked face. It now starts at offset 0, so the floor is the
+  face.
+- **Containment Outside on 2D Adaptive/Pocket.** It no longer machines a
+  recess inside the part: only the outer edge is grown, holes stay protected,
+  and pockets the band past the outline does not reach are left alone. With
+  Outside alone the band is exactly one tool wide, so 2D Adaptive refuses it
+  by name ("no room for an entry") - add a Boundary extension.
+- **Circular follows the selection.** Pick a bore rim, a round pocket floor,
+  or a face around one round hole, and the rings are centred and sized from
+  it (shown as "From selection: Ø… at (x, y)"). A selection that is not round
+  is refused with where it deviates; with no selection the typed centre and
+  radius work as before.
+
+## Known
+- 2D Adaptive on a wide Outside band can be slow to plan (minutes); 2D
+  Offset plans the same area quickly.
+
+---
+
 # CamCraft 0.8.1 (clean-room implementation)
 
 A packaging release on top of 0.8.0 - the program is unchanged.

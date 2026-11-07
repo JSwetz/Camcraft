@@ -1,3 +1,8 @@
+> **Frozen archive (2026-11-07).** Work is now tracked as GitHub issues
+> (AGENTS.md "Issue Law"): every item still owed below was filed as an issue
+> with a `Source: ROADMAP.md <milestone>` line. Read this file for history and
+> design context; do not add work here. Shipped changes: `CHANGELOG.md`.
+
 # ROADMAP.md
 
 > _Last updated: 2026-11-04_
@@ -29,7 +34,7 @@ impressive.
 
 **Phase** → **Milestone** → concrete, checkable features. The feature list is
 the contract; the Goal line is what the feature list adds up to. Phases past
-all green gates live in `DONE.md` (see AGENTS.md's Done ledger law); this file
+all green gates lived in `DONE.md` (retired 2026-11-07; read it with `git show v0.8.1:DONE.md`) (see AGENTS.md's Done ledger law); this file
 keeps the open work, the registry table, and a pointer.
 
 ## Status legend
@@ -1170,7 +1175,7 @@ before touching metal.
 
 ## Archived phases (the ledgers moved to DONE.md)
 
-The phases below passed every gate; their prose lives in `DONE.md`
+The phases below passed every gate; their prose lived in `DONE.md` (`git show v0.8.1:DONE.md`)
 (AGENTS.md "Done ledger" law), their status rows stay in the registry
 table at the foot of this file, and their decisions in `RECOMMENDED.md`.
 
@@ -1939,6 +1944,10 @@ never runs out of dates.
 built or decided here.** — 📋 (audit 2026-11-06, RECOMMENDED "The Phase 1
 leftovers audit")
 
+- **2D Adaptive on an extended Outside band** (found 2026-11-07, RECOMMENDED
+      "0.8.2 hand-test fixes"): the planner ran over 6 minutes in debug on the
+      band around Milling-test's outline; 2D Offset plans it at once. Profile
+      and bound it (or refuse by name with the band's width).
 - ~~**G41/G42 cutter compensation**~~ (M1.3) - done 2026-11-06 (RECOMMENDED
       "M13.11: G41/G42 cutter compensation"): `Compensation { Computer,
       Control }` on the contour's approach, a `CompSpan` in the CL beside the

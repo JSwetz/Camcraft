@@ -11644,3 +11644,31 @@ code on main and both stay owed in ROADMAP. The 0.9.0 and 0.10.0 rows keep
 their dates for whatever lands next. Dropped: cutting at Monday's date
 (holding a finished build three days for a calendar), and cutting before the
 last four changes were gated (they were done; one gate covers them).
+
+## 0.8.2 hand-test fixes: edge loops, the Selection height offset, Outside containment, Circular from the selection (2026-11-07)
+
+From the user's hand-test of 0.8.0 on testdata/models/Milling-test.step (a
+60×50 block, Z −5..20, a round recess cut from the top to Z 0; the ~2500 mm²
+face at Z −5 is the underside - not a shoulder, which changed the diagnosis).
+(1) **Shift+click takes the whole face loop** an edge lies on (the boundary
+picker's `extend_to_loop`, reused), Ctrl+click toggles one edge; the Edges
+mode shows the hint and the open-run refusal says how to close the loop -
+the multi-select existed but nothing taught it. (2) **The "weird height" was
+the From combo carrying the old offset**: "Bottom of stock +18.7" (= Z −5)
+became "selection bottom +18.7" (= Z 13.7). Switching to Selection now
+starts at offset 0 - the picked face IS the floor. Dropped: converting the
+offset to keep the same Z (the user picked the face to mean its Z). (3)
+**Containment On/Outside no longer machines a hole of the part**: the part
+was subtracted from the selection BEFORE containment grew it, leaving only
+the recess, which containment then grew. Now the pocket kinds hand the whole
+outline to the boundary step, only OUTER edges grow, holes stay as picked,
+then the part is subtracted and only the pieces the band past the outline
+touches are kept. Found, owed: Outside alone leaves a band exactly one tool
+wide (2D Adaptive refuses it by name, "no room for an entry"), and 2D
+Adaptive on an extended band planned for over 6 minutes in debug - tracked.
+(4) **Circular fits its circle to the selection** (`circle_fit::
+circular_fit_of`: the region's outer contour - or its single round hole -
+accepted when every vertex is within 0.01 mm of the mean radius about the
+area centroid); a non-round selection refuses with the deviation and where;
+no selection keeps the typed circle byte-identical. The boundary group stays
+refused for Circular (one change at a time).
