@@ -142,8 +142,8 @@ fn every_missing_or_doubled_datum_is_refused_by_name() {
         assert!(e.contains(want), "{want:?} not in {e:?}");
     };
     says(&[], "pick a flat face");
-    says(&[front.clone()], "pick a flat face");
-    says(&[top.clone()], "pick a straight edge");
+    says(std::slice::from_ref(&front), "pick a flat face");
+    says(std::slice::from_ref(&top), "pick a straight edge");
     says(&[top.clone(), side, front.clone()], "only one flat face");
     says(&[top.clone(), front.clone(), front.clone()], "only one edge");
     says(&[top.clone(), front.clone(), c0, c1], "only one origin");

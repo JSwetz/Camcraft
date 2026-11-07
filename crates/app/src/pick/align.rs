@@ -28,6 +28,9 @@ const STRAIGHT_TOL_REL: f64 = 1e-4;
 /// give the plane a direction worth trusting.
 const MIN_EDGE_TILT_DEG: f64 = 5.0;
 
+/// A datum plane: a point on it and its outward unit normal (world).
+type Plane = ([f64; 3], [f64; 3]);
+
 /// A work-offset placement the WCS pane can send as-is: world position and
 /// the pane's roll / pitch / yaw angles (degrees, `quat_from_euler` order).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,7 +52,7 @@ pub struct Alignment {
 /// pick the origin is the edge's end that X runs away from. Every refusal
 /// names what to re-pick.
 pub fn align_321(world: &World, picks: &[GeoSel]) -> Result<Alignment, String> {
-    let mut plane: Option<([f64; 3], [f64; 3])> = None; // (point, outward normal)
+    let mut plane: Option<Plane> = None;
     let mut edge: Option<([f64; 3], [f64; 3])> = None; // (start, end)
     let mut origin: Option<[f64; 3]> = None;
     for g in picks {
@@ -125,7 +128,7 @@ fn set_origin(slot: &mut Option<[f64; 3]>, p: [f64; 3]) -> Result<(), String> {
 /// A planar face's (centroid, outward unit normal) in world, or `None`
 /// when the face is not planar. Outward is the facets' winding (the mesh's
 /// own outside), not the feature's winding-free normal.
-fn flat_face(world: &World, g: &GeoSel) -> Result<Option<([f64; 3], [f64; 3])>, String> {
+fn flat_face(world: &World, g: &GeoSel) -> Result<Option<Plane>, String> {
     let FeatureSel::Face(fid) = g.feature else { return Ok(None) };
     let e = model::find_by_name(world, &g.entity).ok_or_else(|| gone(g))?;
     let features = model::features_of(world, &e).ok_or_else(|| gone(g))?;
