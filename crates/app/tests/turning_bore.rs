@@ -20,7 +20,9 @@
 
 mod common;
 
-use camcraft_app::commands::{ChangeTool, CreateOperation, DeleteOperation, EditOperationParams, GenerateOperation};
+use camcraft_app::commands::{AddTool, ChangeTool, CreateOperation, DeleteOperation, EditOperationParams, GenerateOperation, ImportModel};
+use camcraft_app::drilling::{CycleChoice, Hole};
+use camcraft_app::geo2d::Point2;
 use camcraft_app::model;
 use camcraft_app::operation::{Carried, Height, KindInfo, OpParams, OpStatus, OpType, SrcRef};
 
