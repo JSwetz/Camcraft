@@ -138,24 +138,31 @@ fn machine(word: &str) -> Machine {
     }
 }
 
-/// A document the contour kinds live in: the four bars in plain box
+/// A document the contour kinds live in: the four bars in bar-sized
 /// stock, the lathe mounted, the turning insert and the wrong
 /// steels on the rack.
 fn contour_world() -> (World, History) {
+    contour_world_in(20.0, 56.0)
+}
+
+/// [`contour_world`] with bar stock `diameter` wide from Z -16 up
+/// `height`: the stepped bar (r 6) is roughed from a bar its own size,
+/// never the r 10 blank the other bars stand in (#103, #130).
+fn contour_world_in(diameter: f64, height: f64) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
     history.execute(
         &world,
         SetStock::new(
             &world,
-            camcraft_app::stock::StockShape::Box {
-                dx: 40.0,
-                dy: 40.0,
-                dz: 64.0,
-            },
-            Location::default(),
+            // Bar-sized stock (#103): the widest bar's diameter (r 10)
+            // over the bars' Z span - the turning kernels never cut
+            // stock beyond the part (#130), so a wider blank is a
+            // real crash.
+            camcraft_app::stock::StockShape::Cylinder { diameter, height },
+            Location { pos: camcraft_app::geometry::Point3::new(0.0, 0.0, -16.0), ..Location::default() },
         )
-        .expect("box stock"),
+        .expect("bar stock"),
     );
     let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(machine("lathe")));
     history.execute(&world, cmd.expect("lathe"));
@@ -326,7 +333,7 @@ fn the_multipass_program_runs_ladder_and_springs_silent() {
     // blocks, each strictly inside the last, the last standing a
     // nose off the model. The envelope verdict measures the union
     // and says nothing: the skin is tangent, and nothing stands.
-    let (world, mut history) = contour_world();
+    let (world, mut history) = contour_world_in(12.0, 32.0);
     create_on(&world, &mut history, "MP1", "TN-1600-0R8", "stepped", mp_params());
     let c = cache(&world, "MP1").expect("cached");
     assert_eq!(status(&world, "MP1"), OpStatus::Ok);
@@ -397,6 +404,8 @@ fn the_seeds_of_the_contour_kinds_stand() {
     assert_eq!(status(&world, "SD2"), OpStatus::Ok, "the taper seed states dia 20/16 and the bar keeps it");
     assert!(c.warnings.is_empty(), "the seeded cone reported: {:?}", c.warnings);
     let s = seed(OpType::MultiPassTurning, carried(16.0, -16.0, 30.0));
+    // The stepped bar in a bar of its own size (#103).
+    let (world, mut history) = contour_world_in(12.0, 32.0);
     create_on(&world, &mut history, "SD3", "TN-1600-0R8", "stepped", s);
     let c = cache(&world, "SD3").expect("cached");
     assert_eq!(status(&world, "SD3"), OpStatus::Ok);

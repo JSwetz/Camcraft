@@ -13209,3 +13209,30 @@ revolved (follow-up material if users hit it with long keyways).
 - **Dropped:** a sim-side Revolve rapid law (the sim has no stock solid
   of revolution; the app has the frame and the prior); reading the stock
   bore (a tube stock reads solid - conservative, owed).
+
+### #103 resumed: fixtures, not the law
+
+- **Fixtures.** The lathe suites' 40 mm box stock (Z 0 up) round 12-20
+  mm bars is replaced by bar-sized stock - a Cylinder of the bar's
+  diameter over its Z span - in lathe_post (profile, groove/part; a
+  `bar_world` helper), turning_contour (r 10 blank; the stepped r 6 bar
+  gets its own r 6 world, `contour_world_in`), turning_blade,
+  turning_form, turning_thread and turning_bore. The convictions were
+  real against the declared box: the turning kernels never cut stock
+  beyond the part, filed as #130. No NC golden changed.
+- **One wiring fix, found by turning_form:** the nose disc is the
+  tool's `nose_radius` only for Turning and Bore inserts (their moves
+  carry the nose centre); a groove/thread blade or form gauge carries
+  its tip with the body outward, so it is judged as the tip point (a
+  form's `nose_radius` is its crown arc - read as a 6 mm ball it
+  convicted every clean form traverse). Owed: a blade's band along the
+  axis past the rapid's ends is not read.
+- **Held: turning_bore (3 tests).** The boring ride's approach runs down
+  the axis (r 0, Z 60 -> -10) into the bar. Against the declared solid
+  bar that is a real crash (no pilot hole); against honest stock (a tube,
+  or a drill ahead) the law still convicts it, because both readings
+  fill the bore: the stock and the part are each read as their OUTER
+  silhouette, and the lathe prior credits facing only. A boring op can
+  therefore never post - a false refusal class the law must lose before
+  #103 closes: read each body's meridian section (inner and outer
+  radius per station), and credit an axial drill ahead.

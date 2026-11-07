@@ -111,7 +111,7 @@ fn machine(word: &str) -> Machine {
     }
 }
 
-/// A document the blade kinds live in: bar in plain box stock, the
+/// A document the blade kinds live in: bar in bar-sized stock, the
 /// lathe mounted, both catalog blades on the rack.
 fn blade_world() -> (World, History) {
     let world = new_world();
@@ -120,14 +120,13 @@ fn blade_world() -> (World, History) {
         &world,
         SetStock::new(
             &world,
-            camcraft_app::stock::StockShape::Box {
-                dx: 40.0,
-                dy: 40.0,
-                dz: 40.0,
-            },
-            Location::default(),
+            // Bar-sized stock (#103): the bar's own diameter over its
+            // Z span - the turning kernels never cut stock beyond the
+            // part (#130), so a wider blank is a real crash.
+            camcraft_app::stock::StockShape::Cylinder { diameter: 12.0, height: 44.0 },
+            Location { pos: Point3::new(0.0, 0.0, -16.0), ..Location::default() },
         )
-        .expect("box stock"),
+        .expect("bar stock"),
     );
     let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(machine("lathe")));
     history.execute(&world, cmd.expect("lathe"));

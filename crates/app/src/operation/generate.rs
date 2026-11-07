@@ -2731,7 +2731,15 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &super::turning_rapids::Meridian {
                     part: &material.facets,
                     stock: stock_facets.as_deref(),
-                    nose: tool.nose_radius,
+                    // Only an insert's moves carry a nose CENTRE; a
+                    // blade, thread or form gauge's carry its tip, the
+                    // body standing outward (a form's `nose_radius` is
+                    // its crown arc, not a ball round the tip).
+                    nose: if matches!(tool.kind, crate::tools::ToolKind::Turning | crate::tools::ToolKind::Bore) {
+                        tool.nose_radius
+                    } else {
+                        0.0
+                    },
                     margin: GOUGE_TOL,
                     z_tol: Z_TOL,
                 },

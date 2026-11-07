@@ -99,6 +99,28 @@ fn lathe_world(bar: Mesh, stock: (f64, f64, f64), tools: &[&str]) -> (World, His
     lathe_world_at(bar, stock, Location::default(), tools)
 }
 
+/// The bar in stock of its own size (#103): a cylinder of the
+/// meridian's widest diameter over its Z span - the turning kernels
+/// never cut stock beyond the part (#130), so a wider blank is a real
+/// crash the rapid law convicts.
+fn bar_world(meridian: &[(f64, f64)], tools: &[&str]) -> (World, History) {
+    let r = meridian.iter().map(|p| p.0).fold(0.0f64, f64::max);
+    let z0 = meridian.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let z1 = meridian.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+    let world = new_world();
+    let mut history = History::default();
+    let at = Location { pos: Point3::new(0.0, 0.0, z0), ..Location::default() };
+    let cmd = SetStock::new(&world, camcraft_app::stock::StockShape::Cylinder { diameter: 2.0 * r, height: z1 - z0 }, at);
+    history.execute(&world, cmd.expect("bar stock"));
+    let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(lathe()));
+    history.execute(&world, cmd.expect("lathe"));
+    for t in tools {
+        add_tool(&world, &mut history, t);
+    }
+    history.execute(&world, ImportModel::from_mesh("bar", revolve(meridian, 16)));
+    (world, history)
+}
+
 /// [`lathe_world`] with the stock box's base at `at`.
 fn lathe_world_at(bar: Mesh, stock: (f64, f64, f64), at: Location, tools: &[&str]) -> (World, History) {
     let world = new_world();
@@ -182,8 +204,8 @@ fn facing_posts_to_the_lathe_golden() {
 #[test]
 fn profile_rough_and_finish_post_to_the_lathe_golden() {
     // The stage-B flanged bar: neck r3.5 so the rough ladder has rungs.
-    let bar = revolve(&[(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (3.5, 2.0), (3.5, 16.0), (0.0, 16.0)], 16);
-    let (world, mut history) = lathe_world(bar, (40.0, 40.0, 40.0), &["TN-1600-0R8"]);
+    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (3.5, 2.0), (3.5, 16.0), (0.0, 16.0)];
+    let (world, mut history) = bar_world(&bar, &["TN-1600-0R8"]);
     let rough = OpParams::ProfileRough {
         tolerance: 0.05,
         clearance_z: Height::fixed(25.0),
@@ -214,11 +236,8 @@ fn profile_rough_and_finish_post_to_the_lathe_golden() {
 #[test]
 fn groove_and_part_post_to_the_lathe_golden() {
     // The stage-C grooved bar: wall r6, a 3.2-wide groove to r4.
-    let bar = revolve(
-        &[(0.0, -16.0), (6.0, -16.0), (6.0, -6.8), (4.0, -6.8), (4.0, -3.6), (6.0, -3.6), (6.0, 28.0), (0.0, 28.0)],
-        16,
-    );
-    let (world, mut history) = lathe_world(bar, (40.0, 40.0, 40.0), &["GT-0200", "GT-0300"]);
+    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, -6.8), (4.0, -6.8), (4.0, -3.6), (6.0, -3.6), (6.0, 28.0), (0.0, 28.0)];
+    let (world, mut history) = bar_world(&bar, &["GT-0200", "GT-0300"]);
     let groove = OpParams::GrooveFinish {
         tolerance: 0.05,
         clearance_z: Height::fixed(20.0),
