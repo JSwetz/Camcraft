@@ -1,15 +1,19 @@
 # Changelog
 
 One row per behaviour-changing commit: `commit | date | change | version`.
-`Unreleased` rows take the version name at the next cut (AGENTS.md "Issue
-Law"). Issue references are `(#N)` at the end of the change. Docs-only and
+Rows are written at each cut from the merged PRs' `Changelog:` lines
+(AGENTS.md "Issue Law"); older `Unreleased` rows took the version at their cut. Issue references are `(#N)` at the end of the change. Docs-only and
 release-mechanics commits are not listed; history before 0.7.0 is in
 `RECOMMENDED.md` and git history (the retired `DONE.md` is in every tag up to
 v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
-| d4dc943 | 2026-11-07 | fix(post)!: Heidenhain DIN/ISO posts the TNC block form; drilling as moves, tapping and non-first offsets refused - breaking post output (#50) | Unreleased |
+| 8a959b1 | 2026-11-07 | fix(app): turning ops (and the lathe axial drill) whose fitted axis is not world Z through the work offset within 0.0005 mm are refused by name at generation and at posting, instead of posting a taper or eccentric (#62, PR #65) | 0.12.0 |
+| 7e013e7 | 2026-11-07 | feat(sim,app): turning programs (facing, profile, contour, boring) simulate on the field stock view about their fitted spindle with meridian parity; blade/thread/form tools refuse by name (#19, PR #60) | 0.12.0 |
+| 5956e98 | 2026-11-07 | feat(motion): Adaptive clears the rotary developed wrap level by level under the load and kink laws; refused levels named by radius, cut by Offset rings (#9, PR #57) | 0.12.0 |
+| a68e17a | 2026-11-07 | feat!: project Save As and kept filenames; operation rename, reorder, copy and paste with order-driven playback; browser collapse and viewport visibility controls; GPU buffer guards - v50 project files, refused by older builds (#45 part, PR #58 by linuxguy123) | 0.12.0 |
+| d4dc943 | 2026-11-07 | fix(post)!: Heidenhain DIN/ISO posts the TNC block form; drilling as moves, tapping and non-first offsets refused - breaking post output (#50) | 0.12.0 |
 | 80aafb4 | 2026-11-07 | fix(post)!: Heidenhain DIN/ISO XY arcs post their absolute centre in its own I/J block - breaking post output (#49) | 0.11.0 |
 | bf92363 | 2026-11-07 | fix(motion,app): Swarf links halved, poses never under level, ball re-entry into its own cut is no plunge (#17) | 0.11.0 |
 | c18254c | 2026-11-07 | fix(app,motion): Rotary Offset plunge audit judges against the true cylinder of the bar (#16) | 0.10.0 |
