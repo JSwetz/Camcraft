@@ -349,9 +349,12 @@ change bumps MINOR instead and its release notes say "breaking" first.
 **When to cut.** Fixing an issue ends in a patch release; landing a feature
 ends in a minor one - cut as soon as the change is committed and gated,
 not on a calendar (the release train in the frozen ROADMAP.md is retired).
-Several fixes that land in one sitting share one patch. Each cut costs one
-release.yml Windows build of the Actions budget (~30-40 billed minutes), so
-batch what lands together rather than tagging every commit. The cut:
+Several fixes that land in one sitting share one patch. **Only MAJOR and
+MINOR tags build on GitHub**: `release.yml` triggers on `vX.Y.0` alone, so a
+patch tag is pushed as a marker (and its local zip is the hand-test build)
+while GitHub builds and publishes an artifact only for a feature release -
+each such build costs ~30-40 billed minutes of the Actions budget. To ship a
+patch artifact anyway, run Release by hand (`workflow_dispatch`). The cut:
 `scripts/release.ps1 -Version X.Y.Z` (runs the release gate tier unless the
 same tree already passed it), CHANGELOG.md's `Unreleased` rows become
 `X.Y.Z`, then publish (below) and comment `shipped in vX.Y.Z` on every
@@ -360,7 +363,7 @@ issue it closed.
 **Every cut tag is published.** A release cut is not done until it is on
 GitHub: after the tag is made locally (`scripts/release.ps1`), push the
 branch, then the tag - `git push origin main && git push origin vX.Y.Z` -
-which fires `release.yml` and attaches the built artifact to a GitHub
-release. A tag that exists only locally is an unfinished cut. Never move or
+which, for a MAJOR or MINOR tag, fires `release.yml` and attaches the
+built artifact to a GitHub release (a patch tag is pushed without a build). A tag that exists only locally is an unfinished cut. Never move or
 re-push an existing tag; a fix after a cut is the next patch version. Never
 force-push.

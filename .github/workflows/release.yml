@@ -5,10 +5,14 @@
 # Signing is optional and secret-gated (scripts/sign.ps1): with no
 # CAMCRAFT_SIGN_* secret the binaries ship unsigned, as every release so
 # far has. The decision is logged in RECOMMENDED.md ("M13.3").
+# Only MAJOR and MINOR tags build (vX.Y.0): a patch tag (vX.Y.Z, Z > 0) is
+# pushed as a marker and builds nothing - the Actions budget is spent on
+# releases that carry features (AGENTS.md "Versioning is semantic").
+# workflow_dispatch builds any ref by hand.
 name: Release
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.0']
   workflow_dispatch:
 
 env:
