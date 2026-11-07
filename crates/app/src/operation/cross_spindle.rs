@@ -16,7 +16,7 @@
 //! convention, any turning handbook); the frame shift is plain
 //! translation. Our own design notes; no vendor material consulted.
 
-use crate::cl::Toolpath;
+use crate::cl::{lattice, Toolpath};
 use crate::drilling::{self, CrossHole, CrossParams};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
@@ -30,9 +30,19 @@ pub(super) fn lathe_reads(facets: &[Triangle], origin: [f64; 3]) -> Result<(), G
     if super::spindle_law::spindle_reading(facets, origin).is_some() {
         return Ok(());
     }
-    let why = crate::multiaxis::axis::fit(facets)
-        .err()
-        .map_or_else(|| "its axis lies near the table".to_string(), |e| e.to_string());
+    // `spindle_reading` reads nothing for exactly three reasons; name
+    // the one that holds.
+    let why = match crate::multiaxis::axis::fit(facets) {
+        Err(e) => e.to_string(),
+        Ok(ax) => {
+            let n = ax.dir.dot(ax.dir).sqrt();
+            if n.is_finite() && n > 0.0 {
+                "its axis lies near the table".to_string()
+            } else {
+                "the fitted axis has no usable direction".to_string()
+            }
+        }
+    };
     Err(GenError::Invalid(format!(
         "a lathe's cross drill plunges toward the spindle, and this part cannot be read as \
          turned about one ({why}) - model the part as the turned bar it is, or drill it on a \
@@ -58,6 +68,7 @@ pub(super) fn cross_drill(
     if !(ox.is_finite() && oy.is_finite()) {
         return Err(GenError::Invalid("the work offset's origin is not usable".into()));
     }
+    plunges_inward(p.holes, ox, oy)?;
     // Z is the spindle's own coordinate - no shift. A Z top known lets
     // the kernel route an opposite-station travel over the end face
     // (M5.2 G); a solid with no vertices says so honestly.
@@ -85,7 +96,8 @@ pub(super) fn cross_drill(
         stock_z_max: st.z_max,
         holes: &local,
         ..p
-    })?;
+    })
+    .map_err(|e| in_world(e, &local, p.holes))?;
     super::cross_stock::rapids_clear(&t, &st, p.tool)?;
     if on_origin {
         return Ok(t);
@@ -110,4 +122,54 @@ pub(super) fn cross_drill(
         return Err(GenError::Invalid("cross-drill chain self-check failed after the spindle shift".into()));
     }
     Ok(t)
+}
+
+/// Every hole must plunge TOWARD the spindle line: the kernel stands a
+/// station on the mouth's own side at the hop radius, which for a
+/// plunge pointing away from the axis is a point beyond the part's far
+/// side - and the rapid in to the mouth would run through the material.
+/// (A mill-turn block off its work offset has such faces: the ones
+/// nearer the spindle line.) Read in the spindle frame - the mouth's
+/// radial offset from world Z through (`ox`, `oy`) dotted with the
+/// plunge - and refused by name in world coordinates. A non-finite
+/// hole falls through to the kernel's own malformed-list refusal.
+fn plunges_inward(holes: &[CrossHole], ox: f64, oy: f64) -> Result<(), GenError> {
+    for h in holes {
+        let out = (h.origin.x - ox) * h.dir.x + (h.origin.y - oy) * h.dir.y;
+        if out > 1e-9 {
+            return Err(GenError::Invalid(format!(
+                "cross hole at ({}, {}, {}) plunges along ({}, {}, {}), away from the spindle (world Z                  through ({ox}, {oy})): its station would stand beyond the part's far side and the                  rapid in would cross the material - drill it from the face toward the spindle, or                  move the work offset",
+                h.origin.x, h.origin.y, h.origin.z, h.dir.x, h.dir.y, h.dir.z
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Carry a kernel refusal from the spindle frame back to the world: the
+/// kernel names a hole by its (raw or lattice-snapped) mouth, as an XYZ
+/// or an XY point; the first hole whose point the message carries has
+/// it rewritten to the world mouth the user modelled.
+fn in_world(e: GenError, local: &[CrossHole], world: &[CrossHole]) -> GenError {
+    let fix = |s: String| -> String {
+        for (l, w) in local.iter().zip(world) {
+            let wo = w.origin;
+            let (w3, w2) = (format!("({}, {}, {})", wo.x, wo.y, wo.z), format!("({}, {})", wo.x, wo.y));
+            let snap = Point3::new(lattice(l.origin.x), lattice(l.origin.y), lattice(l.origin.z));
+            let mut out = s.clone();
+            for lo in [l.origin, snap] {
+                out = out.replace(&format!("({}, {}, {})", lo.x, lo.y, lo.z), &w3);
+                out = out.replace(&format!("({}, {})", lo.x, lo.y), &w2);
+            }
+            if out != s {
+                return out;
+            }
+        }
+        s
+    };
+    match e {
+        GenError::Invalid(s) => GenError::Invalid(fix(s)),
+        GenError::Empty(s) => GenError::Empty(fix(s)),
+        other => other,
+    }
 }
