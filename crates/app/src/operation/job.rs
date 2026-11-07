@@ -71,6 +71,11 @@ pub struct GenJob {
     /// The area controls resolved against the world (M11.5); `None` for
     /// the identity - an untouched operation carries nothing new.
     pub(super) area: Option<Result<AreaCtx, GenError>>,
+    /// The work offset's world origin (`posting::wcs_context`), the
+    /// spindle a lathe or mill-turn post programs about: world Z
+    /// through it. The cross drill measures its standoffs from this
+    /// line (issue #67), not from the world origin.
+    pub(super) wcs_origin: [f64; 3],
 }
 
 /// The tripwire phrase for a stored precompute whose arm never collected
@@ -189,9 +194,11 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // through the work offset's origin, the very origin `wcs_context`
     // hands the post), or it is refused here, before a move exists.
     // (The post reads it again, against the origin it is handed then.)
+    // The mill-turn's cross drill joins it (issue #67): its standoffs
+    // are measured about that same line.
+    let (slot, wcs_origin) = crate::posting::wcs_context(world, setup, &op.params);
     if super::spindle_law::turns(world, &op.params) {
-        let (slot, origin) = crate::posting::wcs_context(world, setup, &op.params);
-        super::spindle_law::check(&material.facets, origin, slot)?;
+        super::spindle_law::check(&material.facets, wcs_origin, slot)?;
     }
     let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
@@ -231,6 +238,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         rotary_axis,
         part_solid,
         area,
+        wcs_origin,
     })
 }
 

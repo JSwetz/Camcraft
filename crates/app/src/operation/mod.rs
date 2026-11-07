@@ -117,6 +117,7 @@ use boundary_ctx::*;
 mod job;
 pub use job::*;
 mod generate;
+mod cross_spindle;
 mod plunge_solid;
 mod rotary_law;
 pub(crate) mod spindle_law;
