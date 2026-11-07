@@ -74,9 +74,13 @@ design context, never add work to them. Decisions still go to
   create a new branch to work off of"). Before the first edit:
   `git fetch origin && git switch main && git pull --ff-only origin main`,
   then `git switch -c issue/N-<slug>` (a worktree agent:
-  `git fetch origin && git worktree add --no-track -b issue/N-<slug> <path>
-  origin/main` - `--no-track`, so a bare pull/push never targets main). One
-  issue, one branch; every commit for it lands there, never on `main`.
+  `git fetch origin && git worktree add --no-track -b issue/N-<slug>
+  .claude/worktrees/issue-N origin/main` - `--no-track`, so a bare pull/push
+  never targets main). Worktrees live inside the repo under the gitignored
+  `.claude/worktrees/`, never beside it (user, 2026-11-08: "but why are they
+  outside the working folder u started up in?"), and are removed once their
+  PR is pushed. One issue, one branch; every commit for it lands there, never
+  on `main`.
 - **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
