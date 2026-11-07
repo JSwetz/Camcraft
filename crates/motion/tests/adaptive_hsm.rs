@@ -385,6 +385,25 @@ fn hsm_on_the_user_bore_enters_once_and_holds_every_law() {
     assert!(bad.is_empty(), "{bad:#?}");
 }
 
+/// Issue #5 round 2: the channel the spiral refuses is tried as a
+/// trochoid next (spiral -> trochoid -> rings), and what keeps the
+/// trochoid off - its lifted returns land on loop starts already in cut,
+/// one descent into stock each loop - is named before the Offset rings
+/// cut it; the program verifies clean.
+#[test]
+#[ignore = "heavy lane: the channel spiral, trochoid and rings planned in turn (80 s debug; release)"]
+fn the_channel_names_the_trochoid_fallback_before_the_rings() {
+    let (_, reg) = fixtures().swap_remove(5);
+    let Ok(t) = pocket(&reg, &params(PocketStrategy::Adaptive)) else { panic!("pocket") };
+    assert!(
+        t.notes.iter().any(|n| n.contains("a trochoid") && n.contains("lands on a loop start") && n.contains("Offset rings cut this pocket instead")),
+        "{:?}",
+        t.notes
+    );
+    let w = verified(&t, &reg, D);
+    assert!(w.is_empty(), "{} {:?}", warn_kinds(&w), t.notes);
+}
+
 /// The merged-batch gate's case (`level_links`, M11.2): a 60 x 40
 /// Adaptive pocket, Helix entry at a 1 mm radius, three levels - the
 /// verifier silent (the HSM path never crosses itself) and exactly one

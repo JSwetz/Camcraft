@@ -47,10 +47,8 @@ mod lift_link;
 mod lift_split;
 mod link;
 mod loops;
-// Issue #5: the trochoidal fallback's medial line and loops, proven by
-// their unit tests; NOT yet wired into `pocket_hsm` (gated off until the
-// lifted returns and the wall lap pass the verifier end to end).
-#[cfg_attr(not(test), allow(dead_code))]
+// Issue #5: the trochoidal fallback (`pocket_hsm`: spiral -> trochoid ->
+// rings), its medial line, loops and plan.
 mod medial;
 mod morph;
 mod near;
@@ -62,7 +60,7 @@ mod slit;
 mod spiral;
 mod star;
 mod tidy;
-#[cfg_attr(not(test), allow(dead_code))]
+mod troch_plan;
 mod trochoid;
 mod wall;
 
@@ -73,6 +71,7 @@ pub(crate) use kernel::{central_point, preferred_seed, widest_point};
 pub(crate) use star::corner_radius;
 use star::orbit_radius;
 pub(crate) use guard::first_crossing;
+pub(crate) use troch_plan::{plan as plan_trochoid, seed as trochoid_seed};
 
 pub(crate) use lift::Travel;
 pub(crate) use lift_link::Return;
@@ -432,3 +431,5 @@ impl Planner<'_> {
 mod tests;
 #[cfg(test)]
 mod lift_tests;
+#[cfg(test)]
+mod troch_tests;

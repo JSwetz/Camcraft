@@ -32,7 +32,7 @@ pub(super) const LIFTS: [f64; 5] = [MICROLIFT, 2.0 * MICROLIFT, 3.0 * MICROLIFT,
 /// A return's swept disc may graze standing stock by this much (mm,
 /// the measuring law's in-cut width: half a percent of a D10) - above
 /// the floor, never a cut.
-const GRAZE: f64 = 0.05;
+pub(super) const GRAZE: f64 = 0.05;
 
 /// A return keeps this far off the entry helix's circle (mm).
 const ORBIT_GAP: f64 = 0.05;
@@ -252,7 +252,7 @@ pub(super) fn free_map(ras: &Raster) -> Vec<f64> {
 
 /// Does any leg of `p` cross a leg of `links` by the verifier's law (a
 /// proper XY crossing on one plane, or across a shared height range)?
-fn crosses_any(p: &[Leg], links: &[Vec<Leg>]) -> bool {
+pub(super) fn crosses_any(p: &[Leg], links: &[Vec<Leg>]) -> bool {
     let bx = |q: &[Leg]| {
         q.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |b, v| {
             (b.0.min(v.0.x).min(v.1.x), b.1.min(v.0.y).min(v.1.y), b.2.max(v.0.x).max(v.1.x), b.3.max(v.0.y).max(v.1.y))

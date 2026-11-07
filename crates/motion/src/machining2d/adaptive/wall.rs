@@ -19,6 +19,12 @@ use super::front::{densify, dist, unit};
 /// Also returns, per rounded corner, (corner, how far the center was
 /// pulled off it).
 pub(super) fn laps(center: &Region, climb: bool, rho: f64, seg: f64) -> (Vec<Vec<Point2>>, Vec<(Point2, f64)>) {
+    laps_at(center, climb, rho, seg, 5.0)
+}
+
+/// [`laps`] with the corner arcs tessellated at `deg` degrees a joint
+/// (the trochoid's laps: under the 5-degree break law with a margin).
+pub(super) fn laps_at(center: &Region, climb: bool, rho: f64, seg: f64, deg: f64) -> (Vec<Vec<Point2>>, Vec<(Point2, f64)>) {
     let mut out = Vec::new();
     let mut pulled = Vec::new();
     for l in center.loops() {
@@ -62,7 +68,7 @@ pub(super) fn laps(center: &Region, climb: bool, rho: f64, seg: f64) -> (Vec<Vec
             while sw < -std::f64::consts::PI {
                 sw += std::f64::consts::TAU;
             }
-            let k = ((sw.abs() / 5f64.to_radians()).ceil() as usize).clamp(2, 72);
+            let k = ((sw.abs() / deg.max(0.5).to_radians()).ceil() as usize).clamp(2, 360);
             for j in 0..=k {
                 let a = a0 + sw * j as f64 / k as f64;
                 ring.push(Point2::new(c.x + rr * a.cos(), c.y + rr * a.sin()));
@@ -79,4 +85,38 @@ pub(super) fn laps(center: &Region, climb: bool, rho: f64, seg: f64) -> (Vec<Vec
         }
     }
     (out, pulled)
+}
+
+/// A cubic Hermite blend from `a` (heading `ta`) to `b` (heading `tb`),
+/// sampled about every 0.25 mm, `a` excluded.
+pub(super) fn blend(a: Point2, ta: Point2, b: Point2, tb: Point2) -> Vec<Point2> {
+    let l = dist(a, b);
+    let n = ((l / 0.25).ceil() as usize).clamp(4, 400);
+    (1..=n)
+        .map(|k| {
+            let t = k as f64 / n as f64;
+            let (t2, t3) = (t * t, t * t * t);
+            let (h00, h10, h01, h11) = (2.0 * t3 - 3.0 * t2 + 1.0, t3 - 2.0 * t2 + t, -2.0 * t3 + 3.0 * t2, t3 - t2);
+            Point2::new(
+                h00 * a.x + h10 * l * ta.x + h01 * b.x + h11 * l * tb.x,
+                h00 * a.y + h10 * l * ta.y + h01 * b.y + h11 * l * tb.y,
+            )
+        })
+        .collect()
+}
+
+/// The point `run` mm along the closed `ring` from its start, and the
+/// ring's heading there.
+pub(super) fn along(ring: &[Point2], run: f64) -> Option<(Point2, Point2)> {
+    let mut acc = 0.0;
+    for w in ring.windows(2) {
+        let l = dist(w[0], w[1]);
+        if l > 1e-9 && acc + l >= run {
+            let t = (run - acc) / l;
+            let p = Point2::new(w[0].x + (w[1].x - w[0].x) * t, w[0].y + (w[1].y - w[0].y) * t);
+            return Some((p, Point2::new((w[1].x - w[0].x) / l, (w[1].y - w[0].y) / l)));
+        }
+        acc += l;
+    }
+    None
 }
