@@ -14,6 +14,10 @@ if [[ -z $linuxdeploy || ! -x $linuxdeploy ]]; then
     echo "package-appimage: set LINUXDEPLOY to an executable linuxdeploy AppImage" >&2
     exit 1
 fi
+if ! command -v convert >/dev/null 2>&1; then
+    echo "package-appimage: ImageMagick convert is required for the 256x256 icon" >&2
+    exit 1
+fi
 bin_dir=${CAMCRAFT_BIN_DIR:-target/release}
 for binary in camcraft-ui camcraft-cli post; do
     if [[ ! -x $bin_dir/$binary ]]; then
@@ -46,7 +50,7 @@ Icon=camcraft
 Terminal=false
 Categories=Graphics;Engineering;
 EOF
-cp assets/ui/cube.png "$work/camcraft.png"
+convert assets/ui/cube.png -resize 256x256 "$work/camcraft.png"
 APPIMAGE_EXTRACT_AND_RUN=1 \
 LDAI_NO_APPSTREAM=1 \
 LDAI_OUTPUT="$dist/camcraft-$version-linux-x86_64.AppImage" \
