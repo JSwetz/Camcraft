@@ -160,6 +160,15 @@ version.
 - **`scripts/gate.ps1`** runs the test gates: `-Tier quick` per change,
   `-Tier batch` before a batch of commits, `-Tier release` at a release cut,
   and `-Test <name>` for a single test.
+- **`scripts/gate.sh`** is its bash twin for macOS and Linux (works with
+  the bash 3.2 macOS ships): `scripts/gate.sh quick [base]`,
+  `scripts/gate.sh batch`, `scripts/gate.sh release` and
+  `scripts/gate.sh test <name> [crate] [--exact] [--ignored]`. Its quick
+  tier is coarser than the PowerShell one: it runs every suite of each
+  crate the diff touches (slow suites included), rather than only the
+  changed test functions. For the finer quick tier on macOS or Linux,
+  `gate.ps1` also runs under PowerShell 7: `pwsh scripts/gate.ps1 -Tier
+  quick` (`brew install --cask powershell` on macOS).
 - Project agents and skills for Claude Code live in `.claude/agents/` and
   `.claude/skills/` (gate runner, graph updater, PR reviewer).
 
@@ -194,7 +203,8 @@ more `area:*` labels. Issues opened by an agent also carry `source:agent`.
   partial work. Do not edit `CHANGELOG.md` in the PR; rows are written at
   release time.
 - Gate it locally before asking for review:
-  `powershell -File scripts/gate.ps1 -Tier quick`.
+  `powershell -File scripts/gate.ps1 -Tier quick` on Windows, or
+  `scripts/gate.sh quick` on macOS and Linux.
 - Follow the engineering rules in `AGENTS.md`: the clean-room protocol, never
   crash and never gouge (no `unwrap`, `expect` or `panic!` outside tests;
   refuse bad input by name), every UI change as an undoable command, files
