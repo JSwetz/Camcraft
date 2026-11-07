@@ -48,16 +48,44 @@ pub fn parse_backend(s: &str) -> Result<wgpu::Backend, String> {
 /// `--gpu-backend <name>` flag wins over the environment; a bad value in
 /// either source refuses by name before any window opens.
 pub fn pick_from(args: &[String], env: Option<&str>) -> Result<GpuPick, String> {
-    if let Some(i) = args.iter().position(|a| a == "--gpu-backend") {
-        let Some(v) = args.get(i + 1) else {
+    if let Some(v) = flag_value(args, "--gpu-backend") {
+        let Some(v) = v.filter(|v| !v.trim().is_empty()) else {
             return Err("--gpu-backend needs a value (dx12, metal, vulkan or gl)".into());
         };
-        return Ok(GpuPick::Prefer(parse_backend(v)?));
+        return Ok(GpuPick::Prefer(parse_backend(&v)?));
     }
     if let Some(v) = env.map(str::trim).filter(|v| !v.is_empty()) {
         return Ok(GpuPick::Prefer(parse_backend(v)?));
     }
     Ok(GpuPick::Auto)
+}
+
+/// A flag's value in either spelling, `--flag value` or `--flag=value`:
+/// `None` when the flag is absent, `Some(None)` when it is last on the line.
+fn flag_value(args: &[String], flag: &str) -> Option<Option<String>> {
+    args.iter().enumerate().find_map(|(i, a)| {
+        if a == flag {
+            Some(args.get(i + 1).cloned())
+        } else {
+            a.strip_prefix(flag).and_then(|rest| rest.strip_prefix('=')).map(|v| Some(v.to_owned()))
+        }
+    })
+}
+
+/// #74: the adapter the user names by a case-insensitive substring of its
+/// reported name (`--gpu "quadro"` or `--gpu=quadro`, winning over
+/// `CAMCRAFT_GPU`). A flag with no value refuses by name; an empty env
+/// value means automatic. `--gpu-backend` narrows which adapters `--gpu`
+/// can match: its mask is tried first, so `--gpu` picks among that
+/// backend's adapters before the fallback chain widens the set.
+pub fn adapter_from(args: &[String], env: Option<&str>) -> Result<Option<String>, String> {
+    if let Some(v) = flag_value(args, "--gpu") {
+        return match v.as_deref().map(str::trim) {
+            Some(v) if !v.is_empty() && !v.starts_with("--") => Ok(Some(v.to_owned())),
+            _ => Err("--gpu needs an adapter name (a part of it is enough, e.g. --gpu quadro)".into()),
+        };
+    }
+    Ok(env.map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned))
 }
 
 /// The honest fallback chain: (label, backend mask) pairs tried in order.
@@ -166,6 +194,26 @@ mod tests {
         assert_eq!(c[1].1, wgpu::Backends::PRIMARY);
         assert_eq!(c[2].1, wgpu::Backends::all());
         assert_eq!(attempts(&GpuPick::Auto).len(), 2);
+    }
+
+    #[test]
+    fn adapter_choice_flag_then_env() {
+        assert_eq!(adapter_from(&argv(&["--gpu", "Quadro"]), Some("intel")).unwrap().as_deref(), Some("Quadro"));
+        assert_eq!(adapter_from(&[], Some(" intel ")).unwrap().as_deref(), Some("intel"));
+        assert_eq!(adapter_from(&[], Some("  ")).unwrap(), None);
+        assert_eq!(adapter_from(&argv(&["--gpu-backend", "dx12"]), None).unwrap(), None);
+        assert!(adapter_from(&argv(&["--gpu"]), None).unwrap_err().contains("needs an adapter name"));
+        assert!(adapter_from(&argv(&["--gpu", "--headless"]), None).is_err());
+    }
+
+    #[test]
+    fn equals_form_flags_are_parsed() {
+        assert_eq!(adapter_from(&argv(&["--gpu=quadro"]), Some("intel")).unwrap().as_deref(), Some("quadro"));
+        assert!(adapter_from(&argv(&["--gpu="]), None).unwrap_err().contains("needs an adapter name"));
+        assert_eq!(adapter_from(&argv(&["--gpu-backend=dx12"]), None).unwrap(), None);
+        assert_eq!(pick_from(&argv(&["--gpu-backend=vulkan"]), Some("dx12")).unwrap(), GpuPick::Prefer(wgpu::Backend::Vulkan));
+        assert!(pick_from(&argv(&["--gpu-backend="]), None).unwrap_err().contains("needs a value"));
+        assert!(pick_from(&argv(&["--gpu-backend=webgpu"]), None).unwrap_err().contains("webgpu"));
     }
 
     #[test]

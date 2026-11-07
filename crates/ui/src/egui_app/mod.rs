@@ -23,7 +23,10 @@
 
 // pub(crate) for its own unit tests and the shell's init path: the M4.2
 // GPU backend pick - parse, honest fallback chain, adapter log line.
+pub(crate) mod frame_watch;
 pub(crate) mod gpu;
+pub(crate) mod gpu_init;
+pub(crate) mod gpu_select;
 // pub: the M6.1 D readability golden reads it beside the two built-in
 // columns, and `theme::visuals` + `theme_files::parse` + `painted`'s
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
@@ -105,9 +108,18 @@ pub fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
+    // #74: the adapter-name choice (`--gpu <substring>` over CAMCRAFT_GPU).
+    let want_env = std::env::var("CAMCRAFT_GPU").ok();
+    let want = match gpu::adapter_from(args, want_env.as_deref()) {
+        Ok(w) => w,
+        Err(err) => {
+            eprintln!("gpu: {err}");
+            return 2;
+        }
+    };
     if args.iter().any(|a| a == "--headless") {
-        if pick != gpu::GpuPick::Auto {
-            println!("gpu: --headless pins the fallback adapter for determinism; backend pick ignored");
+        if pick != gpu::GpuPick::Auto || want.is_some() {
+            println!("gpu: --headless pins the fallback adapter for determinism; backend and adapter picks ignored");
         }
         match shell::headless::run() {
             Ok(()) => {
@@ -120,6 +132,6 @@ pub fn run(args: &[String]) -> i32 {
             }
         }
     } else {
-        shell::run_windowed(pick)
+        shell::run_windowed(pick, want)
     }
 }
