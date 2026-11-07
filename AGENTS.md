@@ -418,11 +418,16 @@ trigger), so the PR flow costs no minutes.
 
 **Fixes are tested in the background.** After a fix merges, the main
 session dispatches a gate-runner subagent to run the batch tier on
-`origin/main` in the MAIN checkout (`git switch main && git pull --ff-only`,
-reusing its `target/`) - never a fresh worktree, whose own ~25 GB `target/`
-once filled the disk - and does not wait for it: it claims the next issue at
-once. Before dispatching, check the free disk space; `cargo clean` the main
-`target/` when it is idle and past ~60 GB. A red result is a new issue (`P0` if it is wrong output or a
+`origin/main` in the MAIN checkout, reusing its `target/` - never a fresh
+worktree, whose own ~25 GB `target/` once filled the disk - and does not
+wait for it: it claims the next issue at once. The main checkout is shared,
+so the gate runs there only when it is on a clean `main`
+(`git pull --ff-only` first) with no `release/*` branch checked out, no cut
+in progress and no other gate running; otherwise it waits, and the main
+session starts no cut until a running gate has finished. The main session
+therefore does its own issue work in a worktree while a gate runs. Before
+dispatching, check the free disk space; `cargo clean` the main `target/`
+only when no gate or cut is running and it is past ~60 GB. A red result is a new issue (`P0` if it is wrong output or a
 gouge, else `P1`, `source:agent`) naming the failing tests and the merge
 that broke them. A red result does not revert the merge by itself; the
 issue is worked in the normal order, and a minor/major cut does not start
