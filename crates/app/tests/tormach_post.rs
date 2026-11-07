@@ -110,13 +110,14 @@ fn a_pathpilot_program_has_no_fence_and_no_o_or_n_words() {
             lines.contains(&"G64 P0.001"),
             "{golden}: blending tolerance on its own line"
         );
-        // A G30 right before every tool change.
+        // Z straight up, then G30, right before every tool change (the
+        // tool-change streams are pinned in the belt-range test below).
         for (i, l) in lines.iter().enumerate() {
             if l.ends_with(" M6") {
                 assert_eq!(
-                    lines.get(i.wrapping_sub(1)),
-                    Some(&"G30"),
-                    "{golden}: G30 before {l}"
+                    lines.get(i.saturating_sub(2)..i),
+                    Some(&["G53 G0 Z0", "G30"][..]),
+                    "{golden}: Z up and G30 before {l}"
                 );
             }
         }
@@ -298,4 +299,30 @@ fn a_tap_posts_g84_with_its_feed_and_no_dwell_word() {
         g84.split(' ').any(|w| w == "F50"),
         "the tap feed in inches per minute: {g84}"
     );
+}
+
+/// Between tools, Z goes straight up in machine coordinates before the
+/// G30 that may move X, Y and Z together - PathPilot's own Z-first order -
+/// and the same holds for the first tool of the program.
+#[test]
+fn every_tool_change_lifts_z_before_g30() {
+    let cps = read("assets/posts/tormach.cps");
+    let stream = "PARAM SpindleSpeed 2000\nTOOL 1 T1\nSECTION\nRapid X 0 Y 0 Z 5000\nFeed X 1000 Y 0 Z -1000 F 500000\nENDSECTION\n\
+                  PARAM SpindleSpeed 2000\nTOOL 2 T2\nSECTION\nRapid X 0 Y 0 Z 5000\nFeed X 1000 Y 0 Z -1000 F 500000\nENDSECTION\n";
+    let out = engine::run(&cps, &machine_for(TORMACH_MCH), stream).expect("posts");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    let lines: Vec<&str> = out.program.lines().collect();
+    let changes: Vec<usize> = (0..lines.len())
+        .filter(|i| lines[*i].ends_with(" M6"))
+        .collect();
+    assert_eq!(changes.len(), 2, "two tool changes\n{}", out.program);
+    for i in changes {
+        assert_eq!(
+            lines.get(i.saturating_sub(2)..i),
+            Some(&["G53 G0 Z0", "G30"][..]),
+            "Z up, then G30, before {}\n{}",
+            lines[i],
+            out.program
+        );
+    }
 }

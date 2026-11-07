@@ -177,15 +177,19 @@ function beltNote(rpm) {
 // legal program: plane, offsets, tool, spindle, coolant. Tormach
 // recommends a G30 before every tool change (no Tormach document says
 // M6 moves to a safe position on its own), run in G90 as the guidelines
-// require; M6 then runs the changer, or pauses for a manual change when
-// the tool is not in the tray, and G43 H applies the length the tool
-// table holds (measured by the tool setter).
+// require. A bare G30 may move X, Y and Z together, so Z goes straight
+// up first (G53 G0 Z0, the top of travel in machine coordinates) - the
+// same Z-first order PathPilot's own programs use between tools - and
+// only then G30. M6 then runs the changer, or pauses for a manual change
+// when the tool is not in the tray, and G43 H applies the length the
+// tool table holds (measured by the tool setter).
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
   block(["G17", "G90", wcsWord, "G40", "G49", "G80"]);
   planeG = 17;              // the preamble states the plane
   if (toolWait) {
+    block(["G53", "G0", "Z0"]);
     block(["G30"]);
     block(["T" + ni(tNo), "M6"]);
     block(["G43", "H" + ni(tNo)]);
