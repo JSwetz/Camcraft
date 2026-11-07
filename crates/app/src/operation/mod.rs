@@ -119,6 +119,7 @@ mod job;
 pub use job::*;
 mod generate;
 mod cross_entry;
+mod cross_part;
 mod cross_spindle;
 mod cross_stock;
 mod drill_reach;

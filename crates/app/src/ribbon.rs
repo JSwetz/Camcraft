@@ -1,12 +1,11 @@
 //! The ribbon's document setting (M6.2): the user's pins.
 //!
 //! The accessor pair rides the `theme_of`/`theme_set` seam's shape
-//! (setup furniture on a flecs singleton, saved with the project)
-//! minus the command: the ROADMAP's pin law says so out loud - undo
-//! replays cuts, not layout - so pins write straight to the world,
-//! like `SelectPost`'s helpers write their singleton, and the project
-//! file carries the list. Provenance: our own seam, specced from
-//! ROADMAP M6.2 (pin to ribbon).
+//! (setup furniture on a flecs singleton, saved with the project).
+//! Because the project file carries the list, a pin is a document
+//! change: the UI changes it only through the `SetRibbonPins` command
+//! (issue #143), so it can be undone and marks the document unsaved.
+//! Provenance: our own seam, specced from ROADMAP M6.2 (pin to ribbon).
 
 use flecs_ecs::core::WorldGet; // not in prelude (0.2.2)
 use flecs_ecs::prelude::World;
@@ -28,8 +27,8 @@ pub fn pinned_of(world: &World) -> Vec<usize> {
 }
 
 /// Write the list (order kept, duplicates and out-of-range indices
-/// dropped). For the shell's pin toggle and the project loader; every
-/// other reader goes through `pinned_of`.
+/// dropped). For the `SetRibbonPins` command and the project loader;
+/// every other reader goes through `pinned_of`.
 pub fn pinned_set(world: &World, next: &[usize]) {
     let mut clean: Vec<usize> = Vec::with_capacity(next.len());
     for i in next {
