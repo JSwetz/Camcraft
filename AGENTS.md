@@ -430,6 +430,16 @@ a tag"):
    start the cut again from step 2 on a fresh release branch. Comment
    `shipped in vX.Y.Z` on every issue the cut closed.
 
+**`main` is protected on GitHub** (user, 2026-11-07: "so we don't get
+unauthorized pushes into main instead they follow the rules"): every change
+reaches it through a PR (0 approvals required - the agent and the user push
+as the same account, which cannot approve its own PR; the review is the
+subagent's), admins included; no force-push, no deletion; open review
+conversations must be resolved before a merge; the repo allows merge
+commits only (squash and rebase merging are off). A direct `git push origin
+main` is refused by GitHub - the legacy direct cut is gone. Tags are not
+covered and are pushed as before (step 4).
+
 Docs-, process- and CI-only PRs (no behaviour, no release) merge once
 reviewed by a subagent that did not write them, without waiting for a cut;
 the main session merges them (`gh pr merge --merge --delete-branch`),
