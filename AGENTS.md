@@ -64,9 +64,13 @@ design context, never add work to them. Decisions still go to
   issue, one branch; every commit for it lands there, never on `main`.
 - **Overlapping issues stack.** Fixes wait unmerged until the cut, so an
   issue touching code an open PR changes branches off that PR's branch
-  (not main) and its PR says "stacked on #M"; the parent merges first, then
-  the child is retargeted (`gh pr edit <child> --base main`) and takes
-  `git merge origin/main`. An overlap that can't stack waits for the cut.
+  (not main) and its PR says "stacked on #M". At the cut, retarget the child
+  FIRST (`gh pr edit <child> --base main`), then merge the parent, then the
+  child takes `git merge origin/main`, is re-gated and merges. Never the
+  other way round: `gh pr merge --delete-branch` on the parent deletes the
+  child's base branch and GitHub closes the child PR for good (it cannot be
+  reopened or retargeted - 0.12.1 lost #82 that way and replaced it with
+  #86). An overlap that can't stack waits for the cut.
 - **Claim before any code.** One command, so every agent sees it at once:
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
