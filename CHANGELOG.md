@@ -9,6 +9,7 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 0a830e7 | 2026-11-07 | feat(ui): rename Project to Open, add stock and work offset visibility, hide operation overlays, and align offset axis labels | Unreleased |
 | b3fecb3 | 2026-11-06 | feat(ui): browser parents collapse and expand Setup, Models, Tools, and Operations | Unreleased |
 | 96abbce | 2026-11-07 | fix(motion): the finishing march rides a convex fold edge - coarse-mesh scallops under tolerance (#36) | Unreleased |
 | a128a51 | 2026-11-06 | feat(app,ui): rename and reorder operations within a setup; show project filename in the title, add Save As, and make status text copyable (#45) | Unreleased |
