@@ -13290,6 +13290,61 @@ revolved (follow-up material if users hit it with long keyways).
 - **S2** (a pilot deleted after the bore leaves it Ok) is #109's - a
   lathe pin was added there, not fixed here.
 
+### #109: a verdict that reads earlier ops digests them
+
+- **Chosen: the stamp, not a live re-check at the post.** Every op whose
+  verdict reads the program ahead now writes the existing rest digest
+  (`rest::prior_digest`, the same term Pocket3D and Drill already wrote)
+  into its generation stamp, so editing, regenerating, deleting or
+  reordering an earlier op of its setup marks it Stale, and the post
+  gate - which already refuses Stale - refuses it. Which ops: Pocket3D,
+  Drill and every op with no 3+2 frame (`drill_prior::reads_prior`) -
+  exactly the set `job::collect_job` hands `verify_prior` (the prior
+  acquittal) and the turned family's pilot/facing credits ride. The
+  stale reason names the moved predecessor, the same story as Pocket3D's.
+- **Dropped: re-running `acquit_by_prior` / `judge_axial_rapids` live at
+  the post.** It would keep stamps unchurned, but the post would cut the
+  prior grid (the costly half) for every op every post, and two
+  readings of one verdict could disagree; the stamp is the one source.
+- **Cost, accepted:** every non-first op of a saved project reads Stale
+  once on load and clears on regenerate (release notes say so). A posed
+  (3+2) op reads no prior and keeps its stamp bit-for-bit. The digest
+  reads predecessors' cached paths, so an edited-but-not-regenerated
+  predecessor is its own Stale (the post refuses it first), and the
+  dependent goes Stale when it is regenerated.
+- **RegenerateAll converges in one click (#145).** The digest made a
+  frozen batch leave a dependent Stale behind a predecessor regenerated
+  in the same batch (a second click). Chosen: rounds inside the
+  constructor - stage every Stale op in program order, finish in
+  parallel, write the round so the next reads it, stop when nothing is
+  Stale (cap: the op count; an op still Stale is named in `skipped`),
+  then invert every write so `apply` replays the batch as ONE undo unit.
+  Dropped: staging strictly one op at a time (loses M5.3 B's parallel
+  finish for independent ops) and leaving two clicks (a user hits it).
+  The constructor now writes the world transiently and restores it;
+  every caller builds and executes on the main thread.
+- **#153 review B1: the path signature is stored at the write.**
+  `schema::Toolpath` carries a private `sig` (`path_sig::of`, the old
+  `rest::path_hash`) computed in `Toolpath::new`, its only constructor,
+  so `prior_digest` reads one word per op ahead and clones nothing -
+  O(M) cheap reads per `status_of`, not M full path clones. Chosen
+  over a sibling component (every writer would have to keep two
+  components in step) and a flecs on-set observer (none exist in app;
+  hooks writing components mid-set were not worth the risk). Caches
+  are rebuilt whole, never edited in place (the one test that spliced
+  a move now rebuilds). N3: the kind tag joins the digest.
+  N1: a round defers an op that reads the program ahead when an op
+  ahead of it in its setup is staged in that round - each op generates
+  once; setups still run side by side.
+- Pins: `a_face_regenerated_shallower_marks_the_acquitted_contour_stale`,
+  `one_regenerate_all_brings_a_dependent_pair_current`,
+  `the_program_ahead_digest_moves_only_with_the_path`,
+  `a_reorder_marks_the_dependent_stale`,
+  `a_posed_op_keeps_its_stamp_when_the_program_ahead_moves`
+  (vertical_rapid_stock), `a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale`
+  (turning_bore). turning_bore's fixture moved to `tests/common/bore.rs`
+  to keep the suite under the 400-line law.
+
 ### #103 re-review B3: the bar's body lies toward the axis
 
 - **Law.** The Bore body is no longer centred on the nose: the insert

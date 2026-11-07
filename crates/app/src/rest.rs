@@ -37,9 +37,8 @@
 //!   so the dependent is asked to describe the program exactly as it
 //!   would ship today. When the earlier op IS regenerated its cache
 //!   moves, the dependent's rest digest moves with it, and the
-//!   dependent reads Stale: the job converges within two
-//!   `RegenerateAll` rounds (M3.1 C), each round honest about what it
-//!   fixed. (A recorded `stamp` term was the first design; the stamp
+//!   dependent reads Stale: one `RegenerateAll` converges, its rounds
+//!   re-reading each predecessor's new path (M3.1 C, #145). (A recorded `stamp` term was the first design; the stamp
 //!   digests the parameters, and `EditOperationParams` drops it to
 //!   None - an edit would have marked every dependent Stale for a path
 //!   that had not moved.)
@@ -79,7 +78,7 @@ pub struct PriorState {
 /// `status_of` can ask every frame (M3.1 C's live-questions law).
 #[must_use]
 pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u64> {
-    let ahead = ahead_of(world, name, setup);
+    let ahead = ahead_of(world, name, setup, false);
     (!ahead.is_empty()).then(|| digest_of(&ahead))
 }
 
@@ -95,7 +94,7 @@ pub fn prior_state(
     setup: Option<&str>,
     tool_r: f64,
 ) -> Result<PriorState, GenError> {
-    let ahead = ahead_of(world, name, setup);
+    let ahead = ahead_of(world, name, setup, true);
     if ahead.is_empty() {
         return Ok(PriorState {
             grid: None,
@@ -195,7 +194,7 @@ impl PriorPlan {
 /// IS the prior), an error when the stock grid cannot be built (the
 /// caller treats that as an unknown prior - raw stock).
 pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -> Result<Option<PriorPlan>, String> {
-    let ahead: Vec<Ahead> = ahead_of(world, name, setup).into_iter().filter(|a| a.cut).collect();
+    let ahead: Vec<Ahead> = ahead_of(world, name, setup, true).into_iter().filter(|a| a.cut).collect();
     if ahead.is_empty() {
         return Ok(None);
     }
@@ -233,7 +232,7 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
 /// not run). The order law above is what makes "ahead" mean what the
 /// machine means.
 pub fn prior_stale(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
-    ahead_of(world, name, setup)
+    ahead_of(world, name, setup, false)
         .into_iter()
         .find(|a| a.cut)
         .map(|a| {
@@ -269,7 +268,7 @@ pub struct TurnedAhead {
 /// swept nose - the column grid's undercut objection (#89 review) does
 /// not arise.
 pub fn turned_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<TurnedAhead> {
-    ahead_of(world, name, setup)
+    ahead_of(world, name, setup, true)
         .into_iter()
         .filter(|a| a.cut && a.kind.info().family() == crate::operation::Family::Turn)
         .map(|a| TurnedAhead { nose: a.nose.unwrap_or(0.0), moves: a.moves })
@@ -284,7 +283,7 @@ const STANDARD_POINT_COT: f64 = 0.600_860_619_027_560_4;
 /// the meridian law reads it without the column grid (the prior plan's
 /// facing-only rule is unchanged).
 pub fn drills_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<DrillAhead> {
-    ahead_of(world, name, setup)
+    ahead_of(world, name, setup, true)
         .into_iter()
         .filter(|a| a.cut && a.kind == crate::operation::OpType::Drill && a.radius > 0.0)
         .map(|a| DrillAhead { radius: a.radius, cone: a.cone.or(Some(STANDARD_POINT_COT)), moves: a.moves })

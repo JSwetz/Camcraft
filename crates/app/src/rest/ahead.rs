@@ -8,10 +8,11 @@
 use crate::cl::Move;
 use crate::model;
 use crate::stock_sim;
+use flecs_ecs::core::EntityViewGet;
 use flecs_ecs::prelude::World;
 
 /// One operation ahead of the consumer: name and the hash of its
-/// recorded path (both digest terms), its tool atom (the grid depends
+/// recorded path signature (both digest terms), its tool atom (the grid depends
 /// on it), and the cached moves themselves when it has cut anything.
 pub(super) struct Ahead {
     pub(super) name: String,
@@ -40,50 +41,6 @@ pub(super) struct Ahead {
     pub(super) moves: Vec<Move>,
 }
 
-/// Identity of a cached path: every field a move carries, bit-exact.
-/// The generators are deterministic functions of what the stamp
-/// digests, so equal paths here means the mask below builds identically.
-fn path_hash(moves: &[Move]) -> u64 {
-    use std::hash::Hasher;
-    let mut h = std::hash::DefaultHasher::new();
-    h.write(b"camcraft-rest-path-v1");
-    h.write_u64(moves.len() as u64);
-    for m in moves {
-        h.write_u8(match m.kind {
-            crate::cl::MoveKind::Rapid => 0,
-            crate::cl::MoveKind::Feed => 1,
-            crate::cl::MoveKind::Plunge => 2,
-        });
-        for p in [m.from, m.to] {
-            h.write(&p.x.to_bits().to_le_bytes());
-            h.write(&p.y.to_bits().to_le_bytes());
-            h.write(&p.z.to_bits().to_le_bytes());
-        }
-        match m.feed {
-            Some(f) => {
-                h.write_u8(1);
-                h.write(&f.to_bits().to_le_bytes());
-            }
-            None => h.write_u8(0),
-        }
-        match &m.arc {
-            Some(a) => {
-                h.write_u8(1);
-                h.write(&a.center.x.to_bits().to_le_bytes());
-                h.write(&a.center.y.to_bits().to_le_bytes());
-                h.write_u8(u8::from(a.ccw));
-                // M11.2 A: only a vertical plane adds a byte, so every
-                // XY arc hashes exactly as it always did.
-                if !a.plane.is_xy() {
-                    h.write_u8(a.plane.g_code());
-                }
-            }
-            None => h.write_u8(0),
-        }
-    }
-    h.finish()
-}
-
 /// The operations in program order ahead of `name` in the consumer's
 /// setup. The ordering law is shared with the post BY CALL - both walk
 /// [`crate::setup::operation_order`] - and the sequence is cut at the
@@ -91,7 +48,10 @@ fn path_hash(moves: &[Move]) -> u64 {
 /// itself is not called: it refuses whole programs over a `Never`
 /// operation, and an operation later in the program is nobody's
 /// business here.
-pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahead> {
+/// `with_moves` clones each cutting predecessor's moves; the digest and
+/// the stale story pass `false` and read only the path signature stored
+/// with the cache (#109 review B1: `status_of` asks every frame).
+pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, with_moves: bool) -> Vec<Ahead> {
     let ops = crate::setup::operation_order(world);
     let consumer = crate::setup::effective(world, consumer_setup);
     let Some(self_ix) = ops
@@ -110,18 +70,22 @@ pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) 
         }
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t));
-        let cache = model::toolpath_of(world, e);
         // The cached PATH is the truth for the digest: an edited op's
         // moved parameters are its OWN staleness, and its cache still
         // says exactly what the program would post today. Cutting
         // nothing - never generated, or an empty path - is what
         // contributes no mask.
-        let moves = cache.map_or_else(Vec::new, |c| c.path.moves);
-        let cut = !moves.is_empty();
+        let (cut, sig, moves) = e
+            .entity_view(world)
+            .try_get::<&crate::schema::Toolpath>(|t| {
+                let cut = !t.path.moves.is_empty();
+                (cut, t.path_sig(), if cut && with_moves { t.path.moves.clone() } else { Vec::new() })
+            })
+            .unwrap_or((false, 0, Vec::new()));
         out.push(Ahead {
             name: n.clone(),
             kind: op.params.kind(),
-            path: if cut { path_hash(&moves) } else { 0 },
+            path: if cut { sig } else { 0 },
             radius: tool.as_ref().map_or(0.0, |t| t.diameter * 0.5),
             ball: tool
                 .as_ref()
@@ -160,6 +124,9 @@ pub(super) fn digest_of(ahead: &[Ahead]) -> u64 {
     h.write(b"camcraft-rest-v1");
     for a in ahead {
         h.write(a.name.as_bytes());
+        // The kind (review N3): the prior plan and the pilot and turned
+        // credits branch on it (Facing, Drill, the turning family).
+        h.write_u8(a.kind.info().tag);
         if a.cut {
             h.write_u8(1);
             h.write_u64(a.path);
