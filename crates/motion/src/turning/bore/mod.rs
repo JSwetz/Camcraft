@@ -65,6 +65,37 @@ pub struct BoreParams {
     pub feed: f64,
     pub plunge_feed: f64,
     pub nose_radius: f64,
+    /// The bar's head (flute) and shank diameters (#103): the insert
+    /// sits at the head's edge, and the rapids ride the nose where the
+    /// whole bar - [`bar_spans`] plus the nose - is centred on the
+    /// spindle, the only posture a bar enters and leaves a hole barely
+    /// wider than itself in. Both 0 ride the nose on the axis (a bar of
+    /// no stated body).
+    pub head_d: f64,
+    pub shank_d: f64,
+}
+
+/// A boring bar's cross-section about its nose centre in the meridian
+/// plane (#103), as signed offsets OUTWARD of the nose (+ away from the
+/// spindle): `[head, shank]`. The insert sits at the head's edge, so
+/// the head spans [-head_d, 0]. The shank is read both ways a tool
+/// record can mean it - its edge at the insert's, or its axis on the
+/// head's (then it reaches (shank_d - head_d)/2 PAST the nose) - and
+/// the union of the two kept: [-max(shank_d, (head_d + shank_d)/2),
+/// max(0, (shank_d - head_d)/2)].
+pub fn bar_spans(head_d: f64, shank_d: f64) -> [(f64, f64); 2] {
+    let (h, s) = (head_d.max(0.0), shank_d.max(0.0));
+    [(-h, 0.0), (-(s.max((h + s) * 0.5)), ((s - h) * 0.5).max(0.0))]
+}
+
+/// The nose radius that centres the whole bar (head, shank and the nose
+/// disc past the head's edge) on the spindle: `(L - H) / 2` for the
+/// bar's reach `L` toward the axis and `H` outward of the nose.
+pub fn centred_nose(head_d: f64, shank_d: f64, nose: f64) -> f64 {
+    let sp = bar_spans(head_d, shank_d);
+    let l = sp.iter().map(|q| -q.0).fold(0.0f64, f64::max);
+    let h = sp.iter().map(|q| q.1).fold(nose.max(0.0), f64::max);
+    ((l - h) * 0.5).max(0.0)
 }
 
 /// The float tie that says "just inside" - the reach tests stand a
@@ -79,7 +110,7 @@ pub fn bore(facets: &[Triangle], p: &BoreParams) -> Result<Toolpath, GenError> {
     if facets.is_empty() {
         return Err(GenError::Invalid("no facets to bore".into()));
     }
-    if ![p.clearance_z, p.top_z, p.bottom_z, p.nose_radius, p.tolerance]
+    if ![p.clearance_z, p.top_z, p.bottom_z, p.nose_radius, p.tolerance, p.head_d, p.shank_d]
         .iter()
         .all(|v| v.is_finite())
     {
@@ -155,21 +186,26 @@ pub fn bore(facets: &[Triangle], p: &BoreParams) -> Result<Toolpath, GenError> {
         )));
     }
 
-    // The ride: in on the axis (the only air a boring bar owns
-    // before it is in the hole), out to the wall at the plunge
-    // feed, up the offset, off the wall and back up the axis.
+    // The ride: in with the bar centred on the spindle, out to the
+    // wall at the plunge feed, up the offset, off the wall and back up
+    // the same line (#103): the whole bar ([`centred_nose`]: head,
+    // shank and the nose past the head's edge) centred on the spindle
+    // - never past the ride's own first radius.
+    let centred = centred_nose(p.head_d, p.shank_d, p.nose_radius);
+    let r_in = centred.min(cl[0].1.max(0.0));
+    let r_out = centred.min(cl[cl.len() - 1].1.max(0.0));
     let s_home = f.station_of(p.clearance_z);
-    let mut b = PathBuilder::new(f.point(0.0, s_home));
-    b.push(MoveKind::Rapid, f.point(0.0, cl[0].0), None);
+    let mut b = PathBuilder::new(f.point(r_in, s_home));
+    b.push(MoveKind::Rapid, f.point(r_in, cl[0].0), None);
     b.push(MoveKind::Feed, f.point(cl[0].1, cl[0].0), Some(p.plunge_feed));
     for q in &cl[1..] {
         b.push(MoveKind::Feed, f.point(q.1, q.0), Some(p.feed));
     }
     b.push(
         MoveKind::Rapid,
-        f.point(0.0, cl[cl.len() - 1].0),
+        f.point(r_out, cl[cl.len() - 1].0),
         None,
     );
-    b.push(MoveKind::Rapid, f.point(0.0, s_home), None);
+    b.push(MoveKind::Rapid, f.point(r_out, s_home), None);
     Ok(b.finish())
 }

@@ -48,6 +48,10 @@ pub struct GenJob {
     /// tilted or turned op (whose verify runs in another frame or the
     /// meridian), or an unreadable stock - all the raw-stock reading.
     pub(super) verify_prior: Option<crate::rest::PriorPlan>,
+    /// The Drill ops ahead, for the turned family's rapid law (#103).
+    pub(super) drills_ahead: Vec<crate::rest::DrillAhead>,
+    /// The turning ops ahead, for the same law (#159).
+    pub(super) turned_ahead: Vec<crate::rest::TurnedAhead>,
     pub(super) is_mill: bool,
     /// The document's machine kind (M13.5): the lathe routes the Drill
     /// kind down the spindle axis, and the rotary kinds read their
@@ -199,7 +203,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // Verify's prior reading (#96 review): collected here, cut on the
     // job thread only when a dive was convicted. An unreadable stock
     // grid is logged and read as the raw stock - convictions stand.
-    let verify_prior = if frame.is_none() && op.params.kind().info().section != super::kinds::Section::Turning {
+    // The turned family reads it too (#103): its axial rapids are judged
+    // against the stock the program ahead faced.
+    let verify_prior = if frame.is_none() {
         match crate::rest::prior_plan(world, op_name, setup, tool.diameter * 0.5) {
             Ok(p) => p,
             Err(e) => {
@@ -210,6 +216,11 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     } else {
         None
     };
+    // The axial pilots ahead (#103): a bore pass's approach runs down
+    // the hole the drill made, which the facing-only prior cannot read.
+    let turned = op.params.kind().info().section == super::kinds::Section::Turning;
+    let drills_ahead = if turned { crate::rest::drills_ahead(world, op_name, setup) } else { Vec::new() };
+    let turned_ahead = if turned { crate::rest::turned_ahead(world, op_name, setup) } else { Vec::new() };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
     let machine_kind = crate::machine::kind_of(world);
     // The lathe spindle law (issue #62): every kind that turns about the
@@ -256,6 +267,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         drive_chains,
         prior,
         verify_prior,
+        drills_ahead,
+        turned_ahead,
         is_mill,
         machine_kind,
         machine_rotaries,
