@@ -77,6 +77,32 @@ One short line per PR: number, author, verdict, link to the posted review.
 If a review could not be posted, say why. Do not merge, approve, label, or
 close anything; do not reply on the contributor's behalf.
 
+## 4. Apply outside contributors' claims
+
+Contributors without Triage rights cannot add the `claimed` label or
+assign themselves, so their claim is a comment (AGENTS.md "Outside
+contributors' claims count"). On every run, after the PR steps, find
+fresh claim comments that have not been applied yet:
+
+```bash
+since=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-6H +%Y-%m-%dT%H:%M:%SZ)
+gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
+  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.author_association|test("OWNER|MEMBER|COLLABORATOR")|not))
+        | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
+```
+
+For each line `<N> <login> <time>`:
+- skip if the issue is closed, or already carries `claimed` with a newer
+  claim comment from someone else (first fresh claim wins; say so to the
+  later one);
+- otherwise `gh issue edit N --add-label claimed --add-assignee <login>`
+  (if GitHub refuses the assignee, still add the label) and reply
+  `gh issue comment N --body "Claim recorded for @<login> - label and assignee set (contributors without triage rights claim by comment). It goes stale after 4 h with no update from you."`
+- if an agent of this session is already working that issue, do not take
+  it from them: reply that it is in progress and link the branch or PR.
+
+Report one line per applied claim; nothing found stays silent.
+
 ## Periodic run
 
 `/loop 10m /review-prs` re-runs this every 10 minutes for the session
