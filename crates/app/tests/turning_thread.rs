@@ -130,7 +130,7 @@ fn machine(word: &str) -> Machine {
 }
 
 /// A document the threading kind lives in: the threaded bar AND a
-/// smooth wall in plain box stock, the lathe mounted, the catalog
+/// smooth wall in bar-sized stock, the lathe mounted, the catalog
 /// threading insert (and the other lathe steel) on the rack.
 fn thread_world() -> (World, History) {
     let world = new_world();
@@ -139,14 +139,13 @@ fn thread_world() -> (World, History) {
         &world,
         SetStock::new(
             &world,
-            camcraft_app::stock::StockShape::Box {
-                dx: 40.0,
-                dy: 40.0,
-                dz: 64.0,
-            },
-            Location::default(),
+            // Bar-sized stock (#103): the bar's own diameter over its
+            // Z span - the turning kernels never cut stock beyond the
+            // part (#130), so a wider blank is a real crash.
+            camcraft_app::stock::StockShape::Cylinder { diameter: 12.0, height: 56.0 },
+            Location { pos: Point3::new(0.0, 0.0, -16.0), ..Location::default() },
         )
-        .expect("box stock"),
+        .expect("bar stock"),
     );
     let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(machine("lathe")));
     history.execute(&world, cmd.expect("lathe"));

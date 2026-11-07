@@ -1227,6 +1227,9 @@ fn regenerate_all_fixes_the_whole_job_in_one_undo_unit() {
     assert_eq!(cmd.regenerated(), 2);
     assert!(cmd.skipped().is_empty());
     history.execute(&world, cmd);
+    // #145: Contour1 sorts ahead of Face1 and the face's verdict reads
+    // it (#109) - the batch's second round re-runs the face against
+    // the contour's new path, so one click converges.
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
 
@@ -1386,14 +1389,12 @@ fn the_shell_switch_sends_the_pocket_to_the_offset_engine() {
 #[test]
 fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
     // M5.3 B's determinism claim, tested as a law: `RegenerateAll`
-    // stages every stale job against the frozen world, then FINISHES
-    // the jobs on rayon workers; the serial loop it replaces ran
-    // stage+finish op by op against that same frozen world (the old
-    // batch accumulated its parts and applied them only at the end,
-    // so no job ever saw another's writes). Constructors never write
-    // the world, so "in parallel" cannot change what "before" means:
-    // both roads must write down identical bytes - paths, warnings,
-    // stamps - in identical tree order.
+    // stages each round's stale jobs against the world as it stands,
+    // then FINISHES them on rayon workers; its rounds (#145) re-run an
+    // op whose program ahead was regenerated in the same batch. The
+    // serial loop it must equal generates and applies op by op in
+    // program order: both roads must write down identical bytes -
+    // paths, warnings, stamps - in identical tree order.
     let build = || {
         let world = new_world();
         let mut history = History::default();
@@ -1456,9 +1457,9 @@ fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
     assert!(batch.skipped().is_empty(), "{:?}", batch.skipped());
     history_a.execute(&world_a, batch);
 
-    // The serial loop: each stale op's constructor stage-and-finishes
-    // in turn against the untouched world; the commands apply after,
-    // in tree order - exactly what the batch's loop did before rayon.
+    // The serial loop: each stale op generated and applied in program
+    // order, so every op reads the program ahead as regenerated (#109,
+    // #145) - the job the batch's rounds converge to.
     let (world_b, mut history_b) = build();
     let stale: Vec<String> = camcraft_app::setup::operation_order(&world_b)
         .into_iter()
@@ -1466,12 +1467,13 @@ fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
         .map(|(n, _)| n)
         .collect();
     assert_eq!(stale.len(), 3);
-    let mut parts = Vec::new();
     for name in &stale {
-        parts.push(GenerateOperation::new(&world_b, name).expect("serial generate"));
-    }
-    for part in parts {
+        let part = GenerateOperation::new(&world_b, name).expect("serial generate");
         history_b.execute(&world_b, part);
+    }
+    for name in &stale {
+        assert_eq!(status(&world_a, name), OpStatus::Ok, "{name}: one batch converges");
+        assert_eq!(status(&world_b, name), OpStatus::Ok, "{name}: the ordered loop converges");
     }
 
     // Bit-for-bit: the path bytes, the warnings, and the stamps agree.

@@ -126,7 +126,7 @@ fn machine(word: &str) -> Machine {
 }
 
 /// A document the form kind lives in: the formed bar AND a smooth
-/// wall in plain box stock, the lathe mounted, the catalog crown
+/// wall in bar-sized stock, the lathe mounted, the catalog crown
 /// gauge (and the other lathe steel) on the rack.
 fn form_world() -> (World, History) {
     let world = new_world();
@@ -135,14 +135,13 @@ fn form_world() -> (World, History) {
         &world,
         SetStock::new(
             &world,
-            camcraft_app::stock::StockShape::Box {
-                dx: 40.0,
-                dy: 40.0,
-                dz: 110.0,
-            },
-            Location::default(),
+            // Bar-sized stock (#103): the bar's own diameter over its
+            // Z span - the turning kernels never cut stock beyond the
+            // part (#130), so a wider blank is a real crash.
+            camcraft_app::stock::StockShape::Cylinder { diameter: 20.0, height: 100.0 },
+            Location { pos: Point3::new(0.0, 0.0, -50.0), ..Location::default() },
         )
-        .expect("box stock"),
+        .expect("bar stock"),
     );
     let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(machine("lathe")));
     history.execute(&world, cmd.expect("lathe"));
