@@ -12,8 +12,9 @@
 //! reads its cut layer in closed form at cell centres, so the sign
 //! must match everywhere off the law's surface and off the stock's
 //! skin - zero misses, the sim suite's `stock_lathe.rs` law carried
-//! onto real generated programs. Blades (#21) refuse by name; the
-//! column verdict refuses every lathe program by name.
+//! onto real generated programs. A grooving blade (#21) answers its
+//! own swept rectangle the same way; the column verdict refuses every
+//! lathe program by name.
 //!
 //! Provenance: our own engines and the M5.2 meridian law; nothing from
 //! vendor binaries.
@@ -32,7 +33,7 @@ use camcraft_app::machine::Machine;
 use camcraft_app::model;
 use camcraft_app::operation::{Height, OpParams, OpStatus, SrcRef};
 use camcraft_app::schema::Location;
-use camcraft_app::stock_sim::{LATHE_BLADE_REFUSAL, LATHE_VERDICT_REFUSAL};
+use camcraft_app::stock_sim::LATHE_VERDICT_REFUSAL;
 use camcraft_app::tools::catalog;
 use camcraft_app::world::new_world;
 
@@ -174,6 +175,57 @@ fn meridian_parity(world: &World, ops: &[&str], nose: f64, axis: (f64, f64)) -> 
     (checked, cut, misses, worst)
 }
 
+/// The blade law (#21): every FEED chord of `op` is radial or axial
+/// (the grooving kernel's plunges and steps), so the sharp blade's
+/// rectangle swept along it is the rectangle spanning both ends -
+/// `width` across the station, tip to `height` outward - and the cell
+/// centre's sign is that union's, read in its meridian both signs.
+fn blade_parity(world: &World, op: &str, width: f64, height: f64) -> (usize, usize, usize, f64) {
+    let view = camcraft_app::stock_view::field_view_with(world, TEXELS).expect("the field eye cuts the blade program");
+    let rects: Vec<(f64, f64, f64, f64)> = chords(world, &[op], (0.0, 0.0))
+        .into_iter()
+        .map(|(r0, z0, r1, z1)| {
+            assert!((r0 - r1).abs() < 1e-9 || (z0 - z1).abs() < 1e-9, "fixture: a groove chord is radial or axial");
+            (r0.min(r1), r0.max(r1) + height, z0.min(z1) - 0.5 * width, z0.max(z1) + 0.5 * width)
+        })
+        .collect();
+
+    let sd = |rho: f64, z: f64| {
+        rects.iter().map(|&(ra, rb, za, zb)| {
+            let one = |p: f64| {
+                let (qx, qz) = ((p - 0.5 * (ra + rb)).abs() - 0.5 * (rb - ra), (z - 0.5 * (za + zb)).abs() - 0.5 * (zb - za));
+                qx.max(0.0).hypot(qz.max(0.0)) + qx.max(qz).min(0.0)
+            };
+            one(rho).min(one(-rho))
+        }).fold(f64::INFINITY, f64::min)
+    };
+    let (lo, hi) = stock_box(world);
+    let c = view.cell;
+    let idx = |v: f64| (v / c).floor() as i64;
+    let (mut checked, mut cut, mut misses, mut worst) = (0usize, 0usize, 0usize, 0.0f64);
+    for k in idx(lo.z + 2.0 * c)..idx(hi.z - 2.0 * c) {
+        let z = (k as f64 + 0.5) * c;
+        for j in idx(lo.y + 2.0 * c)..idx(hi.y - 2.0 * c) {
+            let y = (j as f64 + 0.5) * c;
+            for i in idx(lo.x + 2.0 * c)..idx(hi.x - 2.0 * c) {
+                let x = (i as f64 + 0.5) * c;
+                let l = sd(x.hypot(y), z);
+                if l.abs() < 1e-6 {
+                    continue;
+                }
+                let air = view.stock.distance(Point3::new(x, y, z)) > 0.0;
+                checked += 1;
+                cut += usize::from(l < 0.0);
+                if air != (l < 0.0) {
+                    misses += 1;
+                    worst = worst.max(l.abs());
+                }
+            }
+        }
+    }
+    (checked, cut, misses, worst)
+}
+
 fn assert_parity(label: &str, world: &World, ops: &[&str], nose: f64) {
     assert_parity_about(label, world, ops, nose, (0.0, 0.0));
 }
@@ -296,16 +348,18 @@ fn boring_simulates_inside_the_bore_with_meridian_parity() {
 }
 
 #[test]
-fn a_grooving_blade_is_refused_by_name_and_the_verdict_refuses_the_lathe() {
-    // #21 owes the blade's meridian footprint: the nose stadium would
-    // under-claim the kerf, so the eye refuses rather than draw it.
+fn a_grooving_blade_cuts_its_rectangle_and_the_verdict_refuses_the_lathe() {
+    // #21: the blade sweeps its own meridian rectangle - `width` along
+    // the axis centred on the move, `flute_len` outward of its tip -
+    // never the nose disc, which would under-claim the kerf.
+    // The groove stands inside the 0..40 box stock: the kerf is steel.
     let grooved = revolve(&[
         (0.0, -16.0),
         (6.0, -16.0),
-        (6.0, -6.8),
-        (4.0, -6.8),
-        (4.0, -3.6),
-        (6.0, -3.6),
+        (6.0, 13.2),
+        (4.0, 13.2),
+        (4.0, 16.4),
+        (6.0, 16.4),
         (6.0, 28.0),
         (0.0, 28.0),
     ]);
@@ -313,16 +367,20 @@ fn a_grooving_blade_is_refused_by_name_and_the_verdict_refuses_the_lathe() {
     let g = OpParams::GrooveRough {
         tolerance: 0.05,
         clearance_z: Height::fixed(20.0),
-        top_z: Height::fixed(-3.6),
-        bottom_z: Height::fixed(-6.8),
+        top_z: Height::fixed(16.4),
+        bottom_z: Height::fixed(13.2),
         stepdown: 0.5,
         stock_to_leave: 0.25,
         feed: 150.0,
         plunge_feed: 60.0,
     };
     generate(&world, &mut history, "G1", "GT-0200", g);
-    let e = camcraft_app::stock_view::field_view_with(&world, TEXELS).expect_err("a blade is not the nose stadium");
-    assert!(e.contains("G1") && e.contains(LATHE_BLADE_REFUSAL), "{e}");
+    let blade = catalog().into_iter().find(|(n, _)| *n == "GT-0200").map(|(_, t)| t).expect("blade");
+    assert_eq!(blade.corner_r, 0.0, "fixture: the house blade is sharp");
+    let (checked, cut, misses, worst) = blade_parity(&world, "G1", blade.width, blade.flute_len);
+    println!("groove: blade parity over {checked} cell centres ({cut} cut): {misses} sign misses, worst |law| at a miss {worst:.3e}");
+    assert!(cut > 100, "fixture: the groove must cut a measurable volume ({cut})");
+    assert_eq!(misses, 0, "the field disagrees with the blade's swept rectangle");
 
     // A nose program the eye cuts is still not the column verdict's
     // to judge: refused by name, never a silent pass.

@@ -60,6 +60,7 @@
 
 use super::field::{cell_of, SdfField};
 use super::field_bull::{bull_closed, bull_dist, bull_tie};
+use super::field_blade::LatheProfile;
 use super::field_lathe::{LatheAxis, LatheSweep};
 use super::field_solid::{add, dist_pt_para, dot, flat_tie, pose_dist, scale, sub, tool_kind, upright_flat_foot, RevKind, ToolKind};
 use super::kernel::StockError;
@@ -114,8 +115,10 @@ pub enum SdfTool {
     /// part spins a full revolution at every instant, so a move
     /// removes the solid of revolution of the half-plane stadium of
     /// radius `nose` about its (radius, station) chord. A pose stamp
-    /// means nothing to a spinning part and is ignored.
-    Lathe { nose: f64, axis: LatheAxis },
+    /// means nothing to a spinning part and is ignored. A blade (#21)
+    /// sweeps its own footprint instead of the nose disc
+    /// ([`LatheProfile`], `field_blade`).
+    Lathe { profile: LatheProfile, axis: LatheAxis },
 }
 
 /// One chord's swept solid, prepped for the walk (`field_ray` reads
@@ -142,7 +145,7 @@ impl Sweep {
     /// inflated into every axis, which would refuse payables.
     fn extent(&self) -> f64 {
         match self {
-            Sweep::Lathe(l) => l.nose(),
+            Sweep::Lathe(l) => l.bound(),
             Sweep::Ball { r, .. } => *r,
             Sweep::Shanked { r, up, .. } => r + dot(*up, *up).sqrt(),
             Sweep::Revolve { kind, .. } => match kind {
@@ -163,7 +166,7 @@ impl Sweep {
         match self {
             // The revolved solid's reach is its own window (`window_of`
             // reads the annulus directly); the nose is its dilation.
-            Sweep::Lathe(l) => (l.nose(), 0.0),
+            Sweep::Lathe(l) => (l.bound(), 0.0),
             Sweep::Ball { r, .. } => (*r, 0.0),
             Sweep::Shanked { r, up, .. } => (*r, dot(*up, *up).sqrt()),
             Sweep::Revolve { kind, .. } => match kind {
@@ -359,7 +362,7 @@ impl SdfField {
                         b,
                         kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank },
                     },
-                    ToolKind::Lathe { nose, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, *nose)?),
+                    ToolKind::Lathe { foot, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, foot)?),
                 };
                 // The ceiling bounds the WORK: the window as clipped
                 // to the cut region, the only cells the walk can visit.
