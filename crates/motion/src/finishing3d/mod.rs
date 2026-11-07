@@ -98,6 +98,7 @@ mod march;
 mod params;
 mod polar;
 mod raster;
+mod rim;
 mod rings;
 mod scan;
 mod shadow;
