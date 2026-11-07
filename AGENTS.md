@@ -417,9 +417,12 @@ billed Actions minutes each); PRs run no Actions (no `pull_request`
 trigger), so the PR flow costs no minutes.
 
 **Fixes are tested in the background.** After a fix merges, the main
-session dispatches a gate-runner subagent (in its own worktree) to run the
-batch tier on `origin/main` and does not wait for it: it claims the next
-issue at once. A red result is a new issue (`P0` if it is wrong output or a
+session dispatches a gate-runner subagent to run the batch tier on
+`origin/main` in the MAIN checkout (`git switch main && git pull --ff-only`,
+reusing its `target/`) - never a fresh worktree, whose own ~25 GB `target/`
+once filled the disk - and does not wait for it: it claims the next issue at
+once. Before dispatching, check the free disk space; `cargo clean` the main
+`target/` when it is idle and past ~60 GB. A red result is a new issue (`P0` if it is wrong output or a
 gouge, else `P1`, `source:agent`) naming the failing tests and the merge
 that broke them. A red result does not revert the merge by itself; the
 issue is worked in the normal order, and a minor/major cut does not start
