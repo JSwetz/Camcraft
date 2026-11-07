@@ -130,10 +130,6 @@ pub enum OpType {
     /// [`crate::machining2d::bore`]); a counterbore-folded hole is
     /// declined for it by name, the cycle's own word.
     Bore,
-    /// Probing (#108): face / edge / corner / bore-boss centre finding
-    /// with a touch probe, closing the Drilling run (see
-    /// [`crate::probing`]).
-    Probe,
     /// Mesh-driven Z-level pocketing: the model is the final part, every
     /// level's islands are computed from it (see [`crate::machining3d`]).
     Pocket3D,
@@ -270,6 +266,11 @@ pub enum OpType {
     /// nose; a window that stands on no open hole is refused at the
     /// door by name.
     BoringTurning,
+    /// Probing (#108): face / edge / corner / bore-boss centre finding
+    /// with a touch probe (see [`crate::probing`]). Appended - the
+    /// declaration order is the stored kind id - and listed in the
+    /// Drilling section by display order only.
+    Probe,
 }
 
 impl core::fmt::Display for OpType {

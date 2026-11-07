@@ -479,21 +479,6 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // default to name order and the stable entity name respectively.
         file.version = 50;
     }
-    if file.version == 50 {
-        // v50 -> v51: the probe arrives (#108) as one new variant and one
-        // new tool kind a v50 file cannot contain (the arrival law),
-        // seated at 13 to close the Drilling run - the partition law's
-        // contiguity again - so every old row from Pocket3D (13) up
-        // slides one. The pins are indices: one cut, one +1. The stamp
-        // digest writes the kind's tag, so every op behind the seat
-        // regenerates once - the price of the seat, not a wrong answer.
-        for idx in &mut file.pinned {
-            if *idx >= 13 {
-                *idx += 1;
-            }
-        }
-        file.version = 51;
-    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

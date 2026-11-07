@@ -994,7 +994,7 @@ pub enum ParamsDto {
         climb: bool,
         holes: Vec<HoleDto>,
     },
-    /// The probe (#108), filed since v51.
+    /// The probe (#108): an additive variant in the v50 grammar.
     Probe(ProbeDto),
 }
 

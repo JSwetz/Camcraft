@@ -21,8 +21,11 @@ fn sections_partition_the_registry() {
     for s in Section::ORDER {
         let kinds = s.kinds();
         assert!(!kinds.is_empty(), "{s:?} owns no kind");
+        // Display order within a section is table order (#108 lifted
+        // the contiguity law: a new kind APPENDS its id, so stored ids
+        // never move, and still lists in its own section).
         for w in kinds.windows(2) {
-            assert_eq!(w[1], w[0] + 1, "{s:?} is not a contiguous run");
+            assert!(w[1] > w[0], "{s:?} lists out of table order");
         }
         for i in &kinds {
             covered[*i] += 1;
@@ -46,16 +49,10 @@ fn family_is_derived_not_forked() {
     // `KindInfo::family()` cannot drift from `Section::family()`. The
     // boundary is the table's, not a remembered number: a middle
     // insertion moves the rows, not the law (M2.4 B).
-    let turn_start = KindInfo::ALL
-        .iter()
-        .position(|k| k.section == Section::Turning)
-        .expect("turning rows exist");
+    // The family is the section's, wherever the row sits (#108: the
+    // appended Probe row is a mill kind past the turning run).
     for (i, k) in KindInfo::ALL.iter().enumerate() {
-        let want = if i >= turn_start {
-            Family::Turn
-        } else {
-            Family::Mill
-        };
+        let want = if k.section == Section::Turning { Family::Turn } else { Family::Mill };
         assert_eq!(k.family(), want, "row {i} ({}) family drifted", k.label);
     }
     for s in Section::ORDER {
@@ -183,8 +180,8 @@ fn v42_pins_shift_for_the_twins_row_insert() {
     let pins = pinned_of(&world);
     assert_eq!(
         pins,
-        vec![4, 11, 38],
-        "Trace stays; the Drill row takes three rungs, the turning tail a fourth and the v51 probe seat"
+        vec![4, 11, 37],
+        "Trace stays; the Drill row takes three rungs, the turning tail a fourth"
     );
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
@@ -206,7 +203,7 @@ fn v43_pins_shift_for_the_m24b_row_insert() {
     )
     .expect("a v43 pinned file steps up");
     let pins = pinned_of(&world);
-    assert_eq!(pins, vec![6, 11, 38], "below the insert stays, from Drill up shifts");
+    assert_eq!(pins, vec![6, 11, 37], "below the insert stays, from Drill up shifts");
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Offset2D);
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
@@ -233,7 +230,7 @@ fn v44_pins_take_the_two_boundary_step() {
     let pins = pinned_of(&world);
     assert_eq!(
         pins,
-        vec![4, 11, 33, 38],
+        vec![4, 11, 32, 37],
         "below Thread stays, Drill +1, from Pocket3D up +2, from the seat up +1 more"
     );
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Trace);
@@ -259,8 +256,7 @@ fn v47_pins_take_the_deburr_seat_shift() {
     )
     .expect("a v47 pinned file steps up");
     let pins = pinned_of(&world);
-    // The v51 probe seat (#108) chains after: everything from 13 up +1.
-    assert_eq!(pins, vec![4, 15, 17, 38], "below the seat stays, from Contour5D up slides");
+    assert_eq!(pins, vec![4, 14, 16, 37], "below the seat stays, from Contour5D up slides");
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Trace);
     assert_eq!(
         KindInfo::ALL[pins[1]].ty,
@@ -279,25 +275,23 @@ fn v47_pins_take_the_deburr_seat_shift() {
     );
     // And the new row sits where the rung's arithmetic says.
     assert_eq!(
-        KindInfo::ALL[16].ty,
+        KindInfo::ALL[15].ty,
         operation::OpType::Deburr,
         "Deburr seats in the Mill3D run"
     );
 }
 
 #[test]
-fn v50_pins_take_the_probe_seat_shift() {
-    // #108 seats Probe at 13, closing the Drilling run (the partition
-    // law's contiguity): below the seat the names stand - Bore was 12
-    // and stays 12 - and from the old Pocket3D row (13) up every index
-    // slides +1.
-    let world = new_world();
-    project::open(&world, r#"{"version": 50, "pinned": [12, 13, 37], "entities": []}"#)
-        .expect("a v50 pinned file steps up");
-    let pins = pinned_of(&world);
-    assert_eq!(pins, vec![12, 14, 38]);
-    assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Bore);
-    assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Pocket3D);
-    assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
-    assert_eq!(KindInfo::ALL[13].ty, operation::OpType::Probe, "Probe closes Drilling");
+fn the_probe_appends_its_id_and_lists_in_drilling() {
+    // #108: stored kind ids never move - the probe takes the next id,
+    // every older row keeps its own - and the menu still shows it in
+    // the Drilling section, behind the hole cycles.
+    assert_eq!(KindInfo::ALL.len(), KIND_COUNT);
+    assert_eq!(KindInfo::ALL[KIND_COUNT - 1].ty, operation::OpType::Probe);
+    assert_eq!(KindInfo::ALL[13].ty, operation::OpType::Pocket3D, "Pocket3D keeps id 13");
+    assert_eq!(KindInfo::ALL[37].ty, operation::OpType::BoringTurning, "the turning tail keeps 37");
+    let drilling: Vec<operation::OpType> = Section::Drilling.kinds().into_iter().map(|i| KindInfo::ALL[i].ty).collect();
+    assert_eq!(drilling, [operation::OpType::Drill, operation::OpType::Bore, operation::OpType::Probe]);
+    assert!(Section::Drilling.kinds_for(Kind::Mill).contains(&(KIND_COUNT - 1)));
+    assert!(!Section::Drilling.kinds_for(Kind::Lathe).contains(&(KIND_COUNT - 1)), "a lathe has no probe row");
 }

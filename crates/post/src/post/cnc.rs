@@ -74,7 +74,7 @@ pub enum Record {
     /// without its G41 is an undersize part, the silent wrong answer.
     Comp { side: Option<CompSide>, radius_mm: f64 },
     /// A probing move (#108): probe toward the target, stop on contact,
-    /// G38.2 on a control that speaks NIST RS274NGC. A script that
+    /// a skip move (G31) on a Fanuc-style control. A script that
     /// cannot voice it is refused by name: a touch posted as a feed
     /// drives the stylus through the part.
     Touch(super::probe_rec::TouchRec),

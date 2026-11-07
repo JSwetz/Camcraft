@@ -13185,12 +13185,16 @@ revolved (follow-up material if users hit it with long keyways).
 
 ## #108 - Probe: face, edge, corner and bore / boss centre finding (2026-11-07)
 
-- **Chosen:** one new kind, `Probe`, seated at 13 to close the Drilling
-  run (point-located, Z-axial, protected-move work like the hole cycles;
-  the partition's contiguity law forbids a tail-append past Turning).
-  Rows from Pocket3D up slide one: the v50 -> v51 rung shifts pins >= 13
-  by +1 and the digest tags move with the table (every op behind the
-  seat regenerates once). A new tool kind `ToolKind::Probe`: `diameter`
+- **Chosen:** one new kind, `Probe`, APPENDED as kind id 38 (review,
+  2026-11-07): stored kind ids, digest tags and ribbon pins never move,
+  so there is no project-format rung (files stay v50 - the probe and the
+  probe tool are additive words no older file contains) and no op goes
+  Stale on load. The menu lists it in the Drilling section by display
+  order: `Section::kinds` reads a section's rows in table order, and the
+  ribbon laws now ask for that order instead of a contiguous run. The
+  first draft seated it at 13 and slid every row from Pocket3D up - a
+  v51 pin migration and a regenerate-everything for nothing - dropped.
+  A new tool kind `ToolKind::Probe`: `diameter`
   is the stylus ball, `flute_len` the stylus length, corner = ball
   radius by law. The starter catalog gains one, `PRB-0400` (4 mm ball,
   30 mm stylus), so the empty-rack refusal names a real entry for the
@@ -13217,11 +13221,17 @@ revolved (follow-up material if users hit it with long keyways).
   centre, plus the action and tolerance). Hooks `onProbeMove`,
   `onProbeRetreat`, `onProbeResult` have NO prelude default: a script
   without them is refused by name (`probing: operation "Probe1": ...`).
-  Only `fanuc.cps` voices them this slice: G38.2 per NIST RS274NGC
-  (trip in #5061-#5063, copied to #100+3k), the deviation and its
-  tolerance stop in macro-B form (`IF[ABS[..]GT tol]THEN#3000=1`), the
-  set-offset as `G10 L2 Pn` from the active offset's RS274NGC parameters
-  (#5221 + 20 x slot), and report-and-stop as `#3006=1`. A touch probe
+  Only `fanuc.cps` voices them this slice, as the G31 skip function with
+  custom macro B (Fanuc's published operator documentation): the skip
+  position is read from #5061-#5063 (workpiece coordinates) and kept in
+  #100+3k. G31 ends silently at its target when no skip signal fires, so
+  every skip block is followed by a no-contact check that alarms
+  (`#3000=2`) before any back-off. The deviation and its tolerance stop
+  are `IF[ABS[..]GT tol]THEN#3000=1`, the set-offset `G10 L2 Pn` from the
+  workpiece offset variables (#5221 + 20 x slot + axis), report-and-stop
+  `#3006=1`. The first draft wrote G38.2 (NIST RS274NGC), which a Fanuc
+  does not take - dropped: wrong probing code on a real machine is a
+  crash. Not yet proved on a control: the golden locks the text only. A touch probe
   section writes no spindle start and no coolant.
 - **Verify:** the probe op skips the cutting laws; its own law
   (`operation::probe_op::stylus_hits`) sweeps the ball along every move
@@ -13229,16 +13239,16 @@ revolved (follow-up material if users hit it with long keyways).
   ball radius (0.01 mm slack for the tangent touch) as a `Gouge`, which
   holds the post. The stock sim and the rest masks skip probe ops: a
   probe removes no stock.
-- **Dropped:** a `MoveKind::Probe` (blast radius); posting the touches
-  as G31 skip moves (the brief named G38.2; G31 is the per-control
-  follow-up); judging the stylus against the stock (a probe at the
+- **Dropped:** a `MoveKind::Probe` (blast radius); G38.2 on the Fanuc
+  dialect (above); judging the stylus against the stock (a probe at the
   model's contact on unmachined stock would always "collide" - the
   expectation is the model's); a prelude default that comments the
   probe out (a silently skipped measurement then sets no offset while
   the program runs on).
-- **Owed (follow-up issues):** creating the op from a picked
+- **Owed (filed: #171 picking, #172 shank/body, #173 dialect hooks,
+  #174 protected descent):** creating the op from a picked
   face / edge / vertex / cylinder (the op page takes the contact point
   typed today); the stylus shank and probe body in the protected-move
-  law (the ball alone is judged); probing hooks for the Haas (G31),
-  Mazak, Siemens and Heidenhain dialects (they refuse by name now);
+  law (the ball alone is judged); probing hooks for the Haas, Mazak,
+  Siemens and Heidenhain dialects (they refuse by name now);
   protected positioning moves (G38.3-style) for the approach descent.

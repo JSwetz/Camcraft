@@ -1,16 +1,16 @@
 //! #108 acceptance: the Probe operation - face / edge / outside corner /
 //! bore / boss centre finding with a touch probe. Each touch is a fast
 //! seek, an incremental back-off and a slow measuring re-probe; the
-//! post writes the touches as G38.2 (NIST RS274NGC) on the generic
-//! Fanuc-style dialect and refuses the op by name on a dialect that
+//! post writes the touches as G31 skip blocks (custom macro B) on the
+//! generic Fanuc-style dialect and refuses the op by name on a dialect that
 //! cannot probe; the stylus path is judged as protected moves; the op
 //! files and undoes like every other.
 //!
-//! Provenance: NIST RS274NGC (NISTIR 6556) G38.2 and touch-probe
-//! practice; our own fixtures.
+//! Provenance: Fanuc's published operator documentation (G31 skip,
+//! custom macro B system variables) and touch-probe practice; our own fixtures.
 //!
 //! Gate map (M4.4): covers app::operation (probe_op, kinds), app::posting,
-//! app::project (probe DTO, v51), app::commands (create / edit / undo),
+//! app::project (probe DTO), app::commands (create / edit / undo),
 //! motion::probing, post::probe_rec, cl::touch.
 
 mod common;
@@ -142,7 +142,7 @@ fn degenerate_probe_numbers_are_refused() {
 /// The generic dialect's golden: a bore centre setting G55 through the
 /// whole post seam (dump -> stream text -> engine -> fanuc.cps).
 #[test]
-fn bore_centre_posts_g38_2_on_the_generic_dialect() {
+fn bore_centre_posts_g31_skips_on_the_generic_dialect() {
     let t = probe_cycle(&cycle(ProbeMode::Bore, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0))
         .expect("bore");
     let d = post::Dump {
@@ -163,7 +163,9 @@ fn bore_centre_posts_g38_2_on_the_generic_dialect() {
     assert_eq!(cnc::parse(&stream).expect("parse"), recs, "TOUCH / RETREAT / FOUND round-trip");
     let out = engine::run(FANUC, &serde_json::Value::Null, &stream).expect("post");
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
-    assert!(out.program.contains("G38.2"), "the touches are probing blocks");
+    assert!(out.program.contains("G31 "), "the touches are skip blocks");
+    assert!(!out.program.contains("G38"), "a Fanuc control takes no G38.x");
+    assert!(out.program.contains("#3000=2(PROBE NO CONTACT)"), "a touch that never trips alarms");
     assert!(
         !out.program.lines().any(|l| l.split_whitespace().any(|w| w == "M3" || w == "M8")),
         "a touch probe starts no spindle and no coolant"
@@ -271,7 +273,7 @@ fn a_dialect_without_probing_refuses_the_op_by_name() {
     assert!(!path.exists(), "nothing is written");
     // The generic dialect posts the same document.
     let ok = posting::post_script(&world, &path, FANUC).expect("fanuc probes");
-    assert!(ok.program.contains("G38.2"));
+    assert!(ok.program.contains("G31 "));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -319,9 +321,34 @@ fn a_probe_param_edit_undoes_and_redoes() {
 }
 
 #[test]
-fn the_probe_row_closes_the_drilling_run() {
+fn the_probe_row_appends_and_lists_in_drilling() {
     use camcraft_app::operation::{KindInfo, Section};
-    assert_eq!(KindInfo::ALL[13].ty, OpType::Probe);
+    // Appended: stored kind ids never move; the menu lists it under
+    // Drilling by display order.
+    assert_eq!(KindInfo::ALL.last().map(|k| k.ty), Some(OpType::Probe));
+    assert_eq!(KindInfo::ALL[13].ty, OpType::Pocket3D);
     assert_eq!(OpType::Probe.info().section, Section::Drilling);
     assert_eq!(OpType::Probe.info().tool_kinds, &[camcraft_app::tools::ToolKind::Probe]);
+}
+
+#[test]
+fn every_older_kind_keeps_its_stored_id_and_digest_tag() {
+    // The kind order a pre-#108 file was written under. The stamp digest
+    // reads only `tag` for the kind, and pins and the type combo read the
+    // id: both unchanged means an older project loads with no op going
+    // Stale and no pin moving - no format rung.
+    use camcraft_app::operation::KindInfo;
+    use OpType::*;
+    let before = [
+        Face, Contour, Pocket, Slot, Trace, Adaptive2D, Offset2D, Engrave, Chamfer2D, Circular, Thread,
+        Drill, Bore, Pocket3D, Finish3D, Deburr, Contour5D, Parallel5D, Swarf, AdvancedSwarf,
+        RotaryContour, RotaryParallel, RotaryOffset, MultiAxisRough, Flow5D, MultiAxisContour, Facing,
+        ProfileRough, ProfileFinish, GrooveRough, GrooveFinish, Part, Threading, Chamfering,
+        TaperTurning, MultiPassTurning, FormTurning, BoringTurning,
+    ];
+    for (i, ty) in before.iter().enumerate() {
+        assert_eq!(KindInfo::ALL[i].ty, *ty, "id {i} moved");
+        assert_eq!(usize::from(ty.info().tag), i, "{ty:?}'s digest tag moved");
+    }
+    assert_eq!(project::PROJECT_VERSION, 50, "the probe arrives without a format rung");
 }

@@ -40,7 +40,7 @@ use super::*;
 /// before (the arrival law).
 /// v50: operation labels and within-setup order become persisted. An old
 /// reader must refuse the file rather than silently post in name order.
-pub const PROJECT_VERSION: u32 = 51;
+pub const PROJECT_VERSION: u32 = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -304,7 +304,8 @@ pub enum ToolKindDto {
     /// (the cone's INCLUDED angle, the Drill's law restated) has been
     /// filed since v10.
     Taper,
-    /// The touch probe (#108), filed since v51.
+    /// The touch probe (#108): an additive word in the v50 grammar - no
+    /// older file names it, so no rung is needed to read one.
     Probe,
 }
 

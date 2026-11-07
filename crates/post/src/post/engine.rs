@@ -228,7 +228,7 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 if !s.hook_exists("onProbeMove") {
                     warnings.push(
                         "probing: this post script does not define onProbeMove - it cannot write a \
-                         probing move (G38.2), so the probe operation is refused"
+                         probing (skip) move, so the probe operation is refused"
                             .into(),
                     );
                 } else {
