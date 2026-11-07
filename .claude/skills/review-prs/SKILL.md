@@ -91,17 +91,21 @@ gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --pagi
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 
-For each line `<N> <login> <time>` (the window is the 4 h claim
-lifetime, so an older comment is already stale):
+For each line `<N> <login> <time>` (the window only finds claims made since
+a recent tick; a claim applied earlier keeps its label and assignee and is
+judged stale by AGENTS.md's rule - 4 h with no newer comment from the
+claimant - not by this window):
 - **already applied** - the issue carries `claimed` and `<login>` is an
   assignee: skip silently (this keeps each 10-minute tick from replying
   again);
 - **closed issue**: skip;
-- **held by someone else** - it carries `claimed` and its latest claim
-  comment by another claimant (an agent's `claimed:` comment counts) is
-  younger than 4 h: do not take it; reply once (only if you have not
-  already replied to this comment) that it is in progress, naming the
-  claimant and branch or PR;
+- **held by someone else** - it carries `claimed` and either the latest
+  claim comment by another claimant (an agent's `claimed:` comment counts)
+  or that claimant's newest comment is younger than 4 h, or no claim
+  comment can be found at all (be conservative: a label without a findable
+  claim is held): do not take it. Reply once - only if no comment after
+  `<time>` already mentions `@<login>` - that it is in progress, naming
+  the claimant and branch or PR;
 - **otherwise**: `gh issue edit N --add-label claimed --add-assignee <login>`
   (if GitHub refuses the assignee, still add the label) and reply
   `gh issue comment N --body "Claim recorded for @<login> - label and assignee set (contributors without triage rights claim by comment). It goes stale after 4 h with no update from you."`
