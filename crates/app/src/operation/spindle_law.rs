@@ -75,7 +75,10 @@ impl SpindleReading {
 /// Read the part about its fitted axis and about the spindle through
 /// `origin`. `None` when the fit cannot read the model as revolved or
 /// the axis lies near the table: the turning generators refuse those by
-/// their own names, in their own order.
+/// their own names, in their own order (the lathe's axial drill at its
+/// `axial_doors`, its cross drill at `cross_spindle::lathe_reads` -
+/// issue #67; a mill-turn's cross drill takes a prismatic bar, measured
+/// about the spindle as it stands).
 #[must_use]
 pub fn spindle_reading(facets: &[Triangle], origin: [f64; 3]) -> Option<SpindleReading> {
     let ax = crate::multiaxis::axis::fit(facets).ok()?;
@@ -153,12 +156,21 @@ pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result
     )))
 }
 
-/// Whether `params` turns about the fitted axis on the document's
-/// machine: the turning family, and the lathe's axial Drill.
+/// Whether `params` works about the spindle on the document's machine:
+/// the turning family, the lathe's Drill (axial or cross), and the
+/// mill-turn's cross drill (issue #67) - whose standoffs are measured
+/// about this same spindle, so a revolved part off it is refused here
+/// by name rather than drilled about a line it is not on.
 pub(crate) fn turns(world: &World, params: &super::OpParams) -> bool {
+    let kind = crate::machine::kind_of(world);
     params.kind().info().family() == super::Family::Turn
-        || (matches!(params, super::OpParams::Drill { .. })
-            && crate::machine::kind_of(world) == crate::machine::Kind::Lathe)
+        || match params {
+            super::OpParams::Drill { cross, .. } => {
+                kind == crate::machine::Kind::Lathe
+                    || (kind == crate::machine::Kind::MillTurn && !cross.is_empty())
+            }
+            _ => false,
+        }
 }
 
 /// The law again at the post, for operation entity `e` named `name`:

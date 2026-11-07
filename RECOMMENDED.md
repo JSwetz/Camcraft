@@ -12422,3 +12422,47 @@ usual. Why: the change is a test file - the zip ships no tests, so its
 contents cannot differ, and the full release gate (~50 min) already passed on
 every shipped file. Dropped: re-running the whole release gate for six test
 lines. The rule stands for any mid-cut change that touches shipped code.
+
+## #67: the cross drill measures about the work offset's spindle (2026-11-07)
+
+`drilling::cross_drill` measures every standoff (bar radius, a station's
+side, the hop/clearance radii, the station-change chord law) about world Z
+through world (0, 0); the posts program about world Z through the work
+offset's origin. Chosen: carry the job into the spindle's frame in a new
+`operation/cross_spindle.rs` - the holes shifted by the `wcs_context` origin
+(now collected once into `GenJob::wcs_origin`, the very origin the spindle
+law judges), `stock_r` measured about that line, the kernel run unchanged,
+the chain shifted back. An origin on world Z skips the shift, so every
+on-origin chain keeps its bits. Considered and dropped: teaching the motion
+kernel a spindle centre (a kernel API change for a frame shift the app seam
+already owns), and re-latticing the shifted chain (it moved the kernel's
+unsnapped chord points off the on-origin chain).
+
+- *Spindle law for the mill-turn.* `spindle_law::turns` now also covers a
+  Drill with cross holes on a mill-turn (the lathe's Drill was already in),
+  so a revolved bar off its work offset is refused by name there too, at
+  generation and at the post, and moving G54 stales the op.
+- *Unreadable parts.* A plain lathe's cross drill refuses by name a part the
+  axis fit cannot read as turned, as its axial drill already does. The
+  mill-turn's does NOT: a hex or square bar is ordinary cross-drill stock on
+  a C-axis machine, and with the standoffs measured about the posted spindle
+  its envelope is honest whatever the part's shape (the drilling_cross suite
+  drills exactly such a rectangular bar). Dropped: refusing it everywhere.
+- Left open: the standoff radius reads the part's facets, not the setup's
+  stock - a cross drill run before the bar is turned to size would hop
+  inside the raw stock. Worth its own issue.
+- *Review fixes (PR #78).* (1) Every cross hole must plunge TOWARD the
+  spindle line: in the spindle frame, the mouth's radial offset dotted with
+  the plunge must not be positive, or `cross_spindle` refuses the hole by
+  name in world coordinates. The station law stands a tool on the mouth's
+  side at the hop radius, so on a mill-turn block sitting off G54 a hole on
+  the face nearer the axis, plunging away from it, parked the tool beyond
+  the far face and rapided through the block. Chosen: the per-hole rule (it
+  refuses exactly the holes that would collide). Dropped: refusing a
+  prismatic part whose box does not straddle the G54 line (coarser - it
+  would refuse the block's safe far-face holes too). (2) On the shifted
+  path a kernel refusal is carried back to world coordinates (the hole's
+  mouth point rewritten), so the user reads the point in their own model.
+  (3) A lathe part whose fit returns a degenerate axis says so, rather
+  than "its axis lies near the table". (4) A test pins that moving G54
+  under a generated mill-turn cross drill stales it and the post refuses.
