@@ -51,20 +51,23 @@ fn drill() -> ToolGeom {
 
 /// Judge `p` in `mode` on an r-20 bar stock, Z top 30.
 fn judge_in(p: &Toolpath, mode: Mode) -> Vec<Warning> {
+    judge_with(p, mode, &drill(), 30.0, 1e-3)
+}
+
+fn judge_with(p: &Toolpath, mode: Mode, tool: &ToolGeom, stock_top_z: f64, z_tol: f64) -> Vec<Warning> {
     let stock = disc(STOCK_R);
-    let tool = drill();
     let cx = VerifyContext {
         region: &stock,
         stock: Some(&stock),
         model: None,
-        tool: &tool,
+        tool,
         cutter: None,
         mode,
-        stock_top_z: 30.0,
+        stock_top_z,
         clearance_z: 40.0,
         stock_to_leave: 0.0,
         gouge_tol: 0.01,
-        z_tol: 1e-3,
+        z_tol,
         finish_tol: None,
         fixtures: &[],
         spindle: None,
@@ -146,7 +149,8 @@ fn the_column_reading_still_stands_for_a_mill_mode_twin() {
     // the radial reading is Radial's alone.
     let radial = judge(&two_stations(25.0));
     let area = judge_in(&two_stations(25.0), Mode::Area);
-    assert!(radial.iter().all(|w| matches!(w, Warning::RapidInStock { .. })));
+    assert!(!radial.is_empty(), "the radial reading lost its conviction");
+    assert!(radial.iter().all(|w| matches!(w, Warning::RapidInStock { .. })), "{radial:?}");
     assert!(area.iter().any(|w| matches!(w, Warning::RapidInStock { .. })), "{area:?}");
 }
 
@@ -241,4 +245,135 @@ fn the_over_the_end_face_detour_is_clean_and_a_low_one_blocks() {
     // The same swing at Z 25 runs under the stock top, through the bar.
     let w = judge(&detour(25.0));
     assert_eq!(w, vec![Warning::RapidInStock { at: 4 }], "{w:?}");
+}
+
+#[test]
+fn a_rapid_down_a_drilled_hole_past_its_bottom_blocks() {
+    // The hole stops at r 10; the next rapid runs back down it to
+    // r 6 - its flat end is the kerf's floor, never an alibi below it
+    // (and the climb back out starts in that uncut stock too).
+    let w = judge(&chain(
+        (30.0, 0.0, 0.0),
+        &[
+            (R, (25.0, 0.0, 0.0), Some(PX)),
+            (P, (10.0, 0.0, 0.0), None),
+            (R, (25.0, 0.0, 0.0), None),
+            (R, (6.0, 0.0, 0.0), None),
+            (R, (30.0, 0.0, 0.0), None),
+        ],
+    ));
+    assert_eq!(w, vec![Warning::RapidInStock { at: 3 }, Warning::RapidInStock { at: 4 }], "{w:?}");
+}
+
+/// An upright drill sliding along Y with its axis at `x`, its tip
+/// at Z 0 under the Z-30 top: the rim's nearest pass to the r-20
+/// bar is at Y 0, `x - 2` from the spindle.
+fn graze(x: f64) -> Vec<Warning> {
+    judge(&chain((x, -30.0, 0.0), &[(R, (x, 30.0, 0.0), None)]))
+}
+
+#[test]
+fn a_tangential_graze_within_the_gouge_tolerance_is_clean_and_past_it_blocks() {
+    // The contract (gouge_tol 0.01, the mill law's disc r - tol): a
+    // rim overlapping the bar by half the tolerance is a touch, by
+    // twice the tolerance it is a rapid in stock.
+    let w = graze(22.0 - 0.005);
+    assert!(w.is_empty(), "a graze within the tolerance reported: {w:?}");
+    let w = graze(22.0 - 0.02);
+    assert_eq!(w, vec![Warning::RapidInStock { at: 0 }], "{w:?}");
+}
+
+#[test]
+fn a_diagonal_retract_half_in_the_hole_half_in_stock_blocks() {
+    // The exit leans out of the hole's axis: its first half stands in
+    // the kerf, its second cuts through bar the plunge never touched.
+    let w = judge(&chain(
+        (30.0, 0.0, 0.0),
+        &[
+            (R, (25.0, 0.0, 0.0), Some(PX)),
+            (P, (10.0, 0.0, 0.0), None),
+            (R, (25.0, 0.0, 6.0), None),
+            (R, (30.0, 0.0, 6.0), None),
+        ],
+    ));
+    assert_eq!(w, vec![Warning::RapidInStock { at: 2 }], "{w:?}");
+}
+
+/// Forty pecked holes round the bar at 9 degree stations, each
+/// station changed on a chord at r 25 (closest approach r 24.9, the
+/// rim at 22.9 - clear).
+fn forty_pecked_holes() -> Toolpath {
+    let at = |k: usize, rho: f64| {
+        let t = (k as f64 * 9.0).to_radians();
+        (rho * t.cos(), rho * t.sin(), 0.0)
+    };
+    let mut steps: Vec<Step> = Vec::new();
+    for k in 0..40 {
+        let t = (k as f64 * 9.0).to_radians();
+        steps.push((R, at(k, 25.0), Some([t.cos(), t.sin(), 0.0])));
+        for (feed_to, back) in [(17.0, 17.5), (13.0, 13.5), (10.0, 25.0)] {
+            steps.push((P, at(k, feed_to), None));
+            steps.push((R, at(k, back), None));
+        }
+        if k + 1 < 40 {
+            steps.push((R, at(k + 1, 25.0), None));
+        }
+    }
+    chain(at(0, 30.0), &steps)
+}
+
+#[test]
+fn forty_pecked_radial_holes_verify_clean_within_a_wall_time_bound() {
+    // The cost pin (#79 review): the kerf list is built once, culled
+    // per rapid by its swept box and the stock box rejects before the
+    // polygon test - a 40-hole pecked program must not go quadratic.
+    // The bound is generous for a debug build: ~9.5 s before the culls
+    // (1 mm discs), ~0.25 s after (0.5 mm discs) - RECOMMENDED #79.
+    let p = forty_pecked_holes();
+    let t0 = std::time::Instant::now();
+    let w = judge(&p);
+    let took = t0.elapsed();
+    assert!(w.is_empty(), "a clear 40-hole program reported: {w:?}");
+    eprintln!("forty pecked radial holes: {took:?}");
+    assert!(took.as_secs_f64() < 3.0, "40 pecked holes took {took:?}");
+}
+
+#[test]
+fn a_context_the_law_cannot_read_convicts_every_rapid() {
+    // Fail closed (#79 review): a NaN stock top or Z tolerance makes
+    // every "below the top" test false - the law names every rapid
+    // instead of passing them all.
+    let p = two_stations(25.0 * std::f64::consts::SQRT_2);
+    let rapids: Vec<Warning> = p
+        .moves
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.kind == R)
+        .map(|(at, _)| Warning::RapidInStock { at })
+        .collect();
+    assert!(!rapids.is_empty());
+    for (top, tol) in [(f64::NAN, 1e-3), (30.0, f64::NAN), (f64::INFINITY, 1e-3)] {
+        let w = judge_with(&p, Mode::Radial, &drill(), top, tol);
+        assert_eq!(w, rapids, "top {top}, tol {tol}");
+    }
+}
+
+#[test]
+fn a_rapid_on_a_pose_that_is_no_direction_convicts_itself() {
+    // A stated zero axis cannot place the body: never read as upright.
+    let w = judge(&chain((30.0, 0.0, 0.0), &[(R, (25.0, 0.0, 0.0), Some([0.0, 0.0, 0.0]))]));
+    assert_eq!(w, vec![Warning::RapidInStock { at: 0 }], "{w:?}");
+}
+
+#[test]
+fn a_zero_flute_reads_as_a_body_one_diameter_long() {
+    // The tip slides past the bar at r 21 (its disc clear); the body
+    // trails -X into the bar. A zero flute length is no bare tip: the
+    // 4 mm minimum body reaches r 17 and convicts.
+    let p = chain((21.0, -30.0, 0.0), &[(R, (21.0, 30.0, 0.0), Some([-1.0, 0.0, 0.0]))]);
+    let tip_only = ToolGeom { flute_len: 0.0, ..drill() };
+    for tool in [tip_only, ToolGeom { flute_len: f64::NAN, ..drill() }] {
+        let w = judge_with(&p, Mode::Radial, &tool, 30.0, 1e-3);
+        assert_eq!(w, vec![Warning::RapidInStock { at: 0 }], "flute {}: {w:?}", tool.flute_len);
+    }
 }

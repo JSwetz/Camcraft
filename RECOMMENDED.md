@@ -12464,3 +12464,48 @@ stock posted silently.
   test now runs on a stock equal to the bar; a new test pins that the 44 mm
   box never posts silently (named RapidInStock, post blocked) and owes
   nothing once #82's planner hops outside the raw stock.
+
+### #79 review fixes (2026-11-07)
+
+An independent review of PR #83 found the law correct but costly and
+fail-open at its edges. Taken:
+
+- **Cost.** The kerf list is built once (cut order, each cylinder with
+  its box) instead of per rapid; a rapid takes only the earlier kerfs
+  whose box meets its swept box (padded by body + radius), newest first;
+  a disc whose box misses the stock footprint's box (or stands above the
+  top) skips the polygon test; a disc wholly inside one kerf cylinder
+  (the retract riding its own hole's axis) is acquitted in one test
+  instead of 25; shared interval ends are sampled once. Reading on a
+  hand-made 40-hole pecked radial program (debug, `radial_rapids::
+  forty_pecked_radial_holes_verify_clean_within_a_wall_time_bound`):
+  **~9.5 s before** (1 mm discs) **-> ~0.25 s after** with the discs
+  tightened to 0.5 mm (`BODY_STEP` now agrees with the module doc). The
+  test holds a 3 s bound. Dropped: a per-point bbox inside
+  `Region::contains` in geo2d (shared by every law; the footprint box
+  reject in the radial law gets the same win locally).
+- **Fail closed, by name.** A non-finite stock top or Z tolerance, or a
+  tool with no finite positive radius, convicts every rapid
+  (`RapidInStock`, the law's own blocking word); a rapid whose stated or
+  held pose is no direction convicts itself instead of reading as
+  upright; a cut with such a pose keeps only its tip's kerf (less kerf,
+  more convictions). A zero or non-finite flute length reads as a body
+  one tool diameter long, never the bare tip. Dropped: a new `Warning`
+  kind ("rapids not judged") - it ripples into the UI's warning table
+  and the project-file serde for a context generation never builds;
+  RapidInStock already blocks and the move index names where.
+- **Sampling bound documented.** Discs 0.5 mm apart, tip travel 0.5 mm
+  between samples, and the 16 rim samples' chord sag `r (1 - cos(pi/16))`
+  ~ 0.019 r: a graze deeper than the gouge tolerance by less than that,
+  between two rim samples, can pass.
+- **Tests.** Sim: past a drilled hole's bottom (flat end convicts), a
+  tangential graze at half the gouge tolerance (clean) and twice it
+  (blocks), a diagonal retract half in the hole (blocks), the non-finite
+  context, the zero-direction pose, the zero/NaN flute. App: the radial
+  tests moved to `drilling_cross_rapids.rs` (fixtures to
+  `tests/cross_support/`, drilling_cross back under 400 lines) and a new
+  deterministic `a_station_hop_spliced_through_the_bar_is_named_and_the_post_refuses`
+  (the clean bar document's path plus one hand-spliced hop through the
+  bar, judged by the real verifier, refused by the gate by move index) -
+  it speaks whatever #82 does to the planner. The 44 mm box test stays as
+  the planner-tracking twin (vacuous after #82, by design).
