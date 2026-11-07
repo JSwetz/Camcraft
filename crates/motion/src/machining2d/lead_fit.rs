@@ -25,6 +25,12 @@ const LEAD_STEP: f64 = 0.02;
 /// Bound on samples per piece, so a pathological radius cannot hang.
 const LEAD_MAX_SAMPLES: usize = 4096;
 
+/// Steps a lead-in start is tried at on its way in off the boundary.
+const SEAT_STEPS: usize = 16;
+
+/// A start this close past the boundary (mm) is on it: float noise.
+const SEAT_NOISE: f64 = 1e-6;
+
 /// Ring edges tried as a new start, longest first.
 const RESEAT_CANDIDATES: usize = 24;
 
@@ -224,6 +230,42 @@ pub(super) fn reseat(
     None
 }
 
+/// A lead-in start the slack let stand just past the region's
+/// boundary (a straight lead tangent to a curved ring leaves the ring at
+/// once: `L^2 / 2R` outside), stepped in along the air normal until it
+/// stands on the legal side at least a chord tolerance clear of the
+/// boundary - so the level's one descent lands on it and its at-depth
+/// link reaches it without meeting the ring's own flattened chords
+/// (#14). A start on the legal side or on the boundary, or one no step of
+/// up to twice slack plus tolerance seats, is kept as is.
+fn seat_inside(legal: &Legal, entry: Point2, air: Point2, segs: &[Seg], p: &ContourParams) -> Point2 {
+    let tol = slack(p);
+    let need = if p.tolerance.is_finite() { p.tolerance.max(tol) } else { tol };
+    let gap = |q: Point2| {
+        legal.region.loops().iter().fold(f64::INFINITY, |g, l| {
+            let pts = l.points();
+            let n = pts.len();
+            (0..n).fold(g, |g, k| g.min(chord_dev(q, pts[k], pts[(k + 1) % n])))
+        })
+    };
+    let legal_side = |q: Point2| legal.region.contains(q) == legal.inside;
+    let clear = |q: Point2| legal_side(q) && gap(q) >= need;
+    // Only a start truly past the boundary moves (one ON a straight wall
+    // runs along it and keeps its axis-aligned lead), and only a straight
+    // lead's: an arc's start is fixed by its center and radius.
+    if legal_side(entry) || gap(entry) <= SEAT_NOISE || !segs.iter().all(|s| matches!(s, Seg::Line(_))) {
+        return entry;
+    }
+    let reach = 2.0 * (tol + need);
+    (1..=SEAT_STEPS)
+        .map(|k| {
+            let d = reach * k as f64 / SEAT_STEPS as f64;
+            Point2::new(entry.x + air.x * d, entry.y + air.y * d)
+        })
+        .find(|&q| clear(q) && segs_hold(legal, q, segs, tol))
+        .unwrap_or(entry)
+}
+
 /// Lead-in (plunge point + segments onto the walk) and lead-out for one
 /// window, each the requested lead where it fits the legal room, halved
 /// up to [`LEAD_SHRINKS`] times where it does not, and refused - the
@@ -251,9 +293,10 @@ pub(super) fn plan_leads(
     for k in 0..=LEAD_SHRINKS {
         let f = 0.5f64.powi(k as i32);
         if lin.is_none() {
-            let (entry, segs) = lead_in(s, t0, air_side(t0, p.climb), scaled(p.lead, f));
+            let air = air_side(t0, p.climb);
+            let (entry, segs) = lead_in(s, t0, air, scaled(p.lead, f));
             if segs_hold(legal, entry, &segs, slack(p)) {
-                lin = Some((entry, segs, f));
+                lin = Some((seat_inside(legal, entry, air, &segs, p), segs, f));
             }
         }
         if lout.is_none() {
