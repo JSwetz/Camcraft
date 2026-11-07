@@ -77,6 +77,44 @@ One short line per PR: number, author, verdict, link to the posted review.
 If a review could not be posted, say why. Do not merge, approve, label, or
 close anything; do not reply on the contributor's behalf.
 
+## 4. Apply outside contributors' claims
+
+Contributors without Triage rights cannot add the `claimed` label or
+assign themselves, so their claim is a comment (AGENTS.md "Outside
+contributors' claims count"). On every run, after the PR steps, find
+fresh claim comments that have not been applied yet:
+
+```bash
+since=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-4H +%Y-%m-%dT%H:%M:%SZ)
+gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
+  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.author_association|test("OWNER|MEMBER|COLLABORATOR")|not))
+        | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
+```
+
+For each line `<N> <login> <time>` (the window only finds claims made since
+a recent tick; a claim applied earlier keeps its label and assignee and is
+judged stale by AGENTS.md's rule - 4 h with no newer comment from the
+claimant - not by this window; on the first run of a session, or after the loop was
+off, widen it to `-7 days` so a claim kept fresh by later comments is not
+missed - its freshness is then checked as in "held" below):
+- **already applied** - the issue carries `claimed` and `<login>` is an
+  assignee: skip silently (this keeps each 10-minute tick from replying
+  again);
+- **closed issue**: skip;
+- **held by someone else** - it carries `claimed` and either the latest
+  claim comment by another claimant (an agent's `claimed:` comment counts)
+  or that claimant's newest comment is younger than 4 h, or no claim
+  comment can be found at all (be conservative: a label without a findable
+  claim is held): do not take it. Reply once - only if no comment after
+  `<time>` already mentions `@<login>` - that it is in progress, naming
+  the claimant and branch or PR;
+- **otherwise**: `gh issue edit N --add-label claimed --add-assignee <login>`
+  (if GitHub refuses the assignee, still add the label) and reply
+  `gh issue comment N --body "Claim recorded for @<login> - label and assignee set (contributors without triage rights claim by comment). It goes stale after 4 h with no update from you."`
+  If the old claim was stale, say "reclaimed from <old claimant> (stale)".
+
+Report one line per applied claim; nothing found stays silent.
+
 ## Periodic run
 
 `/loop 10m /review-prs` re-runs this every 10 minutes for the session
