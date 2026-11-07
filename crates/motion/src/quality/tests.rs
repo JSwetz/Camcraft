@@ -117,3 +117,17 @@ fn a_lifted_return_over_the_cut_floor_is_lift_not_floor_air() {
     assert!((q.lift_len - 30.0).abs() < 1.0, "the lifted return: {}", q.lift_len);
     assert!((q.air_len - 20.0).abs() < 1.0, "the floor return is floor air: {}", q.air_len);
 }
+
+#[test]
+fn a_chord_vertex_faces_the_curve_and_a_corner_keeps_its_chord() {
+    // Issue #10: the vertex between two chords of a curve faces their
+    // bisector (the tangent there), not the arriving chord, which lags
+    // it by half the turn; a corner past the break limit and the end of
+    // a pass keep the arriving chord.
+    let out = |deg: f64| Some((deg.to_radians().cos(), deg.to_radians().sin()));
+    let Some((x, y)) = vertex_heading((2.0, 0.0), out(4.0), 5.0) else { panic!("a 4 deg chord vertex is a curve") };
+    assert!((y.atan2(x).to_degrees() - 2.0).abs() < 1e-9, "heading {}", y.atan2(x).to_degrees());
+    assert!(vertex_heading((1.0, 0.0), out(30.0), 5.0).is_none(), "a 30 deg corner keeps its chord");
+    assert!(vertex_heading((1.0, 0.0), None, 5.0).is_none(), "a pass end keeps its chord");
+    assert!(vertex_heading((0.0, 0.0), out(1.0), 5.0).is_none(), "no arriving direction");
+}
