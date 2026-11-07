@@ -21,6 +21,49 @@ use super::gates::{area_gate, check_tool, family_gate, heights_gate, tool_gate, 
 pub struct CreateOperation {
     name: String,
     operation: Operation,
+    /// The op's explicit position: the end of its setup's program order
+    /// (#167), so the post and the tree run it after every sibling.
+    meta: OperationMeta,
+    /// Siblings whose positions were made explicit (before, after).
+    reordered: Reordered,
+}
+
+/// `(key, before, after)` for each sibling whose position an append pins.
+type Reordered = Vec<(String, OperationMeta, OperationMeta)>;
+
+/// Pin every operation of the setup `context` resolves to at its current
+/// program position (0..n) and return those changes with the next free
+/// index `n` - so a new op lands last even when an older project's
+/// siblings carry no stored order (their name order is kept, made explicit).
+fn append_position(world: &World, context: Option<&str>) -> Result<(Reordered, u32), CommandError> {
+    let effective = setup::effective(world, context);
+    let siblings: Vec<_> = setup::operation_order(world)
+        .into_iter()
+        .filter(|(_, entity)| {
+            model::operation_of(world, entity)
+                .and_then(|op| setup::effective(world, op.setup.as_deref())) == effective
+        })
+        .collect();
+    let mut reordered = Vec::with_capacity(siblings.len());
+    for (index, (sibling, entity)) in siblings.into_iter().enumerate() {
+        let order = u32::try_from(index)
+            .map_err(|_| CommandError::Invalid("too many operations".into()))?;
+        let before = model::operation_meta_of(world, &entity);
+        let mut after = before.clone();
+        after.order = Some(order);
+        reordered.push((sibling, before, after));
+    }
+    let order = u32::try_from(reordered.len())
+        .map_err(|_| CommandError::Invalid("too many operations".into()))?;
+    Ok((reordered, order))
+}
+
+fn set_metas(world: &World, rows: &Reordered, after: bool) {
+    for (name, before, next) in rows {
+        if let Some(entity) = model::find_by_name(world, name) {
+            entity.entity_view(world).set(if after { next.clone() } else { before.clone() });
+        }
+    }
 }
 
 impl CreateOperation {
@@ -61,8 +104,11 @@ impl CreateOperation {
         family_gate(world, &params)?;
         tool_gate(world, &params, tool)?;
         area_gate(world, setup.as_deref(), &src, &params)?;
+        let (reordered, order) = append_position(world, setup.as_deref())?;
         Ok(CreateOperation {
             name: name.to_string(),
+            meta: OperationMeta { label: None, order: Some(order) },
+            reordered,
             operation: Operation {
                 tool: tool.to_string(),
                 src,
@@ -77,17 +123,20 @@ impl CreateOperation {
 
 impl Command for CreateOperation {
     fn apply(&self, world: &World) {
+        set_metas(world, &self.reordered, true);
         let entity = match model::find_by_name(world, &self.name) {
             Some(entity) => entity,
             None => model::spawn(world, &self.name),
         };
         entity.entity_view(world).set(self.operation.clone());
+        entity.entity_view(world).set(self.meta.clone());
     }
 
     fn invert(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             model::remove(world, &entity);
         }
+        set_metas(world, &self.reordered, false);
     }
 }
 
@@ -98,7 +147,7 @@ pub struct PasteOperation {
     name: String,
     operation: Operation,
     meta: OperationMeta,
-    reordered: Vec<(String, OperationMeta, OperationMeta)>,
+    reordered: Reordered,
 }
 
 impl PasteOperation {
@@ -126,25 +175,7 @@ impl PasteOperation {
         area_gate(world, context, &operation.src, &operation.params)?;
         operation.stamp = None;
 
-        let effective = setup::effective(world, context);
-        let siblings: Vec<_> = setup::operation_order(world)
-            .into_iter()
-            .filter(|(_, entity)| {
-                model::operation_of(world, entity)
-                    .and_then(|op| setup::effective(world, op.setup.as_deref())) == effective
-            })
-            .collect();
-        let mut reordered = Vec::with_capacity(siblings.len());
-        for (index, (sibling, entity)) in siblings.into_iter().enumerate() {
-            let order = u32::try_from(index)
-                .map_err(|_| CommandError::Invalid("too many operations".into()))?;
-            let before = model::operation_meta_of(world, &entity);
-            let mut after = before.clone();
-            after.order = Some(order);
-            reordered.push((sibling, before, after));
-        }
-        let order = u32::try_from(reordered.len())
-            .map_err(|_| CommandError::Invalid("too many operations".into()))?;
+        let (reordered, order) = append_position(world, context)?;
         Ok(Self {
             name: name.to_owned(),
             operation,
@@ -156,11 +187,7 @@ impl PasteOperation {
 
 impl Command for PasteOperation {
     fn apply(&self, world: &World) {
-        for (name, _, after) in &self.reordered {
-            if let Some(entity) = model::find_by_name(world, name) {
-                entity.entity_view(world).set(after.clone());
-            }
-        }
+        set_metas(world, &self.reordered, true);
         if model::find_by_name(world, &self.name).is_none() {
             let entity = model::spawn(world, &self.name);
             entity.entity_view(world).set(self.operation.clone());
@@ -172,11 +199,7 @@ impl Command for PasteOperation {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             model::remove(world, &entity);
         }
-        for (name, before, _) in &self.reordered {
-            if let Some(entity) = model::find_by_name(world, name) {
-                entity.entity_view(world).set(before.clone());
-            }
-        }
+        set_metas(world, &self.reordered, false);
     }
 }
 
