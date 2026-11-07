@@ -119,6 +119,13 @@ fn height_rows(ui: &mut Ui, world: &flecs_ecs::prelude::World, setup: Option<&st
             5 => HeightReference::WorkOffset(h.reference.wcs_slot().min(WCS_SLOTS.len() - 1)),
             _ => HeightReference::selection_for(bottom),
         };
+        // The selection IS the plane (user hand test 2026-11-06): a floor
+        // switched to Selection sits on the picked face. Carrying the old
+        // reference's offset over (Bottom of stock +18.7 -> selection
+        // bottom +18.7) put the floor 18.7 above a face at Z -5.
+        if h.reference.is_selection() {
+            h.offset = 0.0;
+        }
     }
     if matches!(h.reference, HeightReference::WorkOffset(_)) {
         let mut slot = h.reference.wcs_slot().min(WCS_SLOTS.len() - 1);

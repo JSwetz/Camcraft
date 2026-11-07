@@ -153,7 +153,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
             if selection_drives_region(params)
                 && !matches!(params, OpParams::Contour { .. }) =>
         {
-            Some(selection_region(world, setup, items, params))
+            Some(selection_region(world, setup, items, params, &op.area))
         }
         _ => None,
     };

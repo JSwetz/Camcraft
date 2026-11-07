@@ -127,8 +127,13 @@ fn the_combo_offers_selection_and_a_bottom_row_takes_the_low_end() {
         }
         other => panic!("pocket expected, got {other:?}"),
     }
-    // Offset 5 from the block's lowest Z (5): the echo is the resolver's.
-    assert!(harness.query_by_label("(= Z 10.000)").is_some(), "offset 5 above Z 5");
+    // The switch zeroes the offset (user hand test 2026-11-06): the
+    // floor IS the selection's lowest Z (5), never the old fixed 5 on top.
+    match &harness.state().op_ui.params {
+        OpParams::Pocket { bottom_z, .. } => assert_eq!(bottom_z.offset, 0.0, "a selection floor starts at offset 0"),
+        other => panic!("pocket expected, got {other:?}"),
+    }
+    assert!(harness.query_by_label("(= Z 5.000)").is_some(), "the floor sits on the block's bottom, Z 5");
 }
 
 fn with_retract(mut p: OpParams, r: Height) -> OpParams {

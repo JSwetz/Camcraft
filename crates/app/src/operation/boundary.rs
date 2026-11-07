@@ -150,6 +150,32 @@ pub(super) fn containment_delta(native: Native, want: Containment, r: f64) -> f6
     t - n
 }
 
+/// Containment past the edge (user hand test 2026-11-06): a positive `d`
+/// lets a clearing tool pass the selection's OUTER edge only. A hole of
+/// the selection is material the tool stays out of whatever the
+/// containment - growing every contour shrank holes and, past their
+/// size, deleted them. The holes stay as they were (the generator's own
+/// offset keeps the tool >= r from them). Then the island law, and what
+/// the tool reaches FROM that edge: a void of the part the band past the
+/// outline never touches (the recess in the part's top over a picked
+/// underside) is not "past the boundary" and stays uncut. An enclosed
+/// pocket, whose walls take the whole band, is its own answer: nothing
+/// touches the band, so the area stands as the island law left it.
+fn reach_past_edge(
+    pre: &Region,
+    d: f64,
+    islands: &dyn Fn(Region) -> Result<Region, GenError>,
+) -> Result<Region, GenError> {
+    let shells: Vec<Loop> = pre.loops().iter().filter(|l| l.is_ccw()).cloned().collect();
+    let filled = Region::union_all(shells)?;
+    let holes = filled.difference(pre)?;
+    let grown = grow(&filled, d, CornerStyle::Round)?.difference(&holes)?;
+    let band = grown.difference(pre)?;
+    let area = islands(grown)?;
+    let reached = connected_to(&area, &band)?;
+    Ok(if reached.area().abs() > AREA_EPS { reached } else { area })
+}
+
 /// The families whose exclude boundaries shape the ring they ride,
 /// before containment: the contour and the outline rides.
 fn rides(f: Family) -> bool {
@@ -247,7 +273,18 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
             _ => Ok(a),
         }
     };
-    area = check(islands(area)?, "include boundaries (the part fills them)")?;
+    // Containment that lets a clearing tool past the outer edge grows
+    // the selection's OWN outline (before the island law), so a part
+    // standing on the picked face leaves the band around it to clear.
+    let grow_d = c
+        .containment
+        .map(|want| containment_delta(ctx.native, want, r))
+        .filter(|d| *d > 0.0 && !rides(ctx.family));
+    let pre_islands = area.clone();
+    area = islands(area)?;
+    if grow_d.is_none() {
+        area = check(area, "include boundaries (the part fills them)")?;
+    }
     let excludes = |mut a: Region| -> Result<Region, GenError> {
         for (mode, b) in &ctx.extra {
             if *mode == BoundaryMode::Exclude {
@@ -262,12 +299,18 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
     // 5. Containment.
     if let Some(want) = c.containment {
         let d = containment_delta(ctx.native, want, r);
-        area = check(grow(&area, d, CornerStyle::Round)?, "tool containment")?;
+        // The rides shape the ring they ride, holes included; the
+        // clearing kinds keep a hole's protection (`contain`).
+        if grow_d.is_some() {
+            area = check(reach_past_edge(&pre_islands, d, &islands)?, "tool containment (the part fills the area)")?;
+        } else {
+            area = check(grow(&area, d, CornerStyle::Round)?, "tool containment")?;
+            if !rides(ctx.family) {
+                area = check(islands(area)?, "tool containment (the part fills the area)")?;
+            }
+        }
         if let Some(f) = &mut far_side {
             *f = grow(f, -d, CornerStyle::Round)?;
-        }
-        if !rides(ctx.family) {
-            area = check(islands(area)?, "tool containment (the part fills the area)")?;
         }
     }
     // 6. Excludes for the clearing kinds: the tool body stays out.

@@ -344,7 +344,7 @@ pub(super) fn selection_geometry_in(
                     }
                     if pocket {
                         return Err(GenError::Invalid(format!(
-                            "{label} is an open run - a {} cannot end mid-edge; select a closed chain",
+                            "{label} is an open run - a {} cannot end mid-edge; select a closed chain - Ctrl+click the remaining edges, or Shift+click to take the whole loop",
                             params.kind().info().label
                         )));
                     }
@@ -523,6 +523,7 @@ pub(super) fn selection_region(
     setup: Option<&str>,
     items: &[GeoSel],
     params: &OpParams,
+    area: &AreaControls,
 ) -> Result<Region, GenError> {
     let (loops, _) = selection_geometry(world, setup, items, params)?;
     if loops.is_empty() {
@@ -530,9 +531,15 @@ pub(super) fn selection_region(
             "nothing in the selection bounds an area".into(),
         ));
     }
+    // Containment On / Outside lets the tool past the selection's edge:
+    // the enclosed area goes to the boundary law whole, which grows the
+    // outline first and takes the part's material out after (user hand
+    // test 2026-11-06: a picked underside the part fills is the band
+    // around the part, not a refusal).
+    let past_edge = matches!(area.containment, Some(Containment::On | Containment::Outside));
     let region = match pocket_ladder(world, setup, items, params)? {
-        Some((part, planes)) => pocket_region_on_part(loops, &part, &planes)?,
-        None => Region::new(loops)?,
+        Some((part, planes)) if !past_edge => pocket_region_on_part(loops, &part, &planes)?,
+        _ => Region::new(loops)?,
     };
     // The area controls run after this, at the seam's call sites (the
     // job collector, the preview) - they need the tool and the stock.

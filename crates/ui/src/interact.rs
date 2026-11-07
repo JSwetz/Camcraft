@@ -237,8 +237,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         queue_boundary_pick(state, GeoSel { entity, feature: sel }, mods);
         return;
     }
-    let append = mods.ctrl || mods.shift;
-    queue_feature_pick(state, GeoSel { entity, feature: sel }, append);
+    crate::edge_pick::queue_edge_pick(state, GeoSel { entity, feature: sel }, mods);
 }
 
 /// Shared hover/raycast for the Face pick: sets state.hover with the

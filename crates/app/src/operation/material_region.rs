@@ -122,7 +122,7 @@ fn region_turn_core(
                 | OpParams::MultiAxisContour { .. }
         )
     {
-        return controlled(selection_region(world, op.setup.as_deref(), items, &op.params).ok()).map(|(r, t)| (r, t, None));
+        return controlled(selection_region(world, op.setup.as_deref(), items, &op.params, &op.area).ok()).map(|(r, t)| (r, t, None));
     }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
     match frame {
