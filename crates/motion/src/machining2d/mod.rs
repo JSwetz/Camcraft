@@ -20,6 +20,7 @@
 
 
 
+mod arc_biarc;
 mod arc_cross;
 mod arc_proof;
 mod arcs;

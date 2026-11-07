@@ -40,6 +40,7 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::geo2d::{Point2, Region};
 
+use super::arc_biarc::refit;
 use super::arcs::{ARC_FIT_TOL, Seg, fit_arcs};
 use super::slots::chord_clears;
 
@@ -48,14 +49,16 @@ use super::slots::chord_clears;
 /// a degenerate radius).
 const MAX_CHORDS: usize = 512;
 
-/// What the proof did over a plan: arcs kept, arcs refused by the
-/// area law, arcs refused by the crossing law.
+/// What the proof did over a plan: arcs kept (biarc arcs included),
+/// arcs refused by the area, kink and crossing laws, and the kinked arcs
+/// refitted as tangent biarcs.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ProofTally {
     pub arcs: usize,
     pub refused: usize,
     pub kinked: usize,
     pub crossed: usize,
+    pub biarcs: usize,
 }
 
 impl ProofTally {
@@ -75,20 +78,35 @@ impl ProofTally {
 
 /// Fit `pass` (its first point is where the tool stands) with `tol`,
 /// then prove every arc against `legal`; the walk past the first point.
+/// An arc the kink law refuses is fitted again as tangent biarcs
+/// (`arc_biarc`, issue #11) under the same proofs before it is given up.
 pub(crate) fn fit_proved(pass: &[Point2], tol: f64, legal: &Region, tally: &mut ProofTally) -> Vec<Seg> {
     let fitted = fit_arcs(pass, tol);
-    judge(pass, fitted, |(i, j), center, ccw| {
-        let (from, to) = (pass[i], pass[j]);
-        if !proved(from, center, ccw, to, legal) {
+    judge(pass, fitted, |(i, j), group| {
+        let [Seg::Arc { center, ccw, .. }] = group else {
             tally.refused += 1;
-            return false;
+            return None;
+        };
+        let (from, to) = (pass[i], pass[j]);
+        if !proved(from, *center, *ccw, to, legal) {
+            tally.refused += 1;
+            return None;
         }
-        if !adds_no_kink(pass, (i, j), center, ccw) {
-            tally.kinked += 1;
-            return false;
+        if !adds_no_kink(pass, (i, j), *center, *ccw) {
+            return match refit(pass, (i, j), tol, legal) {
+                Some((segs, n)) => {
+                    tally.arcs += n;
+                    tally.biarcs += 1;
+                    Some(segs)
+                }
+                None => {
+                    tally.kinked += 1;
+                    None
+                }
+            };
         }
         tally.arcs += 1;
-        true
+        Some(group.to_vec())
     })
     .unwrap_or_else(|| plain(pass, tally))
 }
@@ -111,50 +129,73 @@ fn turn(u: Point2, v: Point2) -> f64 {
 /// hold, and the fit is held to it junction by junction). An end at the
 /// pass's own end has no neighbour and nothing to compare.
 fn adds_no_kink(pass: &[Point2], (i, j): (usize, usize), center: Point2, ccw: bool) -> bool {
-    let chord = |a: usize, b: usize| Point2::new(pass[b].x - pass[a].x, pass[b].y - pass[a].y);
     let tangent = |p: Point2| {
         let (dx, dy) = (p.x - center.x, p.y - center.y);
         if ccw { Point2::new(-dy, dx) } else { Point2::new(dy, -dx) }
     };
+    kink_free(pass, (i, j), tangent(pass[i]), tangent(pass[j]))
+}
+
+/// The kink law with the fit's own tangents given: `start` the travel
+/// at `pass[i]`, `end` the travel at `pass[j]`.
+pub(super) fn kink_free(pass: &[Point2], (i, j): (usize, usize), start: Point2, end: Point2) -> bool {
+    let chord = |a: usize, b: usize| Point2::new(pass[b].x - pass[a].x, pass[b].y - pass[a].y);
     const SLACK: f64 = 1e-9;
+    if j >= pass.len() {
+        return false;
+    }
     let start_ok = i == 0 || i + 1 > j || {
         let inc = chord(i - 1, i);
-        turn(inc, tangent(pass[i])) <= turn(inc, chord(i, i + 1)) + SLACK
+        turn(inc, start) <= turn(inc, chord(i, i + 1)) + SLACK
     };
     let end_ok = j + 1 >= pass.len() || j == 0 || {
         let out = chord(j, j + 1);
-        turn(tangent(pass[j]), out) <= turn(chord(j - 1, j), out) + SLACK
+        turn(end, out) <= turn(chord(j - 1, j), out) + SLACK
     };
     start_ok && end_ok
 }
 
-/// Walk `segs` over `pass`, keeping each arc `keep` says yes to (handed
-/// the arc's vertex span) and handing the others back as the plan's own
-/// vertices. The fitter's endpoints are always vertices of `pass`, so
-/// the walk's cursor is an index into it; `None` when it is not (never
-/// expected).
-pub(super) fn judge(pass: &[Point2], segs: Vec<Seg>, mut keep: impl FnMut((usize, usize), Point2, bool) -> bool) -> Option<Vec<Seg>> {
+/// Walk `segs` over `pass`, handing each arc group to `keep` with its
+/// vertex span: what it returns stands in for the group, `None` hands
+/// the span back as the plan's own vertices. A group is the arcs up to
+/// one ending on a vertex of `pass` - one arc of the single fit, or a
+/// biarc whose joint lies between vertices. Every group ends on a vertex,
+/// so the walk's cursor is an index into the pass; `None` when it does
+/// not (never expected).
+pub(super) fn judge(pass: &[Point2], segs: Vec<Seg>, mut keep: impl FnMut((usize, usize), &[Seg]) -> Option<Vec<Seg>>) -> Option<Vec<Seg>> {
     let mut out: Vec<Seg> = Vec::with_capacity(segs.len());
+    let mut group: Vec<Seg> = Vec::new();
     let mut i = 0usize;
     for seg in segs {
         match seg {
             Seg::Line(qs) => {
+                if !group.is_empty() {
+                    return None;
+                }
                 i = i.saturating_add(qs.len());
                 push_line(&mut out, qs);
             }
             Seg::Arc { center, ccw, to } => {
                 pass.get(i)?;
-                let j = (i + 1..pass.len()).find(|&k| pass[k] == to)?;
-                if keep((i, j), center, ccw) {
-                    out.push(Seg::Arc { center, ccw, to });
-                } else {
-                    push_line(&mut out, pass[i + 1..=j].to_vec());
+                group.push(Seg::Arc { center, ccw, to });
+                let Some(j) = (i + 1..pass.len()).find(|&k| pass[k] == to) else { continue };
+                let span = std::mem::take(&mut group);
+                match keep((i, j), &span) {
+                    Some(rep) => {
+                        for s in rep {
+                            match s {
+                                Seg::Line(qs) => push_line(&mut out, qs),
+                                arc => out.push(arc),
+                            }
+                        }
+                    }
+                    None => push_line(&mut out, pass[i + 1..=j].to_vec()),
                 }
                 i = j;
             }
         }
     }
-    Some(out)
+    group.is_empty().then_some(out)
 }
 
 /// The honest answer when the fitter's walk cannot be mapped back onto
@@ -165,7 +206,7 @@ pub(super) fn plain(pass: &[Point2], tally: &mut ProofTally) -> Vec<Seg> {
 }
 
 /// Append a straight run, merged onto a preceding one.
-fn push_line(out: &mut Vec<Seg>, qs: Vec<Point2>) {
+pub(super) fn push_line(out: &mut Vec<Seg>, qs: Vec<Point2>) {
     match out.last_mut() {
         Some(Seg::Line(prev)) => prev.extend(qs),
         _ => out.push(Seg::Line(qs)),
@@ -221,7 +262,7 @@ pub(super) fn bracket(from: Point2, center: Point2, ccw: bool, to: Point2) -> Op
 }
 
 /// Both bracketing polylines inside `legal`, chord by chord.
-fn proved(from: Point2, center: Point2, ccw: bool, to: Point2, legal: &Region) -> bool {
+pub(super) fn proved(from: Point2, center: Point2, ccw: bool, to: Point2, legal: &Region) -> bool {
     let Some((fan, hull)) = bracket(from, center, ccw, to) else {
         return false;
     };

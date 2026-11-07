@@ -178,13 +178,15 @@ fn crossing_arcs(path: &Toolpath, keys: &HashSet<Key>) -> HashSet<Key> {
 /// Hand every arc of `runs` keyed in `keys` back to its chords.
 fn refuse(passes: &[Vec<Point2>], runs: &mut [Vec<Seg>], keys: &HashSet<Key>, tally: &mut ProofTally) {
     for (pass, segs) in passes.iter().zip(runs.iter_mut()) {
-        let judged = judge(pass, std::mem::take(segs), |(_, j), center, ccw| {
-            let cross = keys.contains(&key(pass[j], center, ccw));
+        let judged = judge(pass, std::mem::take(segs), |_, group| {
+            let cross = group.iter().any(|s| matches!(s, Seg::Arc { center, ccw, to } if keys.contains(&key(*to, *center, *ccw))));
             if cross {
-                tally.arcs = tally.arcs.saturating_sub(1);
+                tally.arcs = tally.arcs.saturating_sub(group.len());
                 tally.crossed += 1;
+                None
+            } else {
+                Some(group.to_vec())
             }
-            !cross
         });
         *segs = judged.unwrap_or_else(|| plain(pass, tally));
     }
