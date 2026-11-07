@@ -57,15 +57,18 @@ design context, never add work to them. Decisions still go to
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
   limit to 2 bugs 2 enhancements.. as we are now just working on the latest
   issues and not the old ones"). At most four issues are worked at once: two
-  in the **bug lane** (label `bug`, or an unlabelled P0/P1 defect) and two in
-  the **enhancement lane** (label `enhancement`). An issue counts against its
-  lane from its claim until its PR merges, so one sitting `in-review` still
-  holds its slot. The bug lane picks by the order above. The enhancement lane
-  picks user-filed issues (no `source:agent`) first, then `P1` before `P2`,
-  then the oldest, so old owed work is not starved by fresh bugs. When a slot
-  frees, refill that lane at once. Each slot is its own worktree and branch
-  (check free disk first: each worktree's `target/` is 10-20 GB). An
-  enhancement PR is a `feat` and merges at the next minor cut.
+  in the **bug lane** and two in the **enhancement lane**. An issue labelled
+  `enhancement` (and not `bug`) is in the enhancement lane; every other
+  issue, unlabelled ones included, is in the bug lane. A slot is held from
+  the claim until its PR is open and its review clean (`in-review`, waiting
+  only for its merge or its cut); fixing a later review finding takes no new
+  slot. The bug lane picks by the order above. The enhancement lane has its
+  own order, which overrides Pick's: user-filed issues (no `source:agent`)
+  first, then `P1` before `P2`, then the oldest, so old owed work is not
+  starved by fresh bugs. When a slot frees, refill that lane at once. Each
+  slot is its own worktree and branch (check free disk first: each
+  worktree's `target/` is 10-20 GB). An enhancement PR is a `feat` and
+  merges at the next minor cut.
 - **Start from the latest main, on a branch of its own** (user, 2026-11-07:
   "make sure we are on the latest main by pulling data from github then
   create a new branch to work off of"). Before the first edit:
