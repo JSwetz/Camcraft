@@ -60,15 +60,15 @@ design context, never add work to them. Decisions still go to
   in the **bug lane** and two in the **enhancement lane**. An issue labelled
   `enhancement` (and not `bug`) is in the enhancement lane; every other
   issue, unlabelled ones included, is in the bug lane. A slot is held from
-  the claim until its PR is open and its review clean (`in-review`, waiting
-  only for its merge or its cut); fixing a later review finding takes no new
-  slot. The bug lane picks by the order above. The enhancement lane has its
+  the claim until its PR is opened (the swap to `in-review`); fixing a
+  review finding afterwards rides the same issue and takes no new slot, so a
+  `feat` waiting for its cut never holds a lane. The bug lane picks by the order above. The enhancement lane has its
   own order, which overrides Pick's: user-filed issues (no `source:agent`)
   first, then `P1` before `P2`, then the oldest, so old owed work is not
   starved by fresh bugs. When a slot frees, refill that lane at once. Each
   slot is its own worktree and branch (check free disk first: each
-  worktree's `target/` is 10-20 GB). An enhancement PR is a `feat` and
-  merges at the next minor cut.
+  worktree's `target/` is 10-20 GB). Merging follows "Done on a branch"
+  by commit type, whichever lane the issue came from.
 - **Start from the latest main, on a branch of its own** (user, 2026-11-07:
   "make sure we are on the latest main by pulling data from github then
   create a new branch to work off of"). Before the first edit:
