@@ -121,7 +121,8 @@ version.
 
 ### Tools
 
-- **`git`** for branches and commits. Never force-push.
+- **`git`** for branches and commits. Never force-push `main` or a branch
+  with an open PR.
 - **`gh`** (the GitHub CLI) for everything on GitHub: reading, filing,
   claiming and commenting on issues, and opening pull requests. Agents load
   the `gh-issues` skill for issue work.
@@ -178,24 +179,32 @@ more `area:*` labels. Issues opened by an agent also carry `source:agent`.
 included; force-pushes and deletions are blocked; review conversations must
 be resolved; only merge commits are allowed.
 
-- **Review.** A reviewer agent that did not write the change reviews each
-  PR. For pull requests from forks it trial-merges the PR with current
-  `main`, builds it, runs the suites it touches plus clippy, checks it
-  against `AGENTS.md`, and posts its verdict as a comment. It never approves
-  and never merges. A new push to the PR gets a fresh review. A PR that
-  touches build scripts, CI workflows, scripts or dependencies is not built
-  by the reviewer; it is flagged for the maintainer instead.
-- **Approval is manual.** The maintainer reads the review and approves and
-  merges pull requests from forks by hand. Address the review's requested
-  changes and push again to get there.
+- **Review of fork PRs.** The `PR-reviewer` agent (run by `/review-prs`)
+  trial-merges the PR with current `main`, builds it, runs the suites it
+  touches plus clippy, checks it against `AGENTS.md`, and posts its verdict
+  as a comment. It never approves and never merges. A new push to the PR
+  gets a fresh review. A PR that touches build scripts, CI workflows,
+  scripts or dependencies is not built by the reviewer; it is flagged for
+  the maintainer instead.
+- **Review of the maintainers' own PRs.** Issue PRs are reviewed at the
+  release cut by a subagent that did not write them; findings are fixed on
+  the branch before it merges.
+- **Approval is manual.** GitHub requires 0 approvals (the agents and the
+  maintainer share one account, which cannot approve its own PR), so the
+  gate is the maintainer's manual merge: the maintainer reads the review and
+  approves and merges pull requests from forks by hand. Address the
+  review's requested changes and push again to get there.
 - **Workflows on forks** need the maintainer's approval to run, so a fork PR
   never spends the Actions budget on its own.
+- **Docs-, process- and CI-only PRs** merge once reviewed, without
+  waiting for a cut.
 - **Releases.** Issue PRs merge at a release cut: reviewed, merged to `main`
   with merge commits, gated on a `release/vX.Y.Z` branch, merged through a
   release PR, then tagged. Versions follow semantic versioning from the
   commits (`fix` = patch, `feat` = minor, breaking = major; while the major
   is 0, breaking bumps the minor). Each issue gets a `shipped in vX.Y.Z`
-  comment when its release is published.
+  comment when its release is published. Only `vX.Y.0` tags (and manual
+  runs) build the release artifact on GitHub.
 
 ## License
 
