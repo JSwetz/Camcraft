@@ -170,6 +170,12 @@ pub enum CommandKind {
         params: OpParams,
         area: AreaControls,
     },
+    /// The op page's Coolant row (#112): the post's fluid word for one
+    /// operation, one undo unit through `EditOperationParams`.
+    EditOperationCoolant {
+        name: String,
+        coolant: camcraft_app::operation::CoolantMode,
+    },
     /// The op's context-menu retype (M9.1): change the operation's kind
     /// in place, numbers carried by the one retype law, one undo unit.
     ChangeOperationKind {
@@ -2530,6 +2536,16 @@ impl State {
                     Err(err) => {
                         self.refuse(ErrorScope::Operation, format!("parameters not updated: {err}"));
                     }
+                }
+            }
+            CommandKind::EditOperationCoolant { name, coolant } => {
+                match EditOperationParams::with_coolant(&self.world, &name, coolant) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("coolant set to {} for {name}", coolant.label());
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("coolant not changed: {err}")),
                 }
             }
             CommandKind::ChangeOperationKind { name, kind } => {

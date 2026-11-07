@@ -55,7 +55,11 @@ write (the gate), so the released program never carries one.
 - **The machine is truth.** Read `machine.spindleMax` (refuse rpm above
   it by name), `machine.coolants` (the program's coolant word is the
   machine's own first-Flood `mCode`, or stay silent; M9 is the fixed
-  stop pair), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  stop pair; a section's `PARAM Coolant` - `off`, `mist`,
+  `through-tool`, flood when unstated (#112) - picks the machine's
+  entry of that family instead, refused by `message()` when the
+  machine states no code for it; the ask resets to flood at section
+  end), `machine.rtcp` and `machine.rotaries` (RTCP may be
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.

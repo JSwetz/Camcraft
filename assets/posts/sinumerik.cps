@@ -25,6 +25,7 @@ var toolWait = false;
 var tNo = 0;
 var inCycle = false;
 var coolant = "";
+var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var sectionOpen = false;
 var orgX = 0, orgY = 0, orgZ = 0;
 var nLine = 0;             // the numbered-block dialect: every written
@@ -82,6 +83,27 @@ function coolantCode() {
   return first;
 }
 
+// The op's coolant ask (#112): the stream says nothing for flood (every
+// older stream), or carries PARAM Coolant off / mist / through-tool. The
+// code is the machine's own entry of that family - the machine is truth;
+// an ask the machine states no code for is refused by name, never
+// silently posted dry.
+function coolantFor(ask) {
+  if (ask === "off") return "";
+  if (!ask || ask === "flood") return coolantCode();
+  var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
+  if (want.length === 0) { msg("unknown coolant ask " + ask); return ""; }
+  var cs = (typeof machine !== "undefined" && machine.coolants) || [];
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var code = (typeof c === "string") ? "" : (c.mCode || "");
+    var name = String((typeof c === "string") ? c : (c.name || "")).toLowerCase();
+    if (code && want.indexOf(name) >= 0) return code;
+  }
+  msg("the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  return "";
+}
+
 // -------------------------------------------------------------- header
 // The DIN family comments with ';' and needs no fence; identity is one
 // comment line, and the first real block carries the plane.
@@ -130,6 +152,7 @@ function onRadiusCompensation() {
 }
 
 function onParameter(name, value) {
+  if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -166,7 +189,7 @@ function startPreamble() {
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
-  coolant = coolantCode();
+  coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
 }
 
@@ -177,6 +200,8 @@ function endPreamble() {
   if (inCycle) block(["G80"]);
   inCycle = false;
   if (coolant) block(["M9"]);
+  coolant = "";
+  coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
 }
 

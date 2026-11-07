@@ -46,7 +46,7 @@ fn pocket(entry: Entry3D) -> OpParams {
     }
 }
 
-fn face() -> OpParams {
+pub(super) fn face() -> OpParams {
     OpParams::Face { holes: Default::default(),
         blend_turns: false,
         tilt: None,
@@ -63,7 +63,7 @@ fn face() -> OpParams {
 
 /// Stock 60x60x20, a 40x40x10 part, a 4 mm end mill and one operation
 /// named "Op" on the stock, opened on the page.
-fn opened(params: OpParams) -> State {
+pub(super) fn opened(params: OpParams) -> State {
     let mut state = State::new();
     state.pending.push_back(CommandKind::SetStock {
         shape: StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 },
@@ -88,7 +88,7 @@ fn opened(params: OpParams) -> State {
     state
 }
 
-fn page(state: State) -> Harness<'static, State> {
+pub(super) fn page(state: State) -> Harness<'static, State> {
     Harness::builder()
         .with_size(Vec2::new(620.0, 1400.0))
         .build_ui_state(|ui, st: &mut State| super::pages::properties(ui, st, &super::theme::current()), state)

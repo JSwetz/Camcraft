@@ -121,6 +121,7 @@ fn drill_op(src: &str, top: f64, clear: f64, holes: Vec<Hole>, cross: Vec<CrossH
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 

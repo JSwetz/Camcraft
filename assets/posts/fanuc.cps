@@ -28,6 +28,7 @@ var inCycle = false;       // a cycle group is open; its chain is suppressed
 var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
+var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
 var lastA = 0, lastB = 0, lastC = 0; // angle words the last block commanded (deg)
@@ -140,6 +141,27 @@ function coolantCode() {
   return first;
 }
 
+// The op's coolant ask (#112): the stream says nothing for flood (every
+// older stream), or carries PARAM Coolant off / mist / through-tool. The
+// code is the machine's own entry of that family - the machine is truth;
+// an ask the machine states no code for is refused by name, never
+// silently posted dry.
+function coolantFor(ask) {
+  if (ask === "off") return "";
+  if (!ask || ask === "flood") return coolantCode();
+  var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
+  if (want.length === 0) { msg("unknown coolant ask " + ask); return ""; }
+  var cs = (typeof machine !== "undefined" && machine.coolants) || [];
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var code = (typeof c === "string") ? "" : (c.mCode || "");
+    var name = String((typeof c === "string") ? c : (c.name || "")).toLowerCase();
+    if (code && want.indexOf(name) >= 0) return code;
+  }
+  msg("the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  return "";
+}
+
 // ------------------------------------------------------------ the plane
 // M11.2 A: the arc's plane (RS-274 / ISO 6983 G17 XY, G18 XZ, G19 YZ),
 // stated modally. G17 is the state every program starts in (the
@@ -180,6 +202,7 @@ function onOpen() {
 }
 
 function onParameter(name, value) {
+  if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -219,7 +242,7 @@ function startPreamble() {
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
-  coolant = coolantCode();
+  coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
 }
 
@@ -234,6 +257,8 @@ function endPreamble() {
     compG = ""; compD = ""; compOn = false;
   }
   if (coolant) block(["M9"]);
+  coolant = "";
+  coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
   // The next preamble carries G49, which cancels TCPM too - so the
   // arm and the angle memory reset here, and a later tilt re-arms by

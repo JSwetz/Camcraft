@@ -29,6 +29,7 @@ var inCycle = false;       // a cycle group is open; its chain is suppressed
 var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
+var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs)
 
@@ -81,6 +82,27 @@ function coolantCode() {
   return first;
 }
 
+// The op's coolant ask (#112): the stream says nothing for flood (every
+// older stream), or carries PARAM Coolant off / mist / through-tool. The
+// code is the machine's own entry of that family - the machine is truth;
+// an ask the machine states no code for is refused by name, never
+// silently posted dry.
+function coolantFor(ask) {
+  if (ask === "off") return "";
+  if (!ask || ask === "flood") return coolantCode();
+  var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
+  if (want.length === 0) { msg("unknown coolant ask " + ask); return ""; }
+  var cs = (typeof machine !== "undefined" && machine.coolants) || [];
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var code = (typeof c === "string") ? "" : (c.mCode || "");
+    var name = String((typeof c === "string") ? c : (c.name || "")).toLowerCase();
+    if (code && want.indexOf(name) >= 0) return code;
+  }
+  msg("the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  return "";
+}
+
 // ------------------------------------------------------------ the plane
 // M11.2 A: the arc's plane (RS-274 / ISO 6983 G17 XY, G18 XZ, G19 YZ),
 // stated modally. G17 is the state every program starts in (the
@@ -128,6 +150,7 @@ function onRadiusCompensation() {
 }
 
 function onParameter(name, value) {
+  if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -164,7 +187,7 @@ function startPreamble() {
     block(["MOTON", "S" + ff(sRpm)]);
     spindleWait = false;
   }
-  coolant = coolantCode();
+  coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
 }
 
@@ -175,6 +198,8 @@ function endPreamble() {
   if (inCycle) block(["G80"]);
   inCycle = false;
   if (coolant) block(["M9"]);
+  coolant = "";
+  coolantAsk = "flood";      // the next section states its own ask
   block(["MOTOFF"]);
 }
 

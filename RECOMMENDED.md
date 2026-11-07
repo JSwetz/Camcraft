@@ -13182,3 +13182,33 @@ revolved (follow-up material if users hit it with long keyways).
   clamps) a ring count past 1e5, and drops vertical-plane arcs from the
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
+
+## #112 - coolant per operation: Off / Flood / Mist / Through tool (2026-11-07)
+
+- **Chosen:** a per-operation `coolant` field on `Operation` (the post
+  crate's `CoolantMode`, one enum from field to stream), default
+  **Flood** - every built-in post already switched the machine's Flood
+  code on per section and M9 off at its end, so Flood keeps every
+  golden byte-exact. Edited from a Coolant row in the op page's header
+  grid, under Tool, through `EditOperationParams::with_coolant` (one
+  undo unit; the stamp survives, since coolant shapes no geometry).
+  The project file writes `"coolant": "mist"` etc. only off the
+  default (no version bump; absent reads Flood - the `area` precedent).
+- **Stream law:** Flood is the silent default - a section states
+  `PARAM Coolant off|mist|through-tool` only when it asks something
+  else, so every legacy `.cl`/stream posts unchanged. The scripts look
+  the code up in the MACHINE's coolant list by family name (Mist;
+  Through-spindle / Through-tool), never a hard-wired M7: the machine
+  is truth, and that covers Heidenhain too (its own .mch codes). An
+  ask the machine states no code for is a counted `message()` - the
+  gate blocks the post by name rather than cut dry.
+- **Switching:** kept the existing per-section bracket (on after the
+  spindle, M9 before M5 at section end), so coolant is always off
+  across a tool change and at program end; a dry section writes
+  neither word. Dropped: modal coolant carried across sections with M9
+  only on change (fewer lines, but a tool change under running fluid
+  and a golden churn for every multi-op program).
+- **Dropped:** a per-tool default (the tool library carries no coolant
+  today; can seed the op default later), and offering Through tool only
+  for machines that state it (the row would change with the mount; the
+  post-time refusal names the gap instead).
