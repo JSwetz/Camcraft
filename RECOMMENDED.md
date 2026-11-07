@@ -12115,3 +12115,43 @@ load"), then the extra descents (the 2 remaining hops plus high descents read as
 descents into stock?), then the budget at ~32,000 r with the #13 band test re-timed.
 **Dropped:** riding the lead from its own first point (that point holds stock in the
 rim, so every return was refused); a resampled ride back (it reads as a crossing).
+
+## Branch / PR flow for issues and cuts (user, 2026-11-07)
+
+The user reworked the procedure: start each issue from the latest main on
+a branch of its own; finishing an issue pushes the branch (PR), never merges
+it; a cut goes PR review -> merge to main -> tag. Decisions taken filling in
+the mechanics (AGENTS.md Issue Law and "A cut goes PR review"):
+
+1. **Branch names** `issue/N-<slug>` (and `release/vX.Y.Z`, `docs/<slug>`):
+   the issue number leads, so `gh pr list` and `git branch` sort by issue.
+2. **A new `in-review` label** replaces `claimed` once the PR is open, and
+   the pick query skips it - otherwise a pushed-but-unmerged issue would
+   look stale after 4 h and get reclaimed. Dropped: leaving `claimed` on
+   (stale-claim rule fires), closing the issue by hand at push (the law
+   closes only from a merged keyword).
+3. **Changelog rows are written at the cut, on the release branch**, from
+   each PR's `Changelog:` line. Dropped: a row per issue branch - every
+   open branch would edit the table's top line, so every second PR would
+   conflict. The row names the merge commit and the PR.
+4. **Merge commits, never squash/rebase** (`gh pr merge --merge`): branch
+   commit hashes survive, so the `fix on ...` comments and `Fixes #N`
+   commits stay findable. A branch behind main takes `git merge
+   origin/main` (no force-push, which the law forbids).
+5. **Review = a subagent that did not write the change**, under the
+   Autonomous Work Law (the user reviews afterwards, not in the loop). The
+   user can review or hold any PR on GitHub at any time; a hold is a PR
+   comment the next cut honours.
+6. **Docs/process/CI-only PRs merge once reviewed**, without a cut - they
+   carry no behaviour and need no tag, and laws must reach main to bind
+   agents.
+7. **`release.ps1 -NoTag`** commits the bump and builds on the release
+   branch (and refuses to on main); the tag is made on the release PR's
+   merge commit after `git diff <recorded tip> <merge commit>` shows the
+   trees match, so the zip is the tagged tree. Nothing else merges to main
+   from the first issue-PR merge to the tag (a reviewer of this PR found
+   the plain `release/vX.Y.Z` name is gone once `--delete-branch` runs, and
+   a mid-cut docs merge would make the trees differ).
+8. **Overlapping issues stack** on the open PR's branch (parent merges
+   first, child retargeted to main), since fixes stay unmerged until the
+   cut; an issue PR closed unmerged leaves `in-review` with a comment.
