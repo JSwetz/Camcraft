@@ -9,6 +9,7 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 1362b04 | 2026-11-07 | feat(ui): copy and paste operations, close the operation editor, and toggle all toolpaths from the browser and viewport | Unreleased |
 | 0a830e7 | 2026-11-07 | feat(ui): rename Project to Open, add stock and work offset visibility, hide operation overlays, and align offset axis labels | Unreleased |
 | b3fecb3 | 2026-11-06 | feat(ui): browser parents collapse and expand Setup, Models, Tools, and Operations | Unreleased |
 | 96abbce | 2026-11-07 | fix(motion): the finishing march rides a convex fold edge - coarse-mesh scallops under tolerance (#36) | Unreleased |
