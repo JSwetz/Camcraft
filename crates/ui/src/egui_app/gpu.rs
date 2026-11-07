@@ -60,6 +60,19 @@ pub fn pick_from(args: &[String], env: Option<&str>) -> Result<GpuPick, String> 
     Ok(GpuPick::Auto)
 }
 
+/// #74: the adapter the user names by a case-insensitive substring of its
+/// reported name (`--gpu "quadro"` wins over `CAMCRAFT_GPU`). A flag with
+/// no value refuses by name; an empty env value means automatic.
+pub fn adapter_from(args: &[String], env: Option<&str>) -> Result<Option<String>, String> {
+    if let Some(i) = args.iter().position(|a| a == "--gpu") {
+        return match args.get(i + 1).map(|v| v.trim()) {
+            Some(v) if !v.is_empty() && !v.starts_with("--") => Ok(Some(v.to_owned())),
+            _ => Err("--gpu needs an adapter name (a part of it is enough, e.g. --gpu quadro)".into()),
+        };
+    }
+    Ok(env.map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned))
+}
+
 /// The honest fallback chain: (label, backend mask) pairs tried in order.
 /// Each pair gets its own instance + adapter request; the first that
 /// yields a usable adapter wins and says so on stdout.
@@ -166,6 +179,16 @@ mod tests {
         assert_eq!(c[1].1, wgpu::Backends::PRIMARY);
         assert_eq!(c[2].1, wgpu::Backends::all());
         assert_eq!(attempts(&GpuPick::Auto).len(), 2);
+    }
+
+    #[test]
+    fn adapter_choice_flag_then_env() {
+        assert_eq!(adapter_from(&argv(&["--gpu", "Quadro"]), Some("intel")).unwrap().as_deref(), Some("Quadro"));
+        assert_eq!(adapter_from(&[], Some(" intel ")).unwrap().as_deref(), Some("intel"));
+        assert_eq!(adapter_from(&[], Some("  ")).unwrap(), None);
+        assert_eq!(adapter_from(&argv(&["--gpu-backend", "dx12"]), None).unwrap(), None);
+        assert!(adapter_from(&argv(&["--gpu"]), None).unwrap_err().contains("needs an adapter name"));
+        assert!(adapter_from(&argv(&["--gpu", "--headless"]), None).is_err());
     }
 
     #[test]

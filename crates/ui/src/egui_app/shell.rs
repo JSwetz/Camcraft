@@ -36,7 +36,9 @@ use crate::viewport::View3D;
 use super::icons;
 use super::layout;
 use super::machine_editor;
+use super::frame_watch::FrameWatch;
 use super::gpu;
+use super::gpu_init;
 use super::pages;
 use super::panes;
 use super::theme;
@@ -56,7 +58,7 @@ const STATUS_H: f32 = 22.0;
 
 /// The windowed shell (the `--ui egui` entry without `--headless`); returns
 /// the process exit code.
-pub(crate) fn run_windowed(pick: gpu::GpuPick) -> i32 {
+pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(err) => {
@@ -65,7 +67,7 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick) -> i32 {
         }
     };
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut shell = Shell::new(pick);
+    let mut shell = Shell::new(pick, want);
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
         Err(err) => {
@@ -119,6 +121,10 @@ struct Shell {
     /// M4.2: the validated GPU backend pick; drives init_gpu's attempts
     /// chain (preferred mask first, then auto, then all).
     gpu_pick: gpu::GpuPick,
+    /// #74: the `--gpu` / `CAMCRAFT_GPU` adapter-name substring, tried first.
+    gpu_want: Option<String>,
+    /// #74: per-frame phase timing; a frame over budget is logged by phase.
+    frame_watch: FrameWatch,
     state: State,
 }
 
@@ -144,7 +150,7 @@ impl Tab {
 pub(crate) use super::layout::build_dock;
 
 impl Shell {
-    fn new(pick: gpu::GpuPick) -> Self {
+    fn new(pick: gpu::GpuPick, want: Option<String>) -> Self {
         // M-d: startup is a plain State::new() - byte-identical in shape to
         // imgui's App::new. The demo seed left the window path; world::seed
         // is what the harnesses and the headless proof call directly now.
@@ -175,6 +181,8 @@ impl Shell {
             failed: false,
             exit_requested: false,
             gpu_pick: pick,
+            gpu_want: want,
+            frame_watch: FrameWatch::new(std::time::Instant::now()),
             state,
         }
     }
@@ -197,77 +205,18 @@ impl Shell {
                 return;
             }
         };
-        let size = window.inner_size();
-        // M4.2: the honest fallback chain. Each attempt gets a restricted
-        // instance and its own adapter request; a miss names the backend it
-        // tried and yields to the next. The adapter we actually get is the
-        // one we log - never a silent substitution.
-        let mut won: Option<(wgpu::Surface<'static>, wgpu::Adapter)> = None;
-        let mut last_err = String::from("all backends exhausted");
-        for (label, backends) in gpu::attempts(&self.gpu_pick) {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-                backends,
-                ..wgpu::InstanceDescriptor::new_without_display_handle()
-            });
-            // SAFETY: `window` lives in self.window and the surface drops
-            // before it (field order); the raw handle stays valid meanwhile.
-            let target = match unsafe {
-                wgpu::SurfaceTargetUnsafe::from_display_and_window(&window, &window)
-            } {
-                Ok(t) => t,
+        // M4.2 + #74: the honest fallback chain, adapter by adapter inside
+        // each backend mask (gpu_init); a refusal names every adapter tried.
+        let gpu_init::Bring { surface, adapter, device, queue, config } =
+            match gpu_init::bring_up(&window, &self.gpu_pick, self.gpu_want.as_deref()) {
+                Ok(b) => b,
                 Err(err) => {
-                    self.fail(el, "surface handle", err);
+                    refuse_dialog(&err);
+                    self.fail(el, "GPU", err);
                     return;
                 }
             };
-            // SAFETY: the window outlives the surface (same argument as above).
-            let surface = match unsafe { instance.create_surface_unsafe(target) } {
-                Ok(s) => s,
-                Err(err) => {
-                    self.fail(el, "surface creation", err);
-                    return;
-                }
-            };
-            let options = wgpu::RequestAdapterOptions {
-                compatible_surface: Some(&surface),
-                ..Default::default()
-            };
-            match pollster::block_on(instance.request_adapter(&options)) {
-                Ok(adapter) => {
-                    won = Some((surface, adapter));
-                    break;
-                }
-                Err(err) => {
-                    eprintln!("gpu: {label} unavailable ({err}) - falling back");
-                    last_err = err.to_string();
-                }
-            }
-        }
-        let (surface, adapter) = match won {
-            Some(pair) => pair,
-            None => {
-                self.fail(el, "no suitable GPU adapter", last_err);
-                return;
-            }
-        };
         println!("{}", gpu::describe(&adapter).log_line());
-        let (device, queue) = match pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor::default(),
-        )) {
-            Ok(dq) => dq,
-            Err(err) => {
-                self.fail(el, "device request", err);
-                return;
-            }
-        };
-        let Some(mut config) =
-            surface.get_default_config(&adapter, size.width.max(1), size.height.max(1))
-        else {
-            self.fail(el, "surface config", "no compatible configuration");
-            return;
-        };
-        config.present_mode = wgpu::PresentMode::AutoVsync;
-        surface.configure(&device, &config);
 
         let mut renderer = Renderer::new(&device, config.format, RendererOptions::default());
         let scale = window.scale_factor().clamp(0.1, 8.0);
@@ -342,6 +291,8 @@ impl Shell {
         if self.failed {
             return;
         }
+        let now = std::time::Instant::now;
+        self.frame_watch.begin(now());
         // Commands the panels queued last frame land before the scene is
         // collected, so this frame draws what the user's click did.
         self.state.drain_actions();
@@ -372,9 +323,11 @@ impl Shell {
             left_press,
             scene_digest,
             exit_requested,
+            frame_watch,
             state,
             ..
         } = self;
+        frame_watch.mark("commands+scene", now());
         let (
             Some(window),
             Some(device),
@@ -456,6 +409,7 @@ impl Shell {
             .into_iter()
             .filter(renderable_paint_job)
             .collect();
+        frame_watch.mark("ui", now());
 
         let st = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(st)
@@ -468,6 +422,7 @@ impl Shell {
                 return;
             }
         };
+        frame_watch.mark("acquire", now());
         let target = st.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Pass 1: the 3D offscreen target (its own bind group, mvp from the
@@ -542,16 +497,36 @@ impl Shell {
             .forget_lifetime();
         renderer.render(&mut pass, &clipped, &sd);
         drop(pass);
+        frame_watch.mark("encode", now());
         let mut submits = extra;
         submits.push(buffer_encoder.finish());
         submits.push(encoder.finish());
         queue.submit(submits);
         queue.present(st);
+        frame_watch.mark("submit+present", now());
+        if let Some(line) = frame_watch.end(now()) {
+            eprintln!("{line}");
+        }
 
         if state.request_quit {
             *exit_requested = true;
         }
     }
+}
+
+/// The GPU refusal, also as a native dialog: a console-less launch must
+/// not end in a window that silently vanishes (Prime Directive).
+fn refuse_dialog(err: &str) {
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("CamCraft cannot start the viewport")
+        .set_description(format!(
+            "{err}
+
+Try --gpu <adapter name> (or CAMCRAFT_GPU) to choose an adapter, or --gpu-backend dx12|vulkan|gl."
+        ))
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 /// The whole shell for one egui pass: keyboard shortcuts, the ribbon and

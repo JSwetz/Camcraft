@@ -12422,3 +12422,48 @@ usual. Why: the change is a test file - the zip ships no tests, so its
 contents cannot differ, and the full release gate (~50 min) already passed on
 every shipped file. Dropped: re-running the whole release gate for six test
 lines. The rule stands for any mid-cut change that touches shipped code.
+
+## #74: GPU adapter selection on hybrid laptops, frame-time budget (2026-11-07)
+
+User report: Intel UHD + Quadro P3200 laptop never renders on the Intel
+adapter, the NVIDIA chip does not take over, and the P3200 lags 1-2 s on an
+empty scene. Chosen:
+
+- **Adapter order** (`egui_app/gpu_select.rs`, pure, unit-tested on a
+  synthetic hybrid list): inside each backend mask of the existing chain
+  (preferred -> PRIMARY -> all), enumerate every adapter and log it (name,
+  vendor, device, type, backend, presentable or not), then try: the adapter
+  the user named -> the GPU wgpu's `PowerPreference::HighPerformance`
+  request answers with (any of its backends) -> every other presentable
+  adapter, discrete -> integrated -> virtual -> other -> cpu; ties go to the
+  platform's native backend (DX12 on Windows, Metal on macOS, Vulkan
+  elsewhere), then enumeration order. Adapters that cannot present to the
+  window are skipped by name. Each candidate must give a device AND a
+  surface configure that passes a validation scope; a failure logs its
+  reason and moves to the next adapter, and adapters that failed under an
+  earlier mask are not retried. When none works the refusal names every
+  adapter tried and why, on stderr and in a native dialog.
+- **Native backend before Vulkan for the same GPU**: on Optimus laptops a
+  discrete Vulkan device presents through a cross-adapter copy to the
+  iGPU-owned display; DXGI (DX12) does that natively. Ranking by backend
+  inside the HP pick is the one change in default behaviour on Windows.
+- **Surface config from capabilities**: the surface's own first format,
+  Fifo (present in every spec-conforming surface) unless absent, Opaque
+  alpha when offered else the first reported. Replaces get_default_config +
+  a hard-wired AutoVsync.
+- **Adapter choice setting**: `--gpu <name substring>` over
+  `CAMCRAFT_GPU=<substring>`, the pattern `--gpu-backend` /
+  `CAMCRAFT_GPU_BACKEND` already set. Not a world setting through the
+  command path: the choice is consumed before the window and the document
+  exist, cannot be changed live, and is per machine, not per project.
+  Dropped for now: a preferences page entry (no persisted per-machine
+  settings store exists yet - it would have to be built first).
+- **Stall**: no blocking readback or `device.poll(Wait)` is on the idle
+  frame path (the readbacks are test/diagnostic only; the traced-stock eye
+  only marches with Deviate/playback armed). Not reproducible headlessly, so
+  a frame-time budget (`egui_app/frame_watch.rs`) logs any frame over
+  100 ms naming its phases (commands+scene, ui, acquire, encode,
+  submit+present), rate-limited to one line per 5 s. The reporter's log
+  pins the phase; the DX12-first ordering is the leading suspect fix.
+  Dropped: switching the loop from Poll to redraw-on-input (changes
+  playback animation behaviour; not proven to be the cause).
