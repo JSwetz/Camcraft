@@ -121,6 +121,7 @@ mod cross_entry;
 mod cross_spindle;
 mod cross_stock;
 mod drill_reach;
+mod drill_prior;
 mod plunge_solid;
 mod rotary_law;
 pub(crate) mod spindle_law;

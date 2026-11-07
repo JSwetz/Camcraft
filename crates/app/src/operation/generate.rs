@@ -67,6 +67,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         wcs_origin,
         spindle_note: _,
     } = job;
+    // The program ahead, cut only when a law asks (#89, #96 review).
+    let mut verify_prior = super::drill_prior::PriorCell::new(verify_prior);
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;
 
@@ -1834,8 +1836,18 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     holes,
                 })
                 .and_then(|t| {
-                    // Issue #84: flute reach and holder from the stock.
-                    super::drill_reach::axial_reach(&t, holes, &material.facets, stock_facets.as_deref(), &tool, &tool_name)?;
+                    // Issue #84: flute reach and holder from the stock;
+                    // #89: a raw-stock refusal is re-read against what
+                    // the setup's earlier operations left standing.
+                    let reach = |prior| {
+                        super::drill_reach::axial_reach(&t, holes, &material.facets, stock_facets.as_deref(), prior, &tool, &tool_name)
+                    };
+                    if let Err(raw) = reach(None) {
+                        match verify_prior.get() {
+                            Some(dex) => reach(Some(super::drill_prior::PriorRead { dex, revolved: lathe_axial }))?,
+                            None => return Err(raw),
+                        }
+                    }
                     Ok(t)
                 })?
             };
@@ -2709,13 +2721,10 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // the setup's earlier operations left standing.
             // Cut only when a rapid was convicted: the simulation is
             // the costly half, and a clean path needs no second word.
-            if let Some(plan) = verify_prior
-                && warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. }))
+            if warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. }))
+                && let Some(dex) = verify_prior.get()
             {
-                match plan.simulate() {
-                    Ok(dex) => verify::acquit_by_prior(&path, &dex, geom.radius, Z_TOL, &mut warns),
-                    Err(e) => eprintln!("camcraft: the program ahead could not be cut for the rapid law, raw stock stands: {e}"),
-                }
+                verify::acquit_by_prior(&path, dex, geom.radius, Z_TOL, &mut warns);
             }
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian

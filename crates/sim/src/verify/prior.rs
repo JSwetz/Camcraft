@@ -40,7 +40,9 @@ pub fn acquit_by_prior(path: &Toolpath, prior: &Dexel, tool_r: f64, z_tol: f64, 
 
 /// The highest material the prior grid holds under the disc (q, r):
 /// `None` when the disc covers no grid cell or a height is unreadable.
-fn prior_surface(dex: &Dexel, q: Point2, r: f64) -> Option<f64> {
+/// Issue #89: drilling's reach, R-plane and holder laws read the same
+/// conservative surface the rapid law does.
+pub fn prior_surface(dex: &Dexel, q: Point2, r: f64) -> Option<f64> {
     if !(r.is_finite() && r >= 0.0 && dex.cell > 0.0 && q.x.is_finite() && q.y.is_finite()) {
         return None;
     }

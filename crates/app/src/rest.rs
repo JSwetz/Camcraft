@@ -87,6 +87,11 @@ struct Ahead {
     /// the rest grid sweeps the same corner the program sim does, so a
     /// bull predecessor's fillet ring reads as the rest it is.
     corner: Option<f64>,
+    /// A turning insert's nose radius (issue #89): its moves carry the
+    /// nose CENTRE, so the prior plan cuts it as a ball of that radius
+    /// (tip = centre - nose) - the insert's real cutting edge, never
+    /// the flat disc of its whole size. Only [`PriorPlan`] reads it.
+    nose: Option<f64>,
     cut: bool,
     moves: Vec<Move>,
 }
@@ -187,6 +192,11 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
             corner: tool
                 .as_ref()
                 .and_then(|t| stock_sim::bull_corner(t).ok().flatten()),
+            nose: tool
+                .as_ref()
+                .filter(|t| t.kind == crate::tools::ToolKind::Turning)
+                .map(|t| t.nose_radius)
+                .filter(|n| n.is_finite() && *n > 0.0),
             cut,
             moves,
         });
@@ -313,10 +323,33 @@ impl PriorPlan {
     /// "prior unknown" - the raw stock, never an acquittal.
     pub fn simulate(self) -> Result<Dexel, String> {
         let mut dex = self.grid;
+        // A turning insert cuts with its nose: the centre path lowered
+        // to the tip, swept as a ball (issue #89).
+        let tips: Vec<Vec<Move>> = self
+            .ahead
+            .iter()
+            .map(|a| match a.nose {
+                Some(n) => a
+                    .moves
+                    .iter()
+                    .map(|m| {
+                        let mut m = *m;
+                        m.from.z -= n;
+                        m.to.z -= n;
+                        m
+                    })
+                    .collect(),
+                None => Vec::new(),
+            })
+            .collect();
         let ops: Vec<SimOp> = self
             .ahead
             .iter()
-            .map(|a| SimOp { moves: &a.moves, radius: a.radius, ball: a.ball, cone: a.cone, corner: a.corner })
+            .zip(&tips)
+            .map(|(a, tip)| match a.nose {
+                Some(n) => SimOp { moves: tip, radius: n, ball: true, cone: None, corner: None },
+                None => SimOp { moves: &a.moves, radius: a.radius, ball: a.ball, cone: a.cone, corner: a.corner },
+            })
             .collect();
         stock_sim::simulate(&mut dex, &ops).map_err(|e| e.to_string())?;
         Ok(dex)
@@ -332,7 +365,7 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     if ahead.is_empty() {
         return Ok(None);
     }
-    let min_r = ahead.iter().filter(|a| a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
+    let min_r = ahead.iter().map(|a| a.nose.unwrap_or(a.radius)).filter(|r| *r > 0.0).fold(tool_r, f64::min);
     let grid = stock_sim::stock_grid(world, setup, min_r)?;
     Ok(Some(PriorPlan { grid, ahead }))
 }
