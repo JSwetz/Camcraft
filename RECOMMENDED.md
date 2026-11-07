@@ -13033,3 +13033,26 @@ revolved (follow-up material if users hit it with long keyways).
   GCC LTO objects that rust-lld cannot consume. Set `options=('!lto')` in the
   package recipe, as the Arch Rust package guidelines prescribe for mixed
   Rust/C projects, and verify the fix with another Arch package build.
+
+## #80: the axial-hole verdict judges axial holes only
+
+- `lathe_axial` (generate.rs) is now true only for a lathe Drill whose cross
+  list is empty. A lathe cross drill already ran `Mode::Radial` (the mode
+  match tests the cross list first), but the shared verify tail still ran
+  `drilling::axial_warnings` on it, and that verdict convicts any chain without
+  canned cycles. As a result, every lathe cross drill was blocked ("move 1 cuts
+  past the finish surface").
+- Laws a lathe cross drill still goes through: the #62 spindle law sits at
+  the job and post seam (`spindle_law::turns`) and does not read
+  `lathe_axial`. The #67 `cross_spindle::lathe_reads` and the cross kernel
+  call, the #77 raw-stock standoffs and `rapids_clear`, and the #84
+  `cross_reach` and `cross_holder` all run in the cross arm, which never read
+  `lathe_axial`. The #79 radial rapids law runs in verify `Mode::Radial`. The
+  #91 R-plane law is axial-only (`axial_reach`), so it does not apply to a
+  radial hole. The change removes none of these.
+- Mixed lists (Z holes and cross holes in one Drill op) stay refused by name
+  at the cross arm's existing door ("not both"). That refusal fires before
+  any verdict, so no hole is judged by the other kind's law. Dropped: judging
+  each hole by its own kind inside one op. One program would then tell two
+  stories about where the tool stands, which M5.2 v1 already refused, and the
+  user can split the op in two.
