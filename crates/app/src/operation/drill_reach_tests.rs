@@ -80,3 +80,60 @@ fn a_sloped_facet_is_read_over_the_disk_not_at_its_far_vertex() {
     let nan = Triangle::new(Point3::new(0.0, 0.0, f64::NAN), Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0));
     assert_eq!(facet_top(&nan, 0.0, 0.0, 1.0), f64::INFINITY, "a NaN height refuses");
 }
+
+/// DR-0400 with its Ø44 holder `reach` behind the tip (flute 12, the
+/// rest shank).
+fn holder_tool(reach: f64) -> Tool {
+    let base = crate::tools::catalog().into_iter().find(|(n, _)| *n == "DR-0400").map(|(_, t)| t);
+    let Some(base) = base else { panic!("catalog DR-0400") };
+    Tool { flute_len: 12.0, shank_len: reach - 12.0, holder_d: 44.0, holder_len: 30.0, ..base }
+}
+
+/// A chain from `at` with the pose `axis`, through `to`.
+fn chain(at: Point3, axis: [f64; 3], to: &[Point3]) -> Toolpath {
+    let mut b = crate::cl::PathBuilder::new(at);
+    b.set_axis(Some(axis));
+    for &p in to {
+        b.push(crate::cl::MoveKind::Rapid, p, None);
+    }
+    b.finish()
+}
+
+fn box60() -> Vec<Triangle> {
+    crate::geometry::cube(Point3::new(-30.0, -30.0, -20.0), Point3::new(30.0, 30.0, 20.0)).facets.to_vec()
+}
+
+/// Issue #119: on one station the holder reads the box at its face.
+/// A tip at x7 on the +X line with the face 30 behind it stands at x37:
+/// outside the r30 face, inside the r42.43 corner circle - clear. With
+/// 20 of reach (face at x27) the holder really meets the face: refused
+/// by name, read along its line.
+#[test]
+fn an_on_station_holder_reads_the_box_at_its_face_not_its_corner_circle() {
+    let (b, p) = (box60(), Point3::new(50.0, 0.0, 0.0));
+    let t = chain(p, [1.0, 0.0, 0.0], &[Point3::new(7.0, 0.0, 0.0), p]);
+    let r = cross_holder(&t, &[], Some(&b), (0.0, 0.0), &holder_tool(30.0), "T1");
+    assert!(r.is_ok(), "the holder clears the face: {:?}", r.err());
+    let e = cross_holder(&t, &[], Some(&b), (0.0, 0.0), &holder_tool(20.0), "T1").err().map(|e| e.to_string());
+    let e = e.unwrap_or_else(|| panic!("a holder face at x27 sank into the r30 box face"));
+    for s in ["T1's holder", "27.000 mm out along its hole's line", "inside the stock's radius 30.000 on that line"] {
+        assert!(e.contains(s), "the refusal names '{s}': {e}");
+    }
+    // A slide in Z on the station (a column, the holder's face at x32)
+    // reads the same face.
+    let col = chain(Point3::new(20.0, 0.0, 60.0), [1.0, 0.0, 0.0], &[Point3::new(20.0, 0.0, 0.0)]);
+    assert!(cross_holder(&col, &[], Some(&b), (0.0, 0.0), &holder_tool(12.0), "T1").is_ok(), "the column stands off the face");
+}
+
+/// A swing round the bar keeps the corner radius: the quarter-turn
+/// chord from (50, 0) to (0, 50) on the old +X pose passes the box
+/// corner at r35.36 - inside its r42.43 corner circle - and is refused
+/// at that radius, not read along a line.
+#[test]
+fn a_swing_round_the_bar_keeps_the_corner_radius() {
+    let b = box60();
+    let t = chain(Point3::new(50.0, 0.0, 0.0), [1.0, 0.0, 0.0], &[Point3::new(0.0, 50.0, 0.0)]);
+    let e = cross_holder(&t, &[], Some(&b), (0.0, 0.0), &holder_tool(12.0), "T1").err().map(|e| e.to_string());
+    let e = e.unwrap_or_else(|| panic!("the swing's holder passed inside the box corners"));
+    assert!(e.contains("T1's holder") && e.contains("inside the stock's radius 42.426 at Z"), "{e}");
+}
