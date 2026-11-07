@@ -263,7 +263,7 @@ fn inliers(data: &[Datum], ax: Axis, tol: f64) -> Vec<bool> {
 }
 
 /// The normal line's miss of `ax`; `None` for a pole facet.
-fn dist(d: &Datum, ax: Axis) -> Option<f64> {
+pub(super) fn dist(d: &Datum, ax: Axis) -> Option<f64> {
     let k = d.n.cross(ax.dir);
     let kn = k.dot(k).sqrt();
     if kn <= 1e-4 {

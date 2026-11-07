@@ -137,25 +137,28 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
             "rotary found no normals to turn about - this model has no surface".into(),
         ));
     }
-    if vals[0] > ISO * vals[2] && vals[1] > ISO * vals[2] {
-        return Err(GenError::Invalid(
-            "every axis fits this model equally - it curves the same the world around; domed ground is 5-Axis Contour or Parallel work".into(),
-        ));
-    }
     // Two candidates: a surface of revolution's normals concentrate
     // their second moment in the plane perpendicular to the axis
     // (cylindrical zones: the axis is the LEAST eigendirection), while
     // steeply-sloped revolves (cones past 45 degrees) can tip past it -
     // so both extremes are tried and the concurrency residual decides.
-    let cands = [
-        Point3::new(vecs[0][0], vecs[1][0], vecs[2][0]),
-        Point3::new(vecs[0][2], vecs[1][2], vecs[2][2]),
-    ];
+    // Near isotropy the eigenvectors are ill-conditioned, and fully
+    // isotropic they name nothing (a sphere's, but also a bar near
+    // L/D 1..2 whose caps balance its walls): the part's flat poles
+    // are offered too (axis_poles.rs), and an isotropic part that no
+    // pole earns is refused as answering every axis alike.
+    let iso = vals[0] > ISO * vals[2] && vals[1] > ISO * vals[2];
+    let mut cands = Vec::with_capacity(2);
+    if !iso {
+        cands.push(Point3::new(vecs[0][0], vecs[1][0], vecs[2][0]));
+        cands.push(Point3::new(vecs[0][2], vecs[1][2], vecs[2][2]));
+    }
+    let poles = super::axis_poles::candidates(&data, a_total);
+    let tries = cands.into_iter().map(|c| try_axis(&data, c, a_total));
+    let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total)));
     let mut best: Option<(f64, Axis)> = None;
-    for c in cands {
-        if let Some(sol) = try_axis(&data, c, a_total)
-            .filter(|s| best.as_ref().is_none_or(|(r, _)| s.0 < *r))
-        {
+    for sol in tries.flatten() {
+        if best.as_ref().is_none_or(|(r, _)| sol.0 < *r) {
             best = Some(sol);
         }
     }
@@ -178,6 +181,9 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
     });
     match best {
         Some((_, ax)) => Ok(super::axis_robust::reweigh(&data, ax, a_total)),
+        None if iso => Err(GenError::Invalid(
+            "every axis fits this model equally - it curves the same the world around; domed ground is 5-Axis Contour or Parallel work".into(),
+        )),
         None => Err(GenError::Invalid(
             "the model's normals share no rotation axis - a turned workpiece is rotary work; finish a freeform with the 5-Axis kinds".into(),
         )),
@@ -190,7 +196,7 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
 /// this is not a surface of revolution about any line in this
 /// direction, or a bearing skip too wide to call the walls round).
 /// Returns (root-mean-square residual, the axis) for ranking.
-fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
+pub(super) fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
     let (ax, rho) = line(data, u0, a_total)?;
     judge(data, ax, rho, a_total).map(|r| (r, ax))
 }

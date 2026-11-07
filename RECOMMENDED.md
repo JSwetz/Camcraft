@@ -13578,3 +13578,45 @@ revolved (follow-up material if users hit it with long keyways).
   states the OD assumption (an internal blade must flip it or pass None).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
+
+## #152 - a short turned bar's axis is read off its facing flats (2026-11-08)
+
+- **Chosen:** when the area-weighted normal moment is isotropic (both
+  smaller eigenvalues past ISO = 0.5 of the largest), the fit no longer
+  refuses outright. It offers the part's flat POLES as candidate axes:
+  normals (sign-folded) that one cluster of facets shares, carrying at
+  least 5 % of the area, at most 3, largest first
+  (`multiaxis/axis_poles.rs`). The same concurrency and coarseness
+  judgement of `axis.rs` decides; an isotropic part no pole earns is
+  refused by the old name ("every axis fits this model equally"). The
+  poles are also offered next to the two eigen candidates when the
+  moment is not isotropic, since near isotropy the eigenvectors are
+  ill-conditioned; the residual ranks them and the eigen candidate
+  wins ties, so an even revolve keeps its bits.
+- **Re-centred pole line:** on the short bar one radial hole drags the
+  plain least-squares line 0.4 mm toward it, past the 3 % sagitta band,
+  and half the wall misses it. A pole candidate whose plain line fails
+  is re-centred by least trimmed squares (refit on the half of the
+  normal lines that miss least, until that half settles), then judged
+  on every facet as before; `axis_robust` then trims and tightens as
+  for any fit. Only pole candidates get this, so no eigen-path fit
+  changes.
+- **`punched_bar` stays at z -80..20:** back at r10 x 40 the
+  three-hole box fixtures (`drilling_cross_box`) still refuse - three
+  holes plus their images are past the 10 % concurrency share on the
+  short bar. Not a fixture-length tweak, so left.
+- **Why:** a revolve's facing cut is a flat whose normal is the axis
+  (on the Gauss map, a flat is one point; the lateral zone a circle
+  about it). A bar at 0.5 < L/D < 2 balances caps against walls and
+  the moment names no direction, but its caps still do. A sphere has
+  no flat of any share; a cube's faces are flats, but four bearings
+  about any of them fail the coarseness gate, so both are still
+  refused by name.
+- **Dropped:** testing isotropy on the lateral facets alone (needs a
+  candidate axis to sort lateral from axial first - the same
+  chicken-and-egg the poles break); an exhaustive direction search
+  over normal-pair cross products (O(n^2), and a sphere passes the
+  concurrency law about every direction through its centre, so a
+  search finds a false axis); lowering ISO (moves the knife-edge, does
+  not remove it). A revolve with no flat end (domed or pointed both
+  ends) near L/D 1..2 is still refused; none is known to be needed.

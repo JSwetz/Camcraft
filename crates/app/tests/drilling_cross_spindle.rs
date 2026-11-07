@@ -325,3 +325,16 @@ fn a_work_offset_moved_after_a_mill_turn_cross_drill_stales_it_and_the_post_refu
     place_g54(&world, &mut history, 0.0, 0.0);
     assert_eq!(operation::status_of(&world, &e), OpStatus::Ok);
 }
+
+#[test]
+fn a_short_punched_bar_reads_as_turned_about_its_axis() {
+    // Issue #152: the r10 x 40 bar (L/D 2) with one modelled radial
+    // hole tipped the axis fit's isotropy door, and every lathe cross
+    // drill refused it as "every axis fits". Its facing flats name the
+    // axis now.
+    let f = punched_bar::punched_bar(10.0, -20.0, punched_bar::TOP, &holes(0.0, 0.0)[..1]).facets;
+    let ax = camcraft_motion::multiaxis::axis::fit(&f).expect("a short punched bar is turned");
+    let off = ax.dir.cross(Point3::new(0.0, 0.0, 1.0));
+    assert!(off.dot(off).sqrt() < 1e-6, "{ax:?}");
+    assert!(ax.origin.dot(ax.origin).sqrt() < 1e-6, "{ax:?}");
+}
