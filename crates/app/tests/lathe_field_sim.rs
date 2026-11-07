@@ -306,9 +306,16 @@ fn profile_rough_and_finish_simulate_with_meridian_parity() {
         feed: 120.0,
         plunge_feed: 60.0,
     };
-    generate(&world, &mut history, "PR1", "TN-1600-0R8", rough);
-    generate(&world, &mut history, "PF1", "TN-1600-0R8", finish);
-    assert_parity("profile rough+finish", &world, &["PR1", "PF1"], 0.8);
+    // Names are the program order's tie-break for ops created without an
+    // explicit position (`setup::operation_order`), so they must sort
+    // rough first: "PF1" sorted ahead of "PR1" and slipped the finish in
+    // front of the already-generated rough, which (#109: the rough reads
+    // the program ahead) correctly read Stale (#186). Same as lathe_post.
+    generate(&world, &mut history, "R1", "TN-1600-0R8", rough);
+    generate(&world, &mut history, "S1", "TN-1600-0R8", finish);
+    let order: Vec<String> = camcraft_app::setup::operation_order(&world).into_iter().map(|(n, _)| n).collect();
+    assert_eq!(order, ["R1", "S1"], "fixture: the rough machines ahead of the finish");
+    assert_parity("profile rough+finish", &world, &["R1", "S1"], 0.8);
 }
 
 #[test]
