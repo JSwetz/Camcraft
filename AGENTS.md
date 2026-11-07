@@ -327,7 +327,35 @@ INFERRED edge against the code before acting on it, never act on AMBIGUOUS.
 Format: `<type>(<optional scope>): <subject>` - e.g. `fix:` or
 `feat:`.
 
-Version is `0.x.0` until the clean-room audit and release.
+Types in use: `feat` (new capability), `fix` (wrong behaviour corrected),
+`perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`. A breaking change
+says so: `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer (an incompatible
+project-file or post-output change, a removed parameter or command). The
+fixing commit's body ends with `Fixes #N` (Issue Law).
+
+**Versioning is semantic: MAJOR.MINOR.PATCH, derived from the commits.**
+A cut takes the highest bump among the commits since the last tag:
+
+| Commits since the last tag | Bump | Example |
+|---|---|---|
+| a breaking change (`!` or `BREAKING CHANGE:`) | MAJOR | 1.4.2 → 2.0.0 |
+| any `feat` | MINOR | 0.8.2 → 0.9.0 |
+| only `fix` / `perf` / `refactor` (behaviour-neutral or corrective) | PATCH | 0.8.2 → 0.8.3 |
+| only `docs` / `test` / `ci` / `build` / `chore` | no release | - |
+
+While the major is 0 (until the clean-room audit releases 1.0.0), a breaking
+change bumps MINOR instead and its release notes say "breaking" first.
+
+**When to cut.** Fixing an issue ends in a patch release; landing a feature
+ends in a minor one - cut as soon as the change is committed and gated,
+not on a calendar (the release train in the frozen ROADMAP.md is retired).
+Several fixes that land in one sitting share one patch. Each cut costs one
+release.yml Windows build of the Actions budget (~30-40 billed minutes), so
+batch what lands together rather than tagging every commit. The cut:
+`scripts/release.ps1 -Version X.Y.Z` (runs the release gate tier unless the
+same tree already passed it), CHANGELOG.md's `Unreleased` rows become
+`X.Y.Z`, then publish (below) and comment `shipped in vX.Y.Z` on every
+issue it closed.
 
 **Every cut tag is published.** A release cut is not done until it is on
 GitHub: after the tag is made locally (`scripts/release.ps1`), push the

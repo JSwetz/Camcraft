@@ -1905,6 +1905,8 @@ visible and pinned while the generator fix is owed.
 
 ## Release train
 
+> Retired 2026-11-07: releases are cut per change by semantic version (AGENTS.md "Versioning is semantic"), not on a calendar.
+
 A release is a cut, not a goal (user, 2026-11-06: "make sure to hit the marks
 so we don't spend ages between stable test releases"). Two trains a week on
 fixed dates; the scope is what is green at the cut. Each train carries at most
