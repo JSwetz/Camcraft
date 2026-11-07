@@ -199,7 +199,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // Verify's prior reading (#96 review): collected here, cut on the
     // job thread only when a dive was convicted. An unreadable stock
     // grid is logged and read as the raw stock - convictions stand.
-    let verify_prior = if frame.is_none() && op.params.kind().info().section != super::kinds::Section::Turning {
+    // The turned family reads it too (#103): its axial rapids are judged
+    // against the stock the program ahead faced.
+    let verify_prior = if frame.is_none() {
         match crate::rest::prior_plan(world, op_name, setup, tool.diameter * 0.5) {
             Ok(p) => p,
             Err(e) => {

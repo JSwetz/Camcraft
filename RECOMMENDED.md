@@ -13182,3 +13182,30 @@ revolved (follow-up material if users hit it with long keyways).
   clamps) a ring count past 1e5, and drops vertical-plane arcs from the
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
+
+## #103: a turned path's axial rapids judged in the meridian plane (partial)
+
+- **Law.** `operation/turning_rapids.rs` no longer drops the column law's
+  word on a turned op's axial rapids and stops there: it drops it and
+  judges each axial rapid (no XY travel) in the meridian plane. The
+  rapid's nose disc (nose radius less the gouge tolerance) must not meet
+  material between its two stations: the part and the setup stock
+  revolved about the fitted axis (silhouette envelope per station; a
+  station-span x max-radius box where no silhouette reads), less this
+  path's own earlier feeds' nose sweep (signed radius, mirrored, so a
+  facing pass across the axis counts) and less the stock the program
+  ahead faced (the #89 prior grid read revolved, asked only on a
+  conviction; job.rs now collects the prior for the turned family too).
+- **Chosen:** the declared stock revolved, not the part as stock. The
+  turning kernels ignore the stock (rho_clear is the part's r_max + tol),
+  so a bar wider than the part is a real crash on the first approach.
+- **Found (held):** the lathe_post fixtures (and very likely the
+  turning_bore / turning_contour ones) set a 40 mm box stock from Z 0 to
+  40 round a 12 mm bar: their approaches at r 6.85 from Z 25 run inside
+  that box, so they are convicted - real by the declared stock, which the
+  kernels never cut. Owed: decide fixtures (stock the bar's size) vs a
+  kernel that roughs from the stock; the groove/part (Mode::Revolve)
+  kinds are inside the law's scope too and convict the same way.
+- **Dropped:** a sim-side Revolve rapid law (the sim has no stock solid
+  of revolution; the app has the frame and the prior); reading the stock
+  bore (a tube stock reads solid - conservative, owed).

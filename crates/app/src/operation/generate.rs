@@ -2712,10 +2712,6 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // (M13.11); empty for one body.
                 &material.bodies,
             );
-            // A turned path's axial rapids are the lathe's traverse,
-            // not a column dive (#96): the column law's word on them
-            // is dropped for the turned family only.
-            super::turning_rapids::drop_axial_rapids(&params, &path, Z_TOL, &mut warns);
             // The program ahead cut too (#96 review): a dive the column
             // convicted against the raw block is re-read against what
             // the setup's earlier operations left standing.
@@ -2726,6 +2722,22 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             {
                 verify::acquit_by_prior(&path, dex, geom.radius, Z_TOL, &mut warns);
             }
+            // A turned path's axial rapids are judged in the meridian
+            // plane, not by the column (#96, #103): the revolved stock
+            // less what the program ahead faced and this path cut.
+            super::turning_rapids::judge_axial_rapids(
+                &params,
+                &path,
+                &super::turning_rapids::Meridian {
+                    part: &material.facets,
+                    stock: stock_facets.as_deref(),
+                    nose: tool.nose_radius,
+                    margin: GOUGE_TOL,
+                    z_tol: Z_TOL,
+                },
+                &mut verify_prior,
+                &mut warns,
+            );
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
