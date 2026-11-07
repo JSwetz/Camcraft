@@ -9,7 +9,7 @@ use crate::cl::Toolpath as ClPath;
 use crate::commands::{Command, CommandError};
 use crate::model;
 use crate::operation::{OpParams, SrcRef};
-use crate::schema::{Location, Operation, Toolpath};
+use crate::schema::{Location, Operation, OperationMeta, Toolpath};
 use crate::verify::Warning;
 
 use super::gates::{area_gate, check_tool, family_gate, heights_gate, tool_gate, valid_src};
@@ -96,6 +96,7 @@ pub struct DeleteOperation {
     operation: Operation,
     cache: Option<(ClPath, Vec<Warning>)>,
     location: Location,
+    meta: OperationMeta,
 }
 
 impl DeleteOperation {
@@ -111,6 +112,7 @@ impl DeleteOperation {
             operation,
             cache,
             location: model::transform_of(world, &entity).unwrap_or_default(),
+            meta: model::operation_meta_of(world, &entity),
         })
     }
 }
@@ -129,6 +131,7 @@ impl Command for DeleteOperation {
         let entity = model::spawn(world, &self.name);
         model::set_transform(world, &entity, self.location);
         entity.entity_view(world).set(self.operation.clone());
+        entity.entity_view(world).set(self.meta.clone());
         if let Some((path, warnings)) = &self.cache {
             entity.entity_view(world).set(Toolpath {
                 path: path.clone(),

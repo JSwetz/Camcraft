@@ -73,8 +73,7 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     }
     if cmd && !typing {
         // The File tips' keys (ribbon.rs strings): N new, O a model,
-        // Shift+O a project, S save. Shift is what tells the two opens
-        // apart, so it must be tested, not ignored (imgui law).
+        // Shift+O a project, S save, Shift+S save as.
         if n {
             actions::new_document(state);
         }
@@ -85,7 +84,11 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
             actions::open_project(state);
         }
         if s {
-            actions::save_project(state);
+            if modifiers.shift {
+                actions::save_project_as(state);
+            } else {
+                actions::save_project(state);
+            }
         }
         if p {
             // M1.7b: posting joins the file lane - the same dialog law
@@ -121,6 +124,7 @@ pub(super) enum Cmd {
     Model,
     Project,
     Save,
+    SaveAs,
     Post,
     Stock,
     Origin,
@@ -155,7 +159,7 @@ pub(super) enum Cmd {
 /// to kinds 0..=7 while the table grew - the registry counts the
 /// kinds, this comment never must.
 const FILE: (&str, &[Cmd]) =
-    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::Post]);
+    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::SaveAs, Cmd::Post]);
 const SETUP: (&str, &[Cmd]) =
     ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine]);
 
@@ -264,6 +268,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Model => "Model",
         Cmd::Project => "Project",
         Cmd::Save => "Save",
+        Cmd::SaveAs => "Save As",
         Cmd::Post => "Post",
         Cmd::Stock => "Stock",
         Cmd::Origin => "Origin",
@@ -333,6 +338,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Model => "Open a mesh model\tCtrl+O".into(),
         Cmd::Project => "Open a project\tCtrl+Shift+O".into(),
         Cmd::Save => "Save the project\tCtrl+S".into(),
+        Cmd::SaveAs => "Save the project under a new name\tCtrl+Shift+S".into(),
         Cmd::Post => "Post NC program (validation gate), then review it\tCtrl+P".into(),
         Cmd::Stock => "Stock definition".into(),
         Cmd::Origin => "Work offset (WCS)".into(),
@@ -500,6 +506,7 @@ fn icon_of(c: Cmd) -> Option<Icon> {
         Cmd::Model => Some(Icon::OpenModel),
         Cmd::Project => Some(Icon::OpenProject),
         Cmd::Save => Some(Icon::Save),
+        Cmd::SaveAs => Some(Icon::Save),
         Cmd::Post => Some(Icon::Post),
         Cmd::Stock => Some(Icon::Stock),
         Cmd::Origin => Some(Icon::WorkOffset),
@@ -623,6 +630,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Model => actions::open_model_dialog(state),
         Cmd::Project => actions::open_project(state),
         Cmd::Save => actions::save_project(state),
+        Cmd::SaveAs => actions::save_project_as(state),
         Cmd::Post => actions::post_program(state),
         Cmd::Stock => actions::target(state, UiTarget::Stock),
         Cmd::Origin => {
@@ -1227,7 +1235,14 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         })
         .count();
     ui.horizontal(|ui| {
-        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(false));
+        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(true))
+            .on_hover_text(text.as_str())
+            .context_menu(|ui| {
+                if ui.button("Copy message").clicked() {
+                    ui.ctx().copy_text(text.clone());
+                    ui.close();
+                }
+            });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new("egui shell (M-g) - imgui retired")
@@ -1329,9 +1344,8 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let t = state.pane_target();
 
     push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    // Setups (M3.2 A): the row appears once the document has any, and
-    // the Stock and WCS rows below resolve through the ACTIVE one - the
-    // tree shows the context you are standing in, never a global ghost.
+    // As before, the manager appears only after the document has an
+    // explicit setup. Stock and WCS follow the active setup.
     let active = camcraft_app::setup::active(&state.world);
     if !camcraft_app::setup::names(&state.world).is_empty() {
         push_row(
@@ -1426,20 +1440,11 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     }
 
     push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let names: Vec<String> = model::named_entities(&state.world)
-        .into_iter()
-        .filter(|(_, e)| model::is_operation(&state.world, e))
-        .map(|(name, _)| name)
-        .collect();
-    if names.is_empty() {
+    let ordered = camcraft_app::setup::operation_order(&state.world);
+    if ordered.is_empty() {
         push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
     }
-    for name in names {
-        let Some(entity) = model::find_by_name(&state.world, &name) else {
-            continue;
-        };
-        // imgui browser.rs's law: the op's own kind glyphs the row, and a
-        // missing operation component falls back to Generate, never blank.
+    for (name, entity) in ordered {
         let (kind, icon) = model::operation_of(&state.world, &entity)
             .map(|op| {
                 let k = op.params.kind();
@@ -1457,26 +1462,17 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             1 => "  1 warning".to_owned(),
             n => format!("  {n} warnings"),
         };
-        // M10.1 C: a tool gone or of the wrong family outranks the
-        // stamp's word - the row reads BLOCKED and names why, in the
-        // suffix column (the row's one status channel). The app asks
-        // the question; the tree only says it.
         let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
             Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
             None => format!("{kind}  {tag}{warn_text}"),
         };
         let hidden = state.hidden_paths.contains(&name);
         push_row(
-            &mut rows,
-            &mut leaves,
-            name.clone(),
-            suffix,
-            painted::Kind::Op,
-            Some(icon),
+            &mut rows, &mut leaves,
+            model::operation_label(&state.world, &name, &entity), suffix,
+            painted::Kind::Op, Some(icon),
             matches!(&t, UiTarget::Operation(n) if *n == name),
-            hidden,
-            1,
-            Leaf::Op(name),
+            hidden, 1, Leaf::Op(name),
         );
     }
     (rows, leaves)
@@ -1511,6 +1507,34 @@ pub fn browser(
         Vec2::new(ui.available_width(), rows.len() as f32 * pal.row_height),
     );
     let hit = painted::tree(ui, rect, &rows, pal, icons);
+    if let Some(ix) = hit.drag_started {
+        if let Some(Leaf::Op(name)) = leaves.get(ix) {
+            state.dragging_op = Some(name.clone());
+        }
+    }
+    // The visual insertion line and the command use the same target row.
+    // Only operations in the same setup can be drop targets.
+    if let Some(source) = state.dragging_op.clone() {
+        let (released, pointer) = ui.input(|i| (i.pointer.any_released(), i.pointer.hover_pos()));
+        let drop = pointer.filter(|p| rect.contains(*p)).and_then(|p| {
+            let ix = ((p.y - rect.top()) / pal.row_height) as usize;
+            let Leaf::Op(target) = leaves.get(ix)? else { return None };
+            let setup_of = |name: &str| model::find_by_name(&state.world, name)
+                .and_then(|e| model::operation_of(&state.world, &e))
+                .and_then(|op| camcraft_app::setup::effective(&state.world, op.setup.as_deref()));
+            (source != *target && setup_of(&source) == setup_of(target)).then_some((ix, target.clone(), p.y > rect.top() + (ix as f32 + 0.5) * pal.row_height))
+        });
+        if let Some((ix, target, after)) = drop {
+            let y = rect.top() + (ix + usize::from(after)) as f32 * pal.row_height;
+            ui.painter().hline(rect.x_range(), y, egui::Stroke::new(2.0, pal.accent));
+            if released {
+                state.pending.push_back(CommandKind::ReorderOperation { name: source, target, after });
+            }
+        }
+        if released {
+            state.dragging_op = None;
+        }
+    }
     if let Some(ix) = hit.eye {
         match leaves[ix].clone() {
             Leaf::Model(n) => State::toggle_visibility(&mut state.hidden_models, &n),
@@ -1572,6 +1596,7 @@ pub fn browser(
 /// The tree menu's verb rows, keyed past every kind ordinal.
 const MENU_CLEAR: usize = usize::MAX;
 const MENU_DELETE: usize = usize::MAX - 1;
+const MENU_RENAME: usize = usize::MAX - 2;
 
 /// The operation's retype menu (M9.1): what replaced the page's Type
 /// combo. Grouping is the retired combo's law restated once -
@@ -1612,6 +1637,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     // operation) and deleting the operation are two different asks,
     // and the menu names both - each one undoable command.
     lines.push(("Operation", false, None));
+    lines.push(("Rename operation", true, Some(MENU_RENAME)));
     lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
     lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
     let here_section = operation::KindInfo::ALL.get(here).map(|k| k.section);
@@ -1698,7 +1724,13 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
             }
         });
     if let Some(i) = chosen {
-        if i == MENU_CLEAR {
+        if i == MENU_RENAME {
+            let label = model::find_by_name(&state.world, &name)
+                .map(|e| model::operation_label(&state.world, &name, &e))
+                .unwrap_or_else(|| name.clone());
+            state.rename_draft = Some((name.clone(), label));
+            actions::target(state, UiTarget::Operation(name.clone()));
+        } else if i == MENU_CLEAR {
             state.pending.push_back(CommandKind::ClearToolpath(name.clone()));
         } else if i == MENU_DELETE {
             state.pending.push_back(CommandKind::DeleteOperation(name.clone()));

@@ -91,8 +91,8 @@ pub(crate) fn v_generate(env: &mut Env, args: Vec<Value>) -> Result<Value, Strin
         let mut out = Vec::with_capacity(args.len());
         for i in 0..args.len() {
             let name = arg_str(&args, i, "an operation name")?;
-            match all.iter().find(|(n, _, _)| *n == name) {
-                Some((_, e, _)) => out.push((name, *e)),
+            match all.iter().find(|(n, e, _)| *n == name || model::operation_label(&env.world, n, e) == name) {
+                Some((key, e, _)) => out.push((key.clone(), *e)),
                 None => return Err(format!("no operation named '{name}'")),
             }
         }
@@ -123,7 +123,7 @@ pub(crate) fn v_verify(env: &mut Env, args: Vec<Value>) -> Result<Value, String>
         let mut out = Vec::with_capacity(args.len());
         for i in 0..args.len() {
             let name = arg_str(&args, i, "an operation name")?;
-            match all.iter().find(|(n, _, _)| *n == name) {
+            match all.iter().find(|(n, e, _)| *n == name || model::operation_label(&env.world, n, e) == name) {
                 Some(row) => out.push(row.clone()),
                 None => return Err(format!("no operation named '{name}'")),
             }
@@ -245,7 +245,8 @@ fn op_view(env: &Env, name: &str, entity: &Entity, warnings: bool) -> Value {
     let op = model::operation_of(&env.world, entity);
     let status = crate::operation::status_of(&env.world, entity);
     let mut row = json!({
-        "name": name,
+        "name": model::operation_label(&env.world, name, entity),
+        "key": name,
         "kind": op.as_ref().map(|o| o.params.kind().info().label).unwrap_or("?"),
         "setup": op.as_ref().and_then(|o| o.setup.clone()),
         "status": st_str(status),

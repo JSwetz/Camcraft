@@ -47,6 +47,9 @@ pub(super) fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &T
         .as_ref()
         .filter(|e| model::is_operation(&state.world, e))
         .and_then(|e| model::operation_of(&state.world, e));
+    let label = model::find_by_name(&state.world, &target)
+        .map(|e| model::operation_label(&state.world, &target, &e))
+        .unwrap_or_else(|| target.clone());
     let exists = live.is_some();
     // The heights' context is the operation's declared setup, never the
     // active cursor: what the page echoes is what that operation's
@@ -57,7 +60,31 @@ pub(super) fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &T
     // sideways), so the bar takes the same width under it.
     let max_h = (ui.available_height() - BAR_RESERVE).max(80.0);
     let out = ScrollArea::vertical().id_salt("op_page_scroll").max_height(max_h).auto_shrink([false, false]).show(ui, |ui| {
-        ui.heading(format!("Operation: {name}"));
+        ui.horizontal(|ui| {
+            ui.heading(format!("Operation: {label}"));
+            if exists && ui.small_button("Rename").clicked() {
+                state.rename_draft = Some((target.clone(), label.clone()));
+            }
+        });
+        let mut new_label = None;
+        let mut cancel_rename = false;
+        if let Some((key, draft)) = state.rename_draft.as_mut() && key == &target {
+            ui.label("Name");
+            let response = ui.text_edit_singleline(draft);
+            ui.horizontal(|ui| {
+                if ui.button("Apply name").clicked()
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    new_label = Some(draft.clone());
+                }
+                cancel_rename = ui.button("Cancel").clicked();
+            });
+        }
+        if let Some(new_label) = new_label {
+            state.pending.push_back(CommandKind::RenameOperation { name: target.clone(), label: new_label });
+            state.rename_draft = None;
+        } else if cancel_rename {
+            state.rename_draft = None;
+        }
         prop_grid(ui, "op_header", |ui| header_rows(ui, state, &target, live.as_ref(), exists));
         if exists {
             status(ui, state, &target, pal);

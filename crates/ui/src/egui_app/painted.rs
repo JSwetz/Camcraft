@@ -180,6 +180,7 @@ pub struct TreeHit {
     /// The row a secondary click landed on this frame (M9.1): the
     /// retype menu's channel, a hit like the others - never state.
     pub menu: Option<usize>,
+    pub drag_started: Option<usize>,
 }
 
 /// Paint the rows and collect this frame's clicks. Input first (real
@@ -197,7 +198,7 @@ pub fn tree(
     pal: &Tokens,
     icons: Option<&IconSet>,
 ) -> TreeHit {
-    let mut hit = TreeHit { row: None, eye: None, menu: None };
+    let mut hit = TreeHit { row: None, eye: None, menu: None, drag_started: None };
     let mut eye_resps: Vec<(usize, Response)> = Vec::new();
     let row_h = pal.row_height;
     for (ix, row) in rows.iter().enumerate() {
@@ -210,7 +211,7 @@ pub fn tree(
         // clicked() guard below means an eye pixel is one action, never
         // row+eye (browser.rs reaches the same law by submitting the eye's
         // invisible button before the Selectable).
-        let row_resp = ui.interact(rr, ui.id().with(("tree-row", ix)), Sense::click());
+        let row_resp = ui.interact(rr, ui.id().with(("tree-row", ix)), Sense::click_and_drag());
         let eye_rect = if has_eye(row.kind) {
             let er = Rect::from_center_size(
                 Pos2::new(rr.right() - 12.0, rr.center().y),
@@ -305,6 +306,9 @@ pub fn tree(
         }
         if row_resp.secondary_clicked() && hit.eye != Some(ix) {
             hit.menu = Some(ix);
+        }
+        if row_resp.drag_started() && hit.eye != Some(ix) {
+            hit.drag_started = Some(ix);
         }
     }
     // The eye's tooltip (browser.rs: Hide/Show + the view-state promise),

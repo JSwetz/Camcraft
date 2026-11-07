@@ -85,6 +85,7 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick) -> i32 {
 struct Shell {
     // Set on first resumed(); None until GPU init succeeds.
     window: Option<Arc<Window>>,
+    window_title: String,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     surface: Option<wgpu::Surface<'static>>,
@@ -147,13 +148,14 @@ impl Shell {
         // M-d: startup is a plain State::new() - byte-identical in shape to
         // imgui's App::new. The demo seed left the window path; world::seed
         // is what the harnesses and the headless proof call directly now.
-        // File work is the real thing: New/Model/Project/Save on the ribbon
+        // File work is the real thing: New/Model/Project/Save/Save As on the ribbon
         // queue the shared command kinds, rfd picks the path, State::run
         // does the work - the machinery was never egui's to rebuild.
         let state = State::new();
         let dock_state = build_dock();
         Self {
             window: None,
+            window_title: state.window_title(),
             device: None,
             queue: None,
             surface: None,
@@ -186,7 +188,7 @@ impl Shell {
 
     fn init_gpu(&mut self, el: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
-            .with_title("CamCraft")
+            .with_title(self.window_title.clone())
             .with_inner_size(LogicalSize::new(1280.0, 800.0));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -343,6 +345,13 @@ impl Shell {
         // Commands the panels queued last frame land before the scene is
         // collected, so this frame draws what the user's click did.
         self.state.drain_actions();
+        let title = self.state.window_title();
+        if title != self.window_title {
+            if let Some(window) = &self.window {
+                window.set_title(&title);
+            }
+            self.window_title = title;
+        }
         let scene = world::collect(&self.state);
 
         let Self {

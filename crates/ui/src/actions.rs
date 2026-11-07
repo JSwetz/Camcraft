@@ -67,6 +67,10 @@ pub(crate) fn save_project(state: &mut State) {
     state.pending.push_back(CommandKind::SaveProjectDialog);
 }
 
+pub(crate) fn save_project_as(state: &mut State) {
+    state.pending.push_back(CommandKind::SaveProjectAsDialog);
+}
+
 /// Post every operation to one NC program (M1.7b). The dialog arm picks
 /// the path; the gate itself - generated, fresh, warning-free or refused
 /// by name - lives once in the app layer (camcraft_app::posting).

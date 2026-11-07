@@ -18,7 +18,7 @@ use camcraft_app::commands::{
     ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    MoveFixture, MoveModel, RegenerateAll, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
+    MoveFixture, MoveModel, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
@@ -47,6 +47,7 @@ pub enum CommandKind {
     OpenProjectDialog,
     OpenProjectFile(PathBuf),
     SaveProjectDialog,
+    SaveProjectAsDialog,
     SaveProjectFile(PathBuf),
     /// Post NC through the save-dialog law (M1.7b): path via rfd, gate
     /// via `posting::post_setup`.
@@ -187,6 +188,8 @@ pub enum CommandKind {
         items: Vec<GeoSel>,
     },
     DeleteOperation(String),
+    RenameOperation { name: String, label: String },
+    ReorderOperation { name: String, target: String, after: bool },
     /// Throw away the operation's generated path and keep the operation
     /// (undoable: the cache comes back byte for byte).
     ClearToolpath(String),
@@ -945,6 +948,8 @@ pub struct State {
     pub world: World,
     pub history: History,
     pub status: String,
+    /// Last successfully opened or saved project in this window.
+    pub project_path: Option<PathBuf>,
     /// Bumped whenever documents changed; drives GPU re-upload of meshes.
     pub doc_version: u64,
     /// Bumped whenever selection changed; re-sends the vertex stream (the
@@ -1046,6 +1051,10 @@ pub struct State {
     /// draw retires it on any choice, outside press, or a row whose
     /// operation is gone.
     pub tree_menu: Option<String>,
+    /// Inline rename editor: stable key and current draft.
+    pub rename_draft: Option<(String, String)>,
+    /// Operation key being dragged in the browser; discarded on release.
+    pub dragging_op: Option<String>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -1229,6 +1238,7 @@ impl State {
             world: new_world(),
             history: History::default(),
             status,
+            project_path: None,
             doc_version: 0,
             selection_version: 0,
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
@@ -1260,6 +1270,8 @@ impl State {
             panels_open: PanelsOpen { browser: true, properties: true },
             layout_request: None,
             tree_menu: None,
+            rename_draft: None,
+            dragging_op: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
@@ -1994,6 +2006,7 @@ impl State {
             CommandKind::ImportFile(path) => self.import_path(path),
             CommandKind::NewDocument => {
                 self.abandon_imports();
+                self.project_path = None;
                 model::clear_named(&self.world);
                 // Units belong to the document, and clear_named cannot
                 // reach a singleton: reset the lens so a fresh blank is
@@ -2016,6 +2029,8 @@ impl State {
                 self.field_play = None;
                 self.stock_mesh.clear();
                 self.machine_editor = None;
+                self.rename_draft = None;
+                self.dragging_op = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
             }
@@ -2026,17 +2041,16 @@ impl State {
             }
             CommandKind::OpenProjectFile(path) => self.open_project_path(path),
             CommandKind::SaveProjectDialog => {
-                if let Some(path) = save_project_dialog() {
-                    match project::save(&self.world, &path) {
-                        Ok(()) => self.status = format!("saved {}", path.display()),
-                        Err(err) => self.status = format!("save failed: {err}"),
-                    }
+                if let Some(path) = self.project_path.clone().or_else(|| save_project_dialog(None)) {
+                    self.save_project_path(path);
                 }
             }
-            CommandKind::SaveProjectFile(path) => match project::save(&self.world, &path) {
-                Ok(()) => self.status = format!("saved {}", path.display()),
-                Err(err) => self.status = format!("save failed: {err}"),
-            },
+            CommandKind::SaveProjectAsDialog => {
+                if let Some(path) = save_project_dialog(self.project_path.as_deref()) {
+                    self.save_project_path(path);
+                }
+            }
+            CommandKind::SaveProjectFile(path) => self.save_project_path(path),
             CommandKind::PostProgramDialog => {
                 if let Some(path) = post_program_dialog() {
                     self.post_program_path(path);
@@ -2427,6 +2441,22 @@ impl State {
                         format!("operation not deleted: {err}"),
                     );
                 }
+            },
+            CommandKind::RenameOperation { name, label } => match RenameOperation::new(&self.world, &name, &label) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("operation renamed to {label}");
+                }
+                Err(err) => self.refuse(ErrorScope::Operation, format!("rename failed: {err}")),
+            },
+            CommandKind::ReorderOperation { name, target, after } => match ReorderOperation::new(&self.world, &name, &target, after) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("operation {name} moved");
+                }
+                Err(err) => self.refuse(ErrorScope::Operation, format!("reorder failed: {err}")),
             },
             CommandKind::GenerateOperation(name) => {
                 // Generation happens in the constructor (a refusal writes
@@ -3104,6 +3134,7 @@ impl State {
 
     fn open_project_path(&mut self, path: PathBuf) {
         self.abandon_imports();
+        self.project_path = None;
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
@@ -3112,12 +3143,34 @@ impl State {
         self.field_play = None; // nor its playback
         self.stock_mesh.clear(); // nor the mesh extracted from it
         self.machine_editor = None; // nor a draft over its machine's numbers
+        self.rename_draft = None;
+        self.dragging_op = None;
         match project::load(&self.world, &path) {
             Ok(()) => {
+                self.project_path = Some(path.clone());
                 self.doc_version += 1;
                 self.status = format!("opened {}", path.display());
             }
             Err(err) => self.status = format!("open failed: {err}"),
+        }
+    }
+
+    fn save_project_path(&mut self, path: PathBuf) {
+        match project::save(&self.world, &path) {
+            Ok(()) => {
+                self.status = format!("saved {}", path.display());
+                self.project_path = Some(path);
+            }
+            Err(err) => self.status = format!("save failed: {err}"),
+        }
+    }
+
+    #[must_use]
+    pub fn window_title(&self) -> String {
+        let filename = self.project_path.as_ref().and_then(|path| path.file_name());
+        match filename {
+            Some(name) => format!("CamCraft - {}", name.to_string_lossy()),
+            None => String::from("CamCraft - Untitled"),
         }
     }
 
@@ -3294,11 +3347,16 @@ fn pick_theme_file() -> Option<PathBuf> {
     dialog.pick_file()
 }
 
-fn save_project_dialog() -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter("CamCraft Project", &["camproj"])
-        .set_file_name("untitled.camproj")
-        .save_file()
+fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().add_filter("CamCraft Project", &["camproj"]);
+    if let Some(parent) = current.and_then(Path::parent) {
+        dialog = dialog.set_directory(parent);
+    }
+    let filename = current
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .unwrap_or("untitled.camproj");
+    dialog.set_file_name(filename).save_file()
 }
 
 fn post_program_dialog() -> Option<PathBuf> {

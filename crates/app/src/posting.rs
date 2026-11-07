@@ -346,7 +346,7 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
 /// what would post* holds by construction, not by two copies of the
 /// law agreeing (stage D makes the agreement load-bearing).
 pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
-    // THE order law by call (M3.2 A): setup rank, then name - the same
+    // THE order law by call (M3.2 A): setup rank, then operation position - the same
     // walk re-machining, the sim and the machine-limit check make.
     let ops: Vec<(String, Entity)> = crate::setup::operation_order(world);
     if ops.is_empty() {
@@ -583,8 +583,9 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             ),
             _ => (None, false, false, None),
         };
+        let display_name = model::operation_label(world, name, e);
         let d = Dump {
-            op_name: name,
+            op_name: &display_name,
             part_load,
             part_unload,
             part_transfer,

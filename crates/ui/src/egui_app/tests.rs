@@ -324,6 +324,9 @@ fn blank_startup_renders_and_frames_honestly() {
 fn file_ops_round_trip_through_commands() {
     let mut harness = shell_harness();
     let path = std::env::temp_dir().join(format!("camcraft-egui-md-{}.camproj", std::process::id()));
+    let saved_title = format!("CamCraft - {}", path.file_name().unwrap().to_string_lossy());
+    assert_eq!(harness.state().state.project_path, None);
+    assert_eq!(harness.state().state.window_title(), "CamCraft - Untitled");
 
     harness
         .state_mut().state.pending
@@ -334,6 +337,24 @@ fn file_ops_round_trip_through_commands() {
         "save did not report success (status: {})",
         harness.state().state.status
     );
+    assert_eq!(harness.state().state.project_path.as_ref(), Some(&path));
+    assert_eq!(harness.state().state.window_title(), saved_title);
+
+    // Save uses the captured path directly; this must not open a native dialog.
+    harness.state_mut().state.pending.push_back(CommandKind::SaveProjectDialog);
+    harness.run();
+    assert_eq!(harness.state().state.status, format!("saved {}", path.display()));
+    assert_eq!(harness.state().state.project_path.as_ref(), Some(&path));
+
+    // A failed save must leave the last successful filename in place.
+    let bad_path = path.join("failed.camproj"); // `path` is a file, not a directory.
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::SaveProjectFile(bad_path));
+    harness.run();
+    assert!(harness.state().state.status.starts_with("save failed:"));
+    assert_eq!(harness.state().state.project_path.as_ref(), Some(&path));
+    assert_eq!(harness.state().state.window_title(), saved_title);
 
     harness.state_mut().state.pending.push_back(CommandKind::NewDocument);
     harness.run();
@@ -345,6 +366,8 @@ fn file_ops_round_trip_through_commands() {
     );
     assert!(!st.history.can_undo(), "New must retire the timeline");
     assert_eq!(st.status, "new document");
+    assert_eq!(st.project_path, None);
+    assert_eq!(st.window_title(), "CamCraft - Untitled");
 
     harness
         .state_mut().state.pending
@@ -364,6 +387,8 @@ fn file_ops_round_trip_through_commands() {
         st.status
     );
     assert!(st.status.starts_with("opened"), "open status: {}", st.status);
+    assert_eq!(st.project_path.as_ref(), Some(&path));
+    assert_eq!(st.window_title(), saved_title);
     let _ = std::fs::remove_file(&path);
 }
 
@@ -1807,6 +1832,13 @@ fn file_keys_queue_their_commands() {
     );
     expect(
         &mut harness,
+        ctrl_shift,
+        Key::S,
+        |c| matches!(c, CommandKind::SaveProjectAsDialog),
+        "Ctrl+Shift+S",
+    );
+    expect(
+        &mut harness,
         ctrl,
         Key::P,
         |c| matches!(c, CommandKind::PostProgramDialog),
@@ -1834,6 +1866,28 @@ fn file_keys_queue_their_commands() {
         "Ctrl+O armed a dialog over a focused text field: {:?}",
         typing.state().pending
     );
+}
+
+/// Save As has its own ribbon command, so it can ask for a fresh filename
+/// even after an ordinary Save has established the current project path.
+#[test]
+fn save_as_ribbon_cell_queues_its_own_dialog() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(1280.0, 720.0))
+        .build_ui_state(frame_undrained, ShellUi::seeded());
+    let (cells, _, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
+    );
+    let save_as = cells.iter().find(|cell| cell.cmd == Cmd::SaveAs).expect("Save As ribbon cell");
+    let at = save_as.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    let pending = &harness.state().state.pending;
+    assert_eq!(pending.len(), 1, "Save As queued {pending:?}");
+    assert!(matches!(pending.front(), Some(CommandKind::SaveProjectAsDialog)));
 }
 
 /// The painted ribbon cell is a click on the actions law: `ribbon_cells`
@@ -2417,6 +2471,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Model, "Open a mesh model\tCtrl+O"),
         (Cmd::Project, "Open a project\tCtrl+Shift+O"),
         (Cmd::Save, "Save the project\tCtrl+S"),
+        (Cmd::SaveAs, "Save the project under a new name\tCtrl+Shift+S"),
         (Cmd::Post, "Post NC program (validation gate), then review it\tCtrl+P"),
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
@@ -4264,6 +4319,133 @@ fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
     let suffix = row_suffix(&harness.state().state);
     assert!(!suffix.contains("BLOCKED") && suffix.contains("ok"), "{suffix}");
     assert!(harness.query_by_label_contains("Status: BLOCKED").is_none(), "undo clears the page");
+}
+
+#[test]
+fn setup_navigation_is_conditional_and_operations_keep_a_flat_browser() {
+    let plan = panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]);
+    let setup_group = plan.iter().find(|group| group.title == "Setup").expect("setup group");
+    assert_eq!(
+        setup_group.cells.as_slice(),
+        &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
+        "the Setup toolbar matches its original cells"
+    );
+
+    let blank = State::new();
+    let (rows, leaves) = panes::browser_rows(&blank);
+    assert!(!leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
+    assert!(!rows.iter().any(|row| row.label == "Global Setup"));
+    assert!(rows.iter().any(|row| row.label == "Operations"));
+
+    let mut with_setup = State::new();
+    with_setup.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    with_setup.drain_actions();
+    let (rows, leaves) = panes::browser_rows(&with_setup);
+    let manager = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Setups))
+        .expect("the browser shows Setups after the first setup exists");
+    assert_eq!(rows[manager].label, "Setups");
+    assert_eq!(rows[manager].depth, 1);
+
+    let mut seeded = ShellUi::seeded();
+    seeded.state.pending.push_back(CommandKind::RenameOperation {
+        name: "Contour1".into(), label: "Finish contour".into(),
+    });
+    seeded.state.drain_actions();
+    let (rows, leaves) = panes::browser_rows(&seeded.state);
+    let op = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour1"))
+        .expect("stable operation key in browser");
+    assert_eq!(rows[op].label, "Finish contour");
+    assert_eq!(rows[op].depth, 1, "operation sits directly beneath Operations");
+    assert!(!rows.iter().any(|row| row.label == "Global Setup"));
+
+    let source = model::find_by_name(&seeded.state.world, "Contour1").expect("seed op");
+    let definition = model::operation_of(&seeded.state.world, &source).expect("definition");
+    seeded.state.pending.push_back(CommandKind::CreateOperation {
+        name: "Contour2".into(), tool: definition.tool,
+        src: definition.src, params: definition.params,
+    });
+    seeded.state.drain_actions();
+    seeded.state.pending.push_back(CommandKind::ReorderOperation {
+        name: "Contour2".into(), target: "Contour1".into(), after: false,
+    });
+    seeded.state.drain_actions();
+    let (rows, leaves) = panes::browser_rows(&seeded.state);
+    let order: Vec<_> = leaves.iter().enumerate().filter_map(|(ix, leaf)| match leaf {
+        panes::Leaf::Op(key) => Some((key.as_str(), rows[ix].label.as_str())),
+        _ => None,
+    }).collect();
+    assert_eq!(order, [("Contour2", "Contour2"), ("Contour1", "Finish contour")],
+        "browser order follows the shared program order, labels stay independent");
+}
+
+#[test]
+fn dragging_an_operation_row_reorders_within_global_setup() {
+    let mut shell = ShellUi::seeded();
+    let source = model::find_by_name(&shell.state.world, "Contour1").expect("seed op");
+    let definition = model::operation_of(&shell.state.world, &source).expect("definition");
+    shell.state.pending.push_back(CommandKind::CreateOperation {
+        name: "Contour2".into(), tool: definition.tool,
+        src: definition.src, params: definition.params,
+    });
+    shell.state.drain_actions();
+    assert!(model::find_by_name(&shell.state.world, "Contour2").is_some());
+    let mut harness = Harness::builder().with_size(Vec2::new(1280.0, 720.0))
+        .build_ui_state(frame, shell);
+    harness.run_steps(2);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let first = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour1"))
+        .expect("first row");
+    let second = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour2"))
+        .expect("second row");
+    assert_eq!(second, first + 1);
+    // The browser tree begins at y=179 below its view controls in the
+    // 1280x720 shell. The row indices come from the current flat browser,
+    // so the drag follows the rows after setup nesting was removed.
+    let row_h = theme::current().row_height;
+    let from = egui::pos2(120.0, 179.0 + (second as f32 + 0.5) * row_h);
+    let to = egui::pos2(120.0, 179.0 + (first as f32 + 0.25) * row_h);
+    set_pos(&mut harness, from);
+    button_at(&mut harness, egui::PointerButton::Primary, from, true);
+    set_pos(&mut harness, to);
+    assert_eq!(harness.state().state.dragging_op.as_deref(), Some("Contour2"));
+    button_at(&mut harness, egui::PointerButton::Primary, to, false);
+    harness.run_steps(2);
+    let ordered: Vec<String> = camcraft_app::setup::operation_order(&harness.state().state.world)
+        .into_iter().map(|(name, _)| name).collect();
+    assert_eq!(ordered, ["Contour2", "Contour1"]);
+}
+
+#[test]
+fn rename_button_edits_the_browser_label_through_the_command() {
+    let mut harness = shell_harness();
+    harness.run();
+    harness.get_by_label("Rename").click();
+    harness.run();
+    assert_eq!(harness.state().state.rename_draft.as_ref().map(|(key, _)| key.as_str()), Some("Contour1"));
+    let field = harness.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next().expect("rename field under Name");
+    field.click();
+    harness.run();
+    harness.input_mut().events.push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::A, physical_key: None, pressed: true, repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run();
+    harness.input_mut().events.push(Event::ModifiersChanged(Modifiers::NONE));
+    harness.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next().expect("focused rename field")
+        .type_text("Finish contour");
+    harness.run();
+    let apply = harness.get_by_label("Apply name").rect().center();
+    harness.get_by_label("Apply name").click();
+    harness.run_steps(2);
+    let state = &harness.state().state;
+    let (rows, leaves) = panes::browser_rows(state);
+    let op = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(key) if key == "Contour1"))
+        .expect("operation's stable key");
+    assert_eq!(rows[op].label, "Finish contour", "status: {}; draft: {:?}; apply: {apply:?}; pending: {:?}", state.status, state.rename_draft, state.pending);
+    assert!(model::find_by_name(&state.world, "Contour1").is_some());
 }
 
 /// M13.4: Vertex mode through the real shell - hovering a block corner

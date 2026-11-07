@@ -11765,3 +11765,18 @@ adaptive is wanted on long bands); refusing via `Err` (the op would fail instead
 falling back, against the named-fallback law). Known limit: a very large island pocket
 (lb past 2000 r, roughly 250 x 200 mm and up with D10) now falls back to Offset rings
 up front where it used to plan slowly.
+
+## #45: setup navigation, operation labels and order (2026-11-07)
+
+**Chosen:** Keep the entity `Name` as the stable command key, store a separate
+editable label and an optional within-setup order on each operation. Existing
+projects retain name order; the first drag assigns positions to that setup's
+operations. The browser keeps one flat Operations section, sorted by setup
+rank and then operation order. Its existing Setups row appears only after a
+setup exists; setup navigation stays in the browser, with no new toolbar cell.
+Dragging across a setup boundary is refused; changing setup remains the
+existing explicit property edit. The project format advances to v50 so older
+builds cannot silently discard the new program order and post a different sequence.
+**Dropped:** Mutating the entity `Name` on rename (older undo commands would
+lose their target), and a UI-only sort (the displayed order would disagree
+with posting, simulation and rest machining).
