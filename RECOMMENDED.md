@@ -12467,3 +12467,21 @@ empty scene. Chosen:
   pins the phase; the DX12-first ordering is the leading suspect fix.
   Dropped: switching the loop from Poll to redraw-on-input (changes
   playback animation behaviour; not proven to be the cause).
+- **Review fixes (PR #76)**: (1) each candidate's configure, View3D build
+  and a presented test frame (acquire, clear, submit, present, then a
+  5 s-bounded `device.poll`) run inside Validation + OutOfMemory + Internal
+  error scopes - OOM/Internal would otherwise reach wgpu's panicking
+  default handler - and a device-lost callback flags a lost device, which
+  wgpu 30 reports only through that callback; any of these fails the
+  adapter by name and the next one is tried. Occluded/Timeout/Outdated on
+  the test frame are not held against the adapter (window not presentable
+  yet). (2) "Same GPU" across backends matches on PCI vendor + device ids
+  when both are non-zero (DXGI and Vulkan name GPUs differently), the name
+  only otherwise, so the DX12 entry shares the HP rank. (3) The refusal
+  lists skipped adapters and empty backend masks, not "no adapter found".
+  (4) The View3D pipeline is built per candidate: a failure there drops
+  that adapter and tries the next, instead of exiting with no dialog.
+  (5) `--gpu=x` / `--gpu-backend=x` parse; a surface-handle failure keeps
+  the failures collected so far. Dropped: rendering a full egui frame as
+  the test (needs the renderer per candidate; a clear+present exercises
+  the same present path).

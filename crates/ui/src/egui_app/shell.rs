@@ -207,8 +207,23 @@ impl Shell {
         };
         // M4.2 + #74: the honest fallback chain, adapter by adapter inside
         // each backend mask (gpu_init); a refusal names every adapter tried.
-        let gpu_init::Bring { surface, adapter, device, queue, config } =
-            match gpu_init::bring_up(&window, &self.gpu_pick, self.gpu_want.as_deref()) {
+        // The View3D pipelines are built per candidate: an adapter that
+        // cannot build them fails like one that cannot configure, and the
+        // next adapter is tried (the "Intel never renders" path).
+        let scale = window.scale_factor().clamp(0.1, 8.0);
+        let (vw, vh) = (
+            (f64::from(self.viewport_points[0]) * scale).max(1.0) as u32,
+            (f64::from(self.viewport_points[1]) * scale).max(1.0) as u32,
+        );
+        // View3D renders into its OWN texture (Rgba8Unorm, the format
+        // egui's native-texture registration demands), decoupled from the
+        // surface format - that is the registered-texture plan.
+        let build = |device: &wgpu::Device, _: &wgpu::Queue, _: &wgpu::SurfaceConfiguration| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| View3D::new(device, VIEW3D_FORMAT, vw, vh)))
+                .map_err(|_| "viewport3d pipeline creation aborted".to_string())
+        };
+        let gpu_init::Bring { surface, adapter, device, queue, config, built: mut view } =
+            match gpu_init::bring_up(&window, &self.gpu_pick, self.gpu_want.as_deref(), build) {
                 Ok(b) => b,
                 Err(err) => {
                     refuse_dialog(&err);
@@ -219,24 +234,6 @@ impl Shell {
         println!("{}", gpu::describe(&adapter).log_line());
 
         let mut renderer = Renderer::new(&device, config.format, RendererOptions::default());
-        let scale = window.scale_factor().clamp(0.1, 8.0);
-        let mut view = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // View3D renders into its OWN texture (Rgba8Unorm, the format
-            // egui's native-texture registration demands), decoupled from
-            // the surface format - that is the registered-texture plan.
-            View3D::new(
-                &device,
-                VIEW3D_FORMAT,
-                (f64::from(self.viewport_points[0]) * scale).max(1.0) as u32,
-                (f64::from(self.viewport_points[1]) * scale).max(1.0) as u32,
-            )
-        })) {
-            Ok(v) => v,
-            Err(_) => {
-                self.fail(el, "viewport3d pipeline", "GPU validation failed (see log)");
-                return;
-            }
-        };
         let scene = world::collect(&self.state);
         self.scene_digest = scene.digest();
         view.set_document(&device, &queue, &scene.parts);

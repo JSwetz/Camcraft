@@ -133,3 +133,61 @@ fn incompatible_surface_refuses_by_name() {
     let err = surface_config(&caps(vec![wgpu::TextureFormat::Rgba8Unorm], vec![], vec![]), 1, 1).unwrap_err();
     assert!(err.contains("present mode"), "{err}");
 }
+
+#[test]
+fn same_gpu_named_differently_per_backend_still_leads_on_dx12() {
+    // DXGI and Vulkan can name one GPU differently; the PCI ids match.
+    let mut list = vec![
+        a("Intel(R) UHD Graphics 630", 0x8086, DeviceType::IntegratedGpu, Backend::Dx12, true),
+        a("NVIDIA Quadro P3200", 0x10de, DeviceType::DiscreteGpu, Backend::Vulkan, true),
+        a("Quadro P3200", 0x10de, DeviceType::DiscreteGpu, Backend::Dx12, true),
+    ];
+    list[0].device = 0x3e9b;
+    list[1].device = 0x1bb6;
+    list[2].device = 0x1bb6;
+    let (idx, _) = order(&list, None, Some(&list[1]));
+    let n = names(&list, &idx);
+    assert!(n[0].contains("Quadro") && n[1].contains("Quadro"), "both Quadro entries are the HP pick: {n:?}");
+    if cfg!(target_os = "windows") {
+        assert_eq!(n[0], "Quadro P3200/dx12", "DX12 first on Windows: {n:?}");
+    }
+    // Without PCI ids the name decides: a differently named zero-id entry
+    // is not the high-performance pick.
+    let anon = vec![
+        AdapterDesc { device: 0, ..a("Soft GPU", 0, DeviceType::DiscreteGpu, Backend::Vulkan, true) },
+        AdapterDesc { device: 0, ..a("Other GPU", 0, DeviceType::DiscreteGpu, Backend::Vulkan, true) },
+    ];
+    let (idx, _) = order(&anon, None, Some(&anon[1]));
+    assert_eq!(idx, vec![1, 0]);
+}
+
+#[test]
+fn refusal_names_tried_and_skipped_adapters() {
+    let skip = vec!["\"Quadro P3200\" via dx12: skipped - cannot present to this window".to_string()];
+    let all_skipped = refusal(&[], &skip);
+    assert!(!all_skipped.contains("no GPU adapter was found"), "{all_skipped}");
+    assert!(all_skipped.contains("Quadro P3200") && all_skipped.contains("cannot present"), "{all_skipped}");
+    let tried = vec!["\"Intel(R) UHD\" via dx12: the device was lost during bring-up".to_string()];
+    let both = refusal(&tried, &skip);
+    assert!(both.contains("tried: \"Intel(R) UHD\"") && both.contains("skipped: \"Quadro"), "{both}");
+    assert!(refusal(&[], &[]).contains("no GPU adapter was found on any backend"));
+}
+
+#[test]
+fn empty_alpha_modes_refuse_by_name() {
+    let c = caps(vec![wgpu::TextureFormat::Rgba8Unorm], vec![wgpu::PresentMode::Fifo], vec![]);
+    let err = surface_config(&c, 1, 1).unwrap_err();
+    assert!(err.contains("alpha mode"), "{err}");
+}
+
+#[test]
+fn caps_without_render_attachment_refuse_by_name() {
+    let mut c = caps(
+        vec![wgpu::TextureFormat::Rgba8Unorm],
+        vec![wgpu::PresentMode::Fifo],
+        vec![wgpu::CompositeAlphaMode::Opaque],
+    );
+    c.usages = wgpu::TextureUsages::COPY_SRC;
+    let err = surface_config(&c, 1, 1).unwrap_err();
+    assert!(err.contains("cannot be rendered to"), "{err}");
+}

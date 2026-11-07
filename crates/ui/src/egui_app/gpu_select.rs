@@ -46,9 +46,16 @@ impl AdapterDesc {
         )
     }
 
-    /// The same physical GPU (any backend): vendor + device + name.
+    /// The same physical GPU (any backend): the PCI vendor + device ids
+    /// when both sides report them (DXGI and Vulkan can name one GPU
+    /// differently); the name only when an id is missing (zero).
     fn same_gpu(&self, other: &AdapterDesc) -> bool {
-        self.vendor == other.vendor && self.device == other.device && self.name == other.name
+        let ids = |d: &AdapterDesc| d.vendor != 0 && d.device != 0;
+        if ids(self) && ids(other) {
+            self.vendor == other.vendor && self.device == other.device
+        } else {
+            self.name == other.name
+        }
     }
 
     /// Identity across instances (the fallback masks re-enumerate).
@@ -175,6 +182,26 @@ pub fn surface_config(
         alpha_mode,
         view_formats: vec![],
     })
+}
+
+/// The refusal text when no adapter brought the window up: every adapter
+/// tried and why it failed, then every adapter or backend mask skipped
+/// (cannot present, enumerated nothing, unmet `--gpu` choice).
+pub fn refusal(failures: &[String], skipped: &[String]) -> String {
+    let mut s = String::from("no GPU adapter could render to this window");
+    match (failures.is_empty(), skipped.is_empty()) {
+        (true, true) => s.push_str("; no GPU adapter was found on any backend"),
+        (true, false) => s.push_str("; no adapter could be tried"),
+        (false, _) => {
+            s.push_str("; tried: ");
+            s.push_str(&failures.join("; "));
+        }
+    }
+    if !skipped.is_empty() {
+        s.push_str("; skipped: ");
+        s.push_str(&skipped.join("; "));
+    }
+    s
 }
 
 #[cfg(test)]
