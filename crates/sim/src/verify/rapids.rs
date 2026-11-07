@@ -1,4 +1,15 @@
 //! Law (d), lateral rapids under the clearance plane over rest material - the shop practice of traversing only above the stock (machine-tool handbooks) on our own conservative rest model (split from `engine.rs` by M13.7; structure only).
+//!
+//! Issue #106: the column is read under the tool's whole footprint -
+//! the disc of radius `r - gouge_tol` the mill law's other disc
+//! readings use ([`Rest::hidden_along`], [`super::rapids_radial`]) -
+//! never under its centre alone: a dive whose centre stands just off
+//! the stock outline still meets the stock with its rim, and a dive
+//! whose centre an earlier cut cleared can still land its far side on
+//! uncut stock. Sampled: the centre, a ring at half the radius, and
+//! [`RIM`] rim points, so a graze shallower than `r (1 - cos(pi/RIM))`
+//! between two rim samples can pass - the same bound
+//! [`super::rapids_radial`] states.
 
 use super::laws::xy;
 use super::midpose;
@@ -56,6 +67,7 @@ pub(super) fn rapids_in_stock(
             }
             let (a, b) = (xy(&m.from), xy(&m.to));
             let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let d = cx.tool.radius - cx.gouge_tol;
             if dx * dx + dy * dy <= cx.z_tol * cx.z_tol {
                 // Issue #96: a vertical retract rides the tool's own
                 // kerf, but a vertical rapid DOWN is judged by its
@@ -64,7 +76,7 @@ pub(super) fn rapids_in_stock(
                 // rapid in stock. A peck's re-entry stays above its
                 // own earlier plunge, so it is acquitted by the cuts.
                 let down = m.to.z < m.from.z - cx.z_tol;
-                if down && rest.in_stock(a) && m.to.z < rest.surface_before(a, i) - cx.z_tol {
+                if down && footprint(a, d).any(|q| rest.in_stock(q) && m.to.z < rest.surface_before(q, i) - cx.z_tol) {
                     warns.push(Warning::RapidInStock { at: i });
                 }
                 continue;
@@ -82,6 +94,7 @@ pub(super) fn rapids_in_stock(
             // BEFORE it left it - a later feed's clearing is no alibi.
             let bad = [a, mid, b]
                 .into_iter()
+                .flat_map(|c| footprint(c, d))
                 .any(|q| rest.in_stock(q) && low < rest.surface_before(q, i))
                 || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
             if !bad {
@@ -94,4 +107,22 @@ pub(super) fn rapids_in_stock(
             warns.push(Warning::RapidInStock { at: i });
         }
     }
+}
+
+/// Rim samples of the footprint disc (#106) - [`super::rapids_radial`]'s count.
+const RIM: usize = 16;
+
+/// The tool footprint's sample points about `c`: the centre, a ring of
+/// `RIM / 2` at half of `d`, `RIM` on the rim. A `d` that is not a
+/// finite positive radius (a tool no wider than the gouge tolerance)
+/// is the centre alone - the column reading the law had before #106.
+fn footprint(c: Point2, d: f64) -> impl Iterator<Item = Point2> {
+    let d = if d.is_finite() && d > 0.0 { d } else { 0.0 };
+    let rings = if d > 0.0 { [(RIM / 2, 0.5 * d), (RIM, d)] } else { [(0, 0.0), (0, 0.0)] };
+    std::iter::once(c).chain(rings.into_iter().flat_map(move |(n, rad)| {
+        (0..n).map(move |j| {
+            let t = std::f64::consts::TAU * j as f64 / n as f64;
+            Point2::new(c.x + rad * t.cos(), c.y + rad * t.sin())
+        })
+    }))
 }

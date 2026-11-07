@@ -7,7 +7,12 @@
 //! Provenance: our own fixtures, specced from the Prime Directive and the
 //! shop rule "never traverse through uncut stock"; no vendor material.
 //!
-//! Gate map (#96): covers camcraft_sim::verify (rapids, rest).
+//! Issue #106: the column is read under the tool's footprint (the disc
+//! of radius r - gouge_tol), not its centre alone - a dive or a lateral
+//! rapid whose centre stands off the stock but whose rim meets it, and
+//! a re-entry beside an earlier plunge whose far side is uncut, convict.
+//!
+//! Gate map (#96, #106): covers camcraft_sim::verify (rapids, rest).
 
 use camcraft_sim::cl::{Move, MoveKind, Toolpath};
 use camcraft_sim::geo2d::{Loop, Point2, Region};
@@ -28,10 +33,14 @@ fn rect() -> Region {
 }
 
 fn mv(kind: MoveKind, z0: f64, z1: f64) -> Move {
+    at(kind, (0.0, 0.0, z0), (0.0, 0.0, z1))
+}
+
+fn at(kind: MoveKind, a: (f64, f64, f64), b: (f64, f64, f64)) -> Move {
     Move {
         kind,
-        from: Point3::new(0.0, 0.0, z0),
-        to: Point3::new(0.0, 0.0, z1),
+        from: Point3::new(a.0, a.1, a.2),
+        to: Point3::new(b.0, b.1, b.2),
         feed: if kind == MoveKind::Rapid { None } else { Some(80.0) },
         arc: None,
         axis: None,
@@ -114,4 +123,76 @@ fn a_peck_re_entry_past_its_own_earlier_plunge_is_a_rapid_in_stock() {
         mv(MoveKind::Rapid, 12.0, 35.0),
     ]);
     assert_eq!(w, vec![Warning::RapidInStock { at: 3 }], "{w:?}");
+}
+
+/// The stock wall is x = 40 and the tool radius 2: a dive centred at
+/// x = 41 (r/2 off the wall) lands its rim 1 mm into the stock.
+#[test]
+fn a_dive_centred_half_a_radius_off_the_stock_wall_is_a_rapid_in_stock() {
+    let w = judge(vec![
+        at(MoveKind::Rapid, (41.0, 0.0, 35.0), (41.0, 0.0, 20.0)),
+        at(MoveKind::Plunge, (41.0, 0.0, 20.0), (41.0, 0.0, 12.0)),
+        at(MoveKind::Rapid, (41.0, 0.0, 12.0), (41.0, 0.0, 35.0)),
+    ]);
+    // The plunge off the region is law (a)'s Gouge; the dive is ours.
+    assert!(w.contains(&Warning::RapidInStock { at: 0 }), "{w:?}");
+    assert!(!w.contains(&Warning::RapidInStock { at: 2 }), "the retract rides its kerf: {w:?}");
+}
+
+#[test]
+fn a_dive_whose_whole_disc_clears_the_stock_wall_is_clean() {
+    // Centre at x = 42.5: the rim stops 0.5 mm short of the wall.
+    let w = judge(vec![
+        at(MoveKind::Rapid, (42.5, 0.0, 35.0), (42.5, 0.0, 20.0)),
+        at(MoveKind::Plunge, (42.5, 0.0, 20.0), (42.5, 0.0, 12.0)),
+        at(MoveKind::Rapid, (42.5, 0.0, 12.0), (42.5, 0.0, 35.0)),
+    ]);
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn a_dive_touching_the_wall_within_the_gouge_tolerance_is_clean() {
+    // Centre exactly r off the wall: the disc r - gouge_tol never reaches it.
+    let w = judge(vec![
+        at(MoveKind::Rapid, (42.0, 0.0, 35.0), (42.0, 0.0, 20.0)),
+        at(MoveKind::Plunge, (42.0, 0.0, 20.0), (42.0, 0.0, 12.0)),
+        at(MoveKind::Rapid, (42.0, 0.0, 12.0), (42.0, 0.0, 35.0)),
+    ]);
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn a_re_entry_beside_an_earlier_plunge_with_its_far_side_uncut_is_a_rapid_in_stock() {
+    // The plunge at x = 0 cleared the column at x = 1.5 (within r), but
+    // the re-entry's far rim at x = 3.5 stands on the stock top.
+    let w = judge(vec![
+        mv(MoveKind::Rapid, 35.0, 26.0),
+        mv(MoveKind::Plunge, 26.0, 18.0),
+        mv(MoveKind::Rapid, 18.0, 26.0),
+        at(MoveKind::Rapid, (0.0, 0.0, 26.0), (1.5, 0.0, 26.0)),
+        at(MoveKind::Rapid, (1.5, 0.0, 26.0), (1.5, 0.0, 18.5)),
+        at(MoveKind::Plunge, (1.5, 0.0, 18.5), (1.5, 0.0, 12.0)),
+        at(MoveKind::Rapid, (1.5, 0.0, 12.0), (1.5, 0.0, 35.0)),
+    ]);
+    assert_eq!(w, vec![Warning::RapidInStock { at: 4 }], "{w:?}");
+}
+
+#[test]
+fn a_lateral_rapid_centred_off_the_stock_wall_with_its_rim_in_stock_is_a_rapid_in_stock() {
+    let w = judge(vec![
+        at(MoveKind::Rapid, (41.0, -10.0, 35.0), (41.0, -10.0, 20.0)),
+        at(MoveKind::Rapid, (41.0, -10.0, 20.0), (41.0, 10.0, 20.0)),
+        at(MoveKind::Rapid, (41.0, 10.0, 20.0), (41.0, 10.0, 35.0)),
+    ]);
+    assert!(w.contains(&Warning::RapidInStock { at: 1 }), "{w:?}");
+}
+
+#[test]
+fn a_lateral_rapid_whose_whole_disc_clears_the_stock_wall_is_clean() {
+    let w = judge(vec![
+        at(MoveKind::Rapid, (42.5, -10.0, 35.0), (42.5, -10.0, 20.0)),
+        at(MoveKind::Rapid, (42.5, -10.0, 20.0), (42.5, 10.0, 20.0)),
+        at(MoveKind::Rapid, (42.5, 10.0, 20.0), (42.5, 10.0, 35.0)),
+    ]);
+    assert!(w.is_empty(), "{w:?}");
 }

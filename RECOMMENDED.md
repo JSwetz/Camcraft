@@ -13182,3 +13182,27 @@ revolved (follow-up material if users hit it with long keyways).
   clamps) a ring count past 1e5, and drops vertical-plane arcs from the
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
+
+## #106 - rapid-in-stock reads the tool's footprint, not its centre (2026-11-07)
+
+- **Chosen:** law (d)'s column reading (the lateral rapid's a / mid / b
+  samples and #96's vertical dive) asks `in_stock && below
+  surface_before` at every sample of the tool's footprint disc of
+  radius `r - gouge_tol` - the centre, 8 points at half radius, 16 on
+  the rim - not at the centre alone. Any sample in stock and under the
+  surface the earlier cuts left convicts. The disc and the sample count
+  are the ones `rapids_radial` (#79) and `hidden_along` already use, so
+  the mill laws read one tool.
+- **Why `r - gouge_tol`:** a dive or link tangent to the stock wall (an
+  approach at exactly r off the outline, a link riding its own kerf's
+  edge) is not a collision; the full radius would convict it on
+  rounding.
+- **Left alone:** `acquit_by_prior` already reads the whole disc
+  (radius r, the highest prior column under it), so it needed no
+  change; the radial (`Mode::Radial`) reading already samples the flute
+  body discs.
+- **Dropped:** an exact disc-versus-polygon / disc-versus-kerf-union
+  test (the kerf union is not built anywhere; sampling with the stated
+  rim bound `r (1 - cos(pi/16))` matches the radial law's promise);
+  sampling only the vertical law (the issue names both, and the lateral
+  law had the same gap).
