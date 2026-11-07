@@ -346,10 +346,13 @@ fn the_end_face_swing_clears_a_shank_wider_than_the_drill() {
     }
 }
 
-/// A box of raw stock reads its circumscribed radius (40 x 40: r28.28);
-/// a bar off the world origin with G54 moved onto it and a wider r30
-/// raw bar reads that bar about the spindle. Every rapid stands off
-/// the raw stock plus the drill's rim, about the spindle the post turns.
+/// A box of raw stock hops about its circumscribed radius (40 x 40:
+/// r28.28) and enters each hole at its face (r20, issue #85); a bar off
+/// the world origin with G54 moved onto it and a wider r30 raw bar
+/// reads that bar about the spindle. Every rapid off a hole's line
+/// stands off the raw stock plus the drill's rim, and every approach
+/// along one stops the feed-entry standoff (5) outside the stock's
+/// surface on that line, about the spindle the post turns.
 #[test]
 fn a_box_stock_and_an_off_origin_spindle_stand_off_the_raw_stock_plus_the_rim() {
     use camcraft_app::commands::SetWcsOrigin;
@@ -357,7 +360,7 @@ fn a_box_stock_and_an_off_origin_spindle_stand_off_the_raw_stock_plus_the_rim() 
     let wide = Some((StockShape::Cylinder { diameter: 60.0, height: 40.0 }, -20.0));
     let at = (37.0, -12.0);
     for word in ["lathe", "mill-turn"] {
-        for (stock, (ox, oy), raw) in [(boxed.clone(), (0.0, 0.0), 800.0_f64.sqrt()), (wide.clone(), at, 30.0)] {
+        for (stock, (ox, oy), raw, face) in [(boxed.clone(), (0.0, 0.0), 800.0_f64.sqrt(), 20.0), (wide.clone(), at, 30.0, 30.0)] {
             let (world, mut history) = world_on(word, stock, (ox, oy), |_| {});
             let g54 = Location { pos: Point3::new(ox, oy, 0.0), rot: IDENTITY_Q };
             history.execute(&world, SetWcsOrigin::new(&world, "G54", g54).expect("set G54"));
@@ -374,7 +377,17 @@ fn a_box_stock_and_an_off_origin_spindle_stand_off_the_raw_stock_plus_the_rim() 
             for m in &mut local.moves {
                 (m.from, m.to) = (rel(m.from), rel(m.to));
             }
-            let floor = rapid_floor(&local);
+            let mut hops = local.clone();
+            let along = |m: &camcraft_app::cl::Move| {
+                let same = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+                same(m.from.z, m.to.z) && (same(m.from.x, m.to.x) != same(m.from.y, m.to.y))
+            };
+            hops.moves.retain(|m| m.kind != MoveKind::Rapid || !along(m));
+            let floor = rapid_floor(&hops);
+            for m in local.moves.iter().filter(|m| m.kind == MoveKind::Plunge && m.from.z == m.to.z) {
+                let at = m.from.x.abs().max(m.from.y.abs());
+                assert!(at >= face + 5.0 - 1e-9, "{word} raw r{raw:.2}: a feed entry at r{at:.3} inside the face {face}");
+            }
             assert!(floor >= raw + 2.0 - 1e-9, "{word} raw r{raw:.2}: a rapid reaches r{floor:.3}");
             let first = local.moves.first().map(|m| m.from.x.hypot(m.from.y)).unwrap_or(0.0);
             assert!(first >= raw + 5.0 - 1e-9, "{word} raw r{raw:.2}: the clearance stands off the stock: {first:.3}");

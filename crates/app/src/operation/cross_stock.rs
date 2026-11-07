@@ -25,6 +25,10 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::tools::Tool;
 
+#[path = "cross_entry.rs"]
+mod entry;
+use entry::{Line, entry};
+
 /// What the cross drill stands off, measured about world Z through the
 /// spindle origin `(ox, oy)` (already the kernel's frame).
 pub(super) struct Standoff {
@@ -35,6 +39,9 @@ pub(super) struct Standoff {
     /// The raw stock's radius when it is wider than the part: the
     /// mouths move out to it. `None` keeps the part-only chain.
     pub raw: Option<f64>,
+    /// The raw stock's facets in the spindle frame (empty without
+    /// `raw`): each hole's mouth is where its own line meets them (#85).
+    pub mesh: Vec<Triangle>,
 }
 
 fn reach(facets: &[Triangle], ox: f64, oy: f64) -> (f64, Option<f64>) {
@@ -53,14 +60,29 @@ fn reach(facets: &[Triangle], ox: f64, oy: f64) -> (f64, Option<f64>) {
 pub(super) fn standoff(part: &[Triangle], stock: Option<&[Triangle]>, ox: f64, oy: f64) -> Standoff {
     let (part_r, part_z) = reach(part, ox, oy);
     let Some((stock_r, stock_z)) = stock.filter(|s| !s.is_empty()).map(|s| reach(s, ox, oy)) else {
-        return Standoff { r: part_r, z_max: part_z, raw: None };
+        return Standoff { r: part_r, z_max: part_z, raw: None, mesh: Vec::new() };
     };
     let raw = (stock_r > part_r + 1e-9).then_some(stock_r);
     let z_max = match (part_z, stock_z) {
         (Some(a), Some(b)) if b > a + 1e-9 => Some(b),
         (a, b) => a.or(b),
     };
-    Standoff { r: raw.unwrap_or(part_r), z_max, raw }
+    let shift = |p: Point3| Point3::new(p.x - ox, p.y - oy, p.z);
+    let mesh = match (raw, stock) {
+        (Some(_), Some(s)) => s.iter().map(|t| Triangle::new(shift(t.a), shift(t.b), shift(t.c))).collect(),
+        _ => Vec::new(),
+    };
+    Standoff { r: raw.unwrap_or(part_r), z_max, raw, mesh }
+}
+
+/// The hole line through `p` plunging along the XY axis-aligned `dir`
+/// (the kernel refuses anything else), outward against `dir`.
+fn hole_line(p: Point3, dir: Point3) -> Line {
+    if dir.x.abs() >= dir.y.abs() {
+        Line { a: 0, out: -dir.x.signum(), t: p.y, z: p.z }
+    } else {
+        Line { a: 1, out: -dir.y.signum(), t: p.x, z: p.z }
+    }
 }
 
 /// The tool body's half-width the proof stands off: the drill's own
@@ -86,12 +108,16 @@ pub(super) fn body_clear(clearance_d: f64, hop_d: Option<f64>, tool: &Tool) -> (
 }
 
 /// Each hole's mouth moved out along its own axis to where the drill
-/// of diameter `d` first meets the raw stock's radius `raw` (the floor
-/// unchanged: `floor_d` deepens by the shift). An off-centre hole's
-/// drill edge nearest the axis - transverse offset `|t| - d/2` -
-/// meets the raw surface before its centre line does, further out, so
-/// the mouth is taken there. A hole whose drill misses the stock
-/// radius, or whose mouth already stands outside it, is untouched; a
+/// of diameter `d` first meets the raw stock (the floor unchanged:
+/// `floor_d` deepens by the shift). Issue #85: that point is read off
+/// the stock mesh along the hole's own line (`cross_entry::entry`: the
+/// drill's whole body, so an off-centre hole's edge nearest the axis
+/// is what meets the surface first, #77), so a box enters at its face,
+/// not its corner radius `raw`; a round bar, or a line whose body
+/// meets no facet, keeps the circumscribed reading at the edge -
+/// transverse offset `|t| - d/2` - as before. A hole whose drill
+/// misses the stock radius, or whose mouth already stands outside it,
+/// is untouched; a
 /// hole plunging away from the spindle is refused by name (moving its
 /// mouth "out" would move it in). `holes` are in the spindle frame.
 ///
@@ -100,23 +126,19 @@ pub(super) fn body_clear(clearance_d: f64, hop_d: Option<f64>, tool: &Tool) -> (
 /// meets the raw surface further out than the drill's mouth - by that
 /// much more of the shank's length is in stock at the floor. The mouth
 /// (where cutting starts) stays the drill's; the reach law adds this.
-pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, tool: &Tool) -> Result<(Vec<CrossHole>, Vec<f64>), GenError> {
+pub(super) fn to_raw_mouths(
+    holes: &[CrossHole],
+    st: &Standoff,
+    raw: f64,
+    tool: &Tool,
+) -> Result<(Vec<CrossHole>, Vec<f64>), GenError> {
     let (d, rim) = (tool.diameter, body_rim(tool));
-    let surf_at = |t: f64, half: f64| {
-        let edge = (t.abs() - half).max(0.0);
-        (edge < raw).then(|| (raw * raw - edge * edge).max(0.0).sqrt())
-    };
     let mouths: Vec<CrossHole> = holes
         .iter()
         .map(|h| {
             // Axis-aligned XY plunges (the kernel refuses anything
-            // else): the plunge coordinate, its direction, and the
-            // transverse offset.
-            let (c, dc, t) = if h.dir.x.abs() >= h.dir.y.abs() {
-                (h.origin.x, h.dir.x, h.origin.y)
-            } else {
-                (h.origin.y, h.dir.y, h.origin.x)
-            };
+            // else): the plunge coordinate and its direction.
+            let (c, dc) = if h.dir.x.abs() >= h.dir.y.abs() { (h.origin.x, h.dir.x) } else { (h.origin.y, h.dir.y) };
             if c * dc > 0.0 {
                 return Err(GenError::Invalid(format!(
                     "cross hole at ({:.3}, {:.3}, {:.3}) plunges away from the spindle - a cross \
@@ -124,7 +146,8 @@ pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, tool: &Tool) -> Resul
                     h.origin.x, h.origin.y, h.origin.z
                 )));
             }
-            let shift = surf_at(t, 0.5 * d).unwrap_or(0.0) - c.abs();
+            let line = hole_line(h.origin, h.dir);
+            let shift = entry(&st.mesh, raw, line, 0.5 * d).unwrap_or(0.0) - c.abs();
             if !(shift.is_finite() && shift > 0.0) {
                 return Ok(*h);
             }
@@ -144,12 +167,27 @@ pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, tool: &Tool) -> Resul
     let extra = mouths
         .iter()
         .map(|m| {
-            let (c, t) = if m.dir.x.abs() >= m.dir.y.abs() { (m.origin.x, m.origin.y) } else { (m.origin.y, m.origin.x) };
-            let added = surf_at(t, rim).map_or(0.0, |s| s - c.abs());
+            let line = hole_line(m.origin, m.dir);
+            let added = entry(&st.mesh, raw, line, rim).map_or(0.0, |s| s - line.u(m.origin).abs());
             if added.is_finite() { added.max(0.0) } else { 0.0 }
         })
         .collect();
     Ok((mouths, extra))
+}
+
+/// The hole line a rapid along the pose `axis` (tip toward shank, so
+/// outward) through `p` rides, when that axis is XY axis-aligned - the
+/// only radial pose the kernel emits. `None` for anything else.
+fn pose_line(p: Point3, axis: [f64; 3]) -> Option<Line> {
+    let [x, y, z] = axis;
+    let aligned = |a: f64, b: f64| a.abs() > 1e-9 && b.abs() <= 1e-9 && z.abs() <= 1e-9;
+    if aligned(x, y) {
+        Some(Line { a: 0, out: x.signum(), t: p.y, z: p.z })
+    } else if aligned(y, x) {
+        Some(Line { a: 1, out: y.signum(), t: p.x, z: p.z })
+    } else {
+        None
+    }
 }
 
 fn approach(a: Point3, b: Point3) -> f64 {
@@ -219,6 +257,28 @@ pub(super) fn rapids_clear(t: &Toolpath, st: &Standoff, tool: &Tool) -> Result<(
         }
         let (got, need, what) = if on_line(m.to, m.from, axis) {
             let Some(raw) = st.raw else { continue };
+            if let Some(line) = pose_line(m.from, axis) {
+                // Issue #85: along a hole's own line the body must stand
+                // outside where it first meets the stock on that line -
+                // the face of a box, not its corner radius.
+                let tip = line.u(m.from).min(line.u(m.to));
+                let mut short = entry(&st.mesh, raw, line, 0.5 * d).map(|e| (tip, e));
+                if tool.shank_d.is_finite() && tool.shank_d > d && tool.flute_len.is_finite() {
+                    let fl = tool.flute_len.max(0.0);
+                    let s = entry(&st.mesh, raw, line, 0.5 * tool.shank_d).map(|e| (tip + fl, e));
+                    short = match (short, s) {
+                        (Some(a), Some(b)) => Some(if b.1 - b.0 > a.1 - a.0 { b } else { a }),
+                        (a, b) => a.or(b),
+                    };
+                }
+                let Some((got, need)) = short else { continue };
+                if got.is_nan() || got < need - tol {
+                    return Err(GenError::Invalid(format!(
+                        "cross-drill rapid {i} stops {got:.3} mm out along its hole's line, inside where                          the tool body meets the stock ({need:.3} mm) - a rapid through material; raise the                          clearance or retract height, or turn the bar to size first"
+                    )));
+                }
+                continue;
+            }
             let mut got = slab_approach(m.from, m.to, axis, 0.5 * d);
             if tool.shank_d.is_finite() && tool.shank_d > d && tool.flute_len.is_finite() {
                 let fl = tool.flute_len.max(0.0);
