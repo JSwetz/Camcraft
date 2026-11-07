@@ -72,13 +72,28 @@ pub(super) fn judge_axial_rapids(
     if params.kind().info().section != Section::Turning {
         return;
     }
+    let Ok(frame) = Frame::about(cx.part) else { return };
+    let sm = SignedMeridian::of(&frame, path);
+    // Judged here (#103): every AXIAL rapid, which the column cannot
+    // see; and a rapid across radii in the turning plane that the
+    // column convicted, re-read - the column's footprint disc of the
+    // tool's radius about the nose (#106) is a mill's reading, and a
+    // lathe's radial retract along its own kerf is not a disc's dive.
+    // The meridian may acquit those; it adds no conviction the column
+    // did not make on them. A rapid off the meridian keeps the column's
+    // word.
+    let column: Vec<usize> = warns.iter().filter_map(|w| match *w {
+        Warning::RapidInStock { at } => Some(at),
+        _ => None,
+    }).collect();
     let axial = |at: usize| {
         path.moves.get(at).is_some_and(|m| {
             let (dx, dy) = (m.to.x - m.from.x, m.to.y - m.from.y);
-            m.kind == MoveKind::Rapid && dx * dx + dy * dy <= cx.z_tol * cx.z_tol
+            let along = dx * dx + dy * dy <= cx.z_tol * cx.z_tol;
+            let planar = sm.in_plane(m.from, cx.z_tol) && sm.in_plane(m.to, cx.z_tol);
+            m.kind == MoveKind::Rapid && (along || (planar && column.contains(&at)))
         })
     };
-    let Ok(frame) = Frame::about(cx.part) else { return };
     let Some(part) = Revolved::of(cx.part, &frame) else { return };
     let stock = match cx.stock {
         Some(s) => match Revolved::of(s, &frame) {
@@ -88,7 +103,6 @@ pub(super) fn judge_axial_rapids(
         None => None,
     };
     warns.retain(|w| !matches!(*w, Warning::RapidInStock { at } if axial(at)));
-    let sm = SignedMeridian::of(&frame, path);
     let mut cap: Option<Option<f64>> = None; // the faced end, read once
     for (i, m) in path.moves.iter().enumerate() {
         if !axial(i) {
@@ -135,7 +149,20 @@ impl SignedMeridian {
             .map(|m| off(m.from))
             .find(|w| w.dot(*w) > 1e-12)
             .unwrap_or_else(|| f.point(1.0, 0.0) - origin);
+        let n = radial.dot(radial).sqrt();
+        let radial = if n > 0.0 && n.is_finite() { Point3::new(radial.x / n, radial.y / n, radial.z / n) } else { f.point(1.0, 0.0) - origin };
         Self { origin, dir, radial }
+    }
+
+    /// Does `q` stand in the path's own meridian half planes (either
+    /// side of the axis), within `tol`?
+    fn in_plane(&self, q: Point3, tol: f64) -> bool {
+        let d = q - self.origin;
+        let s = d.dot(self.dir);
+        let w = Point3::new(d.x - self.dir.x * s, d.y - self.dir.y * s, d.z - self.dir.z * s);
+        let r = w.dot(self.radial);
+        let off = Point3::new(w.x - self.radial.x * r, w.y - self.radial.y * r, w.z - self.radial.z * r);
+        off.dot(off).sqrt() <= tol.max(1e-9) * (1.0 + r.abs())
     }
 
     fn sr(&self, q: Point3) -> (f64, f64) {
@@ -220,7 +247,14 @@ fn enters(
     let solid = |s: f64, rho: f64| {
         let r = rho.abs();
         let reach = rn + cx.margin;
-        if feeds.iter().any(|&(p, q)| seg_dist((s, rho), p, q) <= reach || seg_dist((s, -rho), p, q) <= reach) {
+        // A blade's feed sweeps its whole band along the axis, not its
+        // centre's point: the kerf is the segment widened by the band.
+        let kerf = |p: (f64, f64), q: (f64, f64)| {
+            spread(band).chain(std::iter::once(0.0)).any(|u| {
+                seg_dist((s + u, rho), p, q) <= reach || seg_dist((s + u, -rho), p, q) <= reach
+            })
+        };
+        if feeds.iter().any(|&(p, q)| kerf(p, q)) {
             return false; // this path's own kerf
         }
         if pilots.iter().any(|p| p.removed(s, r)) {
@@ -231,6 +265,29 @@ fn enters(
         part.solid(s, r, cx.margin)
             || (cap.is_none_or(|c| s < c - cx.margin) && stock.is_some_and(|o| o.solid(s, r, cx.margin)))
     };
+    if (a.1 - b.1).abs() > cx.z_tol {
+        // A rapid across radii (a radial retract, a lead): its own
+        // samples carry the nose and band, and the bar's head and shank
+        // up the axis from each - the pieces above are the axial
+        // shortcut of the same sweep.
+        let len = (b.0 - a.0).hypot(b.1 - a.1);
+        let n = (len / (rn * 0.5).max(0.05).max(len / MAX_SAMPLES)).ceil().max(1.0) as usize;
+        let up: Vec<(f64, Vec<(f64, f64)>)> = pieces.iter().skip(1).map(|(p0, p1, offs)| (p1 - p0 - (s_hi - s_lo), offs.clone())).collect();
+        let starts = [0.0, pieces.get(1).map_or(0.0, |p| p.1 - p.0 - (s_hi - s_lo))];
+        return (0..=n).any(|k| {
+            let t = k as f64 / n as f64;
+            let (s, rho) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            let flip = if (rho < 0.0) == (toward < 0.0) { 1.0 } else { -1.0 };
+            pieces[0].2.iter().any(|&(ds, dr)| solid(s + ds, rho + dr))
+                || up.iter().zip(starts).any(|((h, offs), h0)| {
+                    let m = (h / 0.5).ceil().max(1.0) as usize;
+                    (0..=m).any(|j| {
+                        let hs = s + h0 + h * j as f64 / m as f64;
+                        offs.iter().any(|&(_, dr)| solid(hs, rho + flip * dr))
+                    })
+                })
+        });
+    }
     pieces.iter().any(|(p0, p1, offs)| {
         let len = p1 - p0;
         let step = (rn * 0.5).max(0.05).max(len / MAX_SAMPLES);

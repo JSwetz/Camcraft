@@ -142,13 +142,13 @@ fn bore_world() -> (World, History) {
     add_tool(&world, &mut history, "TN-1600-0R8");
     add_tool(&world, &mut history, "EM-0400-2FL");
     // The pilots' long-series drills: 70 mm of flute for the 62 mm
-    // hole - a Ø11 that clears the bar's Ø10 body (#103 review B1), and
+    // hole - a Ø11.2 that clears the bar's Ø10 body (#103 review B1), and
     // a Ø4 it cannot pass.
     let mut long = catalog_tool("DR-0400");
     long.flute_len = 70.0;
     history.execute(&world, AddTool::new(&world, "DR-0400-L", long.clone()).expect("a sane drill"));
-    long.diameter = 11.0;
-    long.shank_d = 11.0;
+    long.diameter = 11.2;
+    long.shank_d = 11.2;
     history.execute(&world, AddTool::new(&world, "DR-1100-L", long).expect("a sane drill"));
     history.execute(&world, ImportModel::from_mesh("bar", bored()));
     history.execute(&world, ImportModel::from_mesh("wall", wall()));
@@ -180,13 +180,13 @@ fn create(world: &World, history: &mut History, name: &str, params: OpParams) {
 }
 
 /// The pilot a boring bar needs (#103): an axial drill ahead (AX0 -
-/// program order reads names, so it sorts ahead of BR1 and ST), Ø11
+/// program order reads names, so it sorts ahead of BR1 and ST), Ø11.2
 /// down the bar's axis from its top to Z -16 - its point clear under the ride's -10
 /// window, over the model's -20 floor, wide enough for the bar's Ø10
 /// body. The bar stock is solid; the bar's approach runs down this
 /// hole, and the rapid law credits it.
 fn pilot(world: &World, history: &mut History) {
-    pilot_of(world, history, "DR-1100-L", 5.55);
+    pilot_of(world, history, "DR-1100-L", 5.65);
 }
 
 fn pilot_of(world: &World, history: &mut History, drill: &str, radius: f64) {

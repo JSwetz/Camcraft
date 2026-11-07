@@ -13392,3 +13392,40 @@ revolved (follow-up material if users hit it with long keyways).
   them. Dropped: an exact disc-versus-polygon minimum of the lifted
   surface (needs a lifted-tool / stock-edge distance per wall segment;
   the ring bound d / 8 plus the chord bulge is stated instead).
+
+### #103 after merging #106 (rapid footprint): the facing approach and the lathe's radial rapids
+
+- **Verdict on facing.nc's new 1/5/9/13/17 (inward `G00 X14.6 -> X11.6`
+  at each face depth): REAL.** The fixture's declared stock was a 40 mm
+  box from Z 0 to 40, never faced (the Facing kind faces the model,
+  #130). A rapid at Z 16.8..14.8 runs inside it, and below the previous
+  pass's floor the nose ball meets uncut material between r 5 and 6 of
+  any bar wider than the neck. The kernel rapided from rho_clear to the
+  model's reach at the cut depth. The model is air there; the stock is
+  not. **Fixed in the kernel** (`motion::turning::face`): that move is
+  now a feed. Rapids stay outside the work; the approach feeds in. The
+  fixture also moves to bar-sized stock (`bar_world`, like the other
+  lathe goldens).
+- **Main's 11/15/19 (outward `G00 X0 -> X14.6` after each pass): FALSE.**
+  The column's footprint law (#106) reads the turning insert as a
+  vertical-axis disc of the tool's radius about the nose. A lathe pass's
+  radial retract back along the plane it just cut is in its own kerf in
+  the meridian. The same misreading convicted turning_bore's off-wall
+  rapid and turning_contour's chamfer retract after the merge. **Rule:**
+  for the turned family the meridian law judges every axial rapid, and
+  RE-READS any in-plane radial rapid the column convicted. It may
+  acquit; it adds no conviction on radial rapids the column did not
+  make. Generalising it to judge every radial rapid was tried and
+  dropped: it convicts a finish pass's retract across the rough's
+  uncut-by-credit band, because the lathe prior credits facing only
+  (review N5, #130).
+- **Blade kerf:** a groove or part feed's own kerf is credited across
+  its band, not at its centre point.
+- **turning_bore pilot is now Ø11.2.** The meridian re-read of the
+  off-wall rapid found the bar's head 20 mm above the nose standing at
+  r 5.54 in the r 5.5..6 band the ride never cut (above the window
+  top). It is a real 0.04 mm overlap, already there during the ride's
+  feed (#146).
+- **Golden:** facing.nc. The only diff is the five inward moves going
+  G00 to G01 F0.05, and main's three false warnings removed. No other
+  golden changed.

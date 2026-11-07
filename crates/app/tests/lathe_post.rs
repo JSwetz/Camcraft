@@ -94,11 +94,6 @@ fn lathe() -> Machine {
     }
 }
 
-/// Bar in box stock, the lathe mounted, the named tools on the rack.
-fn lathe_world(bar: Mesh, stock: (f64, f64, f64), tools: &[&str]) -> (World, History) {
-    lathe_world_at(bar, stock, Location::default(), tools)
-}
-
 /// The bar in stock of its own size (#103): a cylinder of the
 /// meridian's widest diameter over its Z span - the turning kernels
 /// never cut stock beyond the part (#130), so a wider blank is a real
@@ -121,7 +116,8 @@ fn bar_world(meridian: &[(f64, f64)], tools: &[&str]) -> (World, History) {
     (world, history)
 }
 
-/// [`lathe_world`] with the stock box's base at `at`.
+/// Bar in box stock with the box's base at `at`, the lathe mounted, the
+/// named tools on the rack.
 fn lathe_world_at(bar: Mesh, stock: (f64, f64, f64), at: Location, tools: &[&str]) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
@@ -180,8 +176,8 @@ fn program_of(world: &World) -> String {
 #[test]
 fn facing_posts_to_the_lathe_golden() {
     // The stage-A bar: wall r6 to z 2, neck r5 to the top, z -16..16.
-    let bar = revolve(&[(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)], 16);
-    let (world, mut history) = lathe_world(bar, (40.0, 40.0, 40.0), &["TN-1600-0R8"]);
+    let bar = [(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)];
+    let (world, mut history) = bar_world(&bar, &["TN-1600-0R8"]);
     let params = OpParams::Facing {
         tolerance: 0.05,
         clearance_z: Height::fixed(25.0),
