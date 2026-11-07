@@ -52,6 +52,11 @@ step() {
         fails=$(awk '/^ +Running /{cur=$2} /^test result: FAILED/{printf "%s ", cur}' "$log")
         if [ -n "$fails" ]; then note="failed: $fails"; elif [ $code -ne 0 ]; then note="exit $code"; fi
     fi
+    # A filtered run that matched no test is not a pass (REQUIRE_TESTS=1 in test mode).
+    if [ $code -eq 0 ] && [ -n "${REQUIRE_TESTS:-}" ]; then
+        ran=$(awk '/^test result:/{for(i=1;i<=NF;i++) if($i ~ /^(passed|failed);?$/) n+=$(i-1)} END{print n+0}' "$log")
+        if [ "$ran" -eq 0 ]; then code=1; note="no test ran - filter matched nothing"; fi
+    fi
     if [ $code -eq 0 ]; then st=ok; else st=FAIL; BAD=$((BAD + 1)); fi
     printf '     %s in %ss %s\n' "$st" "$secs" "$note"
     SUMMARY="$SUMMARY$(printf '  %-4s %5ss  %s  %s' "$st" "$secs" "$name" "$note")\n"
@@ -59,7 +64,7 @@ step() {
 
 summary() {
     printf '\n== gate summary (%s) - logs in %s\n' "$TIER" "$LOG_DIR"
-    printf "$SUMMARY"
+    printf '%b' "$SUMMARY"
     printf '  wall %s s, %s step(s), %s failed\n' "$(( $(date +%s) - START ))" "$N" "$BAD"
     [ $BAD -eq 0 ] && exit 0 || exit 1
 }
@@ -92,17 +97,32 @@ case "$TIER" in
 test)
     filter="${1:-}"; [ -z "$filter" ] && { echo "usage: gate.sh test <filter> [crate] [--exact] [--ignored]"; exit 2; }
     shift
+    case "$filter" in *[!A-Za-z0-9_]*) echo "test filter must be a fn name (letters, digits, _): '$filter'"; exit 2 ;; esac
+    REQUIRE_TESTS=1
     crates="$ALL_CRATES"; exact=""; ign=""
     for a in "$@"; do
         case "$a" in --exact) exact=--exact ;; --ignored) ign=1 ;; *) crates="${a#camcraft-}" ;; esac
     done
     for d in $crates; do
         # Only crates that hold a matching #[test] fn name are built and run.
-        grep -rqsE "fn +$( [ -n "$exact" ] && echo "$filter" || echo "[A-Za-z0-9_]*$filter[A-Za-z0-9_]*" ) *[(<]" "$ROOT/crates/$d/src" "$ROOT/crates/$d/tests" || continue
-        if [ -n "$ign" ]; then
-            step "$d $filter (ignored, release)" "$(cwd_of "$d")" test --release -j $J -p "camcraft-$d" -- $T --ignored $exact "$filter"
+        pat="fn +$( [ -n "$exact" ] && echo "$filter" || echo "[A-Za-z0-9_]*$filter[A-Za-z0-9_]*" ) *[(<]"
+        in_src=""; in_tests=""
+        grep -rqsE "$pat" "$ROOT/crates/$d/src" && in_src=1
+        grep -rqsE "$pat" "$ROOT/crates/$d/tests" && in_tests=1
+        [ -z "$in_src$in_tests" ] && continue
+        rel=""; tag=""; [ -n "$ign" ] && { rel=--release; tag=" (ignored, release)"; }
+        if [ -z "$exact" ]; then
+            step "$d $filter$tag" "$(cwd_of "$d")" test $rel -j $J -p "camcraft-$d" -- $T ${ign:+--ignored} "$filter"
         else
-            step "$d $filter" "$(cwd_of "$d")" test -j $J -p "camcraft-$d" -- $T $exact "$filter"
+            # Integration-test fns are top-level, so --exact matches them; lib unit tests are
+            # named module::tests::fn, so --exact <fn> never matches - they take "::<fn>" instead.
+            [ -n "$in_tests" ] && step "$d $filter (tests, exact)$tag" "$(cwd_of "$d")" test $rel -j $J -p "camcraft-$d" --tests -- $T ${ign:+--ignored} --exact "$filter"
+            if [ -n "$in_src" ]; then
+                # Resolve the full lib test path(s) ending in ::<fn>, then run them --exact.
+                names=$(cd "$(cwd_of "$d")" && cargo test $rel -q -j $J -p "camcraft-$d" --lib -- ${ign:+--ignored} --list --format terse 2>/dev/null \
+                    | sed -n "s/^\(\(.*::\)\{0,1\}$filter\): test\$/\1/p")
+                [ -n "$names" ] && step "$d $filter (lib, exact)$tag" "$(cwd_of "$d")" test $rel -j $J -p "camcraft-$d" --lib -- $T ${ign:+--ignored} --exact $names
+            fi
         fi
     done
     [ $N -eq 0 ] && { echo "no #[test] fn matches '$filter'"; exit 1; }

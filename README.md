@@ -165,7 +165,10 @@ version.
   `scripts/gate.sh batch`, `scripts/gate.sh release` and
   `scripts/gate.sh test <name> [crate] [--exact] [--ignored]`. Its quick
   tier is coarser than the PowerShell one: it runs every suite of each
-  crate the diff touches, rather than only the changed test functions.
+  crate the diff touches (slow suites included), rather than only the
+  changed test functions. For the finer quick tier on macOS or Linux,
+  `gate.ps1` also runs under PowerShell 7: `pwsh scripts/gate.ps1 -Tier
+  quick` (`brew install --cask powershell` on macOS).
 - Project agents and skills for Claude Code live in `.claude/agents/` and
   `.claude/skills/` (gate runner, graph updater, PR reviewer).
 
