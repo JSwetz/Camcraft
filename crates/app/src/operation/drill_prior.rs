@@ -52,7 +52,11 @@ pub(super) struct PriorRead<'a> {
 }
 
 impl PriorRead<'_> {
+    /// The disk is padded by half a cell's diagonal (review nit): a
+    /// cell whose centre falls just outside `r` can still hold
+    /// material inside it.
     pub(super) fn surface(&self, q: Point2, r: f64) -> Option<f64> {
+        let r = r + self.dex.cell.abs() * std::f64::consts::FRAC_1_SQRT_2;
         if self.revolved { revolved_surface(self.dex, q, r) } else { crate::verify::prior_surface(self.dex, q, r) }
     }
 }
@@ -69,7 +73,11 @@ fn revolved_surface(dex: &Dexel, c: Point2, r: f64) -> Option<f64> {
         return None;
     }
     let step = dex.cell * 0.5;
-    let n = (r / step).ceil().clamp(0.0, 1.0e5) as usize;
+    let n = (r / step).ceil();
+    if !n.is_finite() || n > 1.0e5 {
+        return None; // too many rings to read: unknown, never a clamped short read
+    }
+    let n = n as usize;
     let mut top: Option<f64> = None;
     for i in 0..=n {
         let rho = (i as f64 * step).min(r);

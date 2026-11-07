@@ -75,10 +75,14 @@ pub struct PriorState {
 /// on it), and the cached moves themselves when it has cut anything.
 struct Ahead {
     name: String,
+    /// The operation's kind: on a lathe only the Facing kind is read
+    /// ([`prior_plan`], #89 review).
+    kind: crate::operation::OpType,
     path: u64,
     radius: f64,
     ball: bool,
-    /// Cot of the half-angle, Some only for a chamfer mill (M2.4 B):
+    /// Cot of the half-angle, Some for a chamfer mill (M2.4 B) and a
+    /// twist drill's point (#89 review: a pilot's cone stands):
     /// the rest grid must sweep the same cone the program sim does, or
     /// a predecessor's chamfer would evaporate a full disc of
     /// material that is really still standing.
@@ -176,6 +180,7 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
         let cut = !moves.is_empty();
         out.push(Ahead {
             name: n.clone(),
+            kind: op.params.kind(),
             path: if cut { path_hash(&moves) } else { 0 },
             radius: tool.as_ref().map_or(0.0, |t| t.diameter * 0.5),
             ball: tool
@@ -183,7 +188,7 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
                 .is_some_and(|t| t.kind == crate::tools::ToolKind::BallNose),
             cone: tool
                 .as_ref()
-                .filter(|t| t.kind == crate::tools::ToolKind::Taper)
+                .filter(|t| matches!(t.kind, crate::tools::ToolKind::Taper | crate::tools::ToolKind::Drill))
                 .map(|t| (t.tip_angle.to_radians() * 0.5).tan())
                 .filter(|x| x.is_finite() && *x > 0.0)
                 .map(|x| 1.0 / x),
@@ -234,6 +239,11 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
             if let Some(c) = a.corner {
                 h.write_u8(2);
                 h.write(&c.to_bits().to_le_bytes());
+            }
+            // The insert's nose is atom too (#89 review).
+            if let Some(n) = a.nose {
+                h.write_u8(3);
+                h.write(&n.to_bits().to_le_bytes());
             }
         } else {
             h.write_u8(0);
@@ -332,6 +342,9 @@ impl PriorPlan {
                 Some(n) => a
                     .moves
                     .iter()
+                    // A vertical-plane arc's centre moves with its ends:
+                    // lowering only the ends would bend it (review nit).
+                    .filter(|m| m.arc.as_ref().is_none_or(|a| a.plane.is_xy()))
                     .map(|m| {
                         let mut m = *m;
                         m.from.z -= n;
@@ -364,6 +377,16 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     let ahead: Vec<Ahead> = ahead_of(world, name, setup).into_iter().filter(|a| a.cut).collect();
     if ahead.is_empty() {
         return Ok(None);
+    }
+    // #89 review (B1/B2): on a lathe the column grid credits a turning
+    // move under standing material (a parting kerf, an ID groove behind
+    // a lip) with everything above it, and a bar or blade cut as a full
+    // disc would be revolved round the bar. Only the Facing kind, cut
+    // with its nose, never undercuts: any other kind ahead is unknown.
+    if crate::machine::kind_of(world) == crate::machine::Kind::Lathe
+        && let Some(a) = ahead.iter().find(|a| a.kind != crate::operation::OpType::Facing || a.nose.is_none())
+    {
+        return Err(format!("operation '{}' ahead is not a facing pass - a lathe's prior reads only those", a.name));
     }
     let min_r = ahead.iter().map(|a| a.nose.unwrap_or(a.radius)).filter(|r| *r > 0.0).fold(tool_r, f64::min);
     let grid = stock_sim::stock_grid(world, setup, min_r)?;

@@ -233,9 +233,9 @@ pub fn current_stamp(
     // Issue #77: a cross drill stands off the setup's RAW stock as well
     // as its part, so the stock it read is an input - a bar re-sized
     // after generation must stale the op, never post the old hops.
-    // Only that kind writes the term: every other stamp keeps its bits.
-    if let OpParams::Drill { cross, .. } = params
-        && !cross.is_empty()
+    // #89 review: an axial drill's reach, R-plane and holder laws read
+    // the stock too, so every Drill writes it; other stamps keep their bits.
+    if matches!(params, OpParams::Drill { .. })
         && !matches!(src, SrcRef::Stock)
     {
         h.write_u8(b'X');

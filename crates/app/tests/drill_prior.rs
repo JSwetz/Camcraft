@@ -312,7 +312,7 @@ fn lathe_world() -> (World, History) {
         ..Default::default()
     };
     h.execute(&world, LoadMachine::new(&world, "lathe.mch".into(), Some(lathe)).expect("lathe"));
-    for t in ["DR-0400", "TN-1600-0R8"] {
+    for t in ["DR-0400", "TN-1600-0R8", "GT-0300"] {
         add_tool(&world, &mut h, t);
     }
     let bar = revolve(&[(0.0, -20.0), (10.0, -20.0), (10.0, 22.0), (2.05, 22.0), (2.05, 10.0), (0.0, 10.0)], 64);
@@ -353,5 +353,43 @@ fn a_lathe_axial_drill_before_facing_is_refused() {
     let (world, mut h) = lathe_world();
     create(&world, &mut h, "Op2", "DR-0400", "bar", drill(TOP, 10.0, TOP + 1.0));
     let e = generate(&world, &mut h, "Op2").err().unwrap_or_else(|| panic!("R under the facing allowance generated"));
+    assert!(e.contains("below the stock top Z 22.000"), "{e}");
+}
+
+/// Review fix 3: R 0.1 under the faced end must refuse - a model that
+/// over-cut the end by a nose radius would wave it through.
+#[test]
+fn a_lathe_axial_drill_with_r_just_under_the_faced_end_is_refused() {
+    let (world, mut h) = lathe_world();
+    create(&world, &mut h, "Op1", "TN-1600-0R8", "bar", facing());
+    generate(&world, &mut h, "Op1").expect("the facing generates");
+    create(&world, &mut h, "Op2", "DR-0400", "bar", drill(TOP, 10.0, TOP - 0.1));
+    let e = generate(&world, &mut h, "Op2").err().unwrap_or_else(|| panic!("R under the faced end generated"));
+    assert!(e.contains("R plane Z 19.900"), "{e}");
+}
+
+/// Review fix B1/B2: a parting kerf to the axis does not clear the end
+/// face above it - on a lathe only the Facing kind is credited.
+#[test]
+fn a_parting_op_ahead_does_not_credit_the_lathe_end_face() {
+    let (world, mut h) = lathe_world();
+    let part = OpParams::Part {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(30.0),
+        top_z: Height::fixed(22.0),
+        bottom_z: Height::fixed(0.0),
+        stepdown: 0.5,
+        feed: 150.0,
+        plunge_feed: 60.0,
+        bar_load: false,
+        bar_advance: 0.0,
+        bar_unload: false,
+        bar_transfer: false,
+        inspect_tol: 0.0,
+    };
+    create(&world, &mut h, "Op1", "GT-0300", "bar", part);
+    generate(&world, &mut h, "Op1").expect("the parting generates");
+    create(&world, &mut h, "Op2", "DR-0400", "bar", drill(TOP, 10.0, TOP + 1.0));
+    let e = generate(&world, &mut h, "Op2").err().unwrap_or_else(|| panic!("the kerf credited the end face"));
     assert!(e.contains("below the stock top Z 22.000"), "{e}");
 }

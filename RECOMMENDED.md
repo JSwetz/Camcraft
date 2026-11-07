@@ -13165,3 +13165,20 @@ revolved (follow-up material if users hit it with long keyways).
   above it ("nothing to face" when the part top is the finished end),
   so a bar's facing allowance in the stock cannot be faced off yet -
   the lathe test models the allowance on the bar.
+- **Review fixes (PR #123):** (B1/B2) on a lathe the prior plan credits
+  ONLY the Facing kind cut with its nose ball - a boring bar, groove or
+  parting blade was cut as a full-diameter disc on the y = 0 strip and
+  revolved round the bar, and the column grid credits a turning move
+  under standing material (a kerf to the axis) with everything above it
+  (the same reason `LATHE_COLUMN_REFUSAL` refuses the column arm); any
+  other kind ahead makes the prior unknown, so the raw stock stands.
+  Dropped: a meridian (revolved field) prior - the right model, but the
+  drill laws read a height; that is #109-sized. A twist-drill
+  predecessor is now cut with its point cone (`cone` for Drill as for
+  Taper), so a pilot's 118 deg point is not read as a flat floor; the
+  nose radius joins the digest; every Drill (not only cross drills)
+  stamps the stock it read; `cut_by` keeps a NaN raw height NaN; the
+  prior reading pads its disk by half a cell diagonal, refuses (not
+  clamps) a ring count past 1e5, and drops vertical-plane arcs from the
+  nose-lowered path (lowering only the ends would bend them) - dropping a
+  cut credits less, never more.

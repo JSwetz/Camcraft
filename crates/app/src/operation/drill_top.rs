@@ -43,6 +43,9 @@ pub(super) fn top_over(
 /// unknown prior is the raw stock, never air.
 pub(super) fn cut_by(z: Option<f64>, prior: Option<f64>) -> Option<f64> {
     match (z, prior.filter(|p| !p.is_nan())) {
+        // `NaN.min(p)` is `p`: a non-finite raw height stays NaN so the
+        // laws refuse it (#89 review).
+        (Some(z), _) if z.is_nan() => Some(z),
         (Some(z), Some(p)) => Some(z.min(p)),
         (z, _) => z,
     }
