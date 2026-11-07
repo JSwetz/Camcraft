@@ -1,10 +1,11 @@
 //! Law (b), the section/tangency gouge law d(center, boundary) >= r - leave - tol, and the wiring of the solid law (b2) it shares a domain with - the shop practice of holding the cutter radius to the finish wall (machine-tool handbooks) on our own section model (split from `engine.rs` by M13.7; structure only).
 
-use super::laws::{dist2_seg, law_points};
+use super::laws::{dist2_segs, law_points};
 use super::rest::Rest;
 use super::types::{Mode, VerifyContext, Warning};
 
-use crate::cl::{MoveKind, Toolpath};
+use crate::cl::{Move, MoveKind, Toolpath};
+use crate::geo2d::Point2;
 
 /// Sample spacing of the solid law (b2) along each move, mm - the
 /// operation layer's containment step.
@@ -41,7 +42,8 @@ pub(super) fn judged(mode: Mode) -> bool {
 }
 
 /// (b) Gouge: tangency law d(center, boundary) >= r - leave - tol,
-/// held at every law point of the move (see law_points). For a
+/// held at what [`segments`] reads of the move (in `Mode::Area` every
+/// chord along its whole length, else the law points). For a
 /// model-driven path the boundary is level-dependent: the region's
 /// silhouette walls plus the model's cross-section strictly above
 /// the move's deepest plane. That section is exact for a fixed-Z
@@ -76,39 +78,45 @@ pub(super) fn tangency(
             continue;
         }
         let section = section.flatten();
-        let mut gouged = false;
-        for p in law_points(m, chord_tol) {
-            let mut d2 = f64::INFINITY;
-            for l in cx.region.loops() {
-                let pts = l.points();
-                for k in 0..pts.len() {
-                    d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
-                }
-            }
-            if let Some(s) = &section {
-                if s.contains(p) {
-                    gouged = true;
-                    break;
-                }
-                for l in s.loops() {
-                    let pts = l.points();
-                    for k in 0..pts.len() {
-                        d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
-                    }
-                }
-            }
-            // The part is gouged below `r`, less only a NEGATIVE leave
-            // (a deliberate overcut) - b2's own allowance. A positive
-            // leave never licenses cutting into the finished wall: the
-            // old `r - leave` let a 0.5 mm leave sink 0.5 mm unconvicted.
-            if d2.sqrt() < r - (-cx.stock_to_leave).max(0.0) - cx.gouge_tol {
-                gouged = true;
-                break;
-            }
+        let chords = segments(m, cx.mode, chord_tol);
+        let mut ends = chords.first().map(|c| c.0).into_iter().chain(chords.iter().map(|c| c.1));
+        if section.as_ref().is_some_and(|s| ends.any(|p| s.contains(p))) {
+            warns.push(Warning::Gouge { at: i });
+            continue;
         }
+        // The part is gouged below `r`, less only a NEGATIVE leave (a
+        // deliberate overcut) - b2's own allowance. A positive leave
+        // never licenses cutting into the finished wall: the old
+        // `r - leave` let a 0.5 mm leave sink 0.5 mm unconvicted.
+        let floor = (r - (-cx.stock_to_leave).max(0.0) - cx.gouge_tol).max(0.0);
+        let mut loops = cx.region.loops().iter().chain(section.iter().flat_map(|s| s.loops().iter()));
+        let gouged = loops.any(|l| {
+            let pts = l.points();
+            (0..pts.len()).any(|k| {
+                let (p, q) = (pts[k], pts[(k + 1) % pts.len()]);
+                chords.iter().any(|&(a, b)| dist2_segs(a, b, p, q) < floor * floor)
+            })
+        });
         if gouged {
             warns.push(Warning::Gouge { at: i });
         }
+    }
+}
+
+/// What law (b) measures of one move. `Mode::Area` (the pocket family:
+/// every region edge is a wall or an island) reads every chord along
+/// its whole length (issue #42): a straight feed whose two ends both
+/// stand r off the part still cuts across a convex corner between them,
+/// and the reading at the move's `to` alone let a G1 chorded over a
+/// block corner sink 1.46 mm into it unconvicted. `Mode::Boundary` keeps the
+/// law points as zero-length chords: a Face's rows run across the
+/// face's open edge by design, which a whole-chord reading would
+/// convict - its verdict is unchanged.
+fn segments(m: &Move, mode: Mode, chord_tol: f64) -> Vec<(Point2, Point2)> {
+    if mode == Mode::Area {
+        m.chords(chord_tol)
+    } else {
+        law_points(m, chord_tol).into_iter().map(|p| (p, p)).collect()
     }
 }
 

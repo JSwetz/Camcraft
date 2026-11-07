@@ -24,6 +24,17 @@ pub(super) fn dist2_seg(p: Point2, a: Point2, b: Point2) -> f64 {
     ex * ex + ey * ey
 }
 
+/// Squared XY distance between segments `a0`-`a1` and `b0`-`b1`: zero
+/// where they cross, else the least endpoint-to-segment distance (the
+/// closest pair of two non-crossing segments has an endpoint in it -
+/// O'Rourke, "Computational Geometry in C").
+pub(super) fn dist2_segs(a0: Point2, a1: Point2, b0: Point2, b1: Point2) -> f64 {
+    if proper_cross(a0, a1, b0, b1) {
+        return 0.0;
+    }
+    dist2_seg(a0, b0, b1).min(dist2_seg(a1, b0, b1)).min(dist2_seg(b0, a0, a1)).min(dist2_seg(b1, a0, a1))
+}
+
 pub(super) fn orient(a: Point2, b: Point2, c: Point2) -> f64 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 }

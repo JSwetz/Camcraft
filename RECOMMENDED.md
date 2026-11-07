@@ -11685,3 +11685,22 @@ model with no stock set up still read as "the volume to remove" (no
 stock means no "around"; the tilt suite pockets such models).
 Dropped: refusing every whole-model pocket (breaks that documented
 contract) and the old reading (it machined the part).
+
+## Issue #42: the gouge law reads Area-mode moves along their whole length (2026-11-07)
+
+The reported 0.30 mm "gouge" at the block corner was the pinning test
+sampling a true G2 (R 5.000 about the corner) along its chord. The
+generator was right, and the test now samples arcs on the arc. The real
+hole was in the verifier: law (b) read a straight move only at its
+`to`, so a G1 chorded across a convex corner with both ends R off the
+part passed (1.46 mm in for the arc's chord, 0.30 mm in for a tangent
+G1). Chosen: in `Mode::Area` (the pocket family, where every region
+edge is a wall or an island), every chord is measured against every
+boundary edge by segment-to-segment distance. Kept: `Mode::Boundary`
+(Face, Contour, Thread, Drill, Bore) on the old law points, because a
+Face's rows cross the face's open edge by design and the whole-chord
+reading convicted them (two area_controls tests). Dropped: the
+whole-chord law for every mode, and point sampling along the move
+(a step size only shrinks the miss, it never closes it). Owed: a
+Contour G1 cut across a convex corner of its own wall is still read at
+its endpoint only; that needs open-edge awareness and has its own issue.

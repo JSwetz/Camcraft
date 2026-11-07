@@ -67,11 +67,17 @@ fn clears_around_the_part(kind: OpParams, label: &str, clear: f64) {
     for m in path.moves.iter().filter(|m| m.kind == MoveKind::Feed) {
         for k in 0..=16 {
             let t = f64::from(k) / 16.0;
-            let q = Point3::new(
-                m.from.x + (m.to.x - m.from.x) * t,
-                m.from.y + (m.to.y - m.from.y) * t,
-                m.from.z + (m.to.z - m.from.z) * t,
-            );
+            // An arc is sampled on the arc (issue #42: its chord is not
+            // where the tool goes - a G2 about the corner at R reads its
+            // chord 0.30 inside R).
+            let q = match m.arc.and_then(|a| a.point_at(m.from, m.to, t)) {
+                Some(q) => q,
+                None => Point3::new(
+                    m.from.x + (m.to.x - m.from.x) * t,
+                    m.from.y + (m.to.y - m.from.y) * t,
+                    m.from.z + (m.to.z - m.from.z) * t,
+                ),
+            };
             if q.z >= 20.0 - EPS {
                 continue;
             }
@@ -113,12 +119,10 @@ fn a_whole_part_adaptive_clears_the_stock_around_the_part_never_its_section() {
     clears_around_the_part(adaptive(), "2D Adaptive", 0.0);
 }
 
-/// The full disc law under 2D Adaptive - found by this suite, owed by the
-/// HSM plan, not by the region: a feed rounds the block's outer corner
-/// 0.30 mm inside the tool radius (centre 4.70 from the corner, R 5) while
-/// verify reports clean.
+/// The full disc law under 2D Adaptive (issue #42): every feed keeps R
+/// off the part, the block's outer corner rounded by a true G2 about it
+/// at R - read on the arc, not on its chord.
 #[test]
-#[ignore = "owed: 2D Adaptive HSM plan chords an island's convex corner 0.3 mm inside R (issue #12 follow-up)"]
 fn a_whole_part_adaptive_keeps_the_full_tool_radius_off_the_part() {
     clears_around_the_part(adaptive(), "2D Adaptive", R - CHORD);
 }
@@ -129,4 +133,70 @@ fn a_whole_part_pocket_whose_part_fills_the_stock_is_refused_by_name() {
     let o = op(SrcRef::Entity("part".into()), pocket(20.0, 5.0), AreaControls::default());
     let err = run(&world, &o).expect_err("a part filling the stock leaves nothing to clear");
     assert!(err.contains("clears the stock around the part"), "{err}");
+}
+
+/// The verifier's backstop for issue #42, on the same block corner: the
+/// generated path judged clean, its corner G2 at R clean, and the corner
+/// cut straight - the arc's own chord (1.46 mm in) or a G1 tangent to a
+/// 4.70 circle about the corner (0.30 mm in) - convicted at that move,
+/// though both ends of each chord stand exactly R off the part.
+#[test]
+fn a_feed_chorded_across_the_parts_corner_reads_a_gouge() {
+    use camcraft_app::cl::Move;
+    use camcraft_app::geo2d::{Loop, Point2, Region};
+    use camcraft_app::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
+    let sq = |h: f64| Loop::new(vec![Point2::new(-h, -h), Point2::new(h, -h), Point2::new(h, h), Point2::new(-h, h)]).expect("loop");
+    // The part section as an island, the stock far off: only the
+    // corner can convict.
+    let region = Region::new(vec![sq(100.0), sq(15.0)]).expect("region");
+    let tool = ToolGeom { radius: R, nose_radius: 0.0, flute_len: 40.0, shank_radius: R, shank_len: 40.0, holder_radius: 20.0, holder_len: 60.0 };
+    let cx = VerifyContext {
+        region: &region,
+        stock: None,
+        model: None,
+        tool: &tool,
+        cutter: None,
+        mode: Mode::Area,
+        stock_top_z: 20.0,
+        clearance_z: 25.0,
+        stock_to_leave: 0.0,
+        gouge_tol: 0.01,
+        z_tol: 1e-6,
+        finish_tol: None,
+        fixtures: &[],
+        spindle: None,
+    };
+    let gouges = |t: &Toolpath| -> Vec<usize> {
+        verify(t, &cx).into_iter().filter_map(|w| if let Warning::Gouge { at } = w { Some(at) } else { None }).collect()
+    };
+    let p = |x: f64, y: f64| Point3::new(x, y, 5.0);
+    let feed = |a: Point3, b: Point3| Move::new(MoveKind::Feed, a, b, Some(500.0));
+    let corner = Point2::new(-15.0, 15.0);
+    let around = |mid: Move| Toolpath::new(vec![feed(p(-20.0, 0.0), mid.from), mid, feed(mid.to, p(0.0, 20.0))]);
+    let arc = feed(p(-20.0, 15.0), p(-15.0, 20.0)).with_arc(corner, false);
+    assert_eq!(gouges(&around(arc)), Vec::<usize>::new(), "the G2 at R about the corner is the tangency law");
+    let chord = feed(p(-20.0, 15.0), p(-15.0, 20.0));
+    assert_eq!(gouges(&around(chord)), vec![1], "the arc's chord cuts 1.46 mm into the corner");
+    // y - x = 30 + 4.70 sqrt 2: tangent to the 4.70 circle, ends on the
+    // R lines past the corner.
+    let c = 4.70 * std::f64::consts::SQRT_2 - 5.0;
+    let shallow = feed(p(-20.0, 15.0 + c), p(-15.0 - c, 20.0));
+    assert_eq!(gouges(&around(shallow)), vec![1], "a 0.30 mm intrusion mid-move convicts");
+
+    // The generated path itself: clean, and with its corner G2 swapped
+    // for the straight chord, convicted at exactly that move.
+    let world = world(block_with_boss(), 50.0);
+    let o = op(SrcRef::Entity("part".into()), adaptive(), AreaControls::default());
+    let (path, _) = run(&world, &o).expect("generates");
+    assert_eq!(gouges(&path), Vec::<usize>::new(), "the generated path keeps R off the part");
+    let at = path
+        .moves
+        .iter()
+        .position(|m| m.arc.is_some_and(|a| (a.center.x - corner.x).hypot(a.center.y - corner.y) < 1e-6) && m.from.z < 10.0 - EPS)
+        .expect("the generated path rounds the block corner on a G2");
+    let mut cut = path.clone();
+    if let Some(m) = cut.moves.get_mut(at) {
+        m.arc = None;
+    }
+    assert_eq!(gouges(&cut), vec![at], "the corner chorded straight convicts at its move");
 }
