@@ -48,6 +48,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         rotary_axis,
         part_solid,
         area,
+        wcs_origin,
     } = job;
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;
@@ -1760,20 +1761,19 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     ));
                 }
                 let top = req_z(hl.top, "Top of Part Z")?;
-                let verts = || material.facets.iter().flat_map(|t| [t.a, t.b, t.c]);
-                let stock_r = verts()
-                    .map(|p| (p.x * p.x + p.y * p.y).sqrt())
-                    .fold(0.0_f64, f64::max);
-                // The bar's Z top: known, the kernel may route an
-                // opposite-station travel over the end face (M5.2
-                // G); a solid with no vertices says so honestly.
-                let stock_z_max = verts().map(|p| p.z).reduce(f64::max);
-                drilling::cross_drill(&drilling::CrossParams {
+                // Issue #67: the lathe reads its bar as turned or
+                // refuses it by name, and every standoff is measured
+                // about the spindle the post programs - world Z
+                // through the work offset - not the world origin.
+                if machine_kind == crate::machine::Kind::Lathe {
+                    super::cross_spindle::lathe_reads(&material.facets, wcs_origin)?;
+                }
+                let radial = drilling::CrossParams {
                     // The clearance/retract planes projected onto the
                     // plunge axis: their Z height above R is exactly
                     // the standoff the radial law wants (a curved
                     // face has no one plane - the kernel owns the
-                    // stock_r part).
+                    // stock_r part, measured about the spindle).
                     clearance_d: (hl.clearance - top).max(1.0),
                     r_d: (hl.clearance - top).max(1.0),
                     hop_d: hl.retract.map(|r| (r - top).max(0.0)),
@@ -1783,11 +1783,13 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     dwell: *dwell,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
-                    stock_r: stock_r.max(1.0),
-                    stock_z_max,
+                    // Both measured about the spindle by the call below.
+                    stock_r: 1.0,
+                    stock_z_max: None,
                     tool: &tool,
                     holes: cross,
-                })?
+                };
+                super::cross_spindle::cross_drill(radial, &material.facets, stock_facets.as_deref(), wcs_origin)?
             } else {
                 // M13.5 A: on a plain lathe the Drill kind is the
                 // turret's axial hole - the doors refuse by name a
