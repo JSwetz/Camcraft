@@ -140,9 +140,12 @@ pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result
         // A rotary op turns the part: its moves are chorded about the
         // fitted axis (M13.1, `stock_sim::rotary`), never cut as the
         // un-chorded posed chords they are written as.
-        let cut = match &p.rotary {
-            Some(ax) => crate::stock_sim::simulate_rotary_slice(&mut stock, &op, &p.moves, 0, ax, pose_tol).map(|_| ()),
-            None => stock.simulate_display(std::slice::from_ref(&op)),
+        // A turning op's moves revolve about its fitted spindle (#19,
+        // `stock_sim::lathe`).
+        let cut = match (&p.rotary, &p.lathe) {
+            (_, Some(l)) => stock.simulate_lathe_about(&p.moves, l.nose, &l.axis),
+            (Some(ax), None) => crate::stock_sim::simulate_rotary_slice(&mut stock, &op, &p.moves, 0, ax, pose_tol).map(|_| ()),
+            (None, None) => stock.simulate_display(std::slice::from_ref(&op)),
         };
         cut.map_err(|e| format!("the field view could not cut the program: {e}"))?;
     }

@@ -38,7 +38,7 @@ pub(crate) enum ToolKind {
     Bull { r: f64, corner: f64, flank: f64 },
     /// The turning insert's nose (M13.1 owed): the annular-sector
     /// sweep about the lathe axis, `field_cut`'s `Sweep::Lathe`.
-    Lathe { nose: f64 },
+    Lathe { nose: f64, axis: super::field_lathe::LatheAxis },
 }
 
 /// The tool's parameters, refused by name when nonsense.
@@ -90,9 +90,12 @@ pub(crate) fn tool_kind(tool: &SdfTool) -> Result<ToolKind, StockError> {
             }
             ToolKind::Bull { r: *r, corner: *corner, flank: *flank }
         }
-        SdfTool::Lathe { nose } => {
+        SdfTool::Lathe { nose, axis } => {
             length("nose radius", nose)?;
-            ToolKind::Lathe { nose: *nose }
+            // Re-stated through the gate: a hand-built axis is
+            // refused by name, never cut as a NaN spindle.
+            let axis = super::field_lathe::LatheAxis::new(axis.origin(), axis.dir())?;
+            ToolKind::Lathe { nose: *nose, axis }
         }
     })
 }

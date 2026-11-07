@@ -45,6 +45,14 @@ pub(super) struct Material {
     pub(super) bodies: Vec<std::ops::Range<usize>>,
 }
 
+/// The world facets an operation's generator stands in - exactly
+/// `material_of`'s read, for a consumer outside the generator that
+/// must re-derive what the generator derived from them (the stock
+/// sim's lathe frame, #19: the turning kernels fit their axis here).
+pub(crate) fn source_facets(world: &World, setup: Option<&str>, src: &SrcRef) -> Result<Vec<Triangle>, String> {
+    material_of(world, setup, src).map(|m| m.facets).map_err(|e| e.to_string())
+}
+
 pub(super) fn material_of(
     world: &World,
     setup: Option<&str>,

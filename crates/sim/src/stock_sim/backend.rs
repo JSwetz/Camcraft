@@ -285,6 +285,18 @@ impl Stock {
     /// plunge - and refuses by name (`LATHE_COLUMN_REFUSAL`), the
     /// honest answer the document verdict gives today.
     pub fn simulate_lathe(&mut self, moves: &[crate::cl::Move], nose: f64) -> Result<(), StockError> {
+        self.simulate_lathe_about(moves, nose, &super::LatheAxis::Z)
+    }
+
+    /// `simulate_lathe` about a stated spindle line (#19): the
+    /// document's turning kernels write their moves in the plane of
+    /// the part's fitted axis, wherever it stands.
+    pub fn simulate_lathe_about(
+        &mut self,
+        moves: &[crate::cl::Move],
+        nose: f64,
+        axis: &super::LatheAxis,
+    ) -> Result<(), StockError> {
         match self {
             Stock::Column(_) => Err(StockError::Invalid(LATHE_COLUMN_REFUSAL.into())),
             Stock::Field(f) => {
@@ -294,7 +306,7 @@ impl Stock {
                     ));
                 }
                 let chord_tol = (f.cell() * 0.25).max(1e-9);
-                let tool = SdfTool::Lathe { nose };
+                let tool = SdfTool::Lathe { nose, axis: *axis };
                 for chunk in moves.chunks(super::field_batch::BATCH_MOVES) {
                     f.subtract_batch(chunk, &tool, chord_tol)?;
                 }

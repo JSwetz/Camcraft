@@ -12155,3 +12155,43 @@ the mechanics (AGENTS.md Issue Law and "A cut goes PR review"):
 8. **Overlapping issues stack** on the open PR's branch (parent merges
    first, child retargeted to main), since fixes stay unmerged until the
    cut; an issue PR closed unmerged leaves `in-review` with a comment.
+
+## #19: the lathe lift - turning programs on the field eye, about their fitted spindle: four decisions (2026-11-07)
+
+(1) **The plan carries the nose and the fitted axis, re-fitted from the
+generator's own facets.** `plan_program` no longer refuses the Turn family:
+`stock_sim::lathe::lathe_plan` reads the op's source through
+`operation::source_facets` (exactly `material_of`'s read) and fits
+`turning::profile::Frame::about` on it - the same frame the kernels wrote the
+moves in - so the field's revolved stadium turns about the line the generator
+turned about. The sweep gained a stated axis (`LatheAxis`, new
+`field_lathe.rs`; `Stock::simulate_lathe_about`; `simulate_lathe` keeps
+`LatheAxis::Z`), and a chord's second end is signed against the first's side
+(a parting chord past centre is 7 to -1, not 7 to 1). Dropped: assuming world Z
+through the origin (a bar placed anywhere else would be cut 3.6 mm off in the
+off-origin fixture); carrying the axis in the cached toolpath (a schema change
+for a number the facets already determine).
+
+(2) **Nose tools only; blades refuse by name.** Turning inserts and boring bars
+(the nose circle) ride the eye; grooving/parting blades, threading inserts and
+form gauges refuse with `LATHE_BLADE_REFUSAL` (#21 owes the blade-profile
+sweep) - the nose stadium under-claims a kerf, and a picture that calls ghost
+material the part is worse than a refusal. A lathe op's plan radius is its nose
+(the display cell law `auto_cell` reads the cutting feature, not the IC).
+
+(3) **The column verdict still refuses, by name.** `simulate_document` refuses
+any lathe program with `LATHE_VERDICT_REFUSAL` (a Z height field reads a
+parting kerf as a plunge); the revolved verdict at generation governs and the
+post gate shows "not judged", as before. Rapids touch nothing on the field
+(RS-274 G0, every arm's law) - a rapid through steel stays the generation-time
+rapid verdict's to refuse.
+
+(4) **Parity is the sign law at every cell centre, on generated programs.**
+Readings (`crates/app/tests/lathe_field_sim.rs`, debug, default box stocks,
+TEXELS 512k = 0.5 mm cell): facing 438,976 centres (10,680 cut) 0 sign misses;
+facing about an off-origin axis (3, -2) the same counts, 0 misses; profile
+rough+finish 438,976 (11,992 cut) 0; multi-pass contour 438,976 (9,160 cut) 0;
+boring 429,777 (2,904 cut) 0. The sim suite adds a stated-axis case (0 misses
+over the bar, NaN move / zero axis refused, a refusal writes nothing). The
+law is written in the test, independently of the engine: air iff inside some
+feed chord's nose stadium about the fixture's own axis.
