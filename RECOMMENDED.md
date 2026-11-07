@@ -12966,3 +12966,11 @@ keeps the part-only chain bit for bit.
   and -10, `LEVELS` and every pinned number stand). (3) verify's module
   doc states the vertical-dive law. (4) turning_rapids carries a unit
   test: one axial and one sideways conviction, only the axial dropped.
+
+- The first AppImage crashed before `main`: linuxdeploy rewrote the executable
+  and replaced its `.init` instructions with ELF header data. Assemble the
+  AppDir directly and use the appimagetool already bundled in the pinned
+  linuxdeploy download. The release job extracts the finished AppImage and
+  compares its ELF to the built binary byte for byte. The Ubuntu runner has
+  no graphics adapter for a headless launch; the desktop run was checked on
+  Fedora.

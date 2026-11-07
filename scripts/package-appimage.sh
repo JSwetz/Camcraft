@@ -36,11 +36,15 @@ dist=$(cd "$dist" && pwd)
 work=$(mktemp -d "$dist/.package-appimage.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 appdir="$work/CamCraft.AppDir"
-mkdir -p "$appdir/usr/bin/assets"
+mkdir -p "$appdir/usr/bin/assets" "$appdir/usr/share/applications" \
+    "$appdir/usr/share/icons/hicolor/256x256/apps"
+for binary in camcraft-ui camcraft-cli post; do
+    install -m 755 "$bin_dir/$binary" "$appdir/usr/bin/$binary"
+done
 for asset in posts machines ui scripts themes; do
     cp -a "assets/$asset" "$appdir/usr/bin/assets/$asset"
 done
-cat > "$work/camcraft.desktop" <<'EOF'
+cat > "$appdir/usr/share/applications/camcraft.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=CamCraft
@@ -50,17 +54,35 @@ Icon=camcraft
 Terminal=false
 Categories=Graphics;Engineering;
 EOF
-convert assets/ui/cube.png -resize 256x256 "$work/camcraft.png"
-APPIMAGE_EXTRACT_AND_RUN=1 \
-LDAI_NO_APPSTREAM=1 \
-LDAI_OUTPUT="$dist/camcraft-$version-linux-x86_64.AppImage" \
-LINUXDEPLOY_OUTPUT_VERSION="$version" \
-    "$linuxdeploy" --appdir "$appdir" \
-    --executable "$bin_dir/camcraft-ui" \
-    --executable "$bin_dir/camcraft-cli" \
-    --executable "$bin_dir/post" \
-    --desktop-file "$work/camcraft.desktop" \
-    --icon-file "$work/camcraft.png" \
-    --output appimage
+convert assets/ui/cube.png -resize 256x256 \
+    "$appdir/usr/share/icons/hicolor/256x256/apps/camcraft.png"
+ln -s usr/share/applications/camcraft.desktop "$appdir/camcraft.desktop"
+ln -s usr/share/icons/hicolor/256x256/apps/camcraft.png "$appdir/camcraft.png"
+cat > "$appdir/AppRun" <<'EOF'
+#!/bin/sh
+appdir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$appdir/usr/bin/camcraft-ui" "$@"
+EOF
+chmod 755 "$appdir/AppRun"
+# linuxdeploy rewrites ELF headers even for binaries already in the AppDir.
+# That overwrites .init in CamCraft and crashes before main on Fedora. Use
+# the appimagetool bundled in our pinned linuxdeploy download directly.
+before=$(sha256sum "$appdir/usr/bin/camcraft-ui" | awk '{print $1}')
+(
+    cd "$work"
+    "$linuxdeploy" --appimage-extract >/dev/null
+)
+appimagetool="$work/squashfs-root/plugins/linuxdeploy-plugin-appimage/usr/bin/appimagetool"
+if [[ ! -x $appimagetool ]]; then
+    echo "package-appimage: pinned linuxdeploy has no bundled appimagetool" >&2
+    exit 1
+fi
+ARCH=x86_64 "$appimagetool" "$appdir" \
+    "$dist/camcraft-$version-linux-x86_64.AppImage" --no-appstream
+after=$(sha256sum "$appdir/usr/bin/camcraft-ui" | awk '{print $1}')
+if [[ $before != "$after" ]]; then
+    echo "package-appimage: appimagetool modified camcraft-ui; refusing broken image" >&2
+    exit 1
+fi
 test -s "$dist/camcraft-$version-linux-x86_64.AppImage"
 echo "AppImage: $dist/camcraft-$version-linux-x86_64.AppImage"
