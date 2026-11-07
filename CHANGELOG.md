@@ -2,7 +2,8 @@
 
 One row per behaviour-changing commit: `commit | date | change | version`.
 Rows are written at each cut from the merged PRs' `Changelog:` lines
-(AGENTS.md "Issue Law"); older `Unreleased` rows took the version at their cut. Issue references are `(#N)` at the end of the change. Docs-only and
+(AGENTS.md "Issue Law"); older `Unreleased` rows took the version at their
+cut. Issue references are `(#N)` at the end of the change. Docs-only and
 release-mechanics commits are not listed; history before 0.7.0 is in
 `RECOMMENDED.md` and git history (the retired `DONE.md` is in every tag up to
 v0.8.1).
