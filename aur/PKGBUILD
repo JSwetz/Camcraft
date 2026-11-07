@@ -7,7 +7,7 @@ pkgdesc='Computer-aided manufacturing application'
 arch=('x86_64')
 url='https://github.com/NeoTech/Camcraft'
 license=('MIT')
-depends=('glibc' 'gcc-libs' 'libxkbcommon' 'libxkbcommon-x11' 'libx11'
+depends=('glibc' 'libgcc' 'libxkbcommon' 'libxkbcommon-x11' 'libx11'
          'wayland' 'vulkan-icd-loader' 'libglvnd')
 makedepends=('cargo' 'pkgconf')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"

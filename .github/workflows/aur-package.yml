@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Install Arch build dependencies
         run: |
-          pacman -Syu --noconfirm --needed base-devel git cargo pkgconf \
+          pacman -Syu --noconfirm --needed base-devel git rust pkgconf \
             libxkbcommon libxkbcommon-x11 libx11 wayland vulkan-icd-loader libglvnd
       - uses: actions/checkout@v4
       - name: Check AUR metadata
