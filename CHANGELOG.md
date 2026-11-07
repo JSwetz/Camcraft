@@ -9,6 +9,7 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 3bfed30 | 2026-11-07 | feat(motion): adaptive arc output refits morph-spiral runs as tangent biarcs - a third fewer moves (#11) | Unreleased |
 | 01c6a28 | 2026-11-07 | fix(motion): the load reader faces a chord plan's curve, not the lagging chord (#10) | Unreleased |
 | 3b4c35d | 2026-11-07 | fix(motion): each raster pass ends with a rim row where its ground ends - tilted shelf scallop gone (#46) | 0.8.4 |
 | 96abbce | 2026-11-07 | fix(motion): the finishing march rides a convex fold edge - coarse-mesh scallops under tolerance (#36) | 0.8.4 |
