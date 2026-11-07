@@ -444,7 +444,7 @@ a tag"):
 unauthorized pushes into main instead they follow the rules"): every change
 reaches it through a PR (0 approvals required - the agent and the user push
 as the same account, which cannot approve its own PR; the review is the
-subagent's), admins included; no force-push, no deletion; open review
+subagent's, for our own PRs; outside PRs wait for the user, below), admins included; no force-push, no deletion; open review
 conversations must be resolved before a merge; the repo allows merge
 commits only (squash and rebase merging are off). A direct `git push origin
 main` is refused by GitHub - the legacy direct cut is gone. Tags are not
@@ -452,10 +452,10 @@ covered and are pushed as before (step 4).
 
 **Outside PRs are reviewed with `/review-prs`** (user, 2026-11-07: "Add the
 use of the /review-prs into agents.md"). A pull request from a fork gets a
-review by the `pr-reviewer` agent (`.claude/agents/pr-reviewer.md`),
+review by the `PR-reviewer` agent (`.claude/agents/PR-reviewer.md`),
 dispatched by the project skill `/review-prs` (`.claude/skills/review-prs/`) -
 run on demand (`/review-prs`, or `/review-prs <N>` for one PR) and on a loop
-(`/loop 30m /review-prs`). The agent trial-merges the PR with current main in
+(`/loop 10m /review-prs`, every 10 minutes). The agent trial-merges the PR with current main in
 its own worktree, builds, runs the suites it touches and clippy, checks this
 file's laws, and posts a plain review **comment** whose first line is
 `<!-- pr-reviewer: <head sha> -->` (the marker that stops a second review of
