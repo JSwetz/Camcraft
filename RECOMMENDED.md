@@ -13221,3 +13221,13 @@ revolved (follow-up material if users hit it with long keyways).
   model's own optimism near a ball pass's edge, review item 4), and
   the overhang backstop `hidden_along` still reads a flat disc - both
   are pre-existing and model-only.
+- **Re-review fix (PR #138, radial gap):** three sample radii (centre,
+  half, rim) let a wall that fell between the half ring and the rim be
+  judged only by rim samples lifted almost a full corner - a real dive
+  into the wall read clean (the earlier bull "clean" pin asserted a
+  gouge). Now 8 rings at `d k / 8` with `2 k` points each (the rim's
+  16 scaled by radius; 73 samples a station), and ring k is judged at
+  ring k - 1's lift, the lowest the tool stands over the band between
+  them. Dropped: an exact disc-versus-polygon minimum of the lifted
+  surface (needs a lifted-tool / stock-edge distance per wall segment;
+  the ring bound d / 8 plus the chord bulge is stated instead).

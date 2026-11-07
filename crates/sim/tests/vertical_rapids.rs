@@ -235,12 +235,31 @@ fn a_ball_dive_whose_lifted_footprint_still_meets_the_stock_is_a_rapid_in_stock(
 }
 
 #[test]
-fn a_bull_dive_whose_corner_lifts_clear_of_the_wall_is_clean() {
-    // Bull r 3, corner 1 (flat to rho 2) at x 41.6: only the rim
-    // (rho 2.99) reaches over the wall, lifted 1 - sqrt(1 - 0.98) = 0.86
-    // to Z 25.36 - air.
+fn a_bull_dive_whose_corner_band_meets_the_wall_is_a_rapid_in_stock() {
+    // Bull r 3, corner 1 (flat to rho 2) at x 41.6 to Z 24.5 (PR #138
+    // re-review): over the wall (rho 1.6..3) the corner stands only
+    // 0.2 mm up at rho 2.6 - Z 24.7, in the stock. A rim sample
+    // alone, lifted 0.86, read it as air.
     let w = judge_tip(dive_at(41.6, 24.5), 3.0, Some(1.0));
-    assert!(!convicted(&w), "{w:?}");
+    assert!(convicted(&w), "{w:?}");
+}
+
+#[test]
+fn a_ball_dive_with_the_wall_between_its_sample_rings_is_a_rapid_in_stock() {
+    // The re-review's rows: the stock edge falls between the half ring
+    // and the rim, where the ball still stands under the Z 25 top.
+    for (x, z) in [(41.51, 22.5), (42.0, 24.0)] {
+        let w = judge_tip(dive_at(x, z), 3.0, Some(3.0));
+        assert!(convicted(&w), "ball at x {x} to Z {z}: {w:?}");
+    }
+}
+
+#[test]
+fn a_bull_dive_whose_flat_reaches_over_the_wall_is_a_rapid_in_stock() {
+    // Bull r 3, corner 1 at x 42.2 to Z 24.5: the flat (rho 2) ends
+    // 0.2 mm short of the wall, the corner rises only 0.02 by it.
+    let w = judge_tip(dive_at(42.2, 24.5), 3.0, Some(1.0));
+    assert!(convicted(&w), "{w:?}");
 }
 
 #[test]

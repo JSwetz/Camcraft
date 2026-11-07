@@ -11,11 +11,20 @@
 //! corner's or point's rise there ([`Cutter::lift_at`]), so a ball
 //! diving beside a wall whose rim is lifted clear of it is air (the
 //! judged cutter: square when the context names no tip, which can
-//! only over-report). Sampled: the centre, a ring at half the radius, and
-//! [`RIM`] rim points, so a graze shallower than `r (1 - cos(pi/RIM))`
-//! between two rim samples can pass - the same bound
-//! [`super::rapids_radial`] states.
-
+//! only over-report).
+//!
+//! Sampled (PR #138 review): [`RINGS`] rings at radii `d k / RINGS`,
+//! `k = 1..=RINGS` about the centre, ring k holding `2 k` points (the
+//! rim's [`RIM`] = 16 density scaled by radius). A sample on ring k is
+//! judged at the lift of ring k - 1, the lowest the tool surface
+//! stands anywhere over the band between the two rings (the lift only
+//! rises outward), so stock the band holds is never judged against a
+//! tip lifted higher than the tool really is there. Bounded rather
+//! than exact: stock reaching into the footprint by less than one
+//! ring spacing `d / RINGS` without touching a ring sample, or poking
+//! between two samples of a ring by less than the chord bulge
+//! `rho (1 - cos(pi / (2 k)))` (about `0.019 d` at the rim, the bound
+//! [`super::rapids_radial`] states), can pass.
 use super::laws::xy;
 use super::midpose;
 use super::probe::Cutter;
@@ -120,18 +129,26 @@ pub(super) fn rapids_in_stock(
 /// Rim samples of the footprint disc (#106) - [`super::rapids_radial`]'s count.
 const RIM: usize = 16;
 
-/// The tool footprint's sample points about `c`, each with its radius
-/// from the axis: the centre, a ring of `RIM / 2` at half of `d`,
-/// `RIM` on the rim. A `d` that is not a
-/// finite positive radius (a tool no wider than the gouge tolerance)
-/// is the centre alone - the column reading the law had before #106.
+/// Rings of the footprint disc out to its rim (PR #138 review).
+const RINGS: usize = 8;
+
+/// The tool footprint's sample points about `c`, each with the radius
+/// its lift is read at - the next ring INWARD's (see the module doc):
+/// the centre (radius 0), then ring k = 1..=[`RINGS`] at `d k / RINGS`
+/// with `RIM k / RINGS` points, read at `d (k - 1) / RINGS`. A `d`
+/// that is not a finite positive radius (a tool no wider than the
+/// gouge tolerance) is the centre alone - the column reading the law
+/// had before #106.
 fn footprint(c: Point2, d: f64) -> impl Iterator<Item = (Point2, f64)> {
     let d = if d.is_finite() && d > 0.0 { d } else { 0.0 };
-    let rings = if d > 0.0 { [(RIM / 2, 0.5 * d), (RIM, d)] } else { [(0, 0.0), (0, 0.0)] };
-    std::iter::once((c, 0.0)).chain(rings.into_iter().flat_map(move |(n, rad)| {
+    let rings = if d > 0.0 { RINGS } else { 0 };
+    std::iter::once((c, 0.0)).chain((1..=rings).flat_map(move |k| {
+        let rad = d * k as f64 / RINGS as f64;
+        let inner = d * (k - 1) as f64 / RINGS as f64;
+        let n = (RIM * k).div_ceil(RINGS).max(1);
         (0..n).map(move |j| {
             let t = std::f64::consts::TAU * j as f64 / n as f64;
-            (Point2::new(c.x + rad * t.cos(), c.y + rad * t.sin()), rad)
+            (Point2::new(c.x + rad * t.cos(), c.y + rad * t.sin()), inner)
         })
     }))
 }
