@@ -114,7 +114,11 @@ pub fn rotary_offset_in(
     c: &AxisControl,
 ) -> Result<Toolpath, GenError> {
     let (base, d) = develop(facets, stock, p)?;
-    wrap_exit::wrap_exit(&base, &d.ax, &d.e1, &d.e2, d.rho_ref, d.r, c)
+    // Adaptive's in-cut kink law holds on the posted chords too; the
+    // other strategies keep the sagitta-only chords they always had.
+    let cap = (p.strategy == crate::machining2d::PocketStrategy::Adaptive)
+        .then(|| wrap_exit::ADAPTIVE_TURN_DEG.to_radians());
+    wrap_exit::wrap_exit(&base, &d.ax, &d.e1, &d.e2, d.rho_ref, d.r, c, cap)
 }
 
 /// The DEVELOPED program [`rotary_offset_in`] wraps (issue #9): the

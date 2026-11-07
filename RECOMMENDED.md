@@ -12184,3 +12184,31 @@ stepdown 0.5, law 14.6 % D + 35 % = 19.7 %):
 - A slimmer debug window. A 10 long window at a 2 mm stepdown still took 130 s. It also
   made the planner narrow the helix to 0.9 and then name an overload. That is a second
   finding to follow up: a narrowed helix bore under Adaptive.
+
+**Review fixes (PR #57, 2026-11-07):**
+- **The kink law now holds on the posted program, not only the developed one.** Under
+  Adaptive, `wrap_exit` chords each developed XY arc at an angular cap
+  (`ADAPTIVE_TURN_DEG` = 4 deg per chord) as well as the sagitta. Each end chord is split
+  at 0.01 mm of arc (`trim_ends`), so a junction the plan held just under 5 deg gains
+  next to nothing. The heavy test pulls the world program back into the developed frame
+  and reads its breaks with the same reader. Readings on the whole bar:
+  - sagitta only: 98,525 world moves, 12,824 in-cut breaks past 5 deg on the planned levels;
+  - a 2.5 deg cap with full-step end chords: 138,097 moves, 14 breaks, all at arc
+    junctions (5.0 to 5.9 deg);
+  - the 4 deg cap with short end chords (chosen): 160,989 moves, 0 breaks.
+  A 2.5 deg cap with short end chords also read 0, at 182,531 moves. OffsetRings keeps
+  sagitta-only chords: its rings digest did not move.
+- **A ring-cut level is now read from the program's shape.** It is a cut level (some
+  cutting descent ends on its plane) whose planar moves have no proved arc. Such a level
+  must carry the "Offset rings cut the developed level at radius R instead" note, and a
+  named level must post no arc. The old check read "ring-cut" from that same note, so it
+  was a tautology. Microlift heights (planar, nothing descends onto them) are not levels.
+- **A hard planner error on the wrap now costs the level, not the op.** For example "the
+  centre area has no room for an entry": rings cut the level, with a named note. The
+  planar ladder still propagates the error. No cheap fixture reaches that error: any
+  non-degenerate centre area has a dive spot, so no test pins it.
+- The arc-proof tally note names "the developed level at radius R" on the wrap. Planar
+  levels keep "Z ...".
+- The rings digest now hashes coordinates on a 1e-6 lattice, so it is portable across
+  libm builds. It was re-pinned at (5263, 11592310142122113043). On the same build the
+  old bitwise digest still matched, so the lattice is the only change.

@@ -159,7 +159,18 @@ pub(super) fn plan_level(
         Some(_) => format!("the developed level at radius {z:.3}"),
         None => format!("the level at Z {z:.3}"),
     };
-    let (passes, notes, s, room, joins) = adaptive_passes(center, &pp, &what, false)?;
+    // On the wrap a hard planner refusal (no room for an entry, ...)
+    // costs the level, not the op: rings cut it, said by name - the
+    // planar ladder keeps the refusal it always had.
+    let (passes, notes, s, room, joins) = match (adaptive_passes(center, &pp, &what, false), seam) {
+        (Ok(planned), _) => planned,
+        (Err(e), Some(_)) => {
+            b.note(format!("adaptive: the HSM planner refused ({e}) - Offset rings cut {what} instead"));
+            let passes = plan_passes(center, step, p.climb, PocketStrategy::OffsetRings)?;
+            return Ok(LevelPlan::rings(passes, p.helix_radius));
+        }
+        (Err(e), None) => return Err(e),
+    };
     for n in notes {
         b.note(n);
     }
@@ -190,7 +201,10 @@ pub(super) fn plan_level(
         }
     });
     if let Some(n) = proof.note() {
-        b.note(format!("Z {z:.3}: {n}"));
+        match seam {
+            Some(_) => b.note(format!("{what}: {n}")),
+            None => b.note(format!("Z {z:.3}: {n}")),
+        }
     }
     Ok(LevelPlan { passes, joins, arcs: Some(runs), helix_r, hsm: true })
 }
