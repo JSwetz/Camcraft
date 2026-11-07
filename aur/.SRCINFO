@@ -5,6 +5,7 @@ pkgbase = camcraft
 	url = https://github.com/NeoTech/Camcraft
 	arch = x86_64
 	license = MIT
+	options = !lto
 	makedepends = cargo
 	makedepends = pkgconf
 	depends = glibc

@@ -10,6 +10,9 @@ license=('MIT')
 depends=('glibc' 'libgcc' 'libxkbcommon' 'libxkbcommon-x11' 'libx11'
          'wayland' 'vulkan-icd-loader' 'libglvnd')
 makedepends=('cargo' 'pkgconf')
+# Flecs compiles bundled C with cc-rs; Arch GCC LTO objects cannot be linked
+# by rust-lld, leaving every Flecs C symbol undefined at the final link.
+options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         'camcraft.desktop')
 sha256sums=('3b36cfef889001d3692d079a99db3b51fa313737782169519144564dd61c66a6'

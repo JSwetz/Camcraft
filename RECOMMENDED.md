@@ -12991,3 +12991,8 @@ keeps the part-only chain bit for bit.
   and upload the result. Keep this out of `release.yml` because the source
   recipe follows tagged versions and AUR updates, while `release.yml`
   assembles assets only for a CamCraft release.
+- The first Arch build reached `ld.lld` but could not resolve Flecs C symbols.
+  The likely cause is makepkg's default LTO compiling the bundled Flecs C into
+  GCC LTO objects that rust-lld cannot consume. Set `options=('!lto')` in the
+  package recipe, as the Arch Rust package guidelines prescribe for mixed
+  Rust/C projects, and verify the fix with another Arch package build.
