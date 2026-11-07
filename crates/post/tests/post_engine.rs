@@ -398,6 +398,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         part_transfer: false,
         probe_tol: None,
         coolant: Default::default(),
+        after: Default::default(),
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -461,6 +462,7 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         part_transfer: false,
         probe_tol: None,
         coolant: Default::default(),
+        after: Default::default(),
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -745,6 +747,7 @@ fn dump_brackets_the_section_with_the_feeder() {
         part_transfer: false,
         probe_tol: None,
         coolant: Default::default(),
+        after: Default::default(),
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -842,6 +845,7 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
         part_transfer: true,
         probe_tol: None,
         coolant: Default::default(),
+        after: Default::default(),
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| {
@@ -939,6 +943,7 @@ fn dump_places_the_probe_after_the_cut_before_the_handoff() {
         part_transfer: true,
         probe_tol: Some(0.05),
         coolant: Default::default(),
+        after: Default::default(),
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| recs.iter().position(pat).expect("record present");
@@ -990,6 +995,44 @@ fn dump_states_coolant_only_off_the_flood_default() {
     let param = records
         .iter()
         .position(|r| matches!(r, Record::Param { name, .. } if name == "Coolant"));
+    assert!(param < section, "the ask stands ahead of its section");
+    let back = cnc::parse(&cnc::serialize(&records)).expect("own output parses");
+    assert_eq!(back, records, "the word round-trips the text form");
+}
+
+#[test]
+fn dump_states_the_after_action_only_off_the_none_default() {
+    // #110: carrying on is silent (every golden and legacy stream); a
+    // stop or a trip home rides one PARAM ahead of the section, and it
+    // round-trips the text form.
+    use camcraft_post::geometry::Point3;
+    use camcraft_post::post::AfterOperation;
+    let t = Toolpath::new(vec![camcraft_post::cl::Move::new(
+        MoveKind::Feed,
+        Point3 { x: 0.0, y: 0.0, z: 1.0 },
+        Point3 { x: 0.0, y: 0.0, z: -1.0 },
+        Some(100.0),
+    )]);
+    let words = |a: AfterOperation| -> Vec<serde_json::Value> {
+        let d = Dump { op_name: "Op1", after: a, ..Default::default() };
+        camcraft_post::post::dump(&t, &d)
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::Param { name, value } if name == "AfterOperation" => Some(value),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(words(AfterOperation::None).is_empty(), "carrying on writes no word");
+    assert_eq!(words(AfterOperation::OptionalStop), vec![json!("optional-stop")]);
+    assert_eq!(words(AfterOperation::ProgramStop), vec![json!("stop")]);
+    assert_eq!(words(AfterOperation::GoHome), vec![json!("home")]);
+    let d = Dump { op_name: "Op1", after: AfterOperation::GoHome, ..Default::default() };
+    let records = camcraft_post::post::dump(&t, &d);
+    let section = records.iter().position(|r| matches!(r, Record::Section { begin: true }));
+    let param = records
+        .iter()
+        .position(|r| matches!(r, Record::Param { name, .. } if name == "AfterOperation"));
     assert!(param < section, "the ask stands ahead of its section");
     let back = cnc::parse(&cnc::serialize(&records)).expect("own output parses");
     assert_eq!(back, records, "the word round-trips the text form");

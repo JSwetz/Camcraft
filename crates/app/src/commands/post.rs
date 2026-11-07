@@ -64,3 +64,36 @@ impl Command for SelectPost {
         posting::post_set(world, &self.prev);
     }
 }
+
+/// SetPostOptions: switch the document's post-time options (#110) -
+/// today the one "skip pauses and homes" switch. Setup furniture like
+/// `SelectPost`: the singleton is written, the inverse writes the
+/// previous value back; no operation is touched, so every op keeps its
+/// after-action for the day the switch goes off again.
+#[derive(Debug)]
+pub struct SetPostOptions {
+    prev: crate::schema::PostOptions,
+    next: crate::schema::PostOptions,
+}
+
+impl SetPostOptions {
+    /// Set the options. Setting what is already set is refused - an
+    /// undo step that changes nothing is noise in the history.
+    pub fn new(world: &World, next: crate::schema::PostOptions) -> Result<Self, CommandError> {
+        let prev = posting::post_options_of(world);
+        if prev == next {
+            return Err(CommandError::Invalid("those post options are already set".to_owned()));
+        }
+        Ok(Self { prev, next })
+    }
+}
+
+impl Command for SetPostOptions {
+    fn apply(&self, world: &World) {
+        posting::post_options_set(world, self.next);
+    }
+
+    fn invert(&self, world: &World) {
+        posting::post_options_set(world, self.prev);
+    }
+}

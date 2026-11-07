@@ -176,6 +176,17 @@ pub enum CommandKind {
         name: String,
         coolant: camcraft_app::operation::CoolantMode,
     },
+    /// The op menu's "After this operation" rows (#110): continue, an
+    /// optional or program stop, or a trip home - one undo unit.
+    EditOperationAfter {
+        name: String,
+        after: camcraft_app::operation::AfterOperation,
+    },
+    /// The op menu's Suppress / Unsuppress row (#110): left out of the
+    /// posted program, toolpath kept - one undo unit.
+    SuppressOperation { name: String, suppressed: bool },
+    /// The post page's "Skip pauses and homes" switch (#110).
+    SetSkipStops(bool),
     /// The op's context-menu retype (M9.1): change the operation's kind
     /// in place, numbers carried by the one retype law, one undo unit.
     ChangeOperationKind {
@@ -2546,6 +2557,45 @@ impl State {
                         self.status = format!("coolant set to {} for {name}", coolant.label());
                     }
                     Err(err) => self.refuse(ErrorScope::Operation, format!("coolant not changed: {err}")),
+                }
+            }
+            CommandKind::EditOperationAfter { name, after } => {
+                match EditOperationParams::with_after(&self.world, &name, after) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("after {name}: {}", after.label());
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("after-action not changed: {err}")),
+                }
+            }
+            CommandKind::SuppressOperation { name, suppressed } => {
+                match EditOperationParams::with_suppressed(&self.world, &name, suppressed) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = if suppressed {
+                            format!("{name} suppressed: left out of the posted program")
+                        } else {
+                            format!("{name} back in the posted program")
+                        };
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("suppression not changed: {err}")),
+                }
+            }
+            CommandKind::SetSkipStops(skip) => {
+                let next = camcraft_app::schema::PostOptions { skip_stops: skip };
+                match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = if skip {
+                            "post skips every pause and home".to_owned()
+                        } else {
+                            "post writes the operations' pauses and homes".to_owned()
+                        };
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("post options not changed: {err}")),
                 }
             }
             CommandKind::ChangeOperationKind { name, kind } => {

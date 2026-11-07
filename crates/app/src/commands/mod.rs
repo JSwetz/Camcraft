@@ -41,7 +41,7 @@ pub use operation::{
     EditOperationParams,
     GenerateOperation, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, SetOperationGeometry,
 };
-pub use post::SelectPost;
+pub use post::{SelectPost, SetPostOptions};
 pub use repair_model::RepairModel;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;

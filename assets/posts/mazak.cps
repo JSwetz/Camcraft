@@ -30,6 +30,7 @@ var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs)
 
@@ -151,6 +152,7 @@ function onRadiusCompensation() {
 
 function onParameter(name, value) {
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -191,6 +193,25 @@ function startPreamble() {
   if (coolant) block([coolant]);
 }
 
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M1"]); return; }
+  if (ask === "stop") { block(["M0"]); return; }
+  if (ask === "home") {
+    block(["G91", "G28", "Z0"]);  // straight up to the reference point first
+    block(["G28", "X0", "Y0"]);
+    block(["G90"]);               // absolute again before the next section
+    return;
+  }
+  msg("unknown after-operation ask " + ask);
+}
+
 function endPreamble() {
   if (!sectionOpen) return;
   restorePlane();            // M11.2 A: the plane never leaks past its section
@@ -201,6 +222,7 @@ function endPreamble() {
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
   block(["MOTOFF"]);
+  afterOp();
 }
 
 function onSection() { startPreamble(); }

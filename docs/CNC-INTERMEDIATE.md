@@ -86,6 +86,7 @@ behavior only):
 | `WorkOffset` `OriginX` `OriginY` `OriginZ` | WCS slot + machine origin (PARAMs) |
 | `StockXYLeft/Right/Front/Back` `StockZTop` | stock bounds (PARAMs) |
 | `Coolant` | `off` / `mist` / `through-tool` (PARAM, #112) - absent means flood; the post picks the machine's code of that family |
+| `AfterOperation` | `optional-stop` / `stop` / `home` (PARAM, #110) - absent means carry on; the post writes its dialect's M1 / M0 / home move after the section's spindle stop, or refuses by name |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |

@@ -575,6 +575,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     crate::ribbon::pinned_set(world, &file.pinned);
     // Opening lands the material too - including None (the units law).
     crate::cutting::material_set(world, material);
+    // Opening lands the post options too - including the default (#110).
+    crate::posting::post_options_set(world, crate::schema::PostOptions { skip_stops: file.skip_stops });
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);
@@ -663,6 +665,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     setup: odto.setup,
                     area: odto.area.to_controls(),
                     coolant: odto.coolant,
+                    after: odto.after,
+                    suppressed: odto.suppressed,
                 });
                 if odto.label.is_some() || odto.order.is_some() {
                     entity.entity_view(world).set(OperationMeta {

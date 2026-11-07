@@ -71,6 +71,8 @@ impl CreateOperation {
                 setup,
                 area: Default::default(),
                 coolant: Default::default(),
+                after: Default::default(),
+                suppressed: false,
             },
         })
     }

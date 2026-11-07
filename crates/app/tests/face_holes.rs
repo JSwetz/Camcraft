@@ -164,6 +164,8 @@ fn a_boss_is_an_island_and_is_lifted_over_even_under_cut_air() {
         setup: None,
         area: Default::default(),
         coolant: Default::default(),
+        after: Default::default(),
+        suppressed: false,
     };
     let region = camcraft_app::operation::region_of(&world, &op).expect("the top face's region");
     assert_eq!(region.loops().len(), 2, "the plate's top around the boss: an outer and the boss's hole");

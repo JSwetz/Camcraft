@@ -105,6 +105,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 cache: model::toolpath_of(world, &entity).map(|c| PathDto::from_cache(&c)),
                 area: AreaDto::from_controls(&op.area),
                 coolant: op.coolant,
+                after: op.after,
+                suppressed: op.suppressed,
                 setup: op.setup,
             });
             // Parametric stock regenerates its facets on load; offsets, tools,
@@ -183,6 +185,8 @@ pub fn collect(world: &World) -> ProjectFile {
         pinned: crate::ribbon::pinned_of(world),
         // No stated material writes no key (the theme's law again).
         material: crate::cutting::material_of(world).map(|m| m.word().to_owned()),
+        // Off writes no key (the material's law, #110).
+        skip_stops: crate::posting::post_options_of(world).skip_stops,
         entities,
     }
 }

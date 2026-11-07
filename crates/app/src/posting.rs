@@ -166,6 +166,19 @@ pub fn post_set(world: &World, next: &PostRef) {
     world.set(next.clone());
 }
 
+/// The document's post-time options (#110), from the `PostOptions`
+/// singleton; absent is the default (pauses and homes post).
+#[must_use]
+pub fn post_options_of(world: &World) -> crate::schema::PostOptions {
+    world.try_get::<&crate::schema::PostOptions>(|o| *o).unwrap_or_default()
+}
+
+/// Write the options singleton. For `SetPostOptions` and the project
+/// reader only.
+pub fn post_options_set(world: &World, next: crate::schema::PostOptions) {
+    world.set(next);
+}
+
 /// The document's post for display: built-in name, or the file path
 /// as chosen. Never touches disk - a pane may draw this every frame,
 /// and it names exactly what `script_source` resolves. One truth,
@@ -348,9 +361,20 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
 pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
     // THE order law by call (M3.2 A): setup rank, then operation position - the same
     // walk re-machining, the sim and the machine-limit check make.
-    let ops: Vec<(String, Entity)> = crate::setup::operation_order(world);
-    if ops.is_empty() {
+    // A suppressed op (#110) is not in the program: skipped before the
+    // freshness law, so a stale op the user left out never holds the
+    // post - and the program sim walks this same list, so what it
+    // judges is still exactly what posts.
+    let all: Vec<(String, Entity)> = crate::setup::operation_order(world);
+    if all.is_empty() {
         return Err("no operations to post".into());
+    }
+    let ops: Vec<(String, Entity)> = all
+        .into_iter()
+        .filter(|(_, e)| !model::operation_of(world, e).is_some_and(|op| op.suppressed))
+        .collect();
+    if ops.is_empty() {
+        return Err("no operations to post: every operation is suppressed".into());
     }
 
     // Validate early: every operation must be generated and fresh
@@ -541,6 +565,7 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         .map(|(n, _)| n)
         .collect();
 
+    let skip_stops = post_options_of(world).skip_stops;
     let mut records: Vec<cnc::Record> = Vec::new();
     let mut moved = 0usize; // cycle AT anchors are stream-global
     for (name, e) in &ops {
@@ -600,6 +625,9 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             part_transfer,
             probe_tol,
             coolant: op.coolant,
+            // "Skip pauses and homes" (#110) mutes every after-action
+            // at post; the ops keep their choices.
+            after: if skip_stops { operation::AfterOperation::None } else { op.after },
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

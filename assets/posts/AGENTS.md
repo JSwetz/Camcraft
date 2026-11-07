@@ -59,7 +59,10 @@ write (the gate), so the released program never carries one.
   `through-tool`, flood when unstated (#112) - picks the machine's
   entry of that family instead, refused by `message()` when the
   machine states no code for it; the ask resets to flood at section
-  end), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  end; a section's `PARAM AfterOperation` - `optional-stop`,
+  `stop`, `home` (#110) - is written after its spindle stop in the
+  dialect's own words, a home the dialect cannot trust is refused by
+  `message()`, and the ask resets there too), `machine.rtcp` and `machine.rotaries` (RTCP may be
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.

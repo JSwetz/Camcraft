@@ -94,6 +94,8 @@ mod dialog_tests;
 #[cfg(test)]
 mod coolant_tests;
 #[cfg(test)]
+mod after_op_tests;
+#[cfg(test)]
 mod colorvision_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`

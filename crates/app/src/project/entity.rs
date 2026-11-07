@@ -295,6 +295,13 @@ pub struct OperationDto {
     /// with no version bump (the `area` precedent).
     #[serde(default, skip_serializing_if = "crate::operation::CoolantMode::is_default")]
     pub coolant: crate::operation::CoolantMode,
+    /// The op's after-action (#110), `optional-stop` / `program-stop` /
+    /// `go-home`; absent reads none (carry on), the coolant's law.
+    #[serde(default, skip_serializing_if = "crate::operation::AfterOperation::is_default")]
+    pub after: crate::operation::AfterOperation,
+    /// Left out of the posted program (#110); absent reads false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
 }
 
 impl MoveDto {

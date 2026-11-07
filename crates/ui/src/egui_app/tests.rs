@@ -4669,9 +4669,10 @@ fn operation_type_menu_requires_confirmation() {
     assert_eq!(harness.state().state.tree_menu,
         Some(TreeMenuTarget::Operation("Contour1".into())));
 
-    // Operation, Rename, Copy, Paste, Clear, Delete, section header, Face.
+    // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
+    // (#110), section header, Face.
     let face = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 7.5 * row_height);
+        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);
@@ -4687,6 +4688,47 @@ fn operation_type_menu_requires_confirmation() {
     let entity = model::find_by_name(&harness.state().state.world, "Contour1").unwrap();
     assert_eq!(model::operation_of(&harness.state().state.world, &entity).unwrap().params.kind(),
         camcraft_app::operation::OpType::Face);
+}
+
+/// #110: the op menu's Suppress row and an after-action row each queue
+/// their one undoable command.
+#[test]
+fn operation_menu_suppresses_and_sets_the_after_action() {
+    let mut harness = shell_harness();
+    harness.run_steps(2);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let row = leaves.iter().position(|leaf| matches!(leaf,
+        panes::Leaf::Op(name) if name == "Contour1"))
+        .expect("operation row");
+    let row_height = theme::current().row_height;
+    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let open_menu = |harness: &mut Harness<'static, ShellUi>| {
+        set_pos(harness, operation);
+        button_at(harness, egui::PointerButton::Secondary, operation, true);
+        button_at(harness, egui::PointerButton::Secondary, operation, false);
+    };
+    let click_row = |harness: &mut Harness<'static, ShellUi>, k: f32| {
+        let at = egui::pos2(90.0, 179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
+        set_pos(harness, at);
+        button_at(harness, egui::PointerButton::Primary, at, true);
+        button_at(harness, egui::PointerButton::Primary, at, false);
+        harness.run_steps(2);
+    };
+    let op = |harness: &Harness<'static, ShellUi>| {
+        let world = &harness.state().state.world;
+        model::find_by_name(world, "Contour1").and_then(|e| model::operation_of(world, &e)).expect("op")
+    };
+    // Operation, Rename, Copy, Paste, Clear, Delete, then Suppress.
+    open_menu(&mut harness);
+    click_row(&mut harness, 6.5);
+    assert!(op(&harness).suppressed, "the Suppress row suppresses");
+    // ... then the After row, which steps Continue -> Optional -> Program stop.
+    open_menu(&mut harness);
+    click_row(&mut harness, 7.5);
+    assert_eq!(op(&harness).after, camcraft_app::operation::AfterOperation::OptionalStop);
+    open_menu(&mut harness);
+    click_row(&mut harness, 7.5);
+    assert_eq!(op(&harness).after, camcraft_app::operation::AfterOperation::ProgramStop);
 }
 
 #[test]

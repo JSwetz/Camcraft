@@ -58,6 +58,7 @@ var inCycle = false;       // a cycle group is open; its chain is suppressed
 var sectionOpen = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (world -> program)
 var clampDone = false;     // G50 once per program
 var refused = {};          // each refusal counted once per program, by name
@@ -175,6 +176,7 @@ function onRadiusCompensation() {
 
 function onParameter(name, value) {
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -218,6 +220,24 @@ function startPreamble() {
   if (coolant) block([coolant]);
 }
 
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M01"]); return; }
+  if (ask === "stop") { block(["M00"]); return; }
+  if (ask === "home") {
+    block(["G28", "U0"]);         // X clear of the part first, then Z
+    block(["G28", "W0"]);
+    return;
+  }
+  msg("unknown after-operation ask " + ask);
+}
+
 function endPreamble() {
   if (!sectionOpen) return;
   sectionOpen = false;
@@ -227,6 +247,7 @@ function endPreamble() {
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
   block(["M05"]);
+  afterOp();
 }
 
 function onSection() { startPreamble(); }

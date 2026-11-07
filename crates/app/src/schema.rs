@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AfterOperation, AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -174,6 +174,13 @@ pub struct Operation {
     /// The cutting fluid the post switches on for this operation
     /// (#112). Flood by default - what every post emitted before.
     pub coolant: CoolantMode,
+    /// What the machine does once this operation is done (#110):
+    /// carry on by default - what every post emitted before.
+    pub after: AfterOperation,
+    /// Left out of the posted program (#110), toolpath and all kept:
+    /// the post (and the program sim that judges it) skip it; it still
+    /// generates, and un-suppressing restores it as it was.
+    pub suppressed: bool,
 }
 
 /// User-facing operation label and explicit position within its setup.
@@ -229,6 +236,16 @@ pub enum PostRef {
     Builtin,
     Named(String),
     File(String),
+}
+
+/// The post-time options of the document (#110), a flecs singleton
+/// like `PostRef`: setup furniture, saved with the project, switched by
+/// the `SetPostOptions` command. `skip_stops` posts the program without
+/// any operation's after-action (no M0 / M1, no trips home) - a
+/// debugged program runs straight through, the ops keep their choices.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PostOptions {
+    pub skip_stops: bool,
 }
 
 /// Which theme the document wears (M6.1 C), a flecs singleton like
@@ -331,6 +348,7 @@ pub fn register_schema(world: &World) {
     world.component::<MachineDef>();
     world.component::<PostRef>();
     world.component::<ThemeRef>();
+    world.component::<PostOptions>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();
     world.component::<RibbonPins>();

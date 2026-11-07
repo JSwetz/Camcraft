@@ -104,6 +104,8 @@ fn op() -> Operation {
         setup: None,
         area: Default::default(),
         coolant: Default::default(),
+        after: Default::default(),
+        suppressed: false,
     }
 }
 

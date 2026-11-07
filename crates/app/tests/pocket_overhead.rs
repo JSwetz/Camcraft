@@ -151,6 +151,8 @@ fn generate(world: &World, floor: f64, params: &OpParams) -> Result<(Toolpath, u
         setup: None,
         area: Default::default(),
         coolant: Default::default(),
+        after: Default::default(),
+        suppressed: false,
     };
     operation::generate(world, &op, "").map(|(t, w)| (t, w.len())).map_err(|e| e.to_string())
 }

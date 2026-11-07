@@ -26,6 +26,7 @@
 //! `COMP` record arrives - the one way a compensated stream could post
 //! as an undersize part.
 
+mod after_op;
 pub mod cnc;
 mod coolant;
 pub mod engine;
@@ -33,6 +34,7 @@ pub mod js;
 pub mod machine;
 mod program;
 
+pub use after_op::AfterOperation;
 pub use coolant::CoolantMode;
 pub use engine::{LineInfo, PostOutput, TraceBlock};
 
@@ -109,6 +111,10 @@ pub struct Dump<'a> {
     /// The cutting fluid the op asks for (#112). Flood is the stream's
     /// silent default; any other ask rides a `PARAM Coolant`.
     pub coolant: CoolantMode,
+    /// What the machine does once this op is done (#110). Carrying on
+    /// is the stream's silent default; any other choice rides a
+    /// `PARAM AfterOperation`.
+    pub after: AfterOperation,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -132,6 +138,7 @@ impl<'a> Default for Dump<'a> {
             part_transfer: false,
             probe_tol: None,
             coolant: CoolantMode::Flood,
+            after: AfterOperation::None,
         }
     }
 }
@@ -166,6 +173,9 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     out.push(Record::Param { name: "StockZTop".into(), value: json!(d.stock_top_z) });
     if let Some(word) = d.coolant.param_word() {
         out.push(Record::Param { name: "Coolant".into(), value: json!(word) });
+    }
+    if let Some(word) = d.after.param_word() {
+        out.push(Record::Param { name: "AfterOperation".into(), value: json!(word) });
     }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });

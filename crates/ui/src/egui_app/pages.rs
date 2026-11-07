@@ -394,6 +394,16 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+    // #110: post the program straight through - every operation keeps
+    // its stop or trip home, the post leaves them all out. A command.
+    let skip = posting::post_options_of(&state.world).skip_stops;
+    let mut want = skip;
+    ui.checkbox(&mut want, "Skip pauses and homes").on_hover_text(
+        "post without any operation's optional stop, program stop or trip home - the operations keep their choices",
+    );
+    if want != skip {
+        state.pending.push_back(CommandKind::SetSkipStops(want));
+    }
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not
