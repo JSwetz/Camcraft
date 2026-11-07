@@ -188,9 +188,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // must have that axis ON the spindle the post programs (world Z
     // through the work offset's origin, the very origin `wcs_context`
     // hands the post), or it is refused here, before a move exists.
-    let turns = op.params.kind().info().family() == Family::Turn
-        || (matches!(op.params, OpParams::Drill { .. }) && machine_kind == crate::machine::Kind::Lathe);
-    if turns {
+    // (The post reads it again, against the origin it is handed then.)
+    if super::spindle_law::turns(world, &op.params) {
         let (slot, origin) = crate::posting::wcs_context(world, setup, &op.params);
         super::spindle_law::check(&material.facets, origin, slot)?;
     }

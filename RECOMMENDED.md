@@ -12178,8 +12178,9 @@ no script refusal).
    line's XY distance from the origin at the part's lowest and highest Z
    (so lean and offset share one budget, scaled by the part's height).
    0.0005 mm radius is half the diameter word's last digit (X at 0.001 mm
-   of diameter), i.e. a part that passes posts the digits a perfectly
-   placed part would; an honest revolve fits exactly far below it.
+   of diameter), i.e. a part that passes posts every word within one
+   last digit of what a perfectly placed part would; an honest revolve
+   fits far below it (measured in the review fixes, below).
    Dropped: a separate angular tolerance (0.01 deg was suggested) - over
    a 100 mm part it allows 17 um of radius drift, 35x the output digit,
    so it would admit a visible taper; a length-scaled single budget is
@@ -12202,3 +12203,38 @@ no script refusal).
    rotary kinds' `fixture::rotary_axis_of` is a different family); with
    generation refusing off-spindle parts, any sim that turns about the
    fitted axis (#19 / PR #60) and the post now describe the same line.
+7. **Review fixes (PR #65).**
+   - *Post-time door.* The stamp held nothing of the work offset's XY,
+     so generating on a plumb bar and THEN moving G54 1 mm in Y left
+     the op Ok and the post wrote every diameter 2 mm small. Now both:
+     `posting::program_ops` re-reads the law against the live
+     `wcs_context` origin for every turning op and the lathe Drill
+     (before the freshness check, like the tool gate, since
+     "regenerate" alone is not the fix), refusing by name; and
+     `current_stamp` digests the selected slot's origin for those kinds
+     (only when it is off the world origin, so no existing digest moves),
+     so the op also reads Stale. Dropped: stamp-only (the post must not
+     trust a cache key for a law it can read directly).
+   - *Measure = rigid displacement.* The old law bounded the axis line
+     at the part's Z extremes only; a lean `a` also cones every face by
+     `R*a` (a 30 mm washer 0.4 mm thick at 2 mrad: 0.4 um axis drift,
+     passed; 30 um coned face). Now every part vertex is read about the
+     fitted axis (radius, station height) and about world Z through the
+     origin (radius, Z); the worst disagreement of either word must be
+     within 0.0005 mm. Equivalent to the reviewer's "drift at the
+     extremes AND lean x largest radius", but exact per vertex.
+   - *Fit noise.* Measured on plumb revolves tessellated like an STL
+     export (uneven bearings, a micro-seam sliver, f32 vertices, at the
+     origin and at (123.456, -78.9)): the eigen-only direction read a
+     24-segment stepped shaft 0.0018 deg off, 1.1 um of radius - a
+     FALSE refusal (2.2x the tolerance). Fixed by refining, not by
+     loosening: `multiaxis/axis_refine.rs` solves the normal lines'
+     Plucker concurrency rows (4x4 Gauss-Newton on two tilts and two
+     shifts); the refined line is kept only past a 1e-12 rad floor and
+     when the fit's own residual does not grow, so even revolves (every
+     golden) keep their bits. Worst measured noise after: 3.3e-6 mm
+     (~150x under the tolerance); 1.4e-7 mm at the origin. No real
+     lathe STL exists in the repo's fixtures; the synthetic STL-like
+     revolve stands in.
+   - Wording: "posts every word within one last digit", not "the same
+     digits".

@@ -364,6 +364,15 @@ pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
         if let Some(why) = operation::tool_gate::tool_problem_of(world, e) {
             return Err(format!("{why} - fix the tool before posting"));
         }
+        // Issue #62 at the post, before freshness (like the tool gate:
+        // "regenerate" alone is the wrong advice when generation would
+        // refuse too): the post measures every diameter from where the
+        // work offset is NOW, so the spindle law is read again against
+        // that origin - a moved offset refuses by name, whatever the
+        // stamp says.
+        if let Some(why) = operation::spindle_law::post_problem(world, name, e) {
+            return Err(why);
+        }
         match operation::status_of(world, e) {
             OpStatus::Never => {
                 return Err(format!("{name}: no toolpath yet - generate it first"))

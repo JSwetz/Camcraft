@@ -11,20 +11,21 @@
 //! byte-identically to the bar the goldens lock.
 //!
 //! Gate map (M4.4): covers app::operation (collect_job's spindle_law
-//! door), app::posting (wcs_context, stream_records on the lathe post).
+//! door, the stamp's spindle-origin term), app::posting (wcs_context,
+//! program_ops' spindle_law door, stream_records on the lathe post).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock,
-    SetWcsOrigin,
+    AddTool, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel, LoadMachine,
+    SetStock, SetWcsOrigin,
 };
 use camcraft_app::drilling::{CycleChoice, Hole};
 use camcraft_app::geo2d::Point2;
 use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, Triangle};
 use camcraft_app::machine::{Coolant, Machine};
-use camcraft_app::operation::{Height, OpParams, SrcRef};
+use camcraft_app::operation::{Height, HeightReference, OpParams, OpStatus, SrcRef};
 use camcraft_app::post::{cnc, engine};
 use camcraft_app::posting;
 use camcraft_app::schema::Location;
@@ -231,4 +232,92 @@ fn a_plumb_bar_on_the_origin_or_under_a_moved_work_offset_posts_the_same_program
     let (moved, warnings) = post(&world);
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(moved, plain, "the work offset on the axis posts the on-origin program");
+}
+
+fn moved(x: f64, y: f64) -> impl Fn(Point3) -> Point3 {
+    move |p| Point3::new(p.x + x, p.y + y, p.z)
+}
+
+fn place(world: &World, history: &mut History, slot: &str, x: f64, y: f64) {
+    let at = Location { pos: Point3::new(x, y, 0.0), rot: IDENTITY_Q };
+    history.execute(world, SetWcsOrigin::new(world, slot, at).expect("set the work offset"));
+}
+
+#[test]
+fn a_plumb_bar_off_the_work_origin_in_y_is_refused_by_name_at_generation() {
+    // The offset the post could not see: every move keeps X = 0, so
+    // the meridian check passes and the post's radius, read as y - 1,
+    // would make every diameter 2 mm small.
+    let (world, mut history) = lathe_world(revolve(&BAR, 16, moved(0.0, 1.0)), &["TN-1600-0R8"]);
+    let says = ["spindle", "1.000 mm", "G54"];
+    assert_refused(&world, &mut history, "F1", "TN-1600-0R8", facing(), &says);
+    assert_refused(&world, &mut history, "P1", "TN-1600-0R8", finish(), &says);
+}
+
+#[test]
+fn a_work_offset_moved_after_generation_stales_the_op_and_is_refused_by_name_at_posting() {
+    let (world, mut history) = lathe_world(revolve(&BAR, 16, |p| p), &["TN-1600-0R8"]);
+    generate(&world, &mut history, "F1", "TN-1600-0R8", facing()).expect("a plumb bar on the origin generates");
+    let op = camcraft_app::model::find_by_name(&world, "F1").expect("F1");
+    assert_eq!(camcraft_app::operation::status_of(&world, &op), OpStatus::Ok);
+
+    // G54 moved 1 mm in Y under the generated op: the post would now
+    // measure every diameter from y = 1.
+    place(&world, &mut history, "G54", 0.0, 1.0);
+    assert_eq!(
+        camcraft_app::operation::status_of(&world, &op),
+        OpStatus::Stale,
+        "the work offset is an input of a turning op"
+    );
+    let e = posting::stream_records(&world).expect_err("a moved spindle never posts");
+    for s in ["F1", "spindle", "1.000 mm", "G54"] {
+        assert!(e.contains(s), "the post's refusal names '{s}': {e}");
+    }
+    let e = posting::program_ops(&world).expect_err("the sim walks the same door");
+    assert!(e.contains("spindle"), "{e}");
+
+    // Moved back, the cached path is fresh again and posts.
+    place(&world, &mut history, "G54", 0.0, 0.0);
+    assert_eq!(camcraft_app::operation::status_of(&world, &op), OpStatus::Ok);
+    let (_, warnings) = post(&world);
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[test]
+fn a_height_on_g55_measures_the_spindle_from_g55() {
+    // The slot is the one the heights reference: G55 at y = 1 under a
+    // bar on the world origin is 1 mm off, whatever G54 says.
+    let on_g55 = || match facing() {
+        OpParams::Facing { tolerance, top_z, bottom_z, stepdown, feed, plunge_feed, .. } => {
+            let clearance_z = Height { reference: HeightReference::WorkOffset(1), offset: 25.0 };
+            OpParams::Facing { tolerance, clearance_z, top_z, bottom_z, stepdown, feed, plunge_feed }
+        }
+        other => other,
+    };
+    let (world, mut history) = lathe_world(revolve(&BAR, 16, |p| p), &["TN-1600-0R8"]);
+    place(&world, &mut history, "G55", 0.0, 1.0);
+    assert_refused(&world, &mut history, "F1", "TN-1600-0R8", on_g55(), &["spindle", "1.000 mm", "G55"]);
+
+    // And G55 on the bar's axis passes, with G54 left elsewhere.
+    let (world, mut history) = lathe_world(revolve(&BAR, 16, moved(10.0, 0.0)), &["TN-1600-0R8"]);
+    place(&world, &mut history, "G55", 10.0, 0.0);
+    generate(&world, &mut history, "F1", "TN-1600-0R8", on_g55()).expect("G55 on the axis generates");
+}
+
+#[test]
+fn a_second_setups_own_work_offset_is_the_spindle_it_is_judged_against() {
+    // Setup2's private G54 sits 1 mm off the bar; the legacy G54 (never
+    // placed, the world origin) is on it - the op must read its own.
+    let (world, mut history) = lathe_world(revolve(&BAR, 16, |p| p), &["TN-1600-0R8"]);
+    history.execute(&world, CreateSetup::new(&world, None, None).expect("materialize Setup1"));
+    history.execute(&world, CreateSetup::new(&world, None, None).expect("Setup2"));
+    let stock = SetStock::new(
+        &world,
+        camcraft_app::stock::StockShape::Box { dx: 40.0, dy: 40.0, dz: 40.0 },
+        Location::default(),
+    );
+    history.execute(&world, stock.expect("Setup2 stock"));
+    place(&world, &mut history, "G54", 0.0, 1.0);
+    assert!(camcraft_app::model::find_by_name(&world, "Setup2/G54").is_some(), "Setup2's own offset");
+    assert_refused(&world, &mut history, "F1", "TN-1600-0R8", facing(), &["spindle", "1.000 mm", "G54"]);
 }
