@@ -62,11 +62,26 @@ pub(super) fn local_rho_max(facets: &[Triangle]) -> f64 {
         .fold(0.0f64, f64::max)
 }
 
+/// The sloped-entry reading of [`radial_relink`] (#15): the ramp angle
+/// in degrees, the laid-frame part facets the ramps are proved against,
+/// and the plan tolerance. None keeps every infeed a radial plunge.
+#[derive(Clone, Copy)]
+pub(super) struct Ramp<'a> {
+    pub deg: f64,
+    pub facets: &'a [Triangle],
+    pub tol: f64,
+}
+
 /// Rotary Parallel's links, rebuilt radial. `base` is the laid-frame
 /// plan in its vertical-ball tip convention (ball center `r` up local
 /// z); `clear`/`hop` are TIP radii about the local x axis - the
 /// clearance and retract planes read as heights above the axis, the
-/// laid frame's own reading. The cut moves are kept verbatim.
+/// laid frame's own reading. The cut moves are kept verbatim. With
+/// `ramp` (the centre-cutting guard's sloped retry), each infeed whose
+/// ramp is proved clear descends from the retract cylinder in the
+/// landing's meridian while advancing along the axis in the pass's own
+/// direction ([`ramp_start`]), instead of plunging along the radius.
+#[allow(clippy::too_many_arguments)] // one relink's flat read
 pub(super) fn radial_relink(
     base: &Toolpath,
     r: f64,
@@ -75,6 +90,7 @@ pub(super) fn radial_relink(
     rho_part: f64,
     feed: f64,
     plunge_feed: f64,
+    ramp: Option<Ramp<'_>>,
 ) -> Result<Toolpath, GenError> {
     for (name, v) in [("clearance", clear), ("retract", hop)] {
         if !(v.is_finite() && v > rho_part + ARC_FIT_TOL) {
@@ -111,6 +127,22 @@ pub(super) fn radial_relink(
         }
         runs.push(&ms[s..i]);
     }
+    if ramp.is_some() {
+        // #15: a run that opens with the raster's own steep drop onto its
+        // line (a Feed the lift test keeps, within the plunge law's cone
+        // of local -z: axial run under half its length) enters at the
+        // drop's FOOT - the ramp lands there, and the drop, posed
+        // radially a plunge down the tool's own axis, stands down.
+        let drop = |m: &Move| {
+            let d = m.to - m.from;
+            m.arc.is_none() && d.z < 0.0 && d.x.abs() <= 0.5 * d.dot(d).sqrt()
+        };
+        for run in runs.iter_mut() {
+            while run.len() > 1 && drop(&run[0]) {
+                *run = &run[1..];
+            }
+        }
+    }
     let (Some(first), Some(last)) = (runs.first(), runs.last()) else {
         return Err(GenError::Empty("the rotary raster left no pass to link".into()));
     };
@@ -118,26 +150,80 @@ pub(super) fn radial_relink(
         return Err(GenError::Empty("the rotary raster left no pass to link".into()));
     };
     let mut out: Vec<Move> = Vec::with_capacity(ms.len());
+    let (mut ramped, mut kept) = (0usize, 0usize);
+    let mut infeed = |run: &[Move], b: Point3| -> Result<Option<Point3>, GenError> {
+        let Some(rp) = ramp else { return Ok(None) };
+        let s = ramp_start(run, b, r, hop, rp)?;
+        if s.is_some() { ramped += 1 } else { kept += 1 }
+        Ok(s)
+    };
     let start = lift(b0, r, clear)?;
-    out.push(Move::new(MoveKind::Plunge, start, b0, Some(plunge_feed)));
+    match infeed(first, b0)? {
+        Some(s) => {
+            let from = lift(Point3::new(s.x, b0.y, b0.z), r, clear)?;
+            out.push(Move::new(MoveKind::Rapid, from, s, None));
+            out.push(Move::new(MoveKind::Feed, s, b0, Some(plunge_feed)));
+        }
+        None => out.push(Move::new(MoveKind::Plunge, start, b0, Some(plunge_feed))),
+    }
     for (k, run) in runs.iter().enumerate() {
         if k > 0
             && let (Some(a), Some(b)) = (out.last().map(|m| m.to), run.first().map(|m| m.from))
         {
-            link_into(&mut out, a, b, r, hop, feed, plunge_feed)?;
+            let s = infeed(run, b)?;
+            link_into(&mut out, a, b, r, hop, feed, plunge_feed, s)?;
         }
         out.extend(run.iter().cloned());
     }
     out.push(Move::new(MoveKind::Rapid, end, lift(end, r, clear)?, None));
     let mut path = Toolpath::new(out);
     path.notes = base.notes.clone();
+    if ramp.is_some() {
+        path.notes.push(format!(
+            "Rotary Parallel: {ramped} infeed(s) ramp in along the pass from the retract cylinder; {kept} with no proved room plunge radially"
+        ));
+    }
     Ok(path)
 }
 
+/// The ramp's top for an infeed onto tip `b` at the head of `run`: the
+/// point on the `hop` cylinder in `b`'s meridian, backed off along the
+/// axis against the pass's first axial travel by the ramp's run, so
+/// the straight ramp to `b` descends at `rp.deg` while advancing with
+/// the pass. Some only when the ball centre's whole ramp is proved
+/// clear of the part ([`super::entry_ramp::segment_clear`]); None keeps
+/// the radial plunge (no axial travel, nothing to drop, or no proof).
+fn ramp_start(run: &[Move], b: Point3, r: f64, hop: f64, rp: Ramp<'_>) -> Result<Option<Point3>, GenError> {
+    use super::entry_ramp::{boxes, ramp_run, segment_clear};
+    let Some(dx) = run.iter().map(|m| m.to.x - m.from.x).find(|d| d.abs() > 1e-9) else {
+        return Ok(None);
+    };
+    let ub = lift(b, r, hop)?;
+    let rho_b = b.y.hypot(b.z + r);
+    let Some(l) = ramp_run(hop + r - rho_b, rp.deg) else { return Ok(None) };
+    let s = Point3::new(ub.x - dx.signum() * l, ub.y, ub.z);
+    let up = |q: Point3| Point3::new(q.x, q.y, q.z + r);
+    let bx = boxes(rp.facets);
+    Ok(segment_clear(up(s), up(b), r, rp.tol, rp.facets, &bx).then_some(s))
+}
+
 /// Retract from tip `a` along its radial to the `hop` cylinder, index
-/// on it, plunge along tip `b`'s radial into `b`.
-fn link_into(out: &mut Vec<Move>, a: Point3, b: Point3, r: f64, hop: f64, feed: f64, plunge_feed: f64) -> Result<(), GenError> {
-    let (ua, ub) = (lift(a, r, hop)?, lift(b, r, hop)?);
+/// on it, then plunge along tip `b`'s radial into `b` - or, with a
+/// proved ramp top `ramp` on the cylinder, index to it and ramp down
+/// into `b`.
+#[allow(clippy::too_many_arguments)] // one link's flat read
+fn link_into(
+    out: &mut Vec<Move>,
+    a: Point3,
+    b: Point3,
+    r: f64,
+    hop: f64,
+    feed: f64,
+    plunge_feed: f64,
+    ramp: Option<Point3>,
+) -> Result<(), GenError> {
+    let ua = lift(a, r, hop)?;
+    let ub = ramp.map_or_else(|| lift(b, r, hop), Ok)?;
     out.push(Move::new(MoveKind::Feed, a, ua, Some(feed)));
     let rc = hop + r;
     let (pa, pb) = (polar(ua, r), polar(ub, r));
@@ -159,7 +245,8 @@ fn link_into(out: &mut Vec<Move>, a: Point3, b: Point3, r: f64, hop: f64, feed: 
             at = to;
         }
     }
-    out.push(Move::new(MoveKind::Plunge, ub, b, Some(plunge_feed)));
+    let kind = if ramp.is_some() { MoveKind::Feed } else { MoveKind::Plunge };
+    out.push(Move::new(kind, ub, b, Some(plunge_feed)));
     Ok(())
 }
 

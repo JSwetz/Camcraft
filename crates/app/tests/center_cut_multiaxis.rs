@@ -258,10 +258,11 @@ fn rotary_offset_is_judged_on_its_wrapped_path() {
 /// (`center_cut_guard_as` re-runs with `ramp` and `entry_ramp` on):
 /// does the retry change the posed path at all, and does the retried
 /// path still plunge into the bar? Rotary Contour's rings honour
-/// `entry_ramp`; Rotary Parallel's raster ramps its hops, but the
-/// radial relink keeps the opening (and link) infeeds radial plunges,
-/// so where those land in the bar the retry cannot help and the guard
-/// refuses by name.
+/// `entry_ramp`; since #15 Rotary Parallel's radial relink ramps its
+/// opening and link infeeds along the pass from the retract cylinder
+/// wherever the ramp is proved clear of the part (the raster's upright
+/// diagonal hops stand down: posed radially they ran down the axis) -
+/// so the retried path no longer plunges into the bar.
 #[test]
 fn the_rotary_twins_under_the_forced_ramp_retry() {
     use camcraft_app::finishing3d::{Finish3DParams, FinishPattern};
@@ -296,9 +297,66 @@ fn the_rotary_twins_under_the_forced_ramp_retry() {
     let lay_s = Finish3DParams { top_z: 6.0, bottom_z: 1.0, ..sloped };
     let (p_plain, p_slope) = (rotary_parallel(&laid, &lay, &axis).expect("rp"), rotary_parallel(&laid, &lay_s, &axis).expect("rp sloped"));
     assert_ne!(c_plain.moves, c_slope.moves, "Rotary Contour honours the retry");
-    assert_ne!(p_plain.moves, p_slope.moves, "Rotary Parallel's hops ramp under the retry");
+    assert_ne!(p_plain.moves, p_slope.moves, "Rotary Parallel's infeeds ramp under the retry");
     let bar = Solid { top: 10.0, footprint: None };
     let plunge = first_solid_plunge(&p_plain, R, &bar);
     assert!(plunge.is_some(), "the laid bar's radial infeed plunges into the 20 mm bar");
-    assert_eq!(first_solid_plunge(&p_slope, R, &bar), plunge, "the radial infeed survives the retry");
+    // #15: no infeed plunges any more. What the coarse no-footprint
+    // solid still reads (everything under its top, even past the bar's
+    // end) is a cut - the end-cap ring beyond x = -16, in air on the
+    // real stock - never the radial infeed it read before.
+    let left = first_solid_plunge(&p_slope, R, &bar);
+    assert_ne!(left, plunge, "#15: the radial infeed ramps under the retry");
+    assert!(left.is_none_or(|(xy, _)| xy.x.abs() > 16.0), "#15: an infeed onto the bar still plunges: {left:?}");
+    assert!(
+        p_slope.notes.iter().any(|n| n.starts_with("Rotary Parallel:") && n.contains("ramp in along the pass")),
+        "the ramped infeeds are stated: {:?}",
+        p_slope.notes
+    );
+}
+
+/// #15: Swarf's first raster entry under the forced sloped-entry retry.
+/// The raster's first drop onto its first line plunges into the bar
+/// (read with the stock topping out at the Top of Part Z); under the
+/// retry it becomes an air drop to that top behind the line's start
+/// and a ramp down the line's tangent - proved clear of the part - so
+/// that entry no longer plunges, and the note says which way it went.
+#[test]
+fn swarf_first_entry_ramps_under_the_forced_retry() {
+    use camcraft_app::finishing3d::{Finish3DParams, FinishPattern};
+    use camcraft_app::multiaxis::{swarf5d, AxisControl};
+    let axis = AxisControl { lead_deg: 0.0, lag_deg: 0.0, max_tilt_deg: Some(60.0) };
+    let base = Finish3DParams {
+        pattern: FinishPattern::Parallel,
+        stepover: Some(2.0),
+        tool_diameter: 2.0 * R,
+        tolerance: 0.1,
+        clearance_z: 20.0,
+        retract_z: None,
+        top_z: 6.0,
+        bottom_z: 1.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        ramp: false,
+        min_step: None,
+        ramp_angle: 45.0,
+        entry_ramp: false,
+        steep_stepover: None,
+        pencil_reference: None,
+    };
+    let sloped = Finish3DParams { ramp: true, entry_ramp: true, ..base };
+    let s = |p: Point3| Point3::new(p.z, p.x, p.y);
+    let laid: Vec<Triangle> = turned_bar().facets.iter().map(|t| Triangle::new(s(t.a), s(t.b), s(t.c))).collect();
+    let plain = swarf5d(&laid, &base, &axis).expect("swarf");
+    let slope = swarf5d(&laid, &sloped, &axis).expect("swarf sloped");
+    let bar = Solid { top: 6.0, footprint: None };
+    let first = first_solid_plunge(&plain, R, &bar);
+    assert!(first.is_some(), "the plain raster's first entry drops into the bar");
+    assert!(
+        slope.notes.iter().any(|n| n.starts_with("swarf: the first raster entry ramps in")),
+        "the lead-in is stated: {:?}",
+        slope.notes
+    );
+    assert_ne!(first_solid_plunge(&slope, R, &bar), first, "the first entry no longer plunges where it did");
 }

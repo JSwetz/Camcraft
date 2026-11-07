@@ -27,6 +27,7 @@ use crate::finishing3d::{self, Finish3DParams};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
+use super::entry_ramp;
 use super::ruling;
 use super::stamp::stamp_axes_ruled;
 use super::stamp_link::{guard_turns, link_swings};
@@ -44,9 +45,11 @@ fn pose_and_link(
     f: &ruling::Field,
     p: &Finish3DParams,
 ) -> Result<Toolpath, GenError> {
-    let posed = stamp_axes_ruled(base, facets, r, c, Point3::new(f.ux, f.uy, 0.0), &f.ruled, p.tolerance)?;
+    let (led, said) = lead_in(base, facets, r, p);
+    let posed = stamp_axes_ruled(&led, facets, r, c, Point3::new(f.ux, f.uy, 0.0), &f.ruled, p.tolerance)?;
     let (mut linked, links) = link_swings(&posed, facets, r, p.clearance_z, p.plunge_feed)?;
     guard_turns(&linked, p.clearance_z)?;
+    linked.notes.extend(said);
     if links > 0 {
         linked.notes.push(format!(
             "swarf: {links} pose hand-off(s) past {} deg linked through air along the contact normal",
@@ -54,6 +57,26 @@ fn pose_and_link(
         ));
     }
     Ok(linked)
+}
+
+/// The first raster entry under the sloped-entry law (#15): with
+/// `entry_ramp` on (the centre-cutting guard's retry), the plan's first
+/// drop onto the first line becomes an air drop to the Top of Part Z
+/// behind it and a ramp down the line's own tangent, proved clear of
+/// the part ([`entry_ramp::lead_first_entry`]); the stamp then poses
+/// it with the cut it lands into. With no proof the drop stays and the
+/// guard judges it. Off, the plan is untouched (byte-identical).
+fn lead_in(base: &Toolpath, facets: &[Triangle], r: f64, p: &Finish3DParams) -> (Toolpath, Option<String>) {
+    if !p.entry_ramp {
+        return (base.clone(), None);
+    }
+    let (led, ok) = entry_ramp::lead_first_entry(base, facets, r, p.top_z, p.ramp_angle, p.tolerance, p.plunge_feed);
+    let said = Some(if ok {
+        format!("swarf: the first raster entry ramps in down the line's tangent at {:.0} deg from the Top of Part Z", p.ramp_angle.min(45.0))
+    } else {
+        "swarf: the first raster entry has no proved room to ramp (part behind the line's start) - it drops straight".into()
+    });
+    (led, said)
 }
 
 /// The raster along the ruling, with the tool lying with the blade.

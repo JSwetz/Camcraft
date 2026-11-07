@@ -29,6 +29,7 @@
 mod avoid;
 mod curv;
 mod curve_walk;
+mod entry_ramp;
 mod linalg;
 mod stamp;
 mod stamp_pose;
