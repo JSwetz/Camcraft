@@ -43,13 +43,22 @@ text, assets or post processors were used.
 
 ## Download
 
-Windows x64 and Linux x86_64 builds are attached to
+Windows x64, Linux x86_64, and universal macOS builds are attached to
 [GitHub releases](https://github.com/NeoTech/Camcraft/releases). On Windows,
 unzip the portable archive and run `camcraft-ui.exe`, or use the installer.
 On Linux, install the DEB or RPM and launch **CamCraft** from the application
 menu (or run `camcraft`), or extract the TAR.GZ and run `./camcraft-ui` from
-its extracted directory. The portable archives include the command-line
-tools and assets. `TESTING.md` in each archive lists hand-test checks.
+its extracted directory. The AppImage runs after `chmod +x` and needs no
+installation. To install the Snap downloaded from Releases, run
+`sudo snap install --dangerous ./camcraft-*.snap`; it can then be launched
+with `camcraft`. To install the Flatpak bundle, run
+`flatpak install --user ./camcraft-*.flatpak` and launch it with
+`flatpak run io.github.NeoTech.Camcraft` (the Freedesktop runtime downloads
+separately). On macOS, open the DMG and drag `CamCraft.app` to Applications,
+or extract the ZIP. The macOS bundle is ad-hoc signed and not notarized, so
+the first launch may require Control-click → Open. The portable archives
+include the command-line tools and assets. `TESTING.md` in each archive lists
+hand-test checks.
 
 ## Build from source
 
@@ -62,8 +71,8 @@ cargo build --release -p camcraft-app --bin camcraft-cli   # headless CLI
 cargo build --release -p camcraft-post --bin post          # standalone post processor
 ```
 
-Windows and Linux desktop releases are built on GitHub. The core crates also
-build and test on macOS, and the post engine compiles for
+Windows, Linux, and macOS desktop releases are built on GitHub. The core
+crates also build and test on macOS, and the post engine compiles for
 `wasm32-unknown-unknown`.
 
 ## Workspace layout

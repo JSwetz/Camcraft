@@ -12786,3 +12786,19 @@ keeps the part-only chain bit for bit.
   publishers: both jobs would race to create or edit the same GitHub Release.
   AUR, FreeBSD, and Web/WASM remain separate slices of #72 because they need
   their own package or platform build paths.
+- The macOS build uses one Apple Silicon runner to compile arm64 and x86_64
+  binaries, joins each pair with `lipo`, and publishes a universal app in ZIP
+  and DMG form. Resources stay in `Contents/Resources` and the theme resolver
+  reads them there. The bundle is ad-hoc signed so both slices are valid,
+  with notarization left for when a Developer ID and credentials are available.
+  Dropped two native macOS runners: that would double the runner setup and
+  make a single universal app require a third combining job.
+- The Linux release tarball is the shared input for the Snap and Flatpak jobs,
+  so packaging either format does not compile Rust again. AppImage uses the
+  same release binaries and bundles adjacent assets with linuxdeploy; its
+  download is pinned by SHA-256. The Snap uses core22 to match the Ubuntu
+  22.04 build host and strict confinement with desktop, GPU, and home access.
+  The Flatpak targets the Freedesktop 25.08 runtime and grants Wayland/X11,
+  GPU, and project-file access. Both are downloadable release files; store
+  publication and runtime validation still require a successful runner build
+  and desktop hand test.

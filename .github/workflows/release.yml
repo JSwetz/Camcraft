@@ -1,6 +1,6 @@
-# Release build (M1.7e, M13.3): a v* tag builds Windows and Linux binaries.
-# Linux packages a portable tarball, DEB, and RPM; Windows assembles the
-# portable zip and Inno Setup installer, then publishes all five assets.
+# Release build (M1.7e, M13.3): a v* tag builds Windows, Linux, and macOS.
+# Linux packages TAR.GZ, DEB, RPM, AppImage, Snap, and Flatpak; macOS packages
+# a universal app as ZIP and DMG; Windows assembles its zip and installer.
 # Signing is optional and secret-gated (scripts/sign.ps1): with no
 # CAMCRAFT_SIGN_* secret the binaries ship unsigned, as every release so
 # far has. The decision is logged in RECOMMENDED.md ("M13.3").
@@ -39,11 +39,21 @@ jobs:
         run: cargo build --locked --release -p camcraft-ui -p camcraft-app -p camcraft-post
       - name: Assemble Linux packages
         run: scripts/package-linux.sh
+      - name: Install pinned linuxdeploy
+        run: |
+          curl -LfsS -o /tmp/linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          echo 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  /tmp/linuxdeploy-x86_64.AppImage' | sha256sum -c -
+          chmod +x /tmp/linuxdeploy-x86_64.AppImage
+      - name: Assemble AppImage
+        env:
+          LINUXDEPLOY: /tmp/linuxdeploy-x86_64.AppImage
+        run: scripts/package-appimage.sh
       - name: Check package contents
         run: |
           tar -tzf dist/*.tar.gz | grep '/camcraft-ui$'
           dpkg-deb --contents dist/*.deb | grep '/usr/lib/camcraft/camcraft-ui$'
           rpm -qpl dist/*.rpm | grep '/usr/lib/camcraft/camcraft-ui$'
+          test -s dist/*.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
@@ -51,10 +61,93 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+            dist/*.AppImage
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Apple Silicon and Intel Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build universal release binaries
+        run: |
+          cargo build --locked --release --target aarch64-apple-darwin -p camcraft-ui -p camcraft-app -p camcraft-post
+          cargo build --locked --release --target x86_64-apple-darwin -p camcraft-ui -p camcraft-app -p camcraft-post
+      - name: Assemble macOS app and disk image
+        run: scripts/package-macos.sh
+      - name: Check macOS package contents
+        run: |
+          unzip -l dist/*-macos-universal.zip | grep 'CamCraft.app/Contents/MacOS/camcraft-ui'
+          hdiutil imageinfo dist/*-macos-universal.dmg >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: |
+            dist/*-macos-universal.zip
+            dist/*-macos-universal.dmg
+          if-no-files-found: error
+
+  snap:
+    needs: linux
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
+      - name: Install Snapcraft and SquashFS tools
+        run: |
+          sudo snap install snapcraft --classic
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools
+      - name: Assemble snap
+        run: scripts/package-snap.sh
+      - name: Check snap contents
+        run: |
+          unsquashfs -l dist/*.snap | grep '/camcraft-ui$'
+          unsquashfs -l dist/*.snap | grep '/meta/snap.yaml$'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snap-package
+          path: dist/*.snap
+          if-no-files-found: error
+
+  flatpak:
+    needs: linux
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
+      - name: Install Flatpak Builder and Freedesktop SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      - name: Assemble Flatpak bundle
+        run: scripts/package-flatpak.sh
+      - name: Check Flatpak bundle
+        run: test -s dist/*.flatpak
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-package
+          path: dist/*.flatpak
           if-no-files-found: error
 
   release:
-    needs: linux
+    needs: [linux, macos, snap, flatpak]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,6 +230,18 @@ jobs:
         with:
           name: linux-packages
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-packages
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: snap-package
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak-package
+          path: dist
       # The release page shows only this version's notes: RELEASE_NOTES.md
       # keeps every release, newest first, separated by a line "---"; the
       # body is its first section (user, 2026-11-07: "just what is in that
@@ -165,5 +270,9 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.snap
+            dist/*.flatpak
           body_path: dist/release-body.md
           fail_on_unmatched_files: true
