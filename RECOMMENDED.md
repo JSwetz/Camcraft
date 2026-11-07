@@ -13056,3 +13056,74 @@ revolved (follow-up material if users hit it with long keyways).
   each hole by its own kind inside one op. One program would then tell two
   stories about where the tool stands, which M5.2 v1 already refused, and the
   user can split the op in two.
+
+## #85: a cross hole enters the stock where its own line meets it
+
+- Each cross hole's mouth is now where the drill's body, moving in along
+  the hole's own line, first meets the raw stock mesh
+  (`cross_entry::entry`, spindle frame). It no longer sits where the line
+  meets the stock's circumscribed radius. A 60 x 60 box therefore enters at
+  its r30 face, not at the r42.43 corner circle. The reach depth (#84) and
+  the Auto peck plan are measured from that face. As a result, a 30 mm-deep
+  hole from the face of a 44 mm square bar reads 30 mm and posts on a
+  35 mm flute (it was refused at 39.1 mm).
+- The body is read as a square tube of half-width d/2 about the line, in XY
+  and in Z. The tube contains the round drill, so the outermost stock point
+  inside it is never nearer the axis than the drill's true first contact:
+  the entry errs on the safe side. #77's rule holds because the tube's edge
+  nearest the axis is what meets the surface first. The shank's added
+  reach (#84) is read the same way at the shank's half-width.
+- A round bar is unchanged bit for bit. The mesh reading replaces the
+  circumscribed one only when the edge point at the mesh crossing stands
+  more than `raw (1 - cos(pi/16))` (about 1.9 % of the radius) inside it.
+  A turned bar's facets are chords lying inside the real round bar, and
+  trusting them would put the mouth inside the metal. That band covers
+  any polygon with 16 or more sides; the stock cylinder has 32. A tube
+  that meets no facet also falls back to the circumscribed reading.
+  Dropped: always trusting the mesh. That is unsafe on tessellated
+  rounds, especially on grazing off-centre lines where the along-line
+  error is many times the sagitta.
+- The rapid proof (`rapids_clear`) now judges a rapid along a hole's own
+  line against that same per-line entry, with the drill at its tip and a
+  wider shank one flute length behind it. Before, it was judged against
+  the circumscribed radius, which would have refused every box approach.
+  Every other rapid (station-change chords, hops, the start/end planes)
+  still stands off the circumscribed radius plus the body's rim. The
+  kernel's hop and clearance planes are still built on it too, so the
+  swing around the bar clears the box corners.
+- `cross_holder` is unchanged: it still reads the widest material radius
+  in the holder's Z band (circumscribed). This errs on the safe side. With
+  mouths now nearer the axis, it could refuse a holder that a per-line
+  reading would pass. That is left as a possible false refusal, not a
+  collision, and can be filed if a user hits it.
+- Review fixes (PR #120):
+  - The band was measured against the GLOBAL raw radius, so a round well
+    inside it (a stepped bar's d40 section under a d60 step, a cylinder
+    stock off the spindle axis, a round boss on a block) was read at its
+    chords on grazing lines: the mouth inside metal, the #84 reach short.
+    Each facet is now read as its sagitta slab: thickened either side by
+    `(h/2) tan(theta/2)`, `theta` the dihedral angle to an edge
+    neighbour (|cos|, so a flipped winding hides nothing) and `h` the
+    facet's width across that edge - twice the inscribed polygon's
+    `(h/2) tan(theta/4)`, an upper bound however narrow the neighbour.
+    Dihedrals above 45 degrees are real edges (box 90, hex 60): those
+    facets stay exact, so box faces and hex flats read exactly. A round
+    bar stays bit for bit: the slab only raises the crossing, which only
+    deepens the fall-back to the circumscribed reading (the fingerprint
+    test, re-run on the pre-#85 parent 2037891, passes with the same
+    values).
+    Dropped: trusting a facet only when its normal is parallel to the
+    line (a tessellated round has such facets too); falling back to the
+    corner circle (the pre-#85 air on every stepped bar).
+    Accepted conservatism: an octagon reads as a coarse round, and a flat
+    face bordering a tessellated fillet takes that crease's allowance
+    (air, capped by the circumscribed reading, never metal). A round
+    whose facets share no vertices gets no allowance - a known gap for
+    non-conforming STLs.
+  - The per-line entry reads the part's facets beside the stock's: a
+    part poking out of a box face (a modelling error) still bounds the
+    mouth and the along-line rapids.
+  - The shank branch of the along-line proof cannot refuse a chain the
+    #84 reach law passed (depth to the shank's meeting point <= flute
+    means the shank stands outside it at the feed entry); its test pins
+    the passing side on box stock.

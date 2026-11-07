@@ -85,7 +85,7 @@ pub(super) fn cross_drill(
             .collect()
     };
     let (local, extra) = match st.raw {
-        Some(raw) => super::cross_stock::to_raw_mouths(&local, raw, p.tool)?,
+        Some(raw) => super::cross_stock::to_raw_mouths(&local, &st, raw, p.tool)?,
         None => (local, Vec::new()),
     };
     // Issue #84: no hole deeper from the stock surface than the flute
