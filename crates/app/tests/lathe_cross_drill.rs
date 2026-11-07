@@ -172,7 +172,13 @@ fn a_lathe_cross_drill_whose_bar_is_off_the_spindle_is_still_refused_by_name() {
         .map(|h| CrossHole { origin: Point3::new(h.origin.x + 30.0, h.origin.y, h.origin.z), ..h })
         .collect();
     let r = operation::generate(&world, &op(params(vec![], moved)), "");
-    assert!(r.is_err(), "a cross drill on a bar off the spindle drilled: {:?}", r.ok().map(|(_, w)| w));
+    let e = match r {
+        Ok((_, w)) => panic!("a cross drill on a bar off the spindle drilled: {w:?}"),
+        Err(e) => e.to_string(),
+    };
+    // The spindle law (#62) names the spindle; a refusal for any other
+    // reason would not prove the off-spindle bar is caught.
+    assert!(e.contains("spindle"), "the refusal names the spindle: {e}");
 }
 
 #[test]
