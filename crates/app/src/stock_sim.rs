@@ -17,6 +17,12 @@ pub use rotary::{
     rotary_kind_lift, rotary_pose_tol, simulate_rotary_slice, ROTARY_KIND_UNMEASURED, ROTARY_VERDICT_REFUSAL,
 };
 
+// The lathe clause (#19): the nose and the spindle in the plan, the
+// blade's refusal, the verdict's refusal.
+#[path = "stock_sim_lathe.rs"]
+pub mod lathe;
+pub use lathe::{LathePlan, LATHE_BLADE_REFUSAL, LATHE_VERDICT_REFUSAL};
+
 use crate::geometry::Triangle;
 
 /// The document's stock, as an axis-aligned grid in world. Box and
@@ -121,6 +127,12 @@ pub fn simulate_document(
     // shows as "not judged" (the generator-time verify, which reads
     // the lean, is what governs these ops).
     for p in &planned {
+        // The lathe clause (#19): a turning program is the field
+        // eye's to cut (`stock_sim::lathe`), never this height
+        // field's to judge.
+        if p.lathe.is_some() {
+            return Err(format!("{}: {LATHE_VERDICT_REFUSAL}", p.name));
+        }
         // The rotary clause (M13.1): named before the posed one, so
         // the gate says WHY this posed program is not judged here and
         // where it is cut (the field eye, `stock_sim::rotary`).
@@ -189,6 +201,10 @@ pub(crate) struct Planned {
     /// about it (`rotary::simulate_rotary_slice`); the column verdict
     /// refuses the program by name. `None` for every other kind.
     pub rotary: Option<crate::verify::RotaryAxis>,
+    /// A Turn-family op's nose and spindle (#19): the eye revolves
+    /// its moves about the axis (`lathe::lathe_plan`); the column
+    /// verdict refuses the program by name. `None` for every mill op.
+    pub lathe: Option<LathePlan>,
 }
 
 /// The corner radius a tool's atom carries (M13.1): Some only for a
@@ -227,23 +243,6 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
             .ok_or_else(|| format!("{name}: lost its operation"))?;
-        // The revolved clause (M5.2 G.2): a Turn-family path lives in
-        // the half-plane - its numbers speak radius and axial
-        // station, and a Z-downward height field would read a parting
-        // kerf as a 38 mm plunge and the whole program as gouged. The
-        // verdict that governs it is the revolved one, already binding
-        // at generation; HERE the honest answer is that nothing was
-        // judged. Refusal, not a guess - the rotated-stock precedent.
-        // The FIELD arm cuts the annular-sector sweep in closed form
-        // (`Stock::simulate_lathe`, M13.1 owed); routing the Turn
-        // family through it needs the field eye's walk to carry the
-        // nose radius and the lathe frame, which this column-engine
-        // verdict cannot - so the refusal stands here by name.
-        if op.params.kind().info().family() == crate::operation::Family::Turn {
-            return Err(format!(
-                "{name}: a revolved path is not judgeable in the mill's dexel frame - its law is the revolved verdict at generation"
-            ));
-        }
         // The rotary clause (M13.1): between two stations a rotary
         // move turns the WORK, so the tool sweeps an annular sector
         // about the fitted axis - a torus-family solid no stock engine
@@ -279,15 +278,23 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
             None
         };
         let corner = bull_corner(&tool).map_err(|e| format!("{name}: {e}"))?;
+        // The revolved clause (#19, was M5.2 G.2's refusal): a Turn-
+        // family path lives in the half-plane of its fitted axis, so
+        // the plan carries the nose and that axis for the field eye's
+        // revolved stadium; a blade refuses by name (`lathe`).
+        let lathe = lathe::lathe_plan(world, name, &op, &tool)?;
         planned.push(Planned {
             name: name.clone(),
             moves: cache.path.moves,
-            radius: tool.diameter / 2.0,
+            // A turning insert's cutting feature is its nose: the
+            // display cell law (`auto_cell`) reads it, not the IC.
+            radius: lathe.map_or(tool.diameter / 2.0, |l| l.nose),
             ball: tool.kind == crate::tools::ToolKind::BallNose,
             cone,
             corner,
             setup: op.setup,
             rotary,
+            lathe,
         });
     }
     Ok(planned)
