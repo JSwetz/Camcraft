@@ -13262,3 +13262,30 @@ revolved (follow-up material if users hit it with long keyways).
   -10 window. Chosen over a tube stock: the fixture models a finished
   bore in solid bar, and a pilot is how a bore pass starts. Pinned:
   `a_boring_approach_into_a_solid_bar_with_no_pilot_is_convicted_and_blocks_the_post`.
+
+### #103 review (PR #135): the body, the band, arcs, the point
+
+- **B1, the bar's body.** A Bore tool is judged by its nose disc (the
+  cutting tip) AND its body: a disc of max(diameter, shank) / 2 about
+  the nose in the meridian, carried up the axis by flute + shank length.
+  A pilot credits only the body points inside its cylinder and cone, so
+  a Ø10 bar down a Ø4 pilot is convicted (`a_ten_mm_bar_down_a_four_mm_pilot_is_convicted`).
+  The turning_bore pilot is now Ø11 to Z -16 (its 118-degree point clear
+  under the ride's -10 window). *Assumption:* the body is centred on the
+  nose. A bar whose tip sits at its body's edge reaches a full diameter
+  off the axis; the catalog does not say which, and the kernel puts the
+  nose on the axis for the approach - if that geometry is wanted, the
+  body offset joins the tool data (follow-up, not guessed here).
+- **B2, the blade's band.** Groove / part / form tools sample ±width/2
+  along the axis about the move (the band's centre); a thread samples
+  its crest half-width. Pinned by the reviewer's scenario
+  (`a_single_groove_at_the_bars_end_is_judged_across_its_band`: one 5 mm
+  groove at the end of a bar running 2 mm past the part - convicted; the
+  centre point alone is not).
+- **S1:** arc feeds credit nothing (a threading half-turn's chord crosses
+  the axis). Conservative; an arc's true sweep is owed if it ever
+  false-convicts.
+- **S3:** a drill with no stated point is read as 118 degrees, not flat
+  (a flat point credits MORE); the DrillAhead doc says so.
+- **S2** (a pilot deleted after the bore leaves it Ok) is #109's - a
+  lathe pin was added there, not fixed here.

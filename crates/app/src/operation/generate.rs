@@ -2744,6 +2744,19 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     margin: GOUGE_TOL,
                     z_tol: Z_TOL,
                     drills: &drills_ahead,
+                    // A blade's move is its band's centre (a thread's,
+                    // its crest's): the edge spans half the width.
+                    band: if matches!(
+                        tool.kind,
+                        crate::tools::ToolKind::Groove | crate::tools::ToolKind::Thread | crate::tools::ToolKind::Form
+                    ) {
+                        tool.width * 0.5
+                    } else {
+                        0.0
+                    },
+                    // A boring bar's body round its nose, up its reach.
+                    body: (tool.kind == crate::tools::ToolKind::Bore)
+                        .then(|| (tool.diameter.max(tool.shank_d) * 0.5, tool.flute_len + tool.shank_len)),
                 },
                 &mut verify_prior,
                 &mut warns,

@@ -425,12 +425,17 @@ pub fn prior_stale(world: &World, name: &str, setup: Option<&str>) -> Option<Str
 
 /// A twist drill ahead in the setup, as the turned family's rapid law
 /// credits it (#103): its cut moves, the drill's radius and the cot of
-/// its point's half-angle (`None` reads a flat point - less removed).
+/// its point's half-angle. A drill that states no point (tip angle 0 or
+/// 180) is read as the standard 118-degree point: a flat point would
+/// credit the full radius down to the tip - MORE removed (review S3).
 pub struct DrillAhead {
     pub radius: f64,
     pub cone: Option<f64>,
     pub moves: Vec<Move>,
 }
+
+/// cot(59 deg): the 118-degree twist drill point (machine-tool handbooks).
+const STANDARD_POINT_COT: f64 = 0.600_860_619_027_560_4;
 
 /// Every Drill operation ahead of `name` in its setup that has cut. Read
 /// on a lathe too - the axial hole is a cylinder about the spindle, so
@@ -440,6 +445,6 @@ pub fn drills_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<Drill
     ahead_of(world, name, setup)
         .into_iter()
         .filter(|a| a.cut && a.kind == crate::operation::OpType::Drill && a.radius > 0.0)
-        .map(|a| DrillAhead { radius: a.radius, cone: a.cone, moves: a.moves })
+        .map(|a| DrillAhead { radius: a.radius, cone: a.cone.or(Some(STANDARD_POINT_COT)), moves: a.moves })
         .collect()
 }

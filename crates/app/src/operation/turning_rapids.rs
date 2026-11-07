@@ -28,6 +28,14 @@ pub(super) struct Meridian<'a> {
     /// The Drill ops ahead: an axial pilot is a removed cylinder with
     /// its point's cone, read on a lathe too.
     pub drills: &'a [DrillAhead],
+    /// Half the blade's band along the axis (#103 review B2): a groove
+    /// or parting blade's move carries the band's CENTRE, a thread's
+    /// its crest - the edge spans this far either side. 0 for a point.
+    pub band: f64,
+    /// A boring bar's body (#103 review B1): its radius about the nose
+    /// and its reach up the axis from it (flute and shank). The nose
+    /// disc stays the cutting tip's; the body must fit the hole too.
+    pub body: Option<(f64, f64)>,
 }
 
 /// Law (d) for the turned family: the column law's word on a turned
@@ -154,11 +162,21 @@ fn enters(
 ) -> bool {
     let rn = if cx.nose.is_finite() && cx.nose > 0.0 { cx.nose } else { 0.0 };
     let rd = (rn - cx.margin).max(0.0);
-    let (lo, hi) = (a.0.min(b.0) - rd, a.0.max(b.0) + rd);
+    let band = if cx.band.is_finite() { (cx.band - cx.margin).max(0.0) } else { 0.0 };
+    let (rb, reach) = cx
+        .body
+        .filter(|(r, l)| r.is_finite() && l.is_finite())
+        .map_or((0.0, 0.0), |(r, l)| ((r - cx.margin).max(0.0), l.max(0.0)));
+    // The body stands up the axis from the nose: the rapid's upper end
+    // carries it `reach` further (an axial rapid keeps its radius).
+    let (a, b) = if a.0 >= b.0 { ((a.0 + reach, a.1), b) } else { (a, (b.0 + reach, b.1)) };
+    let (lo, hi) = (a.0.min(b.0) - rd.max(band), a.0.max(b.0) + rd.max(band));
     // This path's own earlier feeds that can reach the rapid's band.
     let feeds: Vec<((f64, f64), (f64, f64))> = path.moves[..i.min(path.moves.len())]
         .iter()
-        .filter(|m| m.kind != MoveKind::Rapid)
+        // An arc's chord is not its sweep (review S1): a threading
+        // half-turn's chord crosses the axis. Arcs credit nothing.
+        .filter(|m| m.kind != MoveKind::Rapid && m.arc.is_none())
         .map(|m| (sm.sr(m.from), sm.sr(m.to)))
         .filter(|(p, q)| p.0.max(q.0) + rn >= lo && p.0.min(q.0) - rn <= hi)
         .collect();
@@ -184,12 +202,21 @@ fn enters(
         .map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4)
         .flat_map(|t| [(rd * t.cos(), rd * t.sin()), (0.5 * rd * t.cos(), 0.5 * rd * t.sin())])
         .chain(std::iter::once((0.0, 0.0)))
+        .chain(spread(band).map(|ds| (ds, 0.0)))
+        .chain(spread(rb).map(|dr| (0.0, dr)))
         .collect();
     (0..=n).any(|k| {
         let t = k as f64 / n as f64;
         let (s, rho) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
         ring.iter().any(|&(ds, dr)| solid(s + ds, rho + dr))
     })
+}
+
+/// Offsets across `[-h, h]`, at most 0.25 mm apart, ends included (none
+/// for `h` = 0).
+fn spread(h: f64) -> impl Iterator<Item = f64> {
+    let n = if h > 0.0 { (2.0 * h / 0.25).ceil().min(4000.0) as usize } else { 0 };
+    (0..=n).filter(move |_| n > 0).map(move |k| -h + 2.0 * h * k as f64 / n as f64)
 }
 
 /// A drill ahead's cut on the spindle axis, in the meridian plane:
@@ -286,7 +313,7 @@ mod tests {
         };
         let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() };
         let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, 16.0));
-        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[] };
+        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
         warns
@@ -309,6 +336,43 @@ mod tests {
             mv(MoveKind::Rapid, p(8.0, 0.0, 25.0), p(8.0, 0.0, -4.0)),
         ];
         assert_eq!(convicted(turned), vec![Warning::RapidInStock { at: 3 }]);
+    }
+
+    #[test]
+    fn a_single_groove_at_the_bars_end_is_judged_across_its_band() {
+        // Review B2: part r 11 (Z -60..10, long enough to fit an axis) to Z 10, the bar r 12.5 runs 2 mm past it
+        // (to Z 12), unfaced. One 5 mm groove at the part's end: its
+        // centre stands w/2 past the end, at Z 12.5 - over the bar's
+        // end face - but the blade's lower half spans Z 10..12.5.
+        let params = OpParams::ProfileRough {
+            tolerance: 0.05,
+            clearance_z: crate::operation::Height::fixed(25.0),
+            top_z: crate::operation::Height::fixed(10.0),
+            bottom_z: crate::operation::Height::fixed(-20.0),
+            stepdown: 0.8,
+            stock_to_leave: 0.25,
+            feed: 150.0,
+            plunge_feed: 80.0,
+        };
+        let p = Point3::new;
+        let path = Toolpath {
+            moves: vec![
+                mv(MoveKind::Rapid, p(11.01, 0.0, 25.0), p(11.01, 0.0, 12.5)),
+                mv(MoveKind::Feed, p(11.01, 0.0, 12.5), p(9.0, 0.0, 12.5)),
+            ],
+            cycles: Vec::new(),
+            notes: Vec::new(),
+            comps: Vec::new(),
+        };
+        let (part, stock) = (cylinder(11.0, -60.0, 10.0), cylinder(12.5, -60.0, 12.0));
+        let judge = |band: f64| {
+            let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.0, margin: 0.01, z_tol: 1e-6, drills: &[], band, body: None };
+            let mut warns = Vec::new();
+            judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
+            warns
+        };
+        assert_eq!(judge(2.5), vec![Warning::RapidInStock { at: 0 }], "the blade's band meets the bar's end");
+        assert!(judge(0.0).is_empty(), "the band's centre alone stands over the end face - why the band is read");
     }
 
     #[test]

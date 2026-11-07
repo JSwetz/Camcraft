@@ -141,10 +141,15 @@ fn bore_world() -> (World, History) {
     add_tool(&world, &mut history, "BR-1000");
     add_tool(&world, &mut history, "TN-1600-0R8");
     add_tool(&world, &mut history, "EM-0400-2FL");
-    // The pilot's long-series drill: 70 mm of flute for the 62 mm hole.
+    // The pilots' long-series drills: 70 mm of flute for the 62 mm
+    // hole - a Ø11 that clears the bar's Ø10 body (#103 review B1), and
+    // a Ø4 it cannot pass.
     let mut long = catalog_tool("DR-0400");
     long.flute_len = 70.0;
-    history.execute(&world, AddTool::new(&world, "DR-0400-L", long).expect("a sane drill"));
+    history.execute(&world, AddTool::new(&world, "DR-0400-L", long.clone()).expect("a sane drill"));
+    long.diameter = 11.0;
+    long.shank_d = 11.0;
+    history.execute(&world, AddTool::new(&world, "DR-1100-L", long).expect("a sane drill"));
     history.execute(&world, ImportModel::from_mesh("bar", bored()));
     history.execute(&world, ImportModel::from_mesh("wall", wall()));
     (world, history)
@@ -175,12 +180,17 @@ fn create(world: &World, history: &mut History, name: &str, params: OpParams) {
 }
 
 /// The pilot a boring bar needs (#103): an axial drill ahead (AX0 -
-/// program order reads names, so it sorts ahead of BR1 and ST), r 2 down
-/// the bar's axis from its top to Z -12 - under the ride's -10 window,
-/// over the model's -20 floor. The bar stock is solid; the bar's
-/// approach runs down this hole, and the rapid law credits it.
+/// program order reads names, so it sorts ahead of BR1 and ST), Ø11
+/// down the bar's axis from its top to Z -16 - its point clear under the ride's -10
+/// window, over the model's -20 floor, wide enough for the bar's Ø10
+/// body. The bar stock is solid; the bar's approach runs down this
+/// hole, and the rapid law credits it.
 fn pilot(world: &World, history: &mut History) {
-    let hole = Hole { xy: Point2::new(0.0, 0.0), radius: 2.05, entry_z: 50.0, floor_z: -12.0, through: false, stepped: false };
+    pilot_of(world, history, "DR-1100-L", 5.55);
+}
+
+fn pilot_of(world: &World, history: &mut History, drill: &str, radius: f64) {
+    let hole = Hole { xy: Point2::new(0.0, 0.0), radius, entry_z: 50.0, floor_z: -16.0, through: false, stepped: false };
     let params = OpParams::Drill {
         clearance_z: Height::fixed(60.0),
         retract_z: None,
@@ -194,7 +204,7 @@ fn pilot(world: &World, history: &mut History) {
         holes: vec![hole],
         cross: vec![],
     };
-    create_on(world, history, "AX0", "DR-0400-L", "bar", params);
+    create_on(world, history, "AX0", drill, "bar", params);
     assert_eq!(status(world, "AX0"), OpStatus::Ok, "the pilot drills");
 }
 
@@ -241,6 +251,17 @@ fn a_boring_approach_into_a_solid_bar_with_no_pilot_is_convicted_and_blocks_the_
         Err(e) => assert!(e.contains("post blocked") && e.contains("rapid move 0 "), "refused, but not by the rapid law: {e}"),
     }
     assert!(!out.exists(), "a refused post writes nothing");
+}
+
+#[test]
+fn a_ten_mm_bar_down_a_four_mm_pilot_is_convicted() {
+    // #103 review B1: the nose fits the Ø4 hole, the bar's Ø10 body
+    // does not - the body is judged, not the nose alone.
+    let (world, mut history) = bore_world();
+    pilot_of(&world, &mut history, "DR-0400-L", 2.05);
+    create(&world, &mut history, "BR1", bore_params());
+    let c = cache(&world, "BR1").expect("cached");
+    assert!(c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: 0 }), "the body rode a 4 mm hole unnamed: {:?}", c.warnings);
 }
 
 #[test]
