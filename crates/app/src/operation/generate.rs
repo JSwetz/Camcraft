@@ -1206,11 +1206,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             )?;
             // M11.3 owed (2): the wrap-space entry guard judged the
             // ladder before the wrap posed it; the law judges the FINAL
-            // posed path. Solid is the coarse stock reading (below its
-            // top Z, over its XY outline) - a superset of the bar, so
-            // it errs toward refusal.
-            super::plunge_solid::audit_posed(
-                "Rotary Offset", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &path, d * 0.5,
+            // posed path. Solid is the true bar (#16): the stock
+            // revolved about the same fitted axis, so a move in the air
+            // outside its radius is clean and one into it is judged.
+            super::plunge_solid::audit_bar(
+                "Rotary Offset", tool.center_cutting, &material.facets, stock_facets.as_deref(), &path, d * 0.5,
             )?;
             (region, path)
         }

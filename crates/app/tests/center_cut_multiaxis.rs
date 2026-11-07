@@ -12,8 +12,9 @@
 //! operations suite's slab-and-boss, the rotary suite's turned bar).
 //!
 //! Gate map (M11.3): covers app::operation (generate, plunge_solid
-//! audit_posed / guard_posed), app::multiaxis (contour5d, rough,
-//! rotary_offset, rotary twins under the law).
+//! audit_posed / guard_posed / audit_bar), app::multiaxis (contour5d,
+//! rough, rotary_offset, rotary_bar, rotary twins under the law),
+//! motion::plunge_law (Bar, first_bar_plunge).
 
 use flecs_ecs::prelude::World;
 
@@ -27,7 +28,7 @@ use camcraft_app::stock::StockShape;
 use camcraft_app::tools::{catalog, Tool};
 use camcraft_app::world::new_world;
 use camcraft_motion::approach::{CENTER_CUT_REFUSAL, NOT_CENTER_CUTTING};
-use camcraft_motion::plunge_law::{first_solid_plunge, Solid};
+use camcraft_motion::plunge_law::{first_bar_plunge, first_solid_plunge, Bar, Solid};
 
 const BALL: &str = "BN-0600";
 const R: f64 = 3.0;
@@ -213,10 +214,9 @@ fn turned_bar() -> Mesh {
     Mesh::from_facets(f)
 }
 
-#[test]
-fn rotary_offset_is_judged_on_its_wrapped_path() {
-    // An oversized 20 mm bar over the 12 mm part: the rough peels from
-    // the bar's radius, every infeed is into the bar.
+/// An oversized 20 mm bar over the 12 mm part, and the rough over it:
+/// it peels from the bar's radius, every infeed is into the bar.
+fn rotary_offset_on_the_bar() -> (World, OpParams) {
     let world = world_with(
         StockShape::Cylinder { diameter: 20.0, height: 32.0 },
         Point3::new(0.0, 0.0, -16.0),
@@ -242,6 +242,12 @@ fn rotary_offset_is_judged_on_its_wrapped_path() {
         lag_deg: 0.0,
         max_tilt_deg: 60.0,
     };
+    (world, params)
+}
+
+#[test]
+fn rotary_offset_is_judged_on_its_wrapped_path() {
+    let (world, params) = rotary_offset_on_the_bar();
     let (cc, nc) = both(&world, params);
     // The audit's coarse reading of the bar: everything below its top
     // over its outline - here, with no outline, everything below z 16.
@@ -252,6 +258,33 @@ fn rotary_offset_is_judged_on_its_wrapped_path() {
     // no-outline reading of the bar) - ramped, not plunged.
     assert!(!ramped_or_refused("Rotary Offset", &cc, &nc, &solid), "ramped, not refused");
     assert!(nc.as_ref().is_ok_and(|t| t.moves != cc.moves), "the infeeds ramp for the tool that is not centre-cutting");
+}
+
+/// #16: Rotary Offset's audit reads the TRUE bar - the stock cylinder
+/// about the part's axis - not the box under its top: an infeed into
+/// the bar convicts (and is ramped), the same descent out in the air
+/// past its radius is clean where the box reading convicted it.
+#[test]
+fn rotary_offset_is_judged_against_the_true_cylinder() {
+    let (world, params) = rotary_offset_on_the_bar();
+    let (cc, nc) = both(&world, params);
+    let up = Point3::new(0.0, 0.0, 1.0);
+    let bar = Bar { origin: Point3::ZERO, dir: up, radius: 10.0, lo: -16.0, hi: 16.0 };
+    let (xy, _) = first_bar_plunge(&cc, R, &bar).expect("the radial infeeds plunge into the cylinder");
+    assert!(xy.x.hypot(xy.y) < 10.0, "the convicted tip is inside the bar: {xy:?}");
+    let nc = nc.expect("ramped, not refused");
+    assert_eq!(first_bar_plunge(&nc, R, &bar), None, "no infeed of the ramped path plunges into the bar");
+    // The convicted infeed, lifted radially until its tip stands 1 mm
+    // outside the bar: air on the cylinder, solid on the box reading.
+    let i = cc.moves.iter().position(|m| first_bar_plunge(&Toolpath { moves: vec![*m], ..cc.clone() }, R, &bar).is_some());
+    let mut m = cc.moves[i.expect("the infeed move")];
+    let rho = m.to.x.hypot(m.to.y);
+    let k = 11.0 / rho;
+    let lift = |p: Point3| Point3::new(p.x * k, p.y * k, p.z);
+    (m.from, m.to) = (lift(m.from), lift(m.to));
+    let air = Toolpath { moves: vec![m], ..cc.clone() };
+    assert_eq!(first_bar_plunge(&air, R, &bar), None, "a descent in the air outside the radius is clean");
+    assert!(first_solid_plunge(&air, R, &Solid { top: 16.0, footprint: None }).is_some(), "the box reading convicted it");
 }
 
 /// The rotary twins under the forced sloped-entry retry

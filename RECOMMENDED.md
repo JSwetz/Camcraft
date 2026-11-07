@@ -10392,7 +10392,22 @@ Owed:
 - Rotary Parallel's `radial_relink` always rebuilds infeeds as radial
   plunges, so the ramp retry cannot change them.
 - Swarf's first raster entry always plunges.
-- Rotary Offset needs a true cylinder solid.
+- Rotary Offset needs a true cylinder solid. *Done (#16): see below.*
+
+**#16 (2026-11-07): Rotary Offset's audit reads the true bar.** The
+solid was the box reading (`plunge_solid::audit_posed`: below the
+stock's top Z over its XY outline), which also counted the air around
+the bar. It is now `multiaxis::revolved_bar`: the stock (the part's
+skin with none) revolved about the same fitted axis the ladder wraps
+about - radius the stock's farthest vertex, never less than the
+part's; length the stations stock and part span - judged by
+`plunge_law::first_bar_plunge` (same axial cone and cleared-column law;
+a tip in stock iff closer to the axis than the radius and between the
+stations). Chosen over adding a cylinder field to `Solid` (30 literal
+sites). A block stock sweeps the cylinder through its corner, so the
+bar is a superset of it: it still errs toward solid. A bar that cannot
+be read refuses by name. The cylinder is a subset of the box, so the
+change can only drop convictions in air, never one in the bar.
 
 ## M11.5: open boundary on Contour: two decisions (2026-11-06)
 

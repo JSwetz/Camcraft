@@ -153,6 +153,21 @@ pub fn disc_overlaps(region: &Region, xy: Point2, r: f64) -> bool {
 /// pose, not world Z.
 #[must_use]
 pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(Point2, f64)> {
+    first_plunge_where(t, tool_r, |m| m.to.z < solid.top - Z_EPS && solid.under(Point2::new(m.to.x, m.to.y), tool_r))
+}
+
+/// [`first_solid_plunge`] against a round bar (#16): the same axial
+/// reading and the same cleared-column law, with solid the bar's true
+/// cylinder ([`Bar::holds`]) instead of the box reading - a descent
+/// whose tip stays outside the bar's radius falls through air.
+#[must_use]
+pub fn first_bar_plunge(t: &Toolpath, tool_r: f64, bar: &Bar) -> Option<(Point2, f64)> {
+    first_plunge_where(t, tool_r, |m| bar.holds(m.to))
+}
+
+/// The plunge reading the box and the bar share: `in_solid` says
+/// whether a move's tip lands in stock.
+fn first_plunge_where(t: &Toolpath, tool_r: f64, in_solid: impl Fn(&Move) -> bool) -> Option<(Point2, f64)> {
     t.moves.iter().enumerate().find_map(|(i, m)| {
         let xy = Point2::new(m.to.x, m.to.y);
         let hit = match m.axis {
@@ -163,16 +178,15 @@ pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(P
                 // a helix's chords are shallow, its net run may be nil.
                 let exact = (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS && m.to.z < m.from.z - Z_EPS;
                 let coned = m.arc.is_none() && posed_axial(m, Point3::new(0.0, 0.0, 1.0));
-                let axial = m.kind != MoveKind::Rapid && (exact || coned) && m.to.z < solid.top - Z_EPS;
-                axial && solid.under(xy, tool_r) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r)
+                let axial = m.kind != MoveKind::Rapid && (exact || coned);
+                axial && in_solid(m) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r)
             }
             Some(ax) => {
                 let a = Point3::new(ax[0], ax[1], ax[2]);
                 m.kind != MoveKind::Rapid
                     && m.arc.is_none()
                     && posed_axial(m, a)
-                    && m.to.z < solid.top - Z_EPS
-                    && solid.under(xy, tool_r)
+                    && in_solid(m)
                     && !cleared_along(&t.moves[..i], m.to, a, tool_r)
             }
         };
@@ -249,10 +263,61 @@ fn across(a: Point3) -> Option<(Point3, Point3)> {
 pub fn audit(t: &Toolpath, center_cutting: bool, tool_r: f64, solid: &Solid, site: &str) -> Result<(), GenError> {
     match first_solid_plunge(t, tool_r, solid).filter(|_| !center_cutting) {
         None => Ok(()),
-        Some((xy, z)) => Err(GenError::Invalid(format!(
-            "{CENTER_CUT_REFUSAL} - {site} at ({:.3}, {:.3}) would plunge axially into solid down to Z {z:.3}; \
-             pick a centre-cutting tool or an entry that starts outside the stock",
-            xy.x, xy.y
-        ))),
+        Some((xy, z)) => Err(refusal(site, xy, z)),
+    }
+}
+
+/// [`audit`] against a round bar's true cylinder ([`first_bar_plunge`]).
+pub fn audit_bar(t: &Toolpath, center_cutting: bool, tool_r: f64, bar: &Bar, site: &str) -> Result<(), GenError> {
+    match first_bar_plunge(t, tool_r, bar).filter(|_| !center_cutting) {
+        None => Ok(()),
+        Some((xy, z)) => Err(refusal(site, xy, z)),
+    }
+}
+
+fn refusal(site: &str, xy: Point2, z: f64) -> GenError {
+    GenError::Invalid(format!(
+        "{CENTER_CUT_REFUSAL} - {site} at ({:.3}, {:.3}) would plunge axially into solid down to Z {z:.3}; \
+         pick a centre-cutting tool or an entry that starts outside the stock",
+        xy.x, xy.y
+    ))
+}
+
+/// A round bar's true solid (#16): the cylinder of `radius` about the
+/// line through `origin` along the unit `dir`, between the stations
+/// `lo..hi` measured along `dir` from `origin`. A point is in stock iff
+/// it stands closer to the axis than `radius` and within the stations.
+/// A bar that states no finite shape, or a non-finite point, reads as
+/// stock - unseen stock is solid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bar {
+    pub origin: Point3,
+    pub dir: Point3,
+    pub radius: f64,
+    pub lo: f64,
+    pub hi: f64,
+}
+
+impl Bar {
+    /// Is `p` inside the bar?
+    #[must_use]
+    pub fn holds(&self, p: Point3) -> bool {
+        let n = self.dir.dot(self.dir).sqrt();
+        let shape_ok = [n, self.radius, self.lo, self.hi].iter().all(|x| x.is_finite())
+            && self.origin.is_finite()
+            && (n - 1.0).abs() < 1e-6
+            && self.radius > 0.0
+            && self.lo <= self.hi;
+        if !shape_ok {
+            return true;
+        }
+        let d = p - self.origin;
+        let v = d.dot(self.dir);
+        let w = Point3::new(d.x - self.dir.x * v, d.y - self.dir.y * v, d.z - self.dir.z * v);
+        let rho = w.dot(w).sqrt();
+        if !(rho.is_finite() && v.is_finite()) {
+            return true;
+        }
+        rho < self.radius - Z_EPS && v > self.lo + Z_EPS && v < self.hi - Z_EPS
     }
 }
