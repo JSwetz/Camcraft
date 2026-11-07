@@ -91,7 +91,10 @@ fn params(strategy: PocketStrategy) -> Pocket3DParams {
         stepover: 3.0,
         stock_to_leave: 0.0,
         clearance_z: 5.0,
-        top_z: -5.0,
+        // The stock's own top (`read_levels` stocks from Z 0): the
+        // first level is still the 5 mm cut at -5 (#96 review - a top
+        // of -5 rapided through the 0..-5 the reader declares).
+        top_z: 0.0,
         bottom_z: -10.0,
         stepdown: 5.0,
         feed: 800.0,
@@ -122,6 +125,9 @@ fn verified(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<Warnin
         tool: &tool,
         cutter: None,
         mode: Mode::Area,
+        // The load reader's stock (`read_levels`): Z 0. The op's top
+        // stands on it too (#96), so the plunge-height rapid ends over
+        // the block, never inside it.
         stock_top_z: 0.0,
         clearance_z: 5.0,
         stock_to_leave: 0.0,

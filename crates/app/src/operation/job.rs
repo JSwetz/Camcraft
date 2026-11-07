@@ -42,6 +42,12 @@ pub struct GenJob {
         Option<Result<super::selection::SelectionGeometry, GenError>>,
     pub(super) drive_chains: Option<Result<Vec<Vec<Point3>>, GenError>>,
     pub(super) prior: Option<Result<Arc<crate::rest::PriorState>, GenError>>,
+    /// The program ahead of this op in its setup, uncut (issue #96
+    /// review): verify's vertical-dive convictions are re-read against
+    /// the stock it leaves standing. `None` is nothing ahead cut, a
+    /// tilted or turned op (whose verify runs in another frame or the
+    /// meridian), or an unreadable stock - all the raw-stock reading.
+    pub(super) verify_prior: Option<crate::rest::PriorPlan>,
     pub(super) is_mill: bool,
     /// The document's machine kind (M13.5): the lathe routes the Drill
     /// kind down the spindle axis, and the rotary kinds read their
@@ -186,6 +192,20 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         }
         _ => None,
     };
+    // Verify's prior reading (#96 review): collected here, cut on the
+    // job thread only when a dive was convicted. An unreadable stock
+    // grid is logged and read as the raw stock - convictions stand.
+    let verify_prior = if frame.is_none() && op.params.kind().info().section != super::kinds::Section::Turning {
+        match crate::rest::prior_plan(world, op_name, setup, tool.diameter * 0.5) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("camcraft: {op_name}: the program ahead is unreadable for the rapid law, raw stock stands: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
     let machine_kind = crate::machine::kind_of(world);
     // The lathe spindle law (issue #62): every kind that turns about the
@@ -229,6 +249,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         contour_sel,
         drive_chains,
         prior,
+        verify_prior,
         is_mill,
         machine_kind,
         machine_rotaries,

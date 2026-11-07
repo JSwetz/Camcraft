@@ -1349,7 +1349,10 @@ fn the_shell_switch_sends_the_pocket_to_the_offset_engine() {
     let run = |shell: bool| {
         let world = new_world();
         let mut history = History::default();
-        box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+        // The stock stands to the cube's top, Z 5 (#96): the pocket's
+        // top is 5, so its rapids under clearance 10 are air - the old
+        // 20 mm block put them into uncut stock.
+        box_stock(&world, &mut history, 60.0, 60.0, 5.0);
         add_tool(&world, &mut history, "BN-0600");
         history.execute(
             &world,

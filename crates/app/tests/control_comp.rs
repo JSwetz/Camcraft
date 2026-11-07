@@ -63,7 +63,10 @@ fn contour_params(comp: Compensation) -> OpParams {
 fn world_with(comp: Compensation) -> (World, History) {
     let world = camcraft_app::world::new_world();
     let mut history = History::default();
-    let cmd = SetStock::new(&world, StockShape::Box { dx: 100.0, dy: 100.0, dz: 10.0 }, Default::default());
+    // The stock stands to the part's top, Z 5 (#96): the contour's top
+    // is 5, so its rapid down to the plunge height (Z 7) is air - the
+    // old 10 mm block put that rapid 3 mm into uncut stock.
+    let cmd = SetStock::new(&world, StockShape::Box { dx: 100.0, dy: 100.0, dz: 5.0 }, Default::default());
     history.execute(&world, cmd.expect("box stock"));
     let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0600-4FL").map(|(_, t)| t).expect("catalog");
     history.execute(&world, AddTool::new(&world, "EM-0600-4FL", tool).expect("tool"));
