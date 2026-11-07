@@ -450,6 +450,24 @@ commits only (squash and rebase merging are off). A direct `git push origin
 main` is refused by GitHub - the legacy direct cut is gone. Tags are not
 covered and are pushed as before (step 4).
 
+**Outside PRs are reviewed with `/review-prs`** (user, 2026-11-07: "Add the
+use of the /review-prs into agents.md"). A pull request from a fork gets a
+review by the `pr-reviewer` agent (`.claude/agents/pr-reviewer.md`),
+dispatched by the project skill `/review-prs` (`.claude/skills/review-prs/`) -
+run on demand (`/review-prs`, or `/review-prs <N>` for one PR) and on a loop
+(`/loop 30m /review-prs`). The agent trial-merges the PR with current main in
+its own worktree, builds, runs the suites it touches and clippy, checks this
+file's laws, and posts a plain review **comment** whose first line is
+`<!-- pr-reviewer: <head sha> -->` (the marker that stops a second review of
+the same push). It never approves, requests changes, merges, pushes or labels:
+the user approves and merges an outside PR by hand ("make sure u leave a
+comment and allow us to approve it manually"). **Never two PR reviews at
+once** ("make sure we are not running concurrent PR reviews"): one PR per
+`/review-prs` run, guarded by the lock `.claude/pr-review.lock` (`<N> <sha>
+<UTC>`) - a run that finds a lock younger than 90 min stops; an older one is
+stale and is cleared with its leftover `../cc-pr<N>-review` worktree. Our own
+issue PRs are not reviewed here; the cut reviews them (step 1 above).
+
 Docs-, process- and CI-only PRs (no behaviour, no release) merge once
 reviewed by a subagent that did not write them, without waiting for a cut;
 the main session merges them (`gh pr merge --merge --delete-branch`),
