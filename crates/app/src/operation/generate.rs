@@ -14,7 +14,10 @@ pub fn generate(
     op: &Operation,
     op_name: &str,
 ) -> Result<(Toolpath, Vec<Warning>), GenError> {
-    run_job(collect_job(world, op, op_name)?)
+    let job = collect_job(world, op, op_name).inspect_err(|e| {
+        tracing::warn!(op = op_name, kind = %op.params.kind(), "generation refused before it ran: {e}");
+    })?;
+    run_job(job)
 }
 
 /// Run a fully-collected job: every world read happened in
@@ -28,7 +31,20 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // path whichever arm cut it: a note, never a warning - the post
     // is not held for features the op honestly leaves standing.
     let note = job.spindle_note.take();
-    let (mut path, warns) = run_job_arms(job)?;
+    let kind = job.params.kind();
+    let _span = tracing::info_span!("generate", op = %job.op_name).entered();
+    let started = std::time::Instant::now();
+    tracing::debug!(kind = %kind, "generation started");
+    let (mut path, warns) = run_job_arms(job).inspect_err(|e| {
+        tracing::warn!(kind = %kind, ms = started.elapsed().as_millis() as u64, "generation refused: {e}");
+    })?;
+    tracing::info!(
+        kind = %kind,
+        moves = path.moves.len(),
+        warnings = warns.len(),
+        ms = started.elapsed().as_millis() as u64,
+        "generated"
+    );
     if let Some(n) = note
         && !path.notes.contains(&n)
     {
@@ -68,6 +84,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         area,
         wcs_origin,
         spindle_note: _,
+        op_name: _,
     } = job;
     // The program ahead, cut only when a law asks (#89, #96 review).
     let mut verify_prior = super::drill_prior::PriorCell::new(verify_prior);

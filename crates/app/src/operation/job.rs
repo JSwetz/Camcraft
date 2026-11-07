@@ -23,6 +23,9 @@ use super::*;
 /// their generation-time call sites, so a batch surfaces exactly the
 /// error the serial path surfaces, in the same precedence.
 pub struct GenJob {
+    /// The operation's own name, for the generation log (#163) - "" for
+    /// a preview with no entity.
+    pub(super) op_name: String,
     pub(super) tool: crate::tools::Tool,
     /// The op's tool NAME as the component stored it - the error
     /// strings of the tilted kinds quote it verbatim.
@@ -252,6 +255,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     });
 
     Ok(GenJob {
+        op_name: op_name.to_owned(),
         tool,
         tool_name: op.tool.clone(),
         params: op.params.clone(),

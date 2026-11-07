@@ -266,6 +266,23 @@ pub fn post_setup(world: &World, out_path: &Path) -> Result<Posted, String> {
 /// parameterized - what a caller holding a script text runs, and
 /// what the tests use to exercise the script seam directly.
 pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, String> {
+    let started = std::time::Instant::now();
+    let posted = post_script_body(world, out_path, cps);
+    match &posted {
+        Ok(p) => tracing::info!(
+            path = %out_path.display(),
+            bytes = p.program.len(),
+            ops = p.ops,
+            lines = p.lines,
+            ms = started.elapsed().as_millis() as u64,
+            "NC program written"
+        ),
+        Err(why) => tracing::warn!(path = %out_path.display(), "NC program not written: {why}"),
+    }
+    posted
+}
+
+fn post_script_body(world: &World, out_path: &Path, cps: &str) -> Result<Posted, String> {
     let records = stream_records(world)?;
     // The verification gate (M2.3 D): the same two program-level
     // judgments the Deviate cell shows, made binding. Evidence is

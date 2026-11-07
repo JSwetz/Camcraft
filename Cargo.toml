@@ -31,6 +31,12 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # Apache-2.0; pure Rust (its deps included), no build scripts of concern.
 rayon = "1"
 
+# Diagnostics to the launching terminal (#163): `tracing` events at the
+# app's seams, printed by `tracing-subscriber`'s fmt layer on stderr and
+# filtered by CAMCRAFT_LOG / RUST_LOG. Both MIT, pure Rust.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi", "std", "tracing-log"] }
+
 # The JS engine - one in the tree (M5.3 F): the post's sandbox (post/js.rs)
 # and the job-script host (app/script) run the same hard-pinned boa.
 boa_engine = "0.21.1"
