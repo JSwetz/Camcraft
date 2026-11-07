@@ -23,6 +23,16 @@
 //!   that runs past the centre is the meridian segment it is (7 to -1,
 //!   not 7 to 1); the distance reads both signs of the query's radius,
 //!   so the kerf disc is exact either way.
+//! - **A chord lies in one meridian, or is refused.** The flat
+//!   (radius, station) segment is the swept solid only when both ends
+//!   share a plane through the axis. A chord skewed to the axis sweeps
+//!   a hyperboloid whose waist is nearer the axis than either end: the
+//!   flat reading would show LESS removed than was cut, so such a
+//!   chord refuses by name ([`LatheAxis::chord_in_meridian`]). The test
+//!   is the out-of-plane offset `|ra x rb| / max(|ra|, |rb|)` against
+//!   [`MERIDIAN_TOL`], so a chord through or near the axis (parting
+//!   past centre) passes - its radial vectors are (anti)parallel or
+//!   vanish.
 //! - **Total input.** A non-finite or zero axis refuses by name before
 //!   a cell is written (`LatheAxis::new`).
 
@@ -31,6 +41,11 @@ use super::field_solid::dist_pt_seg2;
 use super::kernel::StockError;
 
 use crate::geometry::Point3;
+
+/// How far (mm) a chord's second end may stand off its first end's
+/// meridian plane before the flat meridian reading is refused - far
+/// below any cell, far above the kernels' float noise.
+pub const MERIDIAN_TOL: f64 = 1e-6;
 
 /// The lathe's spindle line: a point on it and its unit direction.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -76,6 +91,24 @@ impl LatheAxis {
         ([w[0] - s * d[0], w[1] - s * d[1], w[2] - s * d[2]], s)
     }
 
+    /// `Ok` when the chord `a -> b` lies in one plane through the axis
+    /// (within [`MERIDIAN_TOL`]); the refusal by name when it is skewed
+    /// and its revolved sweep is not the flat meridian segment.
+    pub fn chord_in_meridian(&self, a: Point3, b: Point3) -> Result<(), StockError> {
+        let (ra, _) = self.split(a);
+        let (rb, _) = self.split(b);
+        let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let x = [ra[1] * rb[2] - ra[2] * rb[1], ra[2] * rb[0] - ra[0] * rb[2], ra[0] * rb[1] - ra[1] * rb[0]];
+        let reach = len(ra).max(len(rb));
+        let off = if reach > 0.0 { len(x) / reach } else { 0.0 };
+        if off.is_finite() && off <= MERIDIAN_TOL {
+            return Ok(());
+        }
+        Err(StockError::Invalid(format!(
+            "lathe chord {a:?} -> {b:?} is skewed {off:.3e} mm off one meridian of the spindle - its revolved sweep is not the flat (radius, station) segment, so the sim refuses instead of showing less removed than was cut"
+        )))
+    }
+
     /// `q` in its own meridian: (radius >= 0, station).
     #[must_use]
     pub fn meridian(&self, q: Point3) -> (f64, f64) {
@@ -96,8 +129,10 @@ pub(crate) struct LatheSweep {
 
 impl LatheSweep {
     /// The chord `a -> b` about `axis`: `b`'s radius signed against
-    /// `a`'s radial direction (the side law above).
-    pub(crate) fn of(axis: LatheAxis, a: Point3, b: Point3, nose: f64) -> Self {
+    /// `a`'s radial direction (the side law above); a chord skewed
+    /// off one meridian refuses by name (the meridian law above).
+    pub(crate) fn of(axis: LatheAxis, a: Point3, b: Point3, nose: f64) -> Result<Self, StockError> {
+        axis.chord_in_meridian(a, b)?;
         let (ra, z0) = axis.split(a);
         let (rb, z1) = axis.split(b);
         let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
@@ -105,7 +140,7 @@ impl LatheSweep {
         if ra[0] * rb[0] + ra[1] * rb[1] + ra[2] * rb[2] < 0.0 {
             r1 = -r1;
         }
-        LatheSweep { r0, z0, r1, z1, nose, axis }
+        Ok(LatheSweep { r0, z0, r1, z1, nose, axis })
     }
 
     /// The nose radius: the solid's dilation of its chord.

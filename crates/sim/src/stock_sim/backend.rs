@@ -305,6 +305,11 @@ impl Stock {
                         "lathe program carries a non-finite move - the sim refuses instead of cutting nothing silently".into(),
                     ));
                 }
+                // Every straight chord's meridian checked up front, so
+                // a skewed one refuses before any batch writes a cell.
+                for m in moves.iter().filter(|m| m.arc.is_none()) {
+                    axis.chord_in_meridian(m.from, m.to)?;
+                }
                 let chord_tol = (f.cell() * 0.25).max(1e-9);
                 let tool = SdfTool::Lathe { nose, axis: *axis };
                 for chunk in moves.chunks(super::field_batch::BATCH_MOVES) {

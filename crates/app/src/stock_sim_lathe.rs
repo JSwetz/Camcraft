@@ -13,7 +13,11 @@
 //!   source facets. The plan re-fits that same frame from the same
 //!   facets (`operation::source_facets` - `material_of`'s read, one
 //!   law), so the sweep revolves about the line the generator turned
-//!   about, never an assumed world Z.
+//!   about, never an assumed world Z. The field revolves about that
+//!   FITTED axis; generation guarantees it is the machine spindle the
+//!   lathe post turns about (world Z through the work offset - #62
+//!   refuses at generation any turning op whose fitted axis is not),
+//!   so the picture and the posted program turn about one line.
 //! - **The nose stadium is the insert's solid; a blade's is not.**
 //!   A turning insert (and a boring bar's ground nose) sweeps its nose
 //!   circle - exactly what the field's revolved stadium cuts, with
@@ -21,6 +25,11 @@
 //!   a threading V and a form gauge cut a meridian footprint the nose
 //!   circle under-claims; they refuse by name ([`LATHE_BLADE_REFUSAL`],
 //!   #21) instead of drawing a ghost the eye would call the part.
+//! - **The nose circle is the whole modelled solid.** Only the nose
+//!   stadium is swept: the insert's flanks and the holder are not
+//!   (unlike the mill field, which sweeps the shank above the flute),
+//!   so a flank or holder rub is the revolved verdict's at generation
+//!   to refuse, not the picture's to show.
 //! - **The eye cuts; the verdict refuses.** The column verdict
 //!   (`simulate_document`) reads Z heights from above: a parting kerf
 //!   reads as a plunge and an undercut groove as nothing - so a lathe
@@ -30,7 +39,7 @@
 //!   every arm's law): a rapid through steel is the generation-time
 //!   rapid verdict's to refuse, not the picture's to hide.
 
-use crate::stock_sim::{LatheAxis, LATHE_COLUMN_REFUSAL};
+use crate::stock_sim::LatheAxis;
 use crate::tools::{Tool, ToolKind};
 
 /// The column verdict's refusal of a turning program, said once.
@@ -66,7 +75,9 @@ pub(crate) fn lathe_plan(
             return Err(format!("{name}: {LATHE_BLADE_REFUSAL}"));
         }
         k => {
-            return Err(format!("{name}: a turning op cut by a {k} has no lathe solid - {LATHE_COLUMN_REFUSAL}"));
+            return Err(format!(
+                "{name}: a turning op cut by a {k} - a milling/drilling tool on the lathe has no revolved solid the field can sweep - not simulated"
+            ));
         }
     }
     let nose = tool.nose_radius;

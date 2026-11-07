@@ -26,8 +26,8 @@
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::MoveKind;
-use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock};
-use camcraft_app::geometry::{Mesh, Point3, Triangle};
+use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock, SetWcsOrigin};
+use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, Triangle};
 use camcraft_app::machine::Machine;
 use camcraft_app::model;
 use camcraft_app::operation::{Height, OpParams, OpStatus, SrcRef};
@@ -208,11 +208,17 @@ fn facing_simulates_on_the_field_with_meridian_parity() {
 
 #[test]
 fn a_bar_off_the_origin_is_turned_about_its_own_fitted_axis() {
-    // The plan's frame is the op's FITTED spindle, not world Z: the
-    // bar stands about (3, -2), and the field must revolve the facing
-    // ladder about that line - an origin-axis sweep would stand the
-    // whole cut 3.6 mm off it.
+    // The plan's frame is the op's FITTED spindle, not world Z through
+    // the origin: the bar stands about (3, -2), and the field must
+    // revolve the facing ladder about that line - an origin-axis sweep
+    // would stand the whole cut 3.6 mm off it. The setup's work offset
+    // sits ON the bar's axis, so the machine spindle the lathe post
+    // turns about (world Z through G54) IS the fitted axis - the only
+    // case generation lets through (#62 refuses an op whose fitted
+    // axis is not the spindle).
     let (world, mut history) = lathe_world(40.0, revolve_at(&[(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)], (3.0, -2.0)));
+    let on_axis = Location { pos: Point3::new(3.0, -2.0, 0.0), rot: IDENTITY_Q };
+    history.execute(&world, SetWcsOrigin::new(&world, "G54", on_axis).expect("G54 on the bar's axis"));
     let p = OpParams::Facing {
         tolerance: 0.05,
         clearance_z: Height::fixed(25.0),

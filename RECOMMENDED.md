@@ -12195,3 +12195,22 @@ boring 429,777 (2,904 cut) 0. The sim suite adds a stated-axis case (0 misses
 over the bar, NaN move / zero axis refused, a refusal writes nothing). The
 law is written in the test, independently of the engine: air iff inside some
 feed chord's nose stadium about the fixture's own axis.
+
+**Review fixes (PR #60, 2026-11-07).** (1) The off-origin test now puts
+the setup's G54 on the bar's axis (3, -2): the field revolves about the
+FITTED axis, and generation (#62, its own branch) guarantees that is the
+machine spindle the lathe post turns about - the module laws say so; the
+refusal itself is #62's, not done here. (2) A chord whose ends stand in
+different planes through the axis sweeps a hyperboloid whose waist the
+flat meridian segment misses (less removed shown than cut): it now
+refuses by name (`LatheAxis::chord_in_meridian`, out-of-plane offset
+`|ra x rb| / max(|ra|,|rb|)` against `MERIDIAN_TOL` = 1e-6 mm), checked
+up front so a refusal writes nothing; parting through/past centre passes
+(antiparallel or vanishing radial vectors). Considered and dropped:
+sweeping the true hyperboloid - the kernels only write meridian chords,
+so a skewed one is a bug upstream to surface, not geometry to draw.
+(3) A leaned-axis (10 degrees) parity case pins the general window reach
+and the leaned split. (4) The laws state the nose circle is the whole
+modelled solid (no flank/holder, unlike the mill's shank). (5) A milling
+tool on a turning op gets its own refusal text instead of the column
+engine's.

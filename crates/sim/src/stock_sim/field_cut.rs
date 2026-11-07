@@ -359,7 +359,7 @@ impl SdfField {
                         b,
                         kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank },
                     },
-                    ToolKind::Lathe { nose, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, *nose)),
+                    ToolKind::Lathe { nose, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, *nose)?),
                 };
                 // The ceiling bounds the WORK: the window as clipped
                 // to the cut region, the only cells the walk can visit.
