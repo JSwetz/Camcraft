@@ -18,7 +18,7 @@ use crate::interact::{
     REGION_RGB, RETRACT_RGB, anchor_hit, anchor_points, anchor_reference, capped, chevrons,
     collect_overlay, edge_nearest, feature_of_facet, ftoz, height_plane_lines, height_planes,
     hover_features, overlay_labels, plane_corner, plane_rect, project_uv, queue_feature_pick,
-    region_lines, selection_feature_lines, toolpath_lines,
+    region_lines, selection_feature_lines, shown_regions, toolpath_lines,
 };
 use crate::state::{CommandKind, HoverHit, State};
 use crate::viewport::GpuPart;
@@ -88,6 +88,45 @@ mod gizmo_tests {
             xs.iter().any(|r| *r > 0.8) && xs.iter().any(|r| *r < 0.6),
             "one bright and one dimmed X: {xs:?}"
         );
+    }
+
+    #[test]
+    fn moved_work_offset_letters_follow_their_axis_tips() {
+        let mut state = State::new();
+        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        let lines = collect_overlay(&state);
+        let labels = overlay_labels(&state, 1.0);
+        for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
+            let tip = lines[axis * 2 + 1];
+            let expected = project_uv(
+                &state.cam.mvp(1.0),
+                [
+                    50.0 + f64::from(tip[0] - 50.0) * 1.08,
+                    f64::from(tip[1]) * 1.08,
+                    f64::from(tip[2]) * 1.08,
+                ],
+            )
+            .expect("work offset axis tip projects");
+            let actual = labels.iter()
+                .find(|(_, rgb, label)| label.as_str() == name && rgb.iter().copied().fold(0.0f32, f32::max) > 0.7)
+                .map(|(uv, _, _)| *uv)
+                .expect("bright work offset axis label");
+            assert!((actual[0] - expected[0]).abs() < 1e-3, "{name} horizontal");
+            assert!((actual[1] - expected[1]).abs() < 1e-3, "{name} vertical");
+        }
+    }
+
+    #[test]
+    fn hidden_work_offset_removes_only_its_gizmo() {
+        let mut state = State::new();
+        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, "G55", [50.0, 0.0, 0.0], 0.0);
+        assert_eq!(collect_overlay(&state).len(), 12);
+        State::toggle_visibility(&mut state.hidden_offsets, "G54");
+        assert_eq!(collect_overlay(&state).len(), 12, "G55 and world axes remain");
+        assert!(model::find_by_name(&state.world, "G54").is_some());
+        State::toggle_visibility(&mut state.hidden_offsets, "G55");
+        assert_eq!(collect_overlay(&state).len(), 6, "only world axes remain");
     }
 
     #[test]
@@ -383,6 +422,29 @@ mod path_tests {
             .iter()
             .any(|v| v[3..6] == FEED_RGB || v[3..6] == RAPID_RGB || v[3..6] == PLUNGE_RGB);
         assert!(bright, "the selected one draws at full strength");
+    }
+
+    #[test]
+    fn show_and_hide_all_toolpaths_update_every_operation_eye() {
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        state.hide_all_toolpaths();
+        assert!(state.hidden_paths.contains(&"Face1".to_owned()));
+        assert!(!state.show_all_paths);
+        assert!(toolpath_lines(&state).is_empty(), "hide all includes the selected path");
+
+        state.show_all_toolpaths();
+        assert!(state.hidden_paths.is_empty());
+        assert!(state.show_all_paths);
+        assert!(!toolpath_lines(&state).is_empty(), "show all restores the hidden path");
+
+        state.toggle_all_toolpaths();
+        assert!(!state.show_all_paths);
+        assert!(state.hidden_paths.contains(&"Face1".to_owned()));
+        assert!(toolpath_lines(&state).is_empty(), "an active path icon hides all paths");
+        state.toggle_all_toolpaths();
+        assert!(state.show_all_paths);
+        assert!(state.hidden_paths.is_empty());
     }
 
     #[test]
@@ -1429,6 +1491,25 @@ mod height_plane_tests {
             !texts.iter().any(|t| t.contains("Clearance")),
             "nothing open labels nothing: {texts:?}"
         );
+    }
+
+    #[test]
+    fn hidden_operation_has_no_height_planes_or_cut_region_overlay() {
+        let mut state = state_with("C1", contour(Height::fixed(25.0)));
+        assert!(height_planes(&state).iter().any(|plane| plane.name == "Clearance"));
+        assert!(height_planes(&state).iter().any(|plane| plane.name == "Bottom"));
+        State::toggle_visibility(&mut state.hidden_paths, "C1");
+
+        assert!(height_planes(&state).is_empty());
+        assert!(height_plane_lines(&state).is_empty());
+        assert!(region_lines(&state).is_empty());
+        assert!(shown_regions(&state).is_empty());
+        let labels = overlay_labels(&state, 800.0 / 600.0);
+        assert!(!labels.iter().any(|(_, _, text)| text.starts_with("C1 · ")));
+        assert!(model::find_by_name(&state.world, "C1").is_some());
+
+        State::toggle_visibility(&mut state.hidden_paths, "C1");
+        assert!(height_planes(&state).iter().any(|plane| plane.name == "Clearance"));
     }
 
     #[test]

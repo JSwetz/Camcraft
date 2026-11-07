@@ -69,6 +69,9 @@ pub(crate) fn filter_hit(
     dir: [f64; 3],
     hit: Option<(String, usize, [f64; 3])>,
 ) -> Option<(String, usize, [f64; 3])> {
+    if state.active_stock_hidden() {
+        return hit.filter(|(name, _, _)| !state.hidden_stocks.contains(name));
+    }
     let Some(mesh) = mesh(state) else { return hit };
     let on_stock = hit.as_ref().is_none_or(|(name, _, _)| {
         model::find_by_name(&state.world, name).is_some_and(|e| model::is_stock(&state.world, &e))

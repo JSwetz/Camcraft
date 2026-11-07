@@ -346,6 +346,15 @@ fn wireframe_hides_wire_behind_solids() {
 }
 
 #[test]
+fn fill_only_document_uses_no_empty_edge_buffer_slice() {
+    let Some((image, _, _)) = render(&[fill_square(12.0, 0.0)], &test_cam()) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    assert!(changed_pixels(&image) > 0, "the fill-only scene should paint");
+}
+
+#[test]
 fn cut_region_fill_is_translucent() {
     // The same model twice, once with a fill sheet riding just above its
     // top face: the sheet must change pixels (it paints) and every pixel

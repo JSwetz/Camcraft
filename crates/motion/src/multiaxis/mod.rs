@@ -36,6 +36,7 @@ mod stamp_pose;
 #[cfg(test)]
 mod stamp_tests;
 pub mod axis;
+mod axis_refine;
 pub mod contour5d;
 pub mod curve;
 pub mod flow;

@@ -9,7 +9,8 @@ use crate::cl::Toolpath as ClPath;
 use crate::commands::{Command, CommandError};
 use crate::model;
 use crate::operation::{OpParams, SrcRef};
-use crate::schema::{Location, Operation, Toolpath};
+use crate::schema::{Location, Operation, OperationMeta, Toolpath};
+use crate::setup;
 use crate::verify::Warning;
 
 use super::gates::{area_gate, check_tool, family_gate, heights_gate, tool_gate, valid_src};
@@ -90,12 +91,102 @@ impl Command for CreateOperation {
     }
 }
 
+/// Paste a copied operation as one undoable change. Existing positions in
+/// its setup are made explicit so the new operation lands at the end even
+/// when an older project has no stored order indices.
+pub struct PasteOperation {
+    name: String,
+    operation: Operation,
+    meta: OperationMeta,
+    reordered: Vec<(String, OperationMeta, OperationMeta)>,
+}
+
+impl PasteOperation {
+    pub fn new(world: &World, name: &str, mut operation: Operation) -> Result<Self, CommandError> {
+        if name.trim().is_empty() || model::find_by_name(world, name).is_some() {
+            return Err(CommandError::NameConflict(name.to_owned()));
+        }
+        if let Some(setup_name) = &operation.setup
+            && setup::def_of(world, setup_name).is_none()
+        {
+            return Err(CommandError::NotFound(setup_name.clone()));
+        }
+        let context = operation.setup.as_deref();
+        check_tool(world, &operation.tool)?;
+        valid_src(world, context, &operation.src)?;
+        if !operation.params.is_sane() {
+            return Err(CommandError::Invalid("copied operation parameters are not usable".into()));
+        }
+        heights_gate(world, context, &operation.src, &operation.params)?;
+        if let Some(msg) = crate::operation::side_sane(&operation.params, &operation.src) {
+            return Err(CommandError::Invalid(msg));
+        }
+        family_gate(world, &operation.params)?;
+        tool_gate(world, &operation.params, &operation.tool)?;
+        area_gate(world, context, &operation.src, &operation.params)?;
+        operation.stamp = None;
+
+        let effective = setup::effective(world, context);
+        let siblings: Vec<_> = setup::operation_order(world)
+            .into_iter()
+            .filter(|(_, entity)| {
+                model::operation_of(world, entity)
+                    .and_then(|op| setup::effective(world, op.setup.as_deref())) == effective
+            })
+            .collect();
+        let mut reordered = Vec::with_capacity(siblings.len());
+        for (index, (sibling, entity)) in siblings.into_iter().enumerate() {
+            let order = u32::try_from(index)
+                .map_err(|_| CommandError::Invalid("too many operations".into()))?;
+            let before = model::operation_meta_of(world, &entity);
+            let mut after = before.clone();
+            after.order = Some(order);
+            reordered.push((sibling, before, after));
+        }
+        let order = u32::try_from(reordered.len())
+            .map_err(|_| CommandError::Invalid("too many operations".into()))?;
+        Ok(Self {
+            name: name.to_owned(),
+            operation,
+            meta: OperationMeta { label: None, order: Some(order) },
+            reordered,
+        })
+    }
+}
+
+impl Command for PasteOperation {
+    fn apply(&self, world: &World) {
+        for (name, _, after) in &self.reordered {
+            if let Some(entity) = model::find_by_name(world, name) {
+                entity.entity_view(world).set(after.clone());
+            }
+        }
+        if model::find_by_name(world, &self.name).is_none() {
+            let entity = model::spawn(world, &self.name);
+            entity.entity_view(world).set(self.operation.clone());
+            entity.entity_view(world).set(self.meta.clone());
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            model::remove(world, &entity);
+        }
+        for (name, before, _) in &self.reordered {
+            if let Some(entity) = model::find_by_name(world, name) {
+                entity.entity_view(world).set(before.clone());
+            }
+        }
+    }
+}
+
 /// Delete an operation with its cached path; the snapshot restores both.
 pub struct DeleteOperation {
     name: String,
     operation: Operation,
     cache: Option<(ClPath, Vec<Warning>)>,
     location: Location,
+    meta: OperationMeta,
 }
 
 impl DeleteOperation {
@@ -111,6 +202,7 @@ impl DeleteOperation {
             operation,
             cache,
             location: model::transform_of(world, &entity).unwrap_or_default(),
+            meta: model::operation_meta_of(world, &entity),
         })
     }
 }
@@ -129,6 +221,7 @@ impl Command for DeleteOperation {
         let entity = model::spawn(world, &self.name);
         model::set_transform(world, &entity, self.location);
         entity.entity_view(world).set(self.operation.clone());
+        entity.entity_view(world).set(self.meta.clone());
         if let Some((path, warnings)) = &self.cache {
             entity.entity_view(world).set(Toolpath {
                 path: path.clone(),

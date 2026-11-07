@@ -211,52 +211,54 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             classes: Vec::new(),
         })
         .collect();
-    match (&state.program_sim, crate::machined::mesh(state)) {
-        // The machined stock's extracted mesh (M13.1 owed) takes the
-        // slot when the whole-program field view has one: the closed
-        // shell the program leaves, through the stock pipeline like the
-        // box it replaces. Unjudged (no classes): it paints as material,
-        // and the GPU eye, when it traces, still paints over the slot.
-        (_, Some(mesh)) => parts.push(GpuPart {
-            verts: mesh.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect(),
-            selected: false,
-            stock: true,
-            fill: false,
-            classes: Vec::new(),
-        }),
-        // The Deviate sheet takes the stock's slot in the draw order:
-        // it IS the stock's surface after the program, judged - same
-        // blend law, and the solid it replaces would only veil it.
-        (Some(ps), None) => parts.push(GpuPart {
-            verts: ps
-                .surface
-                .verts
-                .iter()
-                .map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])
-                .collect(),
-            selected: false,
-            stock: true,
-            fill: false,
-            classes: ps.surface.vcls.clone(),
-        }),
-        (None, None) => {
-            // The drawn block is the ACTIVE setup's stock, resolved by the
-            // same law the tree row and the pick use; a setup-free document
-            // resolves to the legacy "Stock" name and draws exactly as before.
-            let stock_name = camcraft_app::setup::stock_entity_name(
-                &state.world,
-                camcraft_app::setup::active(&state.world).as_deref(),
-            );
-            if let Some(entity) = model::find_by_name(&state.world, &stock_name)
-                && model::is_stock(&state.world, &entity)
-            {
-                parts.push(GpuPart {
-                    verts: world_verts(state, &entity),
-                    selected: model::is_selected(&state.world, &entity),
-                    stock: true,
-                    fill: false,
-                    classes: Vec::new(),
-                });
+    if !state.active_stock_hidden() {
+        match (&state.program_sim, crate::machined::mesh(state)) {
+            // The machined stock's extracted mesh (M13.1 owed) takes the
+            // slot when the whole-program field view has one: the closed
+            // shell the program leaves, through the stock pipeline like the
+            // box it replaces. Unjudged (no classes): it paints as material,
+            // and the GPU eye, when it traces, still paints over the slot.
+            (_, Some(mesh)) => parts.push(GpuPart {
+                verts: mesh.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect(),
+                selected: false,
+                stock: true,
+                fill: false,
+                classes: Vec::new(),
+            }),
+            // The Deviate sheet takes the stock's slot in the draw order:
+            // it IS the stock's surface after the program, judged - same
+            // blend law, and the solid it replaces would only veil it.
+            (Some(ps), None) => parts.push(GpuPart {
+                verts: ps
+                    .surface
+                    .verts
+                    .iter()
+                    .map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])
+                    .collect(),
+                selected: false,
+                stock: true,
+                fill: false,
+                classes: ps.surface.vcls.clone(),
+            }),
+            (None, None) => {
+                // The drawn block is the ACTIVE setup's stock, resolved by the
+                // same law the tree row and the pick use; a setup-free document
+                // resolves to the legacy "Stock" name and draws exactly as before.
+                let stock_name = camcraft_app::setup::stock_entity_name(
+                    &state.world,
+                    camcraft_app::setup::active(&state.world).as_deref(),
+                );
+                if let Some(entity) = model::find_by_name(&state.world, &stock_name)
+                    && model::is_stock(&state.world, &entity)
+                {
+                    parts.push(GpuPart {
+                        verts: world_verts(state, &entity),
+                        selected: model::is_selected(&state.world, &entity),
+                        stock: true,
+                        fill: false,
+                        classes: Vec::new(),
+                    });
+                }
             }
         }
     }

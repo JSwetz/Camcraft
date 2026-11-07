@@ -271,7 +271,7 @@ fn act(state: &mut State, kind: Nav) {
                 DisplayMode::Wireframe => DisplayMode::ShadedEdges,
             };
         }
-        Nav::Paths => state.show_all_paths = !state.show_all_paths,
+        Nav::Paths => state.toggle_all_toolpaths(),
         Nav::Axes => state.show_world_axes = !state.show_world_axes,
     }
 }

@@ -85,6 +85,7 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick) -> i32 {
 struct Shell {
     // Set on first resumed(); None until GPU init succeeds.
     window: Option<Arc<Window>>,
+    window_title: String,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     surface: Option<wgpu::Surface<'static>>,
@@ -147,13 +148,14 @@ impl Shell {
         // M-d: startup is a plain State::new() - byte-identical in shape to
         // imgui's App::new. The demo seed left the window path; world::seed
         // is what the harnesses and the headless proof call directly now.
-        // File work is the real thing: New/Model/Project/Save on the ribbon
+        // File work is the real thing: New/Model/Project/Save/Save As on the ribbon
         // queue the shared command kinds, rfd picks the path, State::run
         // does the work - the machinery was never egui's to rebuild.
         let state = State::new();
         let dock_state = build_dock();
         Self {
             window: None,
+            window_title: state.window_title(),
             device: None,
             queue: None,
             surface: None,
@@ -186,7 +188,7 @@ impl Shell {
 
     fn init_gpu(&mut self, el: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
-            .with_title("CamCraft")
+            .with_title(self.window_title.clone())
             .with_inner_size(LogicalSize::new(1280.0, 800.0));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -343,6 +345,13 @@ impl Shell {
         // Commands the panels queued last frame land before the scene is
         // collected, so this frame draws what the user's click did.
         self.state.drain_actions();
+        let title = self.state.window_title();
+        if title != self.window_title {
+            if let Some(window) = &self.window {
+                window.set_title(&title);
+            }
+            self.window_title = title;
+        }
         let scene = world::collect(&self.state);
 
         let Self {
@@ -442,7 +451,11 @@ impl Shell {
         drain_textures(renderer, device, queue, &mut full_output);
         winit_state.handle_platform_output(window, full_output.platform_output);
 
-        let clipped = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let clipped: Vec<_> = egui_ctx
+            .tessellate(full_output.shapes, full_output.pixels_per_point)
+            .into_iter()
+            .filter(renderable_paint_job)
+            .collect();
 
         let st = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(st)
@@ -468,7 +481,7 @@ impl Shell {
         // The traced stock (M7.2 B3b) takes the sheet's slot when the eye
         // has a frame; the field view is walked once per Deviate arming.
         let mut traced = false;
-        if let Some(se) = stock_eye.as_mut() {
+        if let Some(se) = stock_eye.as_mut().filter(|_| !state.active_stock_hidden()) {
             if state.display != crate::state::DisplayMode::Wireframe {
                 crate::actions::ensure_field_view(state);
             }
@@ -621,6 +634,16 @@ pub(crate) fn shell_layout(
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
 /// renderer. 0.36's TexturesDelta asserts on drop unless drained - consume,
 /// don't peek (the S1 panic this replaced was exactly that).
+/// egui-wgpu 0.36 binds one buffer slice per mesh, including meshes with
+/// no vertices or indices. wgpu 30 rejects those zero-length slices.
+pub(crate) fn renderable_paint_job(job: &egui::ClippedPrimitive) -> bool {
+    match &job.primitive {
+        egui::epaint::Primitive::Mesh(mesh) =>
+            !mesh.vertices.is_empty() && !mesh.indices.is_empty(),
+        egui::epaint::Primitive::Callback(_) => true,
+    }
+}
+
 fn drain_textures(
     renderer: &mut Renderer,
     device: &wgpu::Device,
@@ -1251,11 +1274,10 @@ pub(crate) fn cached_script(state: &mut State) -> std::sync::Arc<camcraft_app::s
 /// display, not suppression; the law stands on `State::has_toolpaths`),
 /// so the transport clock and the posted program count the same moves.
 pub(crate) fn sim_script(state: &State) -> camcraft_app::sim::Script {
-    use camcraft_app::{model, posting, sim};
+    use camcraft_app::{model, posting, setup, sim};
     let tr = sim::Traverse::from_machine(&posting::machine_value(&state.world));
-    let paths: Vec<(String, camcraft_app::cl::Toolpath)> = model::named_entities(&state.world)
+    let paths: Vec<(String, camcraft_app::cl::Toolpath)> = setup::operation_order(&state.world)
         .into_iter()
-        .filter(|(_, e)| model::is_operation(&state.world, e))
         .filter_map(|(n, e)| model::toolpath_of(&state.world, &e).map(|tp| (n, tp.path)))
         .collect();
     sim::script(paths.iter().map(|(n, t)| (n.as_str(), t)), &tr)

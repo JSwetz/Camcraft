@@ -79,6 +79,8 @@ pub fn collect(world: &World) -> ProjectFile {
                     fixed: d.fixed,
                 });
             let operation = model::operation_of(world, &entity).map(|op| OperationDto {
+                label: model::operation_meta_of(world, &entity).label,
+                order: model::operation_meta_of(world, &entity).order,
                 tool: op.tool,
                 src: match &op.src {
                     SrcRef::Stock => SrcDto::Stock,
