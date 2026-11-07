@@ -181,7 +181,7 @@ function onLinear() {
 // is never touched, so G17 stays the program's only plane.
 // #18 made this final: the public manuals allow G2/G3 with axes off
 // the working plane only as a spatial-arc case and state no rotation
-// sense for it (and the I/J/K centre meaning is itself open, #49) -
+// sense for it (its I/J/K are absolute centres, #49) -
 // a native XZ/YZ arc would be a guess at a mirrorable direction.
 var ARC_CHORD_TOL = 0.001;
 var ARC_MAX_CHORDS = 1024;
@@ -227,14 +227,25 @@ function onCircular() {
     verticalArc(p);
     return;
   }
+  // #49: in this dialect I/J are the circle centre's Cartesian
+  // coordinates - ABSOLUTE unless the word carries G91 (TNC 640 ISO
+  // Programming User's Manual, ID 892909-25, 9/2016, pp. 260-261:
+  // "Circle center I, J"; "Entering the circle center incrementally"
+  // is relative to the last programmed position only when entered
+  // incrementally; G91 is written before the word, p. 128). The
+  // manual's form sets the centre in its own block before the
+  // G02/G03 ("you must first enter the circle center I, J"), so it is
+  // posted that way. Absolute: the work origin shifts the centre like
+  // any position word (wo), never a start-relative difference.
   var c = p.IJKIncrement || {};
+  if (!has(c.I) || !has(c.J)) {
+    msg("arc without an XY centre - refused, not guessed");
+    return;
+  }
+  block([wo("I", c.I, orgX), wo("J", c.J, orgY)]);
   block([
     p.CircularDirection === "CW" ? "G2" : "G3",
     wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ),
-    // I/J are increments: a shared translation cancels, so the origin
-    // must NOT enter them - center minus start in the stream's frame.
-    w("I", has(c.I) && has(p.StartX) ? c.I - p.StartX : null),
-    w("J", has(c.J) && has(p.StartY) ? c.J - p.StartY : null),
     fw(p.FeedRate),
   ]);
 }

@@ -216,7 +216,11 @@ fn heidenhain_rides_its_vertical_arcs_as_chords_and_never_switches_plane() {
     // The XY arcs stay arcs; the G18 G3 quarter (r 5) is a fine G1 fan
     // whose every point sits on its circle in XZ about (X15, Z5), on
     // the short way round seen from +Y: X15..20, Z0..5.
-    assert!(out.lines().any(|l| l == "G2 X-5 Y5 Z0 I0 J5 F800"), "{out}");
+    // #49: the centre is its own block, absolute (TNC 640 ISO manual
+    // 892909-25 p. 260); here centre (0, 5) happens to equal the
+    // increment from the start (0, 0).
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines.windows(2).any(|w| w == ["I0 J5", "G2 X-5 Y5 Z0 F800"]), "{out}");
     let fan = hh_fan(&out, 'Y', 0.0, 'X', 'Z');
     assert!(fan.len() > 20, "a fine fan, {} chords", fan.len());
     for (x, z) in &fan {

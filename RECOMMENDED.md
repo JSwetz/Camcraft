@@ -11929,3 +11929,50 @@ absolute centre, so XY arcs that don't start at the centre's origin
 offset may be read wrong by a real TNC. That is outside #18's scope and
 golden-locked, so it is left for its own issue (#49, P0: wrong
 output) and not changed here.
+
+## #49: Heidenhain DIN/ISO XY arcs post the absolute centre, in its own block (2026-11-07, Prime Directive)
+
+Primary source, read in full (not a summary): HEIDENHAIN "TNC 640
+User's Manual, ISO programming", NC software 340590-07 / 340591-07 /
+340595-07, ID 892909-25, English, 9/2016, hosted at
+content.heidenhain.de (`.../TNC640/34059x-07/diniso/892909-25.pdf`).
+
+(1) **I/J are the absolute circle centre - the post now says so.**
+p. 260 "Circle center I, J": the centre is entered as "the Cartesian
+coordinates of the circle center in the working plane", stays in
+effect "until a new circle center is programmed", and is relative to
+the last programmed position only "if you enter the circle center
+with incremental coordinates". p. 128: an incremental coordinate is
+written with G91 *before the word*; this post writes G90 in the
+preamble and never G91. The manual's own full-circle example (p. 267:
+`N50 I+50 J+50`, start `X+0 Y+50`, `G02 X+0`) is only consistent with
+absolute centres. The old output (centre minus start, Fanuc's
+increment) was therefore wrong on every XY arc whose start is not the
+work origin - a real TNC would cut about a different centre, i.e.
+gouge or refuse on its 0.016 mm circle check. Fixed: I/J are the
+CL centre shifted by the work origin, exactly like X/Y (`wo`).
+
+(2) **The centre gets its own block before the G2/G3.** p. 261:
+"Before programming a circular arc, you must first enter the circle
+center I, J. The last programmed tool position will be the starting
+point of the arc"; every example in the manual writes `N.. I.. J..`
+alone, then `G02/G03 X.. Y..`. Writing I/J inside the G2 block (the
+Fanuc shape) is not documented for this mode, so it is not relied on.
+Considered and dropped: keeping one block (fewer lines, smaller golden
+diff) - undocumented, and the manual is the only authority we may use.
+An arc reaching the post without an XY centre is now refused by name
+(counted warning) instead of posting a G2 without one.
+
+Golden diffs: only the I/J words moved (to a preceding line, absolute
+values); X/Y/Z/F and every other block are byte-identical.
+Pinned by `heidenhain_arc_centre::heidenhain_arc_centre_words_are_the_
+absolute_centre` and `..._shifts_with_the_work_origin` (CW and CCW
+arcs ~100 mm from the origin, so absolute and incremental differ; the
+centre rebuilt from the words as the manual defines must equal the CL
+centre within 3-decimal resolution, start/end on one circle), plus the
+updated `arc_planes` and `conformance` goldens.
+
+Left open (not this issue): the manual writes signed words (`X+25`)
+and `N` block numbers with `*` terminators; the post's unsigned,
+unnumbered style is the house choice locked since M3.3 B. Whether a
+real TNC accepts that style is a separate question.
