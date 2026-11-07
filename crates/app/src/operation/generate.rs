@@ -2447,6 +2447,10 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     nose_radius: tool.nose_radius,
+                    // The bar's body, centred on the spindle in its
+                    // approach and retract (#103).
+                    head_d: tool.diameter,
+                    shank_d: tool.shank_d,
                 },
             )?;
             (region, path)
@@ -2755,8 +2759,12 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         0.0
                     },
                     // A boring bar's body round its nose, up its reach.
-                    body: (tool.kind == crate::tools::ToolKind::Bore)
-                        .then(|| (tool.diameter.max(tool.shank_d) * 0.5, tool.flute_len + tool.shank_len)),
+                    body: (tool.kind == crate::tools::ToolKind::Bore).then_some(super::turning_rapids::BarBody {
+                        head_d: tool.diameter,
+                        shank_d: tool.shank_d,
+                        flute_len: tool.flute_len,
+                        shank_len: tool.shank_len,
+                    }),
                 },
                 &mut verify_prior,
                 &mut warns,
