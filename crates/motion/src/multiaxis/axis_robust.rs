@@ -25,16 +25,21 @@
 //! so it admits facets that stand NEAR a meridian plane without lying
 //! in one: a cross hole's mouth ring, the middle strip of its floor.
 //! Their one-sided misses lean the line by a micron (issue #116). So
-//! once the inliers settle the band is tightened to a few times their
-//! median miss - a true surface of revolution (cylinder, cone, face)
-//! meets the axis to its own rounding, so only the facets whose normal
-//! leaves the meridian plane fall out - and the line refitted, while
-//! the band keeps shrinking and every gate still passes.
+//! once the inliers settle the band is tightened ONCE to five noise
+//! sigmas of the settled inliers (their MAD scale) - a true surface of
+//! revolution (cylinder, cone, face) meets the axis to its own noise,
+//! so only the facets whose normal leaves the meridian plane fall out -
+//! and the line refitted once; each pass is taken only when it lowers
+//! a trimmed (clipped) residual and every gate still passes, so a
+//! noisy mesh never settles on an axis worse than its plain fit. The
+//! set-aside share is still read at the sagitta band, so a noisy plain
+//! bar names no features.
 //!
 //! Provenance: iteratively reweighted least squares with a hard
 //! (0/1) redescending weight - the trimmed refit of robust regression
 //! (Huber, Robust Statistics; Fischler & Bolles' consensus-set refit,
-//! RANSAC, 1981) - applied to the normal-line concurrency fit of a
+//! RANSAC, 1981), with the MAD scale estimate
+//! (Hampel; Huber) - applied to the normal-line concurrency fit of a
 //! surface of revolution (Pottmann & Randrup, 1998). Written from
 //! those sources and our own design notes; no vendor material.
 
@@ -52,16 +57,17 @@ const MIN_KEPT_SHARE: f64 = 0.5;
 const MIN_KEPT: usize = 8;
 /// Reweighting rounds: the inlier set settles in one or two.
 const ROUNDS: usize = 4;
-/// The tightened band, in multiples of the kept facets' median miss:
-/// wide enough to keep a mesh's own rounding noise (an f32-stored STL
-/// misses by its storage, evenly about the axis), narrow enough to set
-/// aside the off-meridian facets whose one-sided misses lean the line.
-const BAND_K: f64 = 4.0;
+/// The tightened band, in noise sigmas: wide enough to cut no tail of
+/// a mesh's own rounding (an f32-stored STL misses by its storage, evenly about
+/// the axis), narrow enough to set aside the off-meridian facets whose
+/// one-sided misses lean the line.
+const BAND_K: f64 = 5.0;
+/// The median absolute deviation's normal-consistency factor: sigma =
+/// 1.4826 * MAD (Huber, Robust Statistics).
+const MAD_SIGMA: f64 = 1.4826;
 /// The tightened band's floor, as a fraction of the mean radius: below
 /// it the misses are the solve's rounding, not the part's.
 const BAND_FLOOR: f64 = 1e-9;
-/// Tightening rounds: the band reaches the noise in one or two.
-const TIGHTEN_ROUNDS: usize = 4;
 
 /// What the fit read, for the laws that must explain a refusal: the
 /// robust axis, the plain least-squares one it started from, and the
@@ -87,52 +93,81 @@ pub(super) fn reweigh(data: &[Datum], plain: Axis, a_total: f64) -> Fit {
     let Some((_, rho)) = line(data, plain.dir, a_total) else {
         return as_is(0.0, true); // cannot happen for a judged fit; keep it
     };
-    let mut tol = (REL_TOL * rho).max(1e-9);
-    let mut keep = inliers(data, plain, tol);
-    if keep.iter().all(|k| *k) {
-        // Nothing misses the sagitta band; something may still miss
-        // the tight one (a strip just off a meridian). An exact revolve
-        // meets it everywhere and keeps its plain fit bit for bit.
-        let Some(t) = median_miss(data, &keep, plain).map(|m| tight_band(m, rho)) else {
-            return as_is(0.0, true);
-        };
-        let tight = inliers(data, plain, t);
-        if tight.iter().all(|k| *k) {
-            return as_is(0.0, true);
-        }
-        (tol, keep) = (t, tight);
-    }
-    let ans_all = answering(data, &vec![true; data.len()], plain).0;
+    // The wide band: the sagitta budget, or five noise sigmas of every
+    // facet's miss about the plain fit when the mesh is that noisy -
+    // a band inside the noise cuts its tails one-sidedly about a biased
+    // line and drifts the trimmed refit (review of PR #168). A feature
+    // (keyway, hole wall) misses by millimetres and stays outside it.
+    let all = vec![true; data.len()];
+    let sigma = median_miss(data, &all, plain).map_or(0.0, |m| MAD_SIGMA * m);
+    let tol = (REL_TOL * rho).max(BAND_K * sigma).max(1e-9);
+    let keep = inliers(data, plain, tol);
+    let ans_all = answering(data, &all, plain).0;
     let gate = Gate { rho, a_total, ans_all };
-    let (mut ax, mut keep) = match settle(data, plain, keep, tol, &gate) {
-        Ok(s) => s,
-        Err(keep) => return as_is(share(data, &keep, plain), false),
-    };
-    // The tightening (issue #116): the sagitta band admits facets that
-    // stand near a meridian but not in one - a cross hole's mouth ring,
-    // a hole floor's centre strip - and their small, one-sided misses
-    // lean the line by microns, past the lathe's spindle tolerance. On
-    // the settled axis the true revolve meets it to its own noise, so
-    // the band shrinks to a few times the kept facets' median miss and
-    // the line is refitted on what still meets it; repeated while the
-    // band keeps shrinking. A tighter band that fails any gate is not
-    // taken: the last settled fit stands (it was already trusted).
-    let mut band = tol;
-    for _ in 0..TIGHTEN_ROUNDS {
-        let Some(med) = median_miss(data, &keep, ax) else { break };
-        let next = tight_band(med, rho);
-        if next >= 0.5 * band {
-            break;
+    // The wide pass: trim at the sagitta band until the inliers settle,
+    // taken only when it lowers the trimmed residual of every facet
+    // (a noisy mesh's tails cut at the band would otherwise drift it).
+    let (wide, coarse) = if keep.iter().all(|k| *k) {
+        (plain, keep)
+    } else {
+        match settle(data, plain, keep, tol, &gate) {
+            Ok((ax, k)) if trimmed(data, None, ax, tol) < trimmed(data, None, plain, tol) => (ax, k),
+            Ok(_) => (plain, inliers(data, plain, tol)),
+            Err(keep) => return as_is(share(data, &keep, plain), false),
         }
-        let tight = inliers(data, ax, next);
-        match settle(data, ax, tight, next, &gate) {
-            Ok((a, k)) => {
-                (ax, keep, band) = (a, k, next);
-            }
-            Err(_) => break,
+    };
+    // A fit trusted at the wide band stays trusted if the tightening
+    // is declined.
+    let ax = tighten(data, wide, &coarse, tol, rho, &gate).unwrap_or(wide);
+    // The share is read at the wide band: the tight band's drop-outs on
+    // a noisy mesh are its noise, not features to name.
+    let aside = share(data, &inliers(data, ax, tol), ax);
+    Fit { axis: ax, plain, outlier_share: aside, trusted: true }
+}
+
+/// The tightening (issue #116), done ONCE: the sagitta band admits
+/// facets that stand near a meridian without lying in one - a cross
+/// hole's mouth ring, a hole floor's centre strip - and their
+/// one-sided misses lean the line by microns. The mesh's own noise is
+/// read off the coarse inliers about the settled axis (the MAD scale,
+/// about zero), the band set to [`BAND_K`] sigmas - far enough out that
+/// it cuts no noise tail, only facets clearly off a meridian - and the
+/// line refitted once on what meets it, with no re-trim (re-trimming
+/// about a moving estimate sorts the facets by the sign of their
+/// noise). Taken only when it passes every gate and lowers the coarse
+/// inliers' trimmed residual; `None` keeps the settled fit. An exact
+/// revolve meets the band everywhere and keeps its bits.
+fn tighten(data: &[Datum], wide: Axis, coarse: &[bool], tol: f64, rho: f64, g: &Gate) -> Option<Axis> {
+    let med = median_miss(data, coarse, wide)?;
+    let band = (BAND_K * MAD_SIGMA * med).max(BAND_FLOOR * rho).max(1e-12);
+    if band >= tol {
+        return None;
+    }
+    let tight = inliers(data, wide, band);
+    if tight.iter().zip(coarse).all(|(t, c)| *t == *c) {
+        return None;
+    }
+    let ax = refit_on(data, &tight, wide, g)?;
+    (trimmed(data, Some(coarse), ax, band) < trimmed(data, Some(coarse), wide, band)).then_some(ax)
+}
+
+/// The area-weighted mean squared miss about `ax`, each miss clipped
+/// at `band` (a trimmed residual: a feature off the axis counts the
+/// same about any candidate, noise counts in full), over `keep` (all
+/// facets when `None`).
+fn trimmed(data: &[Datum], keep: Option<&[bool]>, ax: Axis, band: f64) -> f64 {
+    let (mut sq, mut a) = (0.0, 0.0);
+    for (i, d) in data.iter().enumerate() {
+        if keep.is_some_and(|k| !k.get(i).copied().unwrap_or(false)) {
+            continue;
+        }
+        if let Some(e) = dist(d, ax).filter(|e| e.is_finite()) {
+            let c = e.min(band);
+            sq += d.a * c * c;
+            a += d.a;
         }
     }
-    Fit { axis: ax, plain, outlier_share: share(data, &keep, ax), trusted: true }
+    if a > 0.0 { sq / a } else { f64::INFINITY }
 }
 
 /// The fixed terms every refit is judged by: the plain fit's mean
@@ -149,23 +184,9 @@ struct Gate {
 fn settle(data: &[Datum], start: Axis, mut keep: Vec<bool>, tol: f64, g: &Gate) -> Result<(Axis, Vec<bool>), Vec<bool>> {
     let mut ax = start;
     for _ in 0..ROUNDS {
-        let (ans_kept, rows) = answering(data, &keep, ax);
-        if rows < MIN_KEPT || ans_kept < MIN_KEPT_SHARE * g.ans_all {
-            return Err(keep);
-        }
-        let kept: Vec<Datum> = data
-            .iter()
-            .zip(&keep)
-            .filter(|(_, k)| **k)
-            .map(|(d, _)| Datum { n: d.n, p: d.p, a: d.a })
-            .collect();
-        let a_kept: f64 = kept.iter().map(|d| d.a).sum();
-        let Some(next) = refit(&kept, ax, a_kept) else {
+        let Some(next) = refit_on(data, &keep, ax, g) else {
             return Err(keep);
         };
-        if judge(data, next, g.rho, g.a_total).is_none() {
-            return Err(keep);
-        }
         ax = next;
         let again = inliers(data, ax, tol);
         if again == keep {
@@ -176,9 +197,22 @@ fn settle(data: &[Datum], start: Axis, mut keep: Vec<bool>, tol: f64, g: &Gate) 
     Ok((ax, keep))
 }
 
-/// The tightened band for a median miss `med` on mean radius `rho`.
-fn tight_band(med: f64, rho: f64) -> f64 {
-    (BAND_K * med).max(BAND_FLOOR * rho).max(1e-12)
+/// One refit on `keep` from `ax`, through the backstops (enough rows
+/// and kept area) and the full judgement on every facet.
+fn refit_on(data: &[Datum], keep: &[bool], ax: Axis, g: &Gate) -> Option<Axis> {
+    let (ans_kept, rows) = answering(data, keep, ax);
+    if rows < MIN_KEPT || ans_kept < MIN_KEPT_SHARE * g.ans_all {
+        return None;
+    }
+    let kept: Vec<Datum> = data
+        .iter()
+        .zip(keep)
+        .filter(|(_, k)| **k)
+        .map(|(d, _)| Datum { n: d.n, p: d.p, a: d.a })
+        .collect();
+    let a_kept: f64 = kept.iter().map(|d| d.a).sum();
+    let next = refit(&kept, ax, a_kept)?;
+    judge(data, next, g.rho, g.a_total).map(|_| next)
 }
 
 /// The area-weighted median miss of the kept non-pole facets about
@@ -267,110 +301,5 @@ fn rms(kept: &[Datum], ax: Axis) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::geometry::{Point3, Triangle};
-    use crate::multiaxis::axis::{fit, fit_report};
-
-    const SEGS: i64 = 72;
-
-    fn ring(j: i64, z: f64) -> Point3 {
-        let th = std::f64::consts::TAU * j as f64 / SEGS as f64;
-        Point3::new(10.0 * th.cos(), 10.0 * th.sin(), z)
-    }
-
-    /// A D20 shaft on world Z, z -30..30; `half > 0` cuts a keyway on +x
-    /// over z 0..10 whose walls meet the ring at +-`half` segments.
-    fn shaft(half: i64) -> Vec<Triangle> {
-        let mut f = Vec::new();
-        let zs = [-30.0, 0.0, 10.0, 30.0];
-        for j in -SEGS / 2..SEGS / 2 {
-            for (k, w) in zs.windows(2).enumerate() {
-                if k == 1 && j >= -half && j < half {
-                    continue;
-                }
-                let (a1, a2, b1, b2) = (ring(j, w[0]), ring(j + 1, w[0]), ring(j, w[1]), ring(j + 1, w[1]));
-                f.push(Triangle::new(a1, a2, b2));
-                f.push(Triangle::new(a1, b2, b1));
-            }
-            let (c0, c1) = (Point3::new(0.0, 0.0, -30.0), Point3::new(0.0, 0.0, 30.0));
-            f.push(Triangle::new(c0, ring(j + 1, -30.0), ring(j, -30.0)));
-            f.push(Triangle::new(c1, ring(j, 30.0), ring(j + 1, 30.0)));
-        }
-        if half > 0 {
-            let (xt, ys, xf) = (ring(half, 0.0).x, ring(half, 0.0).y, 8.0);
-            let q = Point3::new;
-            f.push(Triangle::new(q(xf, -ys, 0.0), q(xf, ys, 0.0), q(xf, ys, 10.0)));
-            f.push(Triangle::new(q(xf, -ys, 0.0), q(xf, ys, 10.0), q(xf, -ys, 10.0)));
-            f.push(Triangle::new(q(xf, ys, 0.0), q(xt, ys, 0.0), q(xt, ys, 10.0)));
-            f.push(Triangle::new(q(xf, ys, 0.0), q(xt, ys, 10.0), q(xf, ys, 10.0)));
-            f.push(Triangle::new(q(xt, -ys, 0.0), q(xf, -ys, 0.0), q(xf, -ys, 10.0)));
-            f.push(Triangle::new(q(xt, -ys, 0.0), q(xf, -ys, 10.0), q(xt, -ys, 10.0)));
-        }
-        f
-    }
-
-    #[test]
-    fn a_plain_revolve_keeps_its_plain_fit_bit_for_bit() {
-        let r = fit_report(&shaft(0)).expect("a revolve fits");
-        assert_eq!(r.axis, r.plain, "nothing set aside, nothing moved");
-        assert!(r.trusted && r.outlier_share == 0.0, "{r:?}");
-        assert_eq!(r.axis.origin, Point3::new(0.0, 0.0, 0.0), "{r:?}");
-        assert_eq!(r.axis.dir, Point3::new(0.0, 0.0, 1.0), "{r:?}");
-        assert_eq!(fit(&shaft(0)).ok(), Some(r.axis));
-    }
-
-    #[test]
-    fn a_keyway_no_longer_drags_the_axis_and_keeps_the_plain_direction() {
-        for half in [3, 6] {
-            let r = fit_report(&shaft(half)).expect("a keyed shaft fits");
-            let off = |p: Point3| (p.x * p.x + p.y * p.y).sqrt();
-            println!("half {half}: plain off {:.4e} mm, robust off {:.4e} mm, set aside {:.3}", off(r.plain.origin), off(r.axis.origin), r.outlier_share);
-            assert!(off(r.plain.origin) > 0.01, "the plain fit is dragged (the case under test): {r:?}");
-            assert!(off(r.axis.origin) < 1e-9, "half {half}: the robust fit sits on the true axis: {r:?}");
-            assert!(r.trusted && r.outlier_share > 0.0 && r.outlier_share < 0.1, "{r:?}");
-            // The refine guard on a non-revolved remnant: the keyway
-            // cannot tilt a straight shaft, so the direction is the
-            // plain fit's, bit for bit.
-            assert_eq!(r.axis.dir, r.plain.dir, "half {half}: {r:?}");
-            assert_eq!(r.axis.dir, Point3::new(0.0, 0.0, 1.0), "half {half}: {r:?}");
-        }
-    }
-
-    /// The revolved shaft plus a radial flat strip on +x standing just
-    /// off the meridian plane (circumcenters 0.125 mm off it): inside
-    /// the sagitta band, so before #116 it stayed an inlier and leaned
-    /// the line by microns - a cross hole's mouth ring and floor strip
-    /// in miniature.
-    fn shaft_with_near_meridian_strip() -> Vec<Triangle> {
-        let mut f = shaft(0);
-        let q = Point3::new;
-        let (x, y1) = (9.9, 0.25);
-        f.push(Triangle::new(q(x, 0.0, 0.0), q(x, y1, 0.0), q(x, y1, 20.0)));
-        f.push(Triangle::new(q(x, 0.0, 0.0), q(x, y1, 20.0), q(x, 0.0, 20.0)));
-        f
-    }
-
-    #[test]
-    fn a_near_meridian_strip_is_set_aside_by_the_tightened_band() {
-        let r = fit_report(&shaft_with_near_meridian_strip()).expect("the shaft fits");
-        let off = |p: Point3| (p.x * p.x + p.y * p.y).sqrt();
-        println!("strip: plain off {:.4e} mm, robust off {:.4e} mm, set aside {:.4}", off(r.plain.origin), off(r.axis.origin), r.outlier_share);
-        assert!(r.trusted, "{r:?}");
-        assert!(off(r.axis.origin) < 1e-9, "the robust fit sits on the true axis: {r:?}");
-        assert!(r.axis.dir.x.abs() < 1e-12 && r.axis.dir.y.abs() < 1e-12, "no lean: {r:?}");
-    }
-
-    #[test]
-    fn a_rectangular_prism_is_still_refused_as_not_revolved() {
-        let q = Point3::new;
-        let (a, b, h) = (5.0, 10.0, 30.0);
-        let v = [q(-a, -b, -h), q(a, -b, -h), q(a, b, -h), q(-a, b, -h), q(-a, -b, h), q(a, -b, h), q(a, b, h), q(-a, b, h)];
-        let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
-        let mut f = Vec::new();
-        for [i, j, k, l] in quads {
-            f.push(Triangle::new(v[i], v[j], v[k]));
-            f.push(Triangle::new(v[i], v[k], v[l]));
-        }
-        assert!(fit_report(&f).is_err(), "a prism is not a surface of revolution");
-    }
-}
+#[path = "axis_robust_tests.rs"]
+mod tests;
