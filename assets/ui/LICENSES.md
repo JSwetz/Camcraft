@@ -34,19 +34,22 @@ source-form distributions.
     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Original artwork (assets/ui/drill.png, assets/ui/post.png, assets/ui/sim.png, assets/ui/finish3d.png, assets/ui/fixture.png, assets/ui/contour5d.png, assets/ui/parallel5d.png, assets/ui/swarf.png, assets/ui/advancedswarf.png, assets/ui/rotarycontour.png, assets/ui/rotaryparallel.png)
+## Original artwork (assets/ui/drill.png, assets/ui/post.png, assets/ui/sim.png, assets/ui/finish3d.png, assets/ui/fixture.png, assets/ui/contour5d.png, assets/ui/parallel5d.png, assets/ui/swarf.png, assets/ui/advancedswarf.png, assets/ui/rotarycontour.png, assets/ui/rotaryparallel.png, assets/ui/debug-info.png)
 
-These eleven glyphs are our own drawings, authored for M1.6, M1.7, M2.2,
-M3.2 and M5.1 (no Tabler drill-bit, post-to-G-code, waterline, vise,
+These twelve glyphs are our own drawings, authored for M1.6, M1.7, M2.2,
+M3.2, M5.1 and #157 (no Tabler drill-bit, post-to-G-code, waterline, vise,
 5-axis, swarf or rotary-turned-bar glyph exists, and the move-simulation
 mark is a bespoke curve; AGENTS.md's "operation-specific glyphs are
 drawn original when no generic set fits"). Public-domain subjects, our
 renderings; no license notice owed, and they are not part of the Tabler
 set below. (The note once missed fixture.png - the exclusion lists here
 are the only record of which pixels are ours, so both lines now name all
-eleven.)
+twelve.)
+debug-info.png (#157) is the exception to that reason: Tabler has a bug
+glyph, but ours was drawn by a short script (no SVG rasterizer in the
+authoring environment) - still our pixels, no notice owed.
 
-## Tabler Icons (UI glyphs, assets/ui/*.png except drill.png, post.png, sim.png, finish3d.png, fixture.png, contour5d.png, parallel5d.png, swarf.png, advancedswarf.png, rotarycontour.png and rotaryparallel.png, loaded by crates/ui/src/egui_app/icons.rs)
+## Tabler Icons (UI glyphs, assets/ui/*.png except drill.png, post.png, sim.png, finish3d.png, fixture.png, contour5d.png, parallel5d.png, swarf.png, advancedswarf.png, rotarycontour.png, rotaryparallel.png and debug-info.png, loaded by crates/ui/src/egui_app/icons.rs)
 
 Outline glyphs from Tabler Icons (https://tabler-icons.io), version 3.49.0,
 MIT (below): recolored to white at load; shapes otherwise unmodified.

@@ -56,11 +56,13 @@ pub(crate) enum Icon {
     EyeOff,
     Simulate,
     Fixture,
+    /// The status strip's Debug info door (#157), an original glyph.
+    DebugInfo,
 }
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 35] = [
+    pub(crate) const ALL: [Icon; 36] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -96,6 +98,7 @@ impl Icon {
         Icon::EyeOff,
         Icon::Simulate,
         Icon::Fixture,
+        Icon::DebugInfo,
     ];
 
     fn png(self) -> &'static [u8] {
@@ -177,6 +180,7 @@ impl Icon {
             // jaws, screw shaft and round knob of a machine vise, in the
             // set's stroke weight. Ours to give.
             Icon::Fixture => include_bytes!("../../../../assets/ui/fixture.png"),
+            Icon::DebugInfo => include_bytes!("../../../../assets/ui/debug-info.png"),
         }
     }
 
@@ -219,6 +223,7 @@ impl Icon {
             Icon::EyeOff => "icon-eye-off",
             Icon::Simulate => "icon-simulate",
             Icon::Fixture => "icon-fixture",
+            Icon::DebugInfo => "icon-debug-info",
         }
     }
 }

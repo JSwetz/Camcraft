@@ -231,7 +231,9 @@ impl Shell {
                     return;
                 }
             };
-        println!("{}", gpu::describe(&adapter).log_line());
+        let gpu_line = gpu::describe(&adapter).log_line();
+        println!("{gpu_line}");
+        self.state.gpu_line = Some(gpu_line);
 
         let mut renderer = Renderer::new(&device, config.format, RendererOptions::default());
         let scene = world::collect(&self.state);
@@ -570,7 +572,7 @@ pub(crate) fn shell_layout(
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panes::status(ui, &mut *state, &pal);
+            panes::status(ui, &mut *state, &pal, icons);
         });
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
@@ -601,6 +603,9 @@ pub(crate) fn shell_layout(
     // (in-app egui::Window over the dock, None on a fresh State, so
     // snapshots never move until the Setup pane opens it).
     machine_editor::window(ui.ctx(), state);
+    // #157: the Debug info window - same window law (closed on a fresh
+    // State, opened from the status strip's bug button).
+    super::debug_info::window(ui.ctx(), state);
 }
 
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the

@@ -1232,7 +1232,7 @@ pub(super) fn view_rows_of(
 /// writes them all), while command refusals read twice by design: here for
 /// everyone, and on their own pane through `error_for` (M-c). Startup is a
 /// plain empty document; an untouched status reads "ready".
-pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
+pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconSet>) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     // Owned so the button below can reborrow `state` mutably while the
@@ -1262,6 +1262,12 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 }
             });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // #157: the Debug info door, rightmost - the glyph when the
+            // icon set is up, its name when it is not (headless frames
+            // and a failed decode degrade to text, never to nothing).
+            if super::debug_info::button(ui, icons).clicked() {
+                state.debug_info_open = !state.debug_info_open;
+            }
             ui.label(
                 RichText::new("egui shell (M-g) - imgui retired")
                     .color(pal.text_faint)
