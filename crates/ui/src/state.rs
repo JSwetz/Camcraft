@@ -976,6 +976,10 @@ pub struct State {
     /// computed from it keeps running - hiding geometry must never
     /// silently change what the machine does).
     pub hidden_models: Vec<String>,
+    /// Stock entities hidden from the viewport by the browser eye.
+    pub hidden_stocks: Vec<String>,
+    /// Work-offset gizmos hidden by their browser eyes.
+    pub hidden_offsets: Vec<String>,
     /// Operations whose cached path stays undrawn (eye toggle per op).
     /// Same rule: the path still exists and posts.
     pub hidden_paths: Vec<String>,
@@ -1253,6 +1257,8 @@ impl State {
             geo_hover: None,
             op_tab: 0,
             hidden_models: Vec::new(),
+            hidden_stocks: Vec::new(),
+            hidden_offsets: Vec::new(),
             hidden_paths: Vec::new(),
             browser_expanded: [true; 4],
             cam: Camera::default(),
@@ -1953,6 +1959,21 @@ impl State {
         }
     }
 
+    #[must_use]
+    pub(crate) fn hidden_in_view(&self, name: &str) -> bool {
+        self.hidden_models.iter().any(|n| n == name)
+            || self.hidden_stocks.iter().any(|n| n == name)
+    }
+
+    #[must_use]
+    pub(crate) fn active_stock_hidden(&self) -> bool {
+        let name = camcraft_app::setup::stock_entity_name(
+            &self.world,
+            camcraft_app::setup::active(&self.world).as_deref(),
+        );
+        self.hidden_stocks.iter().any(|n| n == &name)
+    }
+
     /// Run every queued action, then poll the import worker once. Safe to
     /// call every frame; never blocks.
     pub fn drain_actions(&mut self) {
@@ -2010,6 +2031,8 @@ impl State {
             CommandKind::NewDocument => {
                 self.abandon_imports();
                 self.project_path = None;
+                self.hidden_stocks.clear();
+                self.hidden_offsets.clear();
                 model::clear_named(&self.world);
                 // Units belong to the document, and clear_named cannot
                 // reach a singleton: reset the lens so a fresh blank is
@@ -3138,6 +3161,8 @@ impl State {
     fn open_project_path(&mut self, path: PathBuf) {
         self.abandon_imports();
         self.project_path = None;
+        self.hidden_stocks.clear();
+        self.hidden_offsets.clear();
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's

@@ -4223,7 +4223,35 @@ fn a_fixture_model_reads_as_a_vise_in_the_tree() {
     // hideable models.
     assert!(painted::has_eye(painted::Kind::Fixture));
     assert!(painted::has_eye(painted::Kind::Model));
+    assert!(painted::has_eye(painted::Kind::Stock));
+    assert!(painted::has_eye(painted::Kind::Wcs));
     assert!(!painted::has_eye(painted::Kind::Section));
+}
+
+#[test]
+fn stock_eye_hides_the_viewport_stock_without_removing_it_from_the_document() {
+    let mut harness = shell_harness();
+    harness.run_steps(2);
+    let stock_name = camcraft_app::setup::stock_entity_name(&harness.state().state.world, None);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock)).expect("stock row");
+    let eye = egui::pos2(216.0, 179.0 + (row as f32 + 0.5) * theme::current().row_height);
+    assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
+
+    set_pos(&mut harness, eye);
+    button_at(&mut harness, egui::PointerButton::Primary, eye, true);
+    button_at(&mut harness, egui::PointerButton::Primary, eye, false);
+    harness.run();
+    let state = &harness.state().state;
+    assert!(state.active_stock_hidden());
+    assert!(model::find_by_name(&state.world, &stock_name).is_some());
+    assert!(!world::collect(state).parts.iter().any(|part| part.stock));
+
+    button_at(&mut harness, egui::PointerButton::Primary, eye, true);
+    button_at(&mut harness, egui::PointerButton::Primary, eye, false);
+    harness.run();
+    assert!(!harness.state().state.active_stock_hidden());
+    assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
 }
 
 #[test]

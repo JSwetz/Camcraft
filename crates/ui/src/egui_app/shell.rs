@@ -477,7 +477,7 @@ impl Shell {
         // The traced stock (M7.2 B3b) takes the sheet's slot when the eye
         // has a frame; the field view is walked once per Deviate arming.
         let mut traced = false;
-        if let Some(se) = stock_eye.as_mut() {
+        if let Some(se) = stock_eye.as_mut().filter(|_| !state.active_stock_hidden()) {
             if state.display != crate::state::DisplayMode::Wireframe {
                 crate::actions::ensure_field_view(state);
             }

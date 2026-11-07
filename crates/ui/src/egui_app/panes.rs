@@ -266,7 +266,7 @@ fn label_of(c: Cmd) -> &'static str {
     match c {
         Cmd::New => "New",
         Cmd::Model => "Model",
-        Cmd::Project => "Project",
+        Cmd::Project => "Open",
         Cmd::Save => "Save",
         Cmd::SaveAs => "Save As",
         Cmd::Post => "Post",
@@ -1379,6 +1379,7 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             );
         }
         let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
+        let stock_hidden = state.hidden_stocks.contains(&stock_name);
         push_row(
             &mut rows,
             &mut leaves,
@@ -1387,13 +1388,15 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             painted::Kind::Stock,
             Some(Icon::Stock),
             matches!(t, UiTarget::Stock),
-            false,
+            stock_hidden,
             1,
             Leaf::Stock,
         );
         for (i, slot) in WCS_SLOTS.iter().enumerate() {
             let placed =
                 camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
+            let offset_name = camcraft_app::setup::wcs_entity_name(&state.world, active.as_deref(), i)
+                .unwrap_or_else(|| (*slot).to_owned());
             push_row(
                 &mut rows,
                 &mut leaves,
@@ -1402,7 +1405,7 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
                 painted::Kind::Wcs,
                 Some(Icon::WorkOffset),
                 matches!(t, UiTarget::WcsSlot(j) if j == i),
-                false,
+                state.hidden_offsets.contains(&offset_name),
                 1,
                 Leaf::Wcs(i),
             );
@@ -1565,6 +1568,22 @@ pub fn browser(
     if let Some(ix) = hit.eye {
         match leaves[ix].clone() {
             Leaf::Model(n) => State::toggle_visibility(&mut state.hidden_models, &n),
+            Leaf::Stock => {
+                let name = camcraft_app::setup::stock_entity_name(
+                    &state.world,
+                    camcraft_app::setup::active(&state.world).as_deref(),
+                );
+                State::toggle_visibility(&mut state.hidden_stocks, &name);
+            }
+            Leaf::Wcs(i) => {
+                if let Some(name) = camcraft_app::setup::wcs_entity_name(
+                    &state.world,
+                    camcraft_app::setup::active(&state.world).as_deref(),
+                    i,
+                ) {
+                    State::toggle_visibility(&mut state.hidden_offsets, &name);
+                }
+            }
             Leaf::Op(n) => State::toggle_visibility(&mut state.hidden_paths, &n),
             _ => {}
         }

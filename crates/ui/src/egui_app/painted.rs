@@ -169,10 +169,9 @@ const TREE_INK: f32 = 16.0;
 /// band plus margin (browser.rs's `eye_x = avail - INK - 6.0`).
 const EYE_RESERVE: f32 = 24.0;
 
-/// Rows whose visibility the user can toggle get the eye (browser.rs's
-/// `eye: true` rows; sections, stock, WCS and tools never do).
+/// Rows whose viewport visibility the user can toggle get the eye.
 pub(crate) fn has_eye(kind: Kind) -> bool {
-    matches!(kind, Kind::Model | Kind::Fixture | Kind::Op)
+    matches!(kind, Kind::Model | Kind::Fixture | Kind::Stock | Kind::Wcs | Kind::Op)
 }
 
 /// Hit result for one frame of the tree.
