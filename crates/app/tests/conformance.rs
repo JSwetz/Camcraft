@@ -53,6 +53,7 @@ const POSTS: &[(&str, &str, &str)] = &[
     ("Siemens 840D", "sinumerik", "sinumerik"),
     ("Heidenhain", "heidenhain", "heidenhain"),
     ("Mazak", "mazak", "mazak"),
+    ("Tormach PathPilot", "tormach", "tormach"),
 ];
 
 /// (post stem, golden, named reason): a golden a dialect must REFUSE
@@ -350,6 +351,7 @@ const EXTENSIONS: &[(&str, &str)] = &[
     ("sinumerik", "nc"),
     ("heidenhain", "I"),
     ("mazak", "nc"),
+    ("tormach", "nc"),
     ("fanuc-lathe", "nc"),
 ];
 

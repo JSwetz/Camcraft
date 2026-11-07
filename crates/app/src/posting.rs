@@ -36,6 +36,7 @@ pub const BUILTINS: &[(&str, &str)] = &[
     ("Siemens 840D", include_str!("../../../assets/posts/sinumerik.cps")),
     ("Heidenhain", include_str!("../../../assets/posts/heidenhain.cps")),
     ("Mazak", include_str!("../../../assets/posts/mazak.cps")),
+    ("Tormach PathPilot", include_str!("../../../assets/posts/tormach.cps")),
     ("Fanuc Lathe", include_str!("../../../assets/posts/fanuc-lathe.cps")),
 ];
 
@@ -123,6 +124,8 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tilt-head 5-axis", include_str!("../../../assets/machines/tilthead.mch")),
     ("Mill-turn", include_str!("../../../assets/machines/millturn.mch")),
     ("Lathe", include_str!("../../../assets/machines/lathe.mch")),
+    // #131: an inch machine; pairs with the "Tormach PathPilot" post.
+    ("Tormach 770MX", include_str!("../../../assets/machines/tormach-770mx.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
