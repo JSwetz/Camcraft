@@ -12786,3 +12786,20 @@ keeps the part-only chain bit for bit.
   publishers: both jobs would race to create or edit the same GitHub Release.
   AUR, FreeBSD, and Web/WASM remain separate slices of #72 because they need
   their own package or platform build paths.
+
+## #72: Arch Linux source package
+
+- Add a `camcraft` source recipe under `aur/`, pinned to tag `v0.12.1` and
+  the source archive's SHA-256. Arch builds against its own libraries, and the
+  tag includes `Cargo.lock`; `prepare()` fetches locked Rust dependencies and
+  `build()` runs offline. Keep the binary, CLI, and adjacent assets under
+  `/usr/lib/camcraft` with commands in `/usr/bin`, as in the DEB and RPM.
+  Dropped `camcraft-bin` for this slice: the current GitHub release has no
+  Linux binary asset for every patch tag, while a source tag exists. The AUR
+  entry itself will be published after an Arch build validates the recipe.
+- Validate `aur/` in a separate PR workflow on an Arch Linux container:
+  compare `makepkg --printsrcinfo` with the checked-in `.SRCINFO`, run
+  `makepkg` through its build and test stages, inspect the package contents,
+  and upload the result. Keep this out of `release.yml` because the source
+  recipe follows tagged versions and AUR updates, while `release.yml`
+  assembles assets only for a CamCraft release.

@@ -1,0 +1,40 @@
+# Validate the AUR source recipe on Arch Linux when that recipe changes.
+# Provenance: Arch's makepkg and Rust packaging guidelines.
+name: AUR package
+on:
+  pull_request:
+    paths:
+      - aur/**
+      - .github/workflows/aur-package.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git cargo pkgconf \
+            libxkbcommon libxkbcommon-x11 libx11 wayland vulkan-icd-loader libglvnd
+      - uses: actions/checkout@v4
+      - name: Check AUR metadata
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c "cd '$GITHUB_WORKSPACE/aur' && makepkg --printsrcinfo" > /tmp/camcraft.srcinfo
+          diff -u aur/.SRCINFO /tmp/camcraft.srcinfo
+      - name: Build and test Arch package
+        run: su builder -c "cd '$GITHUB_WORKSPACE/aur' && makepkg --noconfirm"
+      - name: Check package contents
+        run: |
+          bsdtar -tf aur/camcraft-*.pkg.tar.zst | grep -E '(^|/)usr/lib/camcraft/camcraft-ui$'
+          bsdtar -tf aur/camcraft-*.pkg.tar.zst | grep -E '(^|/)usr/share/applications/camcraft.desktop$'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: aur/camcraft-*.pkg.tar.zst
+          if-no-files-found: error

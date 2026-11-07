@@ -1,0 +1,23 @@
+pkgbase = camcraft
+	pkgdesc = Computer-aided manufacturing application
+	pkgver = 0.12.1
+	pkgrel = 1
+	url = https://github.com/NeoTech/Camcraft
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = pkgconf
+	depends = glibc
+	depends = gcc-libs
+	depends = libxkbcommon
+	depends = libxkbcommon-x11
+	depends = libx11
+	depends = wayland
+	depends = vulkan-icd-loader
+	depends = libglvnd
+	source = camcraft-0.12.1.tar.gz::https://github.com/NeoTech/Camcraft/archive/refs/tags/v0.12.1.tar.gz
+	source = camcraft.desktop
+	sha256sums = 3b36cfef889001d3692d079a99db3b51fa313737782169519144564dd61c66a6
+	sha256sums = 55fc7185f3f84c3db22e4210e049f1838c3ace8c158c4f20cebed4ce31b44621
+
+pkgname = camcraft
