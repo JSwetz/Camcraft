@@ -259,10 +259,11 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $lines = @(Get-Content RELEASE_NOTES.md | ForEach-Object { $_.TrimEnd() })
           $end = [Array]::IndexOf($lines, '---')
           if ($end -lt 0) { throw "RELEASE_NOTES.md has no '---' line: cannot tell this version's notes from the history" }
-          if ($end -eq 0) { throw "RELEASE_NOTES.md starts with '---': no notes for this version" }
+          if ($end -le 1) { throw "RELEASE_NOTES.md has no notes for this version before its first '---'" }
           $head = $lines[0].TrimStart([char]0xFEFF)
           if ($head -notmatch [regex]::Escape($env:CAMCRAFT_VERSION)) {
             throw "RELEASE_NOTES.md's first section is '$head', not $env:CAMCRAFT_VERSION - update the notes before tagging"
@@ -274,16 +275,21 @@ jobs:
           if (-not $notes) { throw "RELEASE_NOTES.md's $env:CAMCRAFT_VERSION section is empty" }
 
           # Contributors: the GitHub login of every commit author since the
-          # previous release tag (the highest vX.Y.Z below this one).
+          # previous FEATURE release (the highest vX.Y.0 below this one) - the
+          # old patch tags were markers that shipped nothing on GitHub, so
+          # their contributors belong on this page.
           $cur = [version]($env:TAG.TrimStart('v'))
-          $prev = gh api "repos/$env:REPO/tags" --paginate --jq '.[].name' |
-            Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+          $tags = @(gh api "repos/$env:REPO/tags" --paginate --jq '.[].name')
+          if ($LASTEXITCODE -ne 0) { throw "could not list the repo's tags (gh api exit $LASTEXITCODE)" }
+          $prev = $tags |
+            Where-Object { $_ -match '^v\d+\.\d+\.0$' } |
             Where-Object { [version]($_.TrimStart('v')) -lt $cur } |
             Sort-Object { [version]($_.TrimStart('v')) } | Select-Object -Last 1
           $logins = @()
           if ($prev) {
             $logins = @(gh api "repos/$env:REPO/compare/$prev...$env:TAG" --paginate `
               --jq '.commits[] | .author.login // empty')
+            if ($LASTEXITCODE -ne 0) { throw "could not compare $prev...$env:TAG (gh api exit $LASTEXITCODE)" }
           }
           $logins = @($logins | Where-Object { $_ -and $_ -notmatch '\[bot\]$' } | Sort-Object -Unique)
           $thanks = if ($logins.Count -gt 0) {
