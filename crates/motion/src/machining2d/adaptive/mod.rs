@@ -47,6 +47,9 @@ mod lift_link;
 mod lift_split;
 mod link;
 mod loops;
+// Issue #5: the trochoidal fallback (`pocket_hsm`: spiral -> trochoid ->
+// rings), its medial line, loops and plan.
+mod medial;
 mod morph;
 mod near;
 mod raster;
@@ -57,6 +60,8 @@ mod slit;
 mod spiral;
 mod star;
 mod tidy;
+mod troch_plan;
+mod trochoid;
 mod wall;
 
 use crate::geo2d::{Point2, Region};
@@ -66,6 +71,7 @@ pub(crate) use kernel::{central_point, preferred_seed, widest_point};
 pub(crate) use star::corner_radius;
 use star::orbit_radius;
 pub(crate) use guard::first_crossing;
+pub(crate) use troch_plan::{plan as plan_trochoid, seed as trochoid_seed};
 
 pub(crate) use lift::Travel;
 pub(crate) use lift_link::Return;
@@ -425,3 +431,5 @@ impl Planner<'_> {
 mod tests;
 #[cfg(test)]
 mod lift_tests;
+#[cfg(test)]
+mod troch_tests;

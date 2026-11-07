@@ -62,7 +62,8 @@ pub(super) fn march_curve(
 /// scoped to Waterline/Morph): on the hill the stride ladder found an
 /// inner-turn piece the blind probe had dropped, and the column it
 /// exposed reads 0.156 against the spiral's 0.144 pin - the ratchet
-/// never rises, so the spiral waits for the fold-annulus law.
+/// never rises. (The fold-annulus law, #36's edge contact, has since
+/// landed; moving the spiral onto the ladder is a separate change.)
 #[allow(clippy::too_many_arguments)]
 pub(super) fn march_curve_blind(
     t0: f64,

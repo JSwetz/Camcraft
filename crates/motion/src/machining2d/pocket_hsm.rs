@@ -38,7 +38,9 @@ pub(crate) struct EntryRoom {
 /// actually planned them and, for the HSM plan, its entry. `what` names
 /// the area in the fallback note ("this pocket"; the 3-D ladder's "the
 /// level at Z ...", M11.4's per-level port) - never a silent switch.
-pub(crate) fn adaptive_passes(center: &Region, p: &PocketParams, what: &str) -> Result<Planned, GenError> {
+/// Issue #5: with `trochoid`, a channel the spiral refuses is tried as
+/// a trochoid first (spiral -> trochoid -> rings, each fallback named).
+pub(crate) fn adaptive_passes(center: &Region, p: &PocketParams, what: &str, trochoid: bool) -> Result<Planned, GenError> {
     let (passes, notes, rest, room, joins, travel, refused) = hsm_passes(center, p)?;
     // A plan that would cross itself is never posted (the verifier's
     // crossing law, asked of the plan first); one refused past its
@@ -50,23 +52,27 @@ pub(crate) fn adaptive_passes(center: &Region, p: &PocketParams, what: &str) -> 
         return Ok((passes, notes, PocketStrategy::Adaptive, room, joins));
     }
     let s = PocketStrategy::OffsetRings;
-    let note = match (cross, budget) {
-        (Some(x), _) => format!(
-            "adaptive: the HSM plan for this area crosses itself at ({:.2}, {:.2}) - Offset rings cut {what} instead",
-            x.x, x.y
-        ),
-        (None, Some(why)) => format!("adaptive: the HSM plan {why} - Offset rings cut {what} instead"),
-        (None, None) => format!(
-            "adaptive: the HSM plan left {:.0}% of the area it could not cut within twice the load - Offset rings cut {what} instead",
-            rest * 100.0
-        ),
+    let why = match (cross, budget) {
+        (Some(x), _) => format!("for this area crosses itself at ({:.2}, {:.2})", x.x, x.y),
+        (None, Some(why)) => why,
+        (None, None) => format!("left {:.0}% of the area it could not cut within twice the load", rest * 100.0),
+    };
+    let troch = if trochoid { super::pocket_troch::trochoid_passes(center, p)? } else { Err("is not tried here".to_owned()) };
+    let note = match troch {
+        Ok((passes, tnotes, room, joins)) => {
+            let mut notes = vec![format!("adaptive: the HSM plan {why} - trochoidal loops cut {what} instead")];
+            notes.extend(tnotes);
+            return Ok((passes, notes, PocketStrategy::Adaptive, Some(room), joins));
+        }
+        Err(t) if trochoid => format!("adaptive: the HSM plan {why}; a trochoid {t} - Offset rings cut {what} instead"),
+        Err(_) => format!("adaptive: the HSM plan {why} - Offset rings cut {what} instead"),
     };
     let step = crate::load::load_step(p.tool_diameter, p.optimal_load);
     Ok((plan_passes(center, step, p.climb, s)?, vec![note], s, None, Vec::new()))
 }
 
 /// Cutter-center walks, one per pass.
-type Walks = Vec<Vec<Point2>>;
+pub(super) type Walks = Vec<Vec<Point2>>;
 
 /// The pocket's passes, notes, the strategy that planned them, the HSM
 /// plan's entry and its joins.
@@ -91,7 +97,7 @@ pub const HOP_BUDGET: usize = 8;
 
 /// Why a plan with `travel` (per level) over `levels` levels is past its
 /// budget, or `None`.
-fn over_budget(t: &Travel, levels: usize) -> Option<String> {
+pub(super) fn over_budget(t: &Travel, levels: usize) -> Option<String> {
     let moves = t.moves.saturating_mul(levels.max(1));
     if t.air + t.lift > NONCUT_PER_CUT * t.cut {
         return Some(format!(
@@ -124,14 +130,14 @@ pub const HSM_REST_MAX: f64 = 0.02;
 /// 3): in a channel the spiral's first rings need the rest to grow
 /// apart from the orbit at the walls (rings microns apart cross on their
 /// chords).
-const HELIX_SHARE: f64 = 0.6;
+pub(super) const HELIX_SHARE: f64 = 0.6;
 
 /// The lead/link arc radius as a fraction of the tool radius.
 pub const SMOOTH_PER_R: f64 = 0.5;
 
 /// The connected pieces of `center`: each outer loop with the holes it
 /// carries.
-fn components(center: &Region) -> Result<Vec<Region>, GenError> {
+pub(super) fn components(center: &Region) -> Result<Vec<Region>, GenError> {
     let (outers, holes): (Vec<&Loop>, Vec<&Loop>) = center.loops().iter().partition(|l| l.area() > 0.0);
     let mut out = Vec::with_capacity(outers.len());
     for o in &outers {
@@ -150,7 +156,7 @@ fn components(center: &Region) -> Result<Vec<Region>, GenError> {
 
 /// The triangle whose centroid is `c` and whose inscribed circle has
 /// radius `inr`: `dive_room` finds exactly `c` in it.
-fn triangle_about(c: Point2, inr: f64) -> Result<Region, GenError> {
+pub(super) fn triangle_about(c: Point2, inr: f64) -> Result<Region, GenError> {
     let pts = (0..3)
         .map(|k| {
             let a = std::f64::consts::FRAC_PI_2 + k as f64 * std::f64::consts::TAU / 3.0;

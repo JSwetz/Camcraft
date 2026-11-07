@@ -9,6 +9,7 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 96abbce | 2026-11-07 | fix(motion): the finishing march rides a convex fold edge - coarse-mesh scallops under tolerance (#36) | Unreleased |
 | a128a51 | 2026-11-06 | feat(app,ui): rename and reorder operations within a setup; show project filename in the title, add Save As, and make status text copyable (#45) | Unreleased |
 | 4e27eea | 2026-11-07 | fix(motion): 2D Adaptive refuses a long thin channel by name in a second instead of grinding for minutes (#13) | Unreleased |
 | 619e479 | 2026-11-07 | fix(sim): Contour moves answer to the part walls along their length; pocket chord law only below the stock top (#43) | 0.8.3 |

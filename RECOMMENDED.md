@@ -11780,3 +11780,28 @@ builds cannot silently discard the new program order and post a different sequen
 **Dropped:** Mutating the entity `Name` on rename (older undo commands would
 lose their target), and a UI-only sort (the displayed order would disagree
 with posting, simulation and rest machining).
+
+## #36: the march rides convex folds on the edge - drop-cutter edge contact closes the fold annulus (2026-11-07)
+
+**Chosen: edge-resting centres for convex folds between shallow facets**
+(`finishing3d::edge`), the ball-against-segment arm of the drop-cutter
+vertex/facet/edge decomposition (Yau, Chuang & Lee 2004; Hwang & Chang 1998).
+`build_sups` keys shared edges by exact vertex bits and keeps, on one of the
+two facets, the neighbour's sky normal when the fold is convex; `support_at`
+and `support_grad` add the edge drop (closed form in the edge's vertical
+plane) as a candidate, admitted only when its contact normal lies on the arc
+m1→m2 and judged by the same exact `ball_clear`. Concave folds, mesh rims,
+shallow-steep edges and knife rims (a cap's base disc only looks shallow once
+its normal is flipped skyward - the arc test refuses it; without that test the
+morph rode the cap's rim down to the 45° clamp) keep the strict tangency.
+Release readings (gate 0.1234): hill contour 0.143 → 0, hill radial 0.126 → 0,
+hill spiral 0.144 → 0, the three hill "with ramp" entries → 0, ramp hill
+0.154 → 0, dome multidirection 0.125 → 0; tilted ramp 0.1698 unchanged - a
+single plane, the hop path reads the same, so its cause is the shelf's high
+rim corner, not a fold. Ratchet table down to that one entry.
+`finish3d_radial_dome.cl` re-blessed (1736 → 1874 moves; plunges 246 → 150:
+chords no longer break at the crests, the extra feeds are the chord law
+refining across the edge arcs). Dropped: the belt's gap law (a slack in the
+facet test - forgives a sunk centre on a convex fold, the corrugated belt's
+0.0317 mm bite); vertex contacts (the vertex gaps are points the readings no
+longer see; owed only if a fixture shows them).

@@ -245,23 +245,14 @@ fn envelope(facets: &[Triangle], t: &Toolpath) -> camcraft_motion::stock_sim::En
 /// dropped whole runs between the tessellation's fold gaps (dome
 /// multidirection 0.349 → 0.125, dome scallop and the geodesic to the
 /// gate, hill project to 0 with the ring's-own-inside law in
-/// `stock_sim::ridge`). What is still listed is the strict tangency's
-/// fold annulus on the coarse hill (`r·Δm`, 0.47 mm between its 9°
-/// bands) and the tilted shelf's edge - ground the march refuses by
-/// its own law, not spacing.
-const SCALLOP_RATCHET: &[(&str, f64)] = &[
-    // Covers the single Parallel path too (`multidirection_rasters_cross`
-    // judges both); the multi path itself reads 0.
-    ("dome multidirection", 0.126),
-    ("hill contour", 0.143),
-    ("hill radial", 0.126),
-    ("hill spiral", 0.144),
-    ("hill radial with ramp", 0.126),
-    ("hill spiral with ramp", 0.144),
-    ("hill contour with ramp", 0.143),
-    ("ramp hill", 0.154),
-    ("tilted ramp", 0.170),
-];
+/// `stock_sim::ridge`). The convex folds' edge contact (#36,
+/// `finishing3d::edge`) closed the strict tangency's fold annulus
+/// (`r·Δm`, 0.47 mm between the hill's 9° bands): every hill entry and
+/// the dome multidirection read 0 since. What stays is the tilted
+/// shelf's high rim corner (7.19, -7.81) - a single plane, no fold; the
+/// hop path reads the same 0.1698, so neither the ramp nor the fold law
+/// owns it.
+const SCALLOP_RATCHET: &[(&str, f64)] = &[("tilted ramp", 0.170)];
 
 fn scallop_ratchet(fixture: &str, rep: &camcraft_motion::stock_sim::EnvelopeReport) {
     let cap = SCALLOP_RATCHET
@@ -2948,14 +2939,29 @@ fn march_stitched(t: &Toolpath, step: f64) -> Vec<Point3> {
 /// paired with its own mid-radius (bands group by it; the morph's
 /// within-band azimuthal wobble averages out across them).
 fn fragment_pitch(t: &Toolpath, step: f64) -> Vec<(f64, f64)> {
+    // A piece is read in windows of at most a quarter turn: since the
+    // convex folds' edge contact (#36) the march no longer breaks at
+    // the crests, so one piece can wind several turns - and a
+    // multi-turn average would blur the per-band law under test.
     let (lo, hi) = (0.3 * step / TAU, 1.8 * step / TAU);
     let mut out = Vec::new();
+    let mut emit = |a: Point3, b: Point3, acc: f64| {
+        if acc.abs() < 0.08 {
+            return; // no opinion from a stub
+        }
+        let (r0, r1) = (a.x.hypot(a.y), b.x.hypot(b.y));
+        let rate = (r0 - r1).abs() / acc.abs();
+        if rate > lo && rate < hi {
+            out.push(((r0 + r1) * 0.5, rate * TAU));
+        }
+    };
     for run in runs_of(t) {
-        let mut acc = 0.0f64;
-        let mut prev: Option<f64> = None;
+        let Some(&first) = run.first() else { continue };
+        let (mut start, mut acc) = (first, 0.0f64);
+        let mut prev: Option<(Point3, f64)> = None;
         for q in &run {
             let th = q.y.atan2(q.x);
-            if let Some(pv) = prev {
+            if let Some((_, pv)) = prev {
                 let mut d = th - pv;
                 while d <= -PI {
                     d += TAU;
@@ -2965,18 +2971,15 @@ fn fragment_pitch(t: &Toolpath, step: f64) -> Vec<(f64, f64)> {
                 }
                 acc += d;
             }
-            prev = Some(th);
+            prev = Some((*q, th));
+            if acc.abs() >= std::f64::consts::FRAC_PI_2 {
+                emit(start, *q, acc);
+                start = *q;
+                acc = 0.0;
+            }
         }
-        if acc.abs() < 0.08 {
-            continue; // no opinion from a stub
-        }
-        let (r0, r1) = (
-            run[0].x.hypot(run[0].y),
-            run[run.len() - 1].x.hypot(run[run.len() - 1].y),
-        );
-        let rate = (r0 - r1).abs() / acc.abs();
-        if rate > lo && rate < hi {
-            out.push(((r0 + r1) * 0.5, rate * TAU));
+        if let Some((last, _)) = prev {
+            emit(start, last, acc);
         }
     }
     out

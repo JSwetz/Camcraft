@@ -112,7 +112,7 @@ pub(super) fn plan_level(
         links: p.links,
     };
     let what = format!("the level at Z {z:.3}");
-    let (passes, notes, s, room, joins) = adaptive_passes(center, &pp, &what)?;
+    let (passes, notes, s, room, joins) = adaptive_passes(center, &pp, &what, false)?;
     for n in notes {
         b.note(n);
     }

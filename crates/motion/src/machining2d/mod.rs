@@ -54,6 +54,7 @@ mod levels;
 mod microlift;
 mod pocket;
 mod pocket_hsm;
+mod pocket_troch;
 mod adaptive;
 mod ring;
 mod slots;
