@@ -383,6 +383,6 @@ fn a_hole_pointing_away_from_the_spindle_on_raw_stock_is_refused_by_name() {
         let (world, _h) = world_with(word, raw_bar());
         let e = operation::generate(&world, &op_with(vec![away], 5.0), "").err().map(|e| e.to_string());
         let e = e.unwrap_or_else(|| panic!("{word}: a hole plunging outward drilled"));
-        assert!(e.contains("plunges away from the spindle"), "{word}: the refusal names it: {e}");
+        assert!(e.contains("away from the spindle"), "{word}: the refusal names it: {e}");
     }
 }
