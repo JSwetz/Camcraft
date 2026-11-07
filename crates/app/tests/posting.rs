@@ -112,7 +112,10 @@ fn hole(
 fn contour_and_drill() -> (World, History) {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 100.0, 100.0, 10.0);
+    // The stock stands to the part's top, Z 5 (#96): the contour's top
+    // is 5, so its rapid down to the plunge height (Z 7) must be air -
+    // the old 10 mm block put that rapid 3 mm into uncut stock.
+    box_stock(&world, &mut history, 100.0, 100.0, 5.0);
     add_tool(&world, &mut history, "EM-0600-4FL");
     add_tool(&world, &mut history, "DR-0400");
     history.execute(
@@ -291,7 +294,8 @@ fn a_warned_path_blocks_even_though_it_generated() {
     // into the part's wall.)
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 100.0, 100.0, 10.0);
+    // Stock to the part's top (#96), so the shank is the only warning.
+    box_stock(&world, &mut history, 100.0, 100.0, 5.0);
     let mut stub = catalog_tool("EM-0600-4FL");
     stub.flute_len = 2.0;
     stub.shank_d = 8.0;

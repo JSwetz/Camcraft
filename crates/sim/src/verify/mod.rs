@@ -56,9 +56,14 @@
 //!   grid in between may not. Area/Boundary paths only; moves (c)
 //!   already convicted are skipped; advisory by nature - the same
 //!   angles the replay timeline turns on screen.
-//! - [`Warning::RapidInStock`] - a *lateral* rapid below the clearance
-//!   plane whose XY path still has material above it. Vertical rapids
-//!   are the tool retracting through its own kerf and stay exempt.
+//! - [`Warning::RapidInStock`] - a lateral rapid below the clearance
+//!   plane whose XY path still has material above it, or (#96) a
+//!   vertical rapid DOWN whose end lies below the surface standing at
+//!   its column: the stock top, lowered by the cuts before it in this
+//!   path (a peck's re-entry above its own earlier plunge is clean)
+//!   and - read by the operation layer through [`acquit_by_prior`] -
+//!   by what the setup's earlier operations cut. A vertical retract
+//!   UP rides the tool's own kerf and stays exempt.
 //!   `Mode::Revolve` stands this law down too (M5.2 D): a lathe insert
 //!   is a point in XY and its whole form lives in the meridian, so the
 //!   column law misreads every threading pull-out - which slides along
@@ -156,6 +161,7 @@ mod hidden;
 mod laws;
 mod midpose;
 mod posed_steel;
+mod prior;
 mod probe;
 mod rapids;
 mod rapids_posed;
@@ -177,6 +183,7 @@ pub use types::{FixturePart, Mode, VerifyContext, Warning};
 pub use crossing::{crossed_pairs, crossed_pairs_all};
 pub use engine::{verify, verify_bodies};
 pub use air::cuts_no_material;
+pub use prior::acquit_by_prior;
 pub use laws::{bands_vs_fixtures, rapids_vs_fixtures, rapids_vs_fixtures_spindle};
 pub use workholding::{bands_vs_workholding, rapids_vs_workholding, Workholding};
 pub use probe::Cutter;

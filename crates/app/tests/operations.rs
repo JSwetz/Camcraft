@@ -1349,7 +1349,10 @@ fn the_shell_switch_sends_the_pocket_to_the_offset_engine() {
     let run = |shell: bool| {
         let world = new_world();
         let mut history = History::default();
-        box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+        // The stock stands to the cube's top, Z 5 (#96): the pocket's
+        // top is 5, so its rapids under clearance 10 are air - the old
+        // 20 mm block put them into uncut stock.
+        box_stock(&world, &mut history, 60.0, 60.0, 5.0);
         add_tool(&world, &mut history, "BN-0600");
         history.execute(
             &world,
@@ -3875,9 +3878,10 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
         let world = new_world();
         let mut history = History::default();
         history.execute(&world, ImportModel::from_mesh("pblock", drilled_block()));
-        // A long-series flute: moved up 2 mm the block's top stands 13
-        // mm over the stored through floor - past the jobber's 12 mm
-        // (issue #84's reach law), and this test pins staleness.
+        // A long-series flute, so no reach law speaks over a moved
+        // part (issue #84) - this test pins staleness. The part moves
+        // DOWN: moved up, its top would stand over the fixed R 10 and
+        // the rapid onto R would cross it (issue #91, refused).
         let mut drill = catalog_tool("DR-0400");
         drill.flute_len = 20.0;
         history.execute(&world, AddTool::new(&world, "DR-0400", drill).expect("tool"));
@@ -3902,7 +3906,7 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
     };
     assert_eq!(status(&world, "Move1"), OpStatus::Ok);
     let e = model::find_by_name(&world, "pblock").expect("part");
-    model::set_location(&world, &e, Point3::new(0.0, 0.0, 2.0));
+    model::set_location(&world, &e, Point3::new(0.0, 0.0, -2.0));
     assert_eq!(
         status(&world, "Move1"),
         OpStatus::Stale,

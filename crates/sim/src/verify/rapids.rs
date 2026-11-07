@@ -57,7 +57,17 @@ pub(super) fn rapids_in_stock(
             let (a, b) = (xy(&m.from), xy(&m.to));
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             if dx * dx + dy * dy <= cx.z_tol * cx.z_tol {
-                continue; // vertical retract through the tool's own kerf
+                // Issue #96: a vertical retract rides the tool's own
+                // kerf, but a vertical rapid DOWN is judged by its
+                // column - below the surface the cuts before it left
+                // (a drill's R plane under unfaced stock) it is a
+                // rapid in stock. A peck's re-entry stays above its
+                // own earlier plunge, so it is acquitted by the cuts.
+                let down = m.to.z < m.from.z - cx.z_tol;
+                if down && rest.in_stock(a) && m.to.z < rest.surface_before(a, i) - cx.z_tol {
+                    warns.push(Warning::RapidInStock { at: i });
+                }
+                continue;
             }
             let low = m.from.z.min(m.to.z);
             if low >= cx.clearance_z - cx.z_tol {

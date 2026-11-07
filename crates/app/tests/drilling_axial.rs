@@ -127,8 +127,11 @@ fn lathe_world_with(bar: Mesh) -> (World, History) {
         &world,
         SetStock::new(
             &world,
-            camcraft_app::stock::StockShape::Box { dx: 24.0, dy: 24.0, dz: 44.0 },
-            Location::default(),
+            // The bar's own envelope, z END..TOP (issue #91: the old box
+            // stood z 0..44, its top 24 mm over the hole's R plane - the
+            // drill's rapid down to R crossed declared stock).
+            camcraft_app::stock::StockShape::Box { dx: 24.0, dy: 24.0, dz: TOP - END },
+            Location { pos: Point3::new(0.0, 0.0, END), ..Default::default() },
         )
         .expect("box stock"),
     );

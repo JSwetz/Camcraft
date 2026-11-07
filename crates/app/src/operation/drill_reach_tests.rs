@@ -64,3 +64,19 @@ fn the_band_radius_reads_only_material_inside_the_band() {
     let r = band_r(&f, (0.0, 0.0), -12.0, 5.0).unwrap_or(f64::NAN);
     assert!((r - 30.0_f64.hypot(1.0)).abs() < 1e-9, "the flange face: {r}");
 }
+
+#[test]
+fn a_sloped_facet_is_read_over_the_disk_not_at_its_far_vertex() {
+    // z = x / 10 over x 0..50: the disk r 2 at x 5 sees at most z 0.7
+    // (the octagon's reach), never the far vertex's 5.0, never under
+    // the true 0.7 at x 7.
+    let t = Triangle::new(Point3::new(0.0, -50.0, 0.0), Point3::new(50.0, 0.0, 5.0), Point3::new(0.0, 50.0, 0.0));
+    let z = facet_top(&t, 5.0, 0.0, 2.0);
+    assert!((0.7 - 1e-9..=0.7 + 1e-3).contains(&z), "{z}");
+    // A wall's top inside the disk is its top edge.
+    let wall = Triangle::new(Point3::new(-5.0, 0.0, 0.0), Point3::new(5.0, 0.0, 0.0), Point3::new(5.0, 0.0, 9.0));
+    let z = facet_top(&wall, 0.0, 0.0, 1.0);
+    assert!((5.4 - 1e-9..=5.4 + 1e-3).contains(&z), "the wall's slanted top z 4.5 + 0.9x at x 1: {z}");
+    let nan = Triangle::new(Point3::new(0.0, 0.0, f64::NAN), Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0));
+    assert_eq!(facet_top(&nan, 0.0, 0.0, 1.0), f64::INFINITY, "a NaN height refuses");
+}

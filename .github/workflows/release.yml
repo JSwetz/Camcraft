@@ -1,6 +1,6 @@
-# Release build (M1.7e, M13.3): a v* tag builds Windows and Linux binaries.
-# Linux packages a portable tarball, DEB, and RPM; Windows assembles the
-# portable zip and Inno Setup installer, then publishes all five assets.
+# Release build (M1.7e, M13.3): a v* tag builds Windows, Linux, and macOS.
+# Linux packages TAR.GZ, DEB, RPM, AppImage, Snap, and Flatpak; macOS packages
+# a universal app as ZIP and DMG; Windows assembles its zip and installer.
 # Signing is optional and secret-gated (scripts/sign.ps1): with no
 # CAMCRAFT_SIGN_* secret the binaries ship unsigned, as every release so
 # far has. The decision is logged in RECOMMENDED.md ("M13.3").
@@ -34,16 +34,33 @@ jobs:
       - name: Install Linux build and package tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libx11-dev rpm
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libx11-dev rpm imagemagick
       - name: Build release binaries
         run: cargo build --locked --release -p camcraft-ui -p camcraft-app -p camcraft-post
       - name: Assemble Linux packages
         run: scripts/package-linux.sh
+      - name: Install pinned linuxdeploy
+        run: |
+          curl -LfsS -o /tmp/linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          echo 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  /tmp/linuxdeploy-x86_64.AppImage' | sha256sum -c -
+          chmod +x /tmp/linuxdeploy-x86_64.AppImage
+      - name: Assemble AppImage
+        env:
+          LINUXDEPLOY: /tmp/linuxdeploy-x86_64.AppImage
+        run: scripts/package-appimage.sh
       - name: Check package contents
         run: |
           tar -tzf dist/*.tar.gz | grep '/camcraft-ui$'
           dpkg-deb --contents dist/*.deb | grep '/usr/lib/camcraft/camcraft-ui$'
           rpm -qpl dist/*.rpm | grep '/usr/lib/camcraft/camcraft-ui$'
+          test -s dist/*.AppImage
+          # This runner has no GPU adapter, so compare the packaged ELF to
+          # the binary we just built. This catches linuxdeploy's .init damage.
+          appimage_check=$(mktemp -d "$RUNNER_TEMP/camcraft-appimage.XXXXXX")
+          (cd "$appimage_check" && "$GITHUB_WORKSPACE"/dist/*.AppImage --appimage-extract)
+          cmp target/release/camcraft-ui "$appimage_check/squashfs-root/usr/bin/camcraft-ui"
+          test -x "$appimage_check/squashfs-root/AppRun"
+          test -d "$appimage_check/squashfs-root/usr/bin/assets/themes"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
@@ -51,10 +68,93 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+            dist/*.AppImage
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Apple Silicon and Intel Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build universal release binaries
+        run: |
+          cargo build --locked --release --target aarch64-apple-darwin -p camcraft-ui -p camcraft-app -p camcraft-post
+          cargo build --locked --release --target x86_64-apple-darwin -p camcraft-ui -p camcraft-app -p camcraft-post
+      - name: Assemble macOS app and disk image
+        run: scripts/package-macos.sh
+      - name: Check macOS package contents
+        run: |
+          unzip -l dist/*-macos-universal.zip | grep 'CamCraft.app/Contents/MacOS/camcraft-ui'
+          hdiutil imageinfo dist/*-macos-universal.dmg >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: |
+            dist/*-macos-universal.zip
+            dist/*-macos-universal.dmg
+          if-no-files-found: error
+
+  snap:
+    needs: linux
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
+      - name: Install Snapcraft and SquashFS tools
+        run: |
+          sudo snap install snapcraft --classic
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools
+      - name: Assemble snap
+        run: scripts/package-snap.sh
+      - name: Check snap contents
+        run: |
+          unsquashfs -l dist/*.snap | grep '/camcraft-ui$'
+          unsquashfs -l dist/*.snap | grep '/meta/snap.yaml$'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snap-package
+          path: dist/*.snap
+          if-no-files-found: error
+
+  flatpak:
+    needs: linux
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
+      - name: Install Flatpak Builder and Freedesktop SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      - name: Assemble Flatpak bundle
+        run: scripts/package-flatpak.sh
+      - name: Check Flatpak bundle
+        run: test -s dist/*.flatpak
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-package
+          path: dist/*.flatpak
           if-no-files-found: error
 
   release:
-    needs: linux
+    needs: [linux, macos, snap, flatpak]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,23 +237,84 @@ jobs:
         with:
           name: linux-packages
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-packages
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: snap-package
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak-package
+          path: dist
       # The release page shows only this version's notes: RELEASE_NOTES.md
       # keeps every release, newest first, separated by a line "---"; the
       # body is its first section (user, 2026-11-07: "just what is in that
       # specific release").
-      - name: Release notes for this version only
+      # The release page is .github/RELEASE_TEMPLATE.md filled in: this
+      # version's section of RELEASE_NOTES.md (never the whole history), the
+      # links (CHANGELOG, issues as the roadmap, Discord, bug and feature
+      # reports) and a thank-you list of the GitHub authors of every commit
+      # since the previous release tag (user, 2026-11-07).
+      - name: Release page from the template
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $lines = @(Get-Content RELEASE_NOTES.md | ForEach-Object { $_.TrimEnd() })
           $end = [Array]::IndexOf($lines, '---')
           if ($end -lt 0) { throw "RELEASE_NOTES.md has no '---' line: cannot tell this version's notes from the history" }
-          if ($end -eq 0) { throw "RELEASE_NOTES.md starts with '---': no notes for this version" }
+          if ($end -le 1) { throw "RELEASE_NOTES.md has no notes for this version before its first '---'" }
           $head = $lines[0].TrimStart([char]0xFEFF)
           if ($head -notmatch [regex]::Escape($env:CAMCRAFT_VERSION)) {
             throw "RELEASE_NOTES.md's first section is '$head', not $env:CAMCRAFT_VERSION - update the notes before tagging"
           }
-          $lines[0..($end - 1)] | Set-Content -Encoding utf8 dist/release-body.md
+          # The section without its own '# CamCraft X.Y.Z' title line (the
+          # template names the version) and without trailing blank lines.
+          $notes = @($lines[1..($end - 1)])
+          $notes = ($notes -join "`n").Trim()
+          if (-not $notes) { throw "RELEASE_NOTES.md's $env:CAMCRAFT_VERSION section is empty" }
+
+          # Contributors: the GitHub login of every commit author since the
+          # previous FEATURE release (the highest vX.Y.0 below this one) - the
+          # old patch tags were markers that shipped nothing on GitHub, so
+          # their contributors belong on this page.
+          $cur = [version]($env:TAG.TrimStart('v'))
+          $tags = @(gh api "repos/$env:REPO/tags" --paginate --jq '.[].name')
+          if ($LASTEXITCODE -ne 0) { throw "could not list the repo's tags (gh api exit $LASTEXITCODE)" }
+          $prev = $tags |
+            Where-Object { $_ -match '^v\d+\.\d+\.0$' } |
+            Where-Object { [version]($_.TrimStart('v')) -lt $cur } |
+            Sort-Object { [version]($_.TrimStart('v')) } | Select-Object -Last 1
+          $logins = @()
+          if ($prev) {
+            $logins = @(gh api "repos/$env:REPO/compare/$prev...$env:TAG" --paginate `
+              --jq '.commits[] | .author.login // empty')
+            if ($LASTEXITCODE -ne 0) { throw "could not compare $prev...$env:TAG (gh api exit $LASTEXITCODE)" }
+          }
+          $logins = @($logins | Where-Object { $_ -and $_ -notmatch '\[bot\]$' } | Sort-Object -Unique)
+          $thanks = if ($logins.Count -gt 0) {
+            ($logins | ForEach-Object { "- @$_" }) -join "`n"
+          } else {
+            "- everyone who reported, tested and discussed on the issues and on Discord"
+          }
+
+          $body = Get-Content -Raw .github/RELEASE_TEMPLATE.md
+          foreach ($k in '{{VERSION}}', '{{TAG}}', '{{REPO_URL}}', '{{NOTES}}', '{{CONTRIBUTORS}}') {
+            if (-not $body.Contains($k)) { throw ".github/RELEASE_TEMPLATE.md lost its $k placeholder" }
+          }
+          $body = $body.Replace('{{VERSION}}', $env:CAMCRAFT_VERSION)
+          $body = $body.Replace('{{TAG}}', $env:TAG)
+          $body = $body.Replace('{{REPO_URL}}', "https://github.com/$env:REPO")
+          $body = $body.Replace('{{NOTES}}', $notes)
+          $body = $body.Replace('{{CONTRIBUTORS}}', $thanks)
+          Set-Content -Encoding utf8 -NoNewline dist/release-body.md -Value $body
           Get-Content dist/release-body.md
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -165,5 +326,9 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.snap
+            dist/*.flatpak
           body_path: dist/release-body.md
           fail_on_unmatched_files: true
