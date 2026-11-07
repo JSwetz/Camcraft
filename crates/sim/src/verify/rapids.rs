@@ -131,13 +131,19 @@ pub(super) fn rapids_in_stock(
             // Cut order (M13.7): the rapid meets the stock as the cuts
             // BEFORE it left it - a later feed's clearing is no alibi.
             // Issue #140: every station along the rapid, not three.
-            let bad = stations(a, b, d).is_none_or(|mut it| {
-                it.any(|c| {
-                    footprint(c, d)
-                        .any(|(q, rho)| rest.in_stock(q) && low + cutter.lift_at(rho) < rest.surface_before(q, i))
-                })
-            })
-                || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
+            // A rapid at or above the stock top cannot meet the column -
+            // `surface_before` is capped at the stock top and the lift is
+            // never negative - so the march is skipped (PR #160 review):
+            // same verdict, far fewer samples. A NaN height still marches.
+            let above = low >= cx.stock_top_z;
+            let marched = !above
+                && stations(a, b, d).is_none_or(|mut it| {
+                    it.any(|c| {
+                        footprint(c, d)
+                            .any(|(q, rho)| rest.in_stock(q) && low + cutter.lift_at(rho) < rest.surface_before(q, i))
+                    })
+                });
+            let bad = marched || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
             if !bad {
                 continue;
             }
