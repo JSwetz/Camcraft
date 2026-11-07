@@ -82,15 +82,22 @@ fn containment_outside_clears_past_the_edge_never_the_recess() {
     assert!(!err.contains("fills the whole selection"), "Outside is not a height error: {err}");
     let preview = operation::region_of(&world, &op(src.clone(), adaptive(FLOOR), a)).expect("the band previews");
     assert!(!preview.contains(Point2::new(c.0, c.1)), "the recess is not in the machined area");
-    // With room past the edge the band clears. The cut itself rides the
-    // Offset rings (the same region law, the adaptive's own fallback):
-    // the adaptive plan over this band is minutes in a debug build.
+    // With room past the edge the band clears. 2D Adaptive itself: the
+    // band is a channel ~270 mm long no single spiral should grow
+    // through, so the planner refuses it by name at once (issue #13: it
+    // used to grind for minutes) and its Offset rings cut it.
     let a = AreaControls { containment: Some(Containment::Outside), extension: 4.0, ..Default::default() };
-    let ring = operation::retype_params(&adaptive(FLOOR), OpType::Offset2D.ordinal());
     let band = operation::region_of(&world, &op(src.clone(), adaptive(FLOOR), a.clone())).expect("the band previews");
     assert!(!band.contains(Point2::new(c.0, c.1)), "the recess stays out with an extension too");
-    let (t, warns) = run(&world, &op(src, ring, a)).expect("generates");
+    let t0 = std::time::Instant::now();
+    let (t, warns) = run(&world, &op(src, adaptive(FLOOR), a)).expect("generates");
+    assert!(t0.elapsed().as_secs_f64() < 60.0, "the band plans in seconds, not minutes");
     assert_eq!(warns, 0, "the plan verifies clean: {:?}", t.notes);
+    assert!(
+        t.notes.iter().any(|n| n.contains("channel") && n.contains("Offset rings cut")),
+        "the refusal is named: {:?}",
+        t.notes
+    );
     let f: Vec<&camcraft_app::cl::Move> = t.moves.iter().filter(|m| m.kind == MoveKind::Feed).collect();
     assert!(!f.is_empty());
     let lo = f.iter().map(|m| m.to.z).fold(f64::INFINITY, f64::min);

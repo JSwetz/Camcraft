@@ -37,6 +37,7 @@
 //! refused and left (and `pocket_hsm` falls back to Offset rings when
 //! too much is left). Every loop is capped; the plan cannot hang.
 
+mod budget;
 mod front;
 mod grow;
 mod guard;
@@ -158,6 +159,9 @@ pub(crate) struct AdaptivePlan {
     pub rest: f64,
     /// Its travel, read on the planner's stock (`lift::travel`).
     pub travel: lift::Travel,
+    /// Refused past the planning budget (`budget`), by this name: no
+    /// passes, the area is the Offset rings'.
+    pub refused: Option<String>,
 }
 
 struct Planner<'a> {
@@ -181,6 +185,12 @@ struct Planner<'a> {
     laps_from: usize,
     /// ... and where the last lap begins.
     fin_from: usize,
+    /// The growth rings' planning work so far: the length of every
+    /// revolution tried (mm), held to [`budget::WORK_MAX`].
+    work: std::cell::Cell<f64>,
+    /// Why the plan was refused outright (the pocket hands the area to
+    /// the Offset rings by this name), or `None`.
+    refused: Option<String>,
 }
 
 /// Plan the area `reach` (the material the cutter can reach) from the
@@ -213,6 +223,8 @@ pub(crate) fn plan(reach: &Region, center: &Region, s: &AdaptiveSpec) -> Result<
         worst: (0.0, s.start),
         laps_from: usize::MAX,
         fin_from: usize::MAX,
+        work: std::cell::Cell::new(0.0),
+        refused: None,
     };
     if s.bore > 0.0 {
         p.ras.cut(s.seed, s.seed, s.bore);
@@ -245,6 +257,11 @@ pub(crate) fn plan(reach: &Region, center: &Region, s: &AdaptiveSpec) -> Result<
             if grown != grow::Grown::Short {
                 break;
             }
+        }
+        if let Some(why) = p.refused.take() {
+            // Past the budget: no plan, the refusal named (`pocket_hsm`
+            // hands the area to the Offset rings).
+            return Ok(AdaptivePlan { refused: Some(why), notes: std::mem::take(&mut p.plan.notes), ..AdaptivePlan::default() });
         }
         if grown != grow::Grown::Done {
             (p.walk, p.ras, p.worst) = (walk, ras, worst);

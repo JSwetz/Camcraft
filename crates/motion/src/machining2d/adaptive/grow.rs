@@ -32,7 +32,7 @@ use crate::geo2d::{Loop, Point2, Region};
 
 use super::raster::Raster;
 use super::rings::{ARC_TOL, LAND, NARROW, morph_rev, one_loop, open, pick, piece, widest_opening};
-use super::{CORNER_PER_R, GenError, Planner, Worst, orbit_radius, slit};
+use super::{CORNER_PER_R, GenError, Planner, Worst, budget, orbit_radius, slit};
 
 /// The wall margin the rings start at (mm).
 const EPS0: f64 = 0.4;
@@ -83,6 +83,9 @@ pub(super) enum Grown {
     Unfit,
     /// The wall margin ran out first: plan again from a wider one.
     Short,
+    /// Past the planning budget (`budget`): the plan is refused by the
+    /// name left in `Planner::refused`, never planned otherwise.
+    Refused,
 }
 
 
@@ -104,6 +107,14 @@ impl Planner<'_> {
         }
         // The wall margin (widened by the caller's ladder when spent).
         let clear = super::loops::boundary_dist(&d0, s.seed);
+        // A channel too long for one spiral is refused before a single
+        // revolution is planned (`budget`).
+        let len = budget::channel_len(d0.area(), clear);
+        let (least, revs) = budget::least_work(len, CAP * self.width(1.0), s.r);
+        if least > budget::LEAST_WORK_MAX {
+            self.refused = Some(budget::too_long(2.0 * (clear + s.r), len, revs));
+            return Ok(Grown::Refused);
+        }
         let eps0 = (EPS0 * scale).min(0.25 * s.r).min(clear - a0 - 0.01);
         if eps0 <= 4.0 * GAP {
             return Ok(Grown::Unfit);
@@ -135,7 +146,11 @@ impl Planner<'_> {
         let mut step = 0.25 * self.width(1.0);
         let mut overloaded = false;
         let mut grown = false;
-        for _ in 0..MAX_REVS {
+        for rev_k in 0..MAX_REVS {
+            if self.work.get() > budget::WORK_MAX * s.r {
+                self.refused = Some(budget::over_work(rev_k));
+                return Ok(Grown::Refused);
+            }
             let disc = a < levels[0] - 1e-9;
             // The margin closes as the fronts travel (it is spent when they
             // have gone the farthest reach, detours included), and never by
@@ -169,6 +184,7 @@ impl Planner<'_> {
                 // turns by the ring's chord angle, whatever the next
                 // revolution's step.
                 let (rev, b) = morph_rev(&ring, &b, LAND);
+                p.work.set(p.work.get() + super::front::len(&rev));
                 let mut ras = p.ras.clone();
                 let w = ras.walk_until(&rev, (s.r, p.rim, p.step), limit);
                 Ok(Some((g, yr, b, rev, ras, w, done)))

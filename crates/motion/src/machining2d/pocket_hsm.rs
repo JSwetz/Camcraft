@@ -39,12 +39,13 @@ pub(crate) struct EntryRoom {
 /// the area in the fallback note ("this pocket"; the 3-D ladder's "the
 /// level at Z ...", M11.4's per-level port) - never a silent switch.
 pub(crate) fn adaptive_passes(center: &Region, p: &PocketParams, what: &str) -> Result<Planned, GenError> {
-    let (passes, notes, rest, room, joins, travel) = hsm_passes(center, p)?;
+    let (passes, notes, rest, room, joins, travel, refused) = hsm_passes(center, p)?;
     // A plan that would cross itself is never posted (the verifier's
-    // crossing law, asked of the plan first).
-    let cross = first_crossing(&passes);
+    // crossing law, asked of the plan first); one refused past its
+    // planning budget (issue #13) has no passes to judge.
+    let cross = if refused.is_some() { None } else { first_crossing(&passes) };
     let levels = super::levels::cut_levels(p.top_z, p.bottom_z, p.stepdown).len();
-    let budget = over_budget(&travel, levels);
+    let budget = refused.or_else(|| over_budget(&travel, levels));
     if rest <= HSM_REST_MAX && cross.is_none() && budget.is_none() {
         return Ok((passes, notes, PocketStrategy::Adaptive, room, joins));
     }
@@ -71,9 +72,9 @@ type Walks = Vec<Vec<Point2>>;
 /// plan's entry and its joins.
 pub(crate) type Planned = (Walks, Vec<String>, PocketStrategy, Option<EntryRoom>, Joins);
 
-/// The HSM plan's passes, notes, share of stock left, entry, joins and
-/// travel.
-type HsmPlanned = (Walks, Vec<String>, f64, Option<EntryRoom>, Joins, Travel);
+/// The HSM plan's passes, notes, share of stock left, entry, joins,
+/// travel and - refused past its planning budget - why.
+type HsmPlanned = (Walks, Vec<String>, f64, Option<EntryRoom>, Joins, Travel, Option<String>);
 
 /// The HSM plan's budget (round 4): it may travel at most this many times
 /// its cutting length out of cut (floor air and lifted returns) ...
@@ -247,6 +248,9 @@ fn hsm_passes(center: &Region, p: &PocketParams) -> Result<HsmPlanned, GenError>
             AdaptiveSpec { seed: d, start: d, bore: r, helix_r: 0.0, ..first }
         };
         let pl = plan(&reach, comp, &spec)?;
+        if let Some(why) = pl.refused {
+            return Ok((Vec::new(), notes, 1.0, room, Vec::new(), travel, Some(why)));
+        }
         rest += pl.rest;
         area += reach.area();
         // Each piece's passes after its first may be microlift-joined.
@@ -257,7 +261,7 @@ fn hsm_passes(center: &Region, p: &PocketParams) -> Result<HsmPlanned, GenError>
         travel.hops += t.hops;
         notes.extend(pl.notes);
     }
-    Ok((passes, notes, if area > 0.0 { rest / area } else { 0.0 }, room, joins, travel))
+    Ok((passes, notes, if area > 0.0 { rest / area } else { 0.0 }, room, joins, travel, None))
 }
 
 #[cfg(test)]

@@ -11739,3 +11739,29 @@ straight move that CROSSES a wall of a 2.5-D contour (centre inside the material
 excused by the crossing rule, exactly as before this change. Note: the solid law (b2)
 did NOT catch the pinned chord with the mesh in hand either - the tangency law was the
 only line, so the fix is not redundant.
+
+## #13: 2D Adaptive refuses a channel too long for one growth spiral, at once and by name (2026-11-07)
+
+`motion::machining2d::adaptive::budget`. **Cause:** the extended Outside band round the
+Milling-test part is a 14 mm annulus (D10): its centre area a closed ~4 mm channel ~270 mm
+long, no star cell, so the growth rings (`grow`) slit it open and grow ONE spiral along
+the C. In a 4 mm channel each revolution held the load at 0.12-0.37 mm of front advance
+(~1.5 mm^2 of ~1100 mm^2 a revolution) while re-walking the whole cleared outline (rings
+of 250-500 vertices, up to 7 trials on a 1.3 M-cell raster): margin 1.0 spent 140 revs in
+9.8 s release and went Short, 1.6 the same, 2.4 runs toward MAX_REVS 800 - about a minute
+in release, many in debug. The work grows as L^2 with the channel length. **Chosen:** (1)
+an up-front least-work law - channel length `L = area / (2 clearance)`, fronts each
+travelling L/2 at no more than the step cap (1.5 optimal widths) a revolution over rings
+averaging L: `L^2 / (2 cap)` in tool radii, refused past 2000 r (the 60x14 slot needs
+~110 r, the user's band ~3400 r, a fat 200x150 island pocket ~1600 r); (2) a running net:
+the summed length of every revolution tried, all margin attempts, refused past 30 000 r
+(the slot spends ~5800 r). A refused plan has no passes; `pocket_hsm` names it ("the HSM
+plan is refused: the area is a channel 13.9 mm wide and ~269 mm long ...") and the Offset
+rings cut the area - the existing fallback law, now 0.06 s instead of minutes.
+**Dropped:** a wall-clock deadline (non-deterministic: a plan's outcome would depend on
+machine load); making the ring walk incremental (the real speed-up, but a rewrite of the
+trial walk across grow/raster - not a 40-minute change; open as follow-up if the
+adaptive is wanted on long bands); refusing via `Err` (the op would fail instead of
+falling back, against the named-fallback law). Known limit: a very large island pocket
+(lb past 2000 r, roughly 250 x 200 mm and up with D10) now falls back to Offset rings
+up front where it used to plan slowly.
