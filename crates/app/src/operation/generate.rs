@@ -1679,12 +1679,19 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
+            // Picks author the circle (user report, 0.8.0): a picked
+            // rim, round floor or holed face hands its own centre and
+            // radius; the typed ones rule only without a selection.
+            let (center, radius) = match &src {
+                SrcRef::Selection(s) if !s.is_empty() => circle_of_region(&region)?,
+                _ => (*center, *radius),
+            };
             let path = machining2d::circular(
                 &region,
                 &CircularParams {
                     links: lk,
-                    center: *center,
-                    radius: *radius,
+                    center,
+                    radius,
                     vault: *vault,
                     bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                     top_z: req_z(hl.top, "Top of Part Z")?,

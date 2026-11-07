@@ -21,6 +21,9 @@ pub(super) struct Cx<'a> {
     pub cycle_note: &'a Option<String>,
     pub engrave: bool,
     pub detect_holes: bool,
+    /// The Circular op's circle read off its picks (`Some(Ok)`), or the
+    /// fit's refusal; `None` while the typed centre and radius rule.
+    pub circle_fit: &'a Option<Result<(camcraft_app::geo2d::Point2, f64), String>>,
 }
 
 pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
@@ -142,6 +145,21 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     // the height-editor ids switch. Read before the match's borrow.
     let engrave = matches!(&state.op_ui.params, OpParams::Engrave { .. });
 
+    // The picks' circle, through the same law generation runs, for the
+    // draft's own source (the typed fields stay untouched beneath it).
+    let circle_fit = if matches!(&state.op_ui.params, OpParams::Circular { .. }) {
+        let draft = camcraft_app::schema::Operation {
+            tool: state.op_ui.tool.clone(),
+            src: state.op_ui.src(),
+            params: state.op_ui.params.clone(),
+            stamp: None,
+            setup: op_ctx.clone(),
+            area: Default::default(),
+        };
+        operation::circular_fit_of(&state.world, &draft)
+    } else {
+        None
+    };
     let mut cx = Cx {
         u,
         tab,
@@ -151,6 +169,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         cycle_note: &cycle_note,
         engrave,
         detect_holes: false,
+        circle_fit: &circle_fit,
     };
     let world = &state.world;
     let params = &mut state.op_ui.params;

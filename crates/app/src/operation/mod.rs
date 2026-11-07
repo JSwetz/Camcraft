@@ -81,6 +81,8 @@ pub use stamp::*;
 mod material;
 pub use material::*;
 mod material_region;
+mod circle_fit;
+pub use circle_fit::{CIRCLE_FIT_TOL, circle_of_region, circular_fit_of};
 mod material_source;
 mod footprint;
 pub use footprint::machined_footprint;

@@ -229,8 +229,8 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             }
         }
         // The circular ladder (M2.4 B): the pocket family about an
-        // AUTHORED centre - geometry typed like Slot's endpoints, no
-        // pick to disagree with the circles; heights and passes are the
+        // AUTHORED centre - typed like Slot's endpoints, or fitted to a
+        // round pick (0.8.0 hand test); heights and passes are the
         // pocket's shape, and `vault` stands the floor on the dome law
         // instead of at Bottom Z.
         OpParams::Circular {
@@ -256,9 +256,19 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 lead_page::leads_tab(ui, u, "circ", Some((entry, helix_radius)), links);
             }
             if tab == SEC_GEO {
-                prop_row(ui, "Center X", |ui| num(ui, u, &mut center.x));
-                prop_row(ui, "Center Y", |ui| num(ui, u, &mut center.y));
-                prop_row(ui, "Radius", |ui| num(ui, u, radius));
+                // Picks author the circle: echoed read-only, the typed
+                // fields greyed but kept, so clearing the picks restores them.
+                let typed = cx.circle_fit.is_none();
+                match cx.circle_fit {
+                    Some(Ok((c, r))) => hint(ui, &format!("From selection: Ø{:.3} at ({:.3}, {:.3})", 2.0 * r, c.x, c.y)),
+                    Some(Err(e)) => hint(ui, e),
+                    None => {}
+                }
+                ui.add_enabled_ui(typed, |ui| {
+                    prop_row(ui, "Center X", |ui| num(ui, u, &mut center.x));
+                    prop_row(ui, "Center Y", |ui| num(ui, u, &mut center.y));
+                    prop_row(ui, "Radius", |ui| num(ui, u, radius));
+                });
                 check_row(ui, "Vault - dome floor", vault);
                 hint(ui, "flat floors stand at Bottom Z; the vault sinks each ring by (r/R)^2 of the Top-to-Bottom span - a parabolic reflector, every ring a circle the spindle simply holds");
             }
