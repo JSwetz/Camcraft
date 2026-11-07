@@ -1,6 +1,6 @@
 //! Law (b), the section/tangency gouge law d(center, boundary) >= r - leave - tol, and the wiring of the solid law (b2) it shares a domain with - the shop practice of holding the cutter radius to the finish wall (machine-tool handbooks) on our own section model (split from `engine.rs` by M13.7; structure only).
 
-use super::laws::{dist2_segs, law_points};
+use super::laws::{dist2_segs, law_points, proper_cross};
 use super::rest::Rest;
 use super::types::{Mode, VerifyContext, Warning};
 
@@ -78,7 +78,7 @@ pub(super) fn tangency(
             continue;
         }
         let section = section.flatten();
-        let chords = segments(m, cx.mode, chord_tol);
+        let chords = segments(m, cx.mode, chord_tol, cx.stock_top_z + cx.z_tol);
         let mut ends = chords.first().map(|c| c.0).into_iter().chain(chords.iter().map(|c| c.1));
         if section.as_ref().is_some_and(|s| ends.any(|p| s.contains(p))) {
             warns.push(Warning::Gouge { at: i });
@@ -97,10 +97,79 @@ pub(super) fn tangency(
                 chords.iter().any(|&(a, b)| dist2_segs(a, b, p, q) < floor * floor)
             })
         });
-        if gouged {
+        let walled = !gouged
+            && cx.mode == Mode::Boundary
+            && m.arc.is_none()
+            && wall_gouge(
+                (Point2::new(m.from.x, m.from.y), Point2::new(m.to.x, m.to.y)),
+                cx.region,
+                section.as_ref(),
+                cx.model.is_some(),
+                floor,
+            );
+        if gouged || walled {
             warns.push(Warning::Gouge { at: i });
         }
     }
+}
+
+/// How far off a region edge's midpoint the wall probe stands, mm: well
+/// past float dust on a section that shares the edge, well inside any
+/// feature the tolerance could care about.
+const WALL_PROBE: f64 = 0.05;
+
+/// The Boundary-mode whole-chord reading (issue #43): a straight move
+/// measured along its whole length against the region's WALLS only.
+/// The law points cannot see a G1 chorded across a convex corner of the
+/// wall with both ends `r` off it; a whole-chord reading of EVERY edge
+/// convicts a Face's rows, which cross the face's OPEN rim by design.
+/// So each edge is classified first:
+/// - every edge of the model section is a wall (part material on its
+///   one side, by construction);
+/// - with a model, a region edge is a wall when the section holds a
+///   probe [`WALL_PROBE`] off its midpoint on either side - a Face's
+///   rim over air (or stock) is open, a Contour's outline at a level
+///   the part still stands is a wall;
+/// - without a model there is no material to probe: a move that
+///   properly crosses a region edge is overrunning an open rim (the
+///   Face row; a wall is never crossed by a legitimate move), and only
+///   a move that crosses none is read against the region's edges.
+fn wall_gouge(
+    (a, b): (Point2, Point2),
+    region: &crate::geo2d::Region,
+    section: Option<&crate::geo2d::Region>,
+    has_model: bool,
+    floor: f64,
+) -> bool {
+    let near = |(p, q): (Point2, Point2)| dist2_segs(a, b, p, q) < floor * floor;
+    if section.is_some_and(|s| edges(s).any(near)) {
+        return true;
+    }
+    if has_model {
+        let walled = |(p, q): (Point2, Point2)| {
+            let (dx, dy) = (q.x - p.x, q.y - p.y);
+            let len = dx.hypot(dy);
+            if len <= f64::EPSILON {
+                return false;
+            }
+            let (nx, ny) = (-dy / len * WALL_PROBE, dx / len * WALL_PROBE);
+            let (mx, my) = (0.5 * (p.x + q.x), 0.5 * (p.y + q.y));
+            section.is_some_and(|s| {
+                s.contains(Point2::new(mx + nx, my + ny)) || s.contains(Point2::new(mx - nx, my - ny))
+            })
+        };
+        edges(region).any(|e| walled(e) && near(e))
+    } else {
+        !edges(region).any(|(p, q)| proper_cross(a, b, p, q)) && edges(region).any(near)
+    }
+}
+
+/// Every closed edge of every loop of `r`.
+fn edges(r: &crate::geo2d::Region) -> impl Iterator<Item = (Point2, Point2)> + '_ {
+    r.loops().iter().flat_map(|l| {
+        let pts = l.points();
+        (0..pts.len()).map(move |k| (pts[k], pts[(k + 1) % pts.len()]))
+    })
 }
 
 /// What law (b) measures of one move. `Mode::Area` (the pocket family:
@@ -110,14 +179,60 @@ pub(super) fn tangency(
 /// and the reading at the move's `to` alone let a G1 chorded over a
 /// block corner sink 1.46 mm into it unconvicted. `Mode::Boundary` keeps the
 /// law points as zero-length chords: a Face's rows run across the
-/// face's open edge by design, which a whole-chord reading would
-/// convict - its verdict is unchanged.
-fn segments(m: &Move, mode: Mode, chord_tol: f64) -> Vec<(Point2, Point2)> {
-    if mode == Mode::Area {
-        m.chords(chord_tol)
-    } else {
-        law_points(m, chord_tol).into_iter().map(|p| (p, p)).collect()
+/// face's open edge by design, which a whole-chord reading of every
+/// edge would convict; its straight moves answer to the WALL edges
+/// along their whole length instead ([`wall_gouge`], issue #43).
+///
+/// The whole-chord reading covers only the stretch of the move that is
+/// below `wall_top` (the stock top): above it the region's walls are
+/// not standing, so a ramp that crosses the wall line in the air on its
+/// way down into the pocket is not a gouge. A move entirely above
+/// `wall_top` keeps the law points.
+fn segments(m: &Move, mode: Mode, chord_tol: f64, wall_top: f64) -> Vec<(Point2, Point2)> {
+    let points = || law_points(m, chord_tol).into_iter().map(|p| (p, p)).collect();
+    if mode != Mode::Area {
+        return points();
     }
+    let (z0, z1) = (m.from.z, m.to.z);
+    if !(z0.is_finite() && z1.is_finite()) {
+        return m.chords(chord_tol); // fail closed: the whole move answers
+    }
+    if z0 > wall_top && z1 > wall_top {
+        return points();
+    }
+    let chords = m.chords(chord_tol);
+    if z0 <= wall_top && z1 <= wall_top {
+        return chords;
+    }
+    // One end above the wall top: keep the chords past the crossing.
+    // z is linear in the move's parameter, chords run from -> to in
+    // order, so the crossing is a fraction of the summed chord length.
+    let t = ((wall_top - z0) / (z1 - z0)).clamp(0.0, 1.0);
+    let lens: Vec<f64> = chords.iter().map(|&(a, b)| ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()).collect();
+    let total: f64 = lens.iter().sum();
+    if !(total > 0.0) {
+        return chords;
+    }
+    let cut = t * total;
+    let descending = z0 > z1; // the end below the top is `to`
+    let mut out = Vec::new();
+    let mut acc = 0.0;
+    for (&(a, b), &len) in chords.iter().zip(&lens) {
+        let (s0, s1) = (acc, acc + len);
+        acc = s1;
+        let lerp = |s: f64| {
+            let u = if len > 0.0 { ((s - s0) / len).clamp(0.0, 1.0) } else { 0.0 };
+            Point2::new(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u)
+        };
+        if descending {
+            if s1 >= cut {
+                out.push((lerp(cut.max(s0)), b));
+            }
+        } else if s0 <= cut {
+            out.push((a, lerp(cut.min(s1))));
+        }
+    }
+    out
 }
 
 /// (b2) The solid law: the plane sections of (b) are blind to what

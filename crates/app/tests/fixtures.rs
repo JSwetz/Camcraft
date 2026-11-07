@@ -285,7 +285,10 @@ fn a_shank_that_clears_stock_but_hits_planted_steel_warns_fixture_hit() {
     // fixture::boxes_for - and with nothing tagged the field is inert.
     let world = new_world();
     let mut history = History::default();
-    let region = rect(0.0, 0.0, 30.0, 30.0);
+    // The region reaches past the ramp (x from -5): this test is about
+    // the fixture law, and a ramp descending below the stock top within
+    // r of a pocket wall is a true gouge since #42's whole-chord reading.
+    let region = rect(-10.0, 0.0, 30.0, 30.0);
     let tool = deep_tool();
     let path = Toolpath::new(vec![Move::new(
         MoveKind::Feed,
@@ -461,8 +464,9 @@ fn cutting_below_the_reachable_z_hits_the_table_and_above_it_is_clean() {
 fn the_spindle_band_lives_past_the_holder_only_the_mch_beyond() {
     // The tall steel at x 30 stands outside the shank (9) and holder
     // (20) cylinders but inside a 30 mm spindle radius, in the band
-    // that starts where the holder ends (z_deep + 130).
-    let region = rect(0.0, 0.0, 30.0, 30.0);
+    // that starts where the holder ends (z_deep + 130). The region
+    // reaches past the ramp (see the shank test above, #42).
+    let region = rect(-10.0, 0.0, 30.0, 30.0);
     let tool = deep_tool();
     let path = Toolpath::new(vec![Move::new(
         MoveKind::Feed,

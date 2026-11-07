@@ -11720,3 +11720,22 @@ edges are between r and 2r and passes 150-deg turns it cannot cut; the trim rule
 exact one. Rings the centre offset drops (an island the tool cannot reach) are not
 judged - computer comp skips them too. Two bosses closer than 2r (Outside merge) stay
 on the existing seam / distance / `is_sane` refusals.
+
+## #43: the Boundary-mode gouge law reads straight moves against WALL edges along their length (2026-11-07)
+
+`sim::verify::section::wall_gouge`, after #42's Area reading. **Chosen:** in
+`Mode::Boundary` every straight cutting move is also measured along its whole length,
+but only against wall edges: every edge of the model section (material on one side by
+construction), and a region edge when the section holds a probe 0.05 mm off its
+midpoint on either side (a Face rim over air is open, a Contour outline where the part
+stands is a wall). With no model there is no material to probe: a move that properly
+crosses a region edge is read as overrunning an open rim (the Face row - a wall is never
+crossed by a legitimate move) and keeps the endpoint reading; a move that crosses none
+answers to every region edge. Arcs keep the law points (their chords sag inward).
+**Dropped:** a new `Mode` variant or a `VerifyContext` field naming open edges (touches
+every constructor and kind for what the section already knows); the plain whole-chord
+reading of every edge (convicts Face, #42's finding). Known limit, model-less only: a
+straight move that CROSSES a wall of a 2.5-D contour (centre inside the material) is
+excused by the crossing rule, exactly as before this change. Note: the solid law (b2)
+did NOT catch the pinned chord with the mesh in hand either - the tangency law was the
+only line, so the fix is not redundant.
