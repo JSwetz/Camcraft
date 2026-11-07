@@ -35,6 +35,7 @@ mod boundary;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
 pub mod colorvision;
+mod post_options;
 pub mod cvd;
 mod icons;
 mod layout;

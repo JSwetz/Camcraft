@@ -34,6 +34,7 @@ committed golden is a legal post input.
 | `PART LOAD [ADVANCE <µm>]` / `PART UNLOAD` | a part lifecycle event: `dump` brackets each section with them; ADVANCE rides the LOAD alone (the bar's next bite, µm) |
 | `PART TRANSFER <from> <to>` | the handoff step of the same family: station `from` (1-based, the order the machine file states its spindles) hands the part to station `to`; both operands required, a missing or zero-station number refuses by name |
 | `COMP LEFT <µm>` / `COMP RIGHT <µm>` / `COMP OFF` | cutter radius compensation in the control (M13.11): engage (G41 / G42, the register holding this radius) on the next motion record, or cancel (G40) on it. The motion records between an engage and its cancel are the PART contour the control offsets, not the cutter centre - a script that cannot say the words refuses by name |
+| `THREAD X.. Y.. Z.. EX.. EY.. EZ.. MAJOR.. MINOR.. LEAD.. HEIGHT.. FIRST.. MIN.. FINISH.. ANGLE.. SPRING.. PULLOUT..` / `THREAD END` | a threading cycle (issue #34): opens / closes the span of explicit thread passes it stands for. X Y Z the cycle's start point (clearance radius, first station), EX EY EZ its end at the root, MAJOR / MINOR diameters, HEIGHT / FIRST / MIN / FINISH radial lengths and PULLOUT axial, all µm; LEAD (mm) and ANGLE (the compound infeed's included angle, degrees, 0 = radial) 6-decimal reals; SPRING the spring-pass count. Every word required, once. The passes between are ordinary motion records - a script without `onThreadCycle` posts them unchanged |
 | `PROBE <µm>` | the measurement ask (M5.3 D): the deviation budget, in µm, that the finished part is to be probed to after this section's last cut. The number is the switch - no word when no ask - and the verdict it deserves (whether the program's own cuts can measure to it, and which pass owes a re-run) is the app post gate's, never the streams |
 | `START X <i> Y <i> Z <i>` / `END` | legacy `.cl` position lines: consumed silently (END ends the record span) |
 
@@ -140,7 +141,16 @@ fires per `COMP` record (M13.11; `side` is `"left"`, `"right"` or
 `"off"`, `properties.CompensationRadius` the register's radius in mm)
 — and a script that does not define it is REFUSED (counted warning)
 the moment a `COMP` record arrives, since the records after it are a
-part contour no centre-path post may write. `onClose`
+part contour no centre-path post may write. `onThreadCycle()` /
+`onThreadCycleEnd()` fire per `THREAD` / `THREAD END` (issue #34;
+lifecycle, `onCommand` never sees them): properties `X Y Z`, `EndX
+EndY EndZ`, `MajorDiameter`, `MinorDiameter`, `Lead`, `ThreadHeight`,
+`FirstDepth`, `MinimumDepth`, `FinishAllowance`, `InfeedAngle`,
+`SpringPasses`, `PullOut`. Both are optional: the explicit passes
+follow as motion records either way, and a script that writes the
+cycle skips them itself. `postOptions` is the document's post-option
+object (`engine::run_with`; `{ Threading: "G32" | "G76" }` from the
+app, `{}` from `run` and the CLI). `onClose`
 ends the run; its lines belong to no record.
 
 A parsed stream is normalized to program order before the hooks

@@ -101,6 +101,9 @@ pub struct PathDto {
     /// before the option. The same additive law as the notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comps: Vec<CompSpanDto>,
+    /// The threading-cycle records (issue #34): the same additive law.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads: Vec<super::thread_dto::ThreadCycleDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -362,6 +365,7 @@ impl PathDto {
             cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
             notes: t.path.notes.clone(),
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
+            threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
         }
     }
 
@@ -383,6 +387,7 @@ impl PathDto {
             .map(CompSpanDto::to_span)
             .filter(|c| c.is_sane(&path.moves))
             .collect();
+        path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
         ToolpathCache::new(path, self.warnings.clone())
     }
 }

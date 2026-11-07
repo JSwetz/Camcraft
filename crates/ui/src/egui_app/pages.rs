@@ -394,6 +394,7 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+    super::post_options::threading_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not

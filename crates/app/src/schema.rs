@@ -253,6 +253,29 @@ pub enum PostRef {
     File(String),
 }
 
+/// The user's choices for the document's post (issue #34), a flecs
+/// singleton beside `PostRef`: setup furniture, moved only by
+/// `SetPostOptions` (undoable) or a document load. A script reads the
+/// ones it knows from its `postOptions` global and ignores the rest;
+/// the default is every post's own default, so a document that never
+/// chose writes no key.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PostOptions {
+    /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
+    /// default, or the two-block G76 cycle from the thread record).
+    pub threading: ThreadingOutput,
+}
+
+/// The thread-output choice of [`PostOptions`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThreadingOutput {
+    /// Every pass as synchronized G32 moves - the stream's own passes.
+    #[default]
+    G32Passes,
+    /// One G76 multi-pass threading cycle per thread record.
+    G76Cycle,
+}
+
 /// Which theme the document wears (M6.1 C), a flecs singleton like
 /// `PostRef`: setup furniture, never a browser row. `Dark` is the
 /// shipped default - the meaning of a file with no theme key at all;
@@ -352,6 +375,7 @@ pub fn register_schema(world: &World) {
     world.component::<Units>();
     world.component::<MachineDef>();
     world.component::<PostRef>();
+    world.component::<PostOptions>();
     world.component::<ThemeRef>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();

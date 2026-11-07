@@ -73,6 +73,12 @@ pub enum Record {
     /// does not define the hook at all - a centre-less contour posted
     /// without its G41 is an undersize part, the silent wrong answer.
     Comp { side: Option<CompSide>, radius_mm: f64 },
+    /// A threading cycle (issue #34): `Some` opens the span of explicit
+    /// passes the cycle stands for, `None` (`THREAD END`) closes it.
+    /// The passes between are ordinary motion records - a script with
+    /// a threading cycle writes the record and skips them, any other
+    /// posts them as they are.
+    Thread(Option<super::cnc_thread::ThreadRec>),
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -259,6 +265,8 @@ impl Record {
             Record::Comp { side: Some(CompSide::Left), radius_mm } => format!("comp left · r {radius_mm:.3} mm"),
             Record::Comp { side: Some(CompSide::Right), radius_mm } => format!("comp right · r {radius_mm:.3} mm"),
             Record::Comp { side: None, .. } => "comp off".into(),
+            Record::Thread(Some(t)) => t.label(),
+            Record::Thread(None) => "thread cycle end".into(),
         }
     }
 
@@ -396,6 +404,8 @@ pub fn serialize(records: &[Record]) -> String {
                     None => "COMP OFF\n".to_string(),
                 });
             }
+            Record::Thread(Some(t)) => s.push_str(&t.line()),
+            Record::Thread(None) => s.push_str("THREAD END\n"),
         }
     }
     s
@@ -866,6 +876,11 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     }
                 };
                 out.push(Record::Comp { side, radius_mm });
+                in_section = true;
+            }
+            "THREAD" => {
+                let t = super::cnc_thread::parse(it).map_err(fail)?;
+                out.push(Record::Thread(t));
                 in_section = true;
             }
             "PROBE" => {
