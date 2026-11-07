@@ -1,7 +1,6 @@
-# Release build (M1.7e, M13.3): a v* tag builds the release binaries,
-# assembles the portable zip - app exe, the `post` CLI, and the post/machine
-# data files it reads from disk - builds the Inno Setup installer from the
-# same staged tree, and attaches both to the GitHub Release.
+# Release build (M1.7e, M13.3): a v* tag builds Windows and Linux binaries.
+# Linux packages a portable tarball, DEB, and RPM; Windows assembles the
+# portable zip and Inno Setup installer, then publishes all five assets.
 # Signing is optional and secret-gated (scripts/sign.ps1): with no
 # CAMCRAFT_SIGN_* secret the binaries ship unsigned, as every release so
 # far has. The decision is logged in RECOMMENDED.md ("M13.3").
@@ -25,7 +24,37 @@ permissions:
   contents: write
 
 jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux build and package tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libx11-dev rpm
+      - name: Build release binaries
+        run: cargo build --locked --release -p camcraft-ui -p camcraft-app -p camcraft-post
+      - name: Assemble Linux packages
+        run: scripts/package-linux.sh
+      - name: Check package contents
+        run: |
+          tar -tzf dist/*.tar.gz | grep '/camcraft-ui$'
+          dpkg-deb --contents dist/*.deb | grep '/usr/lib/camcraft/camcraft-ui$'
+          rpm -qpl dist/*.rpm | grep '/usr/lib/camcraft/camcraft-ui$'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+
   release:
+    needs: linux
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +133,10 @@ jobs:
         with:
           name: installer
           path: dist/*-setup.exe
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
       # The release page shows only this version's notes: RELEASE_NOTES.md
       # keeps every release, newest first, separated by a line "---"; the
       # body is its first section (user, 2026-11-07: "just what is in that
@@ -129,5 +162,8 @@ jobs:
           files: |
             dist/*.zip
             dist/*-setup.exe
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
           body_path: dist/release-body.md
           fail_on_unmatched_files: true

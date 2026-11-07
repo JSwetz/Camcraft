@@ -43,10 +43,13 @@ text, assets or post processors were used.
 
 ## Download
 
-Windows builds are attached to each
-[GitHub release](https://github.com/NeoTech/Camcraft/releases). Unzip and run
-`camcraft-ui.exe`. `TESTING.md` in the zip is a short hand-test checklist
-for what changed in that release.
+Windows x64 and Linux x86_64 builds are attached to
+[GitHub releases](https://github.com/NeoTech/Camcraft/releases). On Windows,
+unzip the portable archive and run `camcraft-ui.exe`, or use the installer.
+On Linux, install the DEB or RPM and launch **CamCraft** from the application
+menu (or run `camcraft`), or extract the TAR.GZ and run `./camcraft-ui` from
+its extracted directory. The portable archives include the command-line
+tools and assets. `TESTING.md` in each archive lists hand-test checks.
 
 ## Build from source
 
@@ -59,8 +62,9 @@ cargo build --release -p camcraft-app --bin camcraft-cli   # headless CLI
 cargo build --release -p camcraft-post --bin post          # standalone post processor
 ```
 
-Windows is the primary platform. The core crates also build and test on
-Linux and macOS, and the post engine compiles for `wasm32-unknown-unknown`.
+Windows and Linux desktop releases are built on GitHub. The core crates also
+build and test on macOS, and the post engine compiles for
+`wasm32-unknown-unknown`.
 
 ## Workspace layout
 
