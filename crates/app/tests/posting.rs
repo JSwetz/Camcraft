@@ -274,11 +274,12 @@ fn a_stale_operation_blocks_the_post_and_leaves_the_file_untouched() {
         "a refusal rewrites nothing"
     );
 
-    // Regenerating through the command clears it and the post runs again.
-    history.execute(
-        &world,
-        GenerateOperation::new(&world, "Contour1").expect("regenerate"),
-    );
+    // Regenerating through the commands, in program order, clears it
+    // and the post runs again (issue #89: Drill1 reads what Contour1
+    // ahead of it removed, so Contour1's new path moves Drill1 too).
+    for op in ["Contour1", "Drill1"] {
+        history.execute(&world, GenerateOperation::new(&world, op).expect("regenerate"));
+    }
     posting::post_setup(&world, &path).expect("fresh again posts");
     let _ = std::fs::remove_file(&path);
 }

@@ -18,6 +18,12 @@
 //! back-bore cycles run in a hole that is already there: they are held
 //! not to the flute but to the shank fitting that hole.
 //!
+//! Issue #89: the axial laws read the stock as the setup's earlier
+//! operations left it (the re-machining prior grid, read under each
+//! disk at its highest covered cell; unknown = raw). The cross holes'
+//! laws keep the raw stock: the column grid stands along Z and cannot
+//! be read along a radial hole line.
+//!
 //! Provenance: usable flute length versus hole depth, and holder
 //! clearance over the work, are the machine-tool handbooks' drilling
 //! practice; the swept-rectangle distance is textbook planar geometry
@@ -26,6 +32,7 @@
 
 use crate::cl::{Cycle, CycleKind, Toolpath};
 use crate::drilling::{CrossHole, CycleChoice, Hole, SPOT_DEPTH, THROUGH_CLEAR};
+use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::tools::Tool;
@@ -113,11 +120,18 @@ fn seg_dist(p: (f64, f64), q: (f64, f64)) -> f64 {
 /// the material top over the holder's disk. A tap, bore or back-bore
 /// cycle runs in an existing hole (`holes`, the list the kernel cut):
 /// past its flute only the shank must fit that hole's diameter.
+///
+/// `prior` (issue #89) is the grid the setup's earlier operations left
+/// standing: over each disk the stock and the hole's mouth stand no
+/// higher than its highest covered cell ([`prior_surface`]); `None`,
+/// or a disk it cannot read, is the raw stock; a lathe's axial hole
+/// reads it revolved about the axis ([`super::drill_prior::PriorRead`]).
 pub(super) fn axial_reach(
     t: &Toolpath,
     holes: &[Hole],
     part: &[Triangle],
     stock: Option<&[Triangle]>,
+    prior: Option<super::drill_prior::PriorRead<'_>>,
     tool: &Tool,
     name: &str,
 ) -> Result<(), GenError> {
@@ -128,8 +142,12 @@ pub(super) fn axial_reach(
     let body = 0.5 * finite_or_zero(tool.diameter).max(finite_or_zero(tool.shank_d));
     for c in &t.cycles {
         let Cycle { xy, r_z, bottom_z, .. } = *c;
-        r_plane_clear(part, stock, c, body)?;
-        let top = top_over(part, stock, xy.x, xy.y, body).unwrap_or(c.entry_z).max(c.entry_z.min(r_z));
+        let q = Point2::new(xy.x, xy.y);
+        let prior_at = |r: f64| prior.and_then(|p| p.surface(q, r));
+        let pb = prior_at(body);
+        r_plane_clear(part, stock, c, body, pb)?;
+        let entry = top::cut_by(Some(c.entry_z), pb).unwrap_or(c.entry_z);
+        let top = top_over(part, stock, xy.x, xy.y, body, pb).unwrap_or(entry).max(entry.min(r_z));
         let depth = top - bottom_z;
         if matches!(c.kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {
             shank_fits(c, holes, depth, flute, tool, name)?;
@@ -144,7 +162,7 @@ pub(super) fn axial_reach(
         }
         if let Some((reach, hr)) = holder(tool, name)? {
             let face = bottom_z + reach;
-            if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr).filter(|&z| face < z - TOL) {
+            if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr, prior_at(hr)).filter(|&z| face < z - TOL) {
                 return Err(GenError::Invalid(format!(
                     "tool {name}'s holder (dia. {:.3}, {reach:.3} mm above the tip) sinks to Z {face:.3} at the \
                      hole at ({:.3}, {:.3}), below the material top {ht:.3} around it - the holder feeds into \

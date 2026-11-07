@@ -13127,3 +13127,58 @@ revolved (follow-up material if users hit it with long keyways).
     #84 reach law passed (depth to the shank's meeting point <= flute
     means the shank stands outside it at the feed entry); its test pins
     the passing side on box stock.
+
+## #89 - drilling reads what the setup's earlier operations removed (2026-11-07)
+
+- **Chosen:** the axial drill's reach (#84), R-plane (#91) and holder
+  laws read the stock top over each disk as min(raw stock, prior
+  surface), the prior being #96's `rest::PriorPlan` - the setup's stock
+  grid cut by every earlier op's cached moves - read conservatively at
+  the highest covered cell (`verify::prior_surface`, now public); an
+  unknown cell, an ungenerated predecessor or a posed (tilted) one that
+  the column engine refuses all leave the raw stock. The hole's own
+  mouth is lowered by the same reading (a counterbore cut first is air).
+  The plan is simulated lazily (`operation::drill_prior::PriorCell`):
+  only when the raw reading refuses, and at most once per job - verify's
+  #96 acquittal shares the same cell.
+- **Lathe:** a lathe axial drill reads the grid revolved about the axis
+  (the lowest of four compass cells per ring, the highest ring) - the
+  spindle carries any cut all the way round. A turning predecessor is
+  now cut in the prior plan as its nose ball (moves carry the nose
+  centre), not as a flat disc of the insert size, so a facing pass reads
+  the faced end, never below it (a few microns high on the grid).
+  `prior_state` (the Pocket3D rest mask) keeps its old atom - #109 scope.
+- **Cross drills keep the raw stock:** the column grid stands along Z
+  and cannot be read along a radial hole line; their laws say nothing
+  new.
+- **Staleness:** the Drill stamp carries `rest::prior_digest` (as
+  Pocket3D's does) and `stale_reason` names the predecessor, so a drill
+  judged against an earlier pocket goes Stale when that pocket's
+  recorded path moves. Only Drill joins (#109 owns the general case).
+  Cost: a drill behind any cutting op now regenerates after it - the
+  posting suite's stale test regenerates in program order.
+- **Dropped:** reading the prior always (pays a simulation on every
+  clean job); reading the lathe grid unrevolved (a facing pass at Y 0
+  never covers the drill's disk); a tolerance on the prior reading to
+  pass R exactly at a ball-faced end (the reading may never be low).
+- **Found:** the lathe Facing kind faces the work MODEL, not stock
+  above it ("nothing to face" when the part top is the finished end),
+  so a bar's facing allowance in the stock cannot be faced off yet -
+  the lathe test models the allowance on the bar.
+- **Review fixes (PR #123):** (B1/B2) on a lathe the prior plan credits
+  ONLY the Facing kind cut with its nose ball - a boring bar, groove or
+  parting blade was cut as a full-diameter disc on the y = 0 strip and
+  revolved round the bar, and the column grid credits a turning move
+  under standing material (a kerf to the axis) with everything above it
+  (the same reason `LATHE_COLUMN_REFUSAL` refuses the column arm); any
+  other kind ahead makes the prior unknown, so the raw stock stands.
+  Dropped: a meridian (revolved field) prior - the right model, but the
+  drill laws read a height; that is #109-sized. A twist-drill
+  predecessor is now cut with its point cone (`cone` for Drill as for
+  Taper), so a pilot's 118 deg point is not read as a flat floor; the
+  nose radius joins the digest; every Drill (not only cross drills)
+  stamps the stock it read; `cut_by` keeps a NaN raw height NaN; the
+  prior reading pads its disk by half a cell diagonal, refuses (not
+  clamps) a ring count past 1e5, and drops vertical-plane arcs from the
+  nose-lowered path (lowering only the ends would bend them) - dropping a
+  cut credits less, never more.

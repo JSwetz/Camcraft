@@ -75,10 +75,14 @@ pub struct PriorState {
 /// on it), and the cached moves themselves when it has cut anything.
 struct Ahead {
     name: String,
+    /// The operation's kind: on a lathe only the Facing kind is read
+    /// ([`prior_plan`], #89 review).
+    kind: crate::operation::OpType,
     path: u64,
     radius: f64,
     ball: bool,
-    /// Cot of the half-angle, Some only for a chamfer mill (M2.4 B):
+    /// Cot of the half-angle, Some for a chamfer mill (M2.4 B) and a
+    /// twist drill's point (#89 review: a pilot's cone stands):
     /// the rest grid must sweep the same cone the program sim does, or
     /// a predecessor's chamfer would evaporate a full disc of
     /// material that is really still standing.
@@ -87,6 +91,11 @@ struct Ahead {
     /// the rest grid sweeps the same corner the program sim does, so a
     /// bull predecessor's fillet ring reads as the rest it is.
     corner: Option<f64>,
+    /// A turning insert's nose radius (issue #89): its moves carry the
+    /// nose CENTRE, so the prior plan cuts it as a ball of that radius
+    /// (tip = centre - nose) - the insert's real cutting edge, never
+    /// the flat disc of its whole size. Only [`PriorPlan`] reads it.
+    nose: Option<f64>,
     cut: bool,
     moves: Vec<Move>,
 }
@@ -171,6 +180,7 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
         let cut = !moves.is_empty();
         out.push(Ahead {
             name: n.clone(),
+            kind: op.params.kind(),
             path: if cut { path_hash(&moves) } else { 0 },
             radius: tool.as_ref().map_or(0.0, |t| t.diameter * 0.5),
             ball: tool
@@ -178,7 +188,7 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
                 .is_some_and(|t| t.kind == crate::tools::ToolKind::BallNose),
             cone: tool
                 .as_ref()
-                .filter(|t| t.kind == crate::tools::ToolKind::Taper)
+                .filter(|t| matches!(t.kind, crate::tools::ToolKind::Taper | crate::tools::ToolKind::Drill))
                 .map(|t| (t.tip_angle.to_radians() * 0.5).tan())
                 .filter(|x| x.is_finite() && *x > 0.0)
                 .map(|x| 1.0 / x),
@@ -187,6 +197,11 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
             corner: tool
                 .as_ref()
                 .and_then(|t| stock_sim::bull_corner(t).ok().flatten()),
+            nose: tool
+                .as_ref()
+                .filter(|t| t.kind == crate::tools::ToolKind::Turning)
+                .map(|t| t.nose_radius)
+                .filter(|n| n.is_finite() && *n > 0.0),
             cut,
             moves,
         });
@@ -224,6 +239,11 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
             if let Some(c) = a.corner {
                 h.write_u8(2);
                 h.write(&c.to_bits().to_le_bytes());
+            }
+            // The insert's nose is atom too (#89 review).
+            if let Some(n) = a.nose {
+                h.write_u8(3);
+                h.write(&n.to_bits().to_le_bytes());
             }
         } else {
             h.write_u8(0);
@@ -313,10 +333,36 @@ impl PriorPlan {
     /// "prior unknown" - the raw stock, never an acquittal.
     pub fn simulate(self) -> Result<Dexel, String> {
         let mut dex = self.grid;
+        // A turning insert cuts with its nose: the centre path lowered
+        // to the tip, swept as a ball (issue #89).
+        let tips: Vec<Vec<Move>> = self
+            .ahead
+            .iter()
+            .map(|a| match a.nose {
+                Some(n) => a
+                    .moves
+                    .iter()
+                    // A vertical-plane arc's centre moves with its ends:
+                    // lowering only the ends would bend it (review nit).
+                    .filter(|m| m.arc.as_ref().is_none_or(|a| a.plane.is_xy()))
+                    .map(|m| {
+                        let mut m = *m;
+                        m.from.z -= n;
+                        m.to.z -= n;
+                        m
+                    })
+                    .collect(),
+                None => Vec::new(),
+            })
+            .collect();
         let ops: Vec<SimOp> = self
             .ahead
             .iter()
-            .map(|a| SimOp { moves: &a.moves, radius: a.radius, ball: a.ball, cone: a.cone, corner: a.corner })
+            .zip(&tips)
+            .map(|(a, tip)| match a.nose {
+                Some(n) => SimOp { moves: tip, radius: n, ball: true, cone: None, corner: None },
+                None => SimOp { moves: &a.moves, radius: a.radius, ball: a.ball, cone: a.cone, corner: a.corner },
+            })
             .collect();
         stock_sim::simulate(&mut dex, &ops).map_err(|e| e.to_string())?;
         Ok(dex)
@@ -332,7 +378,24 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     if ahead.is_empty() {
         return Ok(None);
     }
-    let min_r = ahead.iter().filter(|a| a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
+    // #89 review (B1/B2): on a lathe the column grid credits a turning
+    // move under standing material (a parting kerf, an ID groove behind
+    // a lip) with everything above it, and a bar or blade cut as a full
+    // disc would be revolved round the bar. Only the Facing kind, cut
+    // with its nose, never undercuts: any other kind ahead is unknown.
+    // The same holds for a turning kind on a mill-turn: the column grid
+    // reads its undercuts the same way, so outside a lathe every turning
+    // kind but nose-cut Facing ahead is unknown too.
+    let lathe = crate::machine::kind_of(world) == crate::machine::Kind::Lathe;
+    let facing = |a: &Ahead| a.kind == crate::operation::OpType::Facing && a.nose.is_some();
+    let turning = |a: &Ahead| a.kind.info().family() == crate::operation::Family::Turn;
+    if let Some(a) = ahead.iter().find(|a| !facing(a) && (lathe || turning(a))) {
+        return Err(format!(
+            "operation '{}' ahead is a turning pass other than facing - the column grid cannot read its removal",
+            a.name
+        ));
+    }
+    let min_r = ahead.iter().map(|a| a.nose.unwrap_or(a.radius)).filter(|r| *r > 0.0).fold(tool_r, f64::min);
     let grid = stock_sim::stock_grid(world, setup, min_r)?;
     Ok(Some(PriorPlan { grid, ahead }))
 }

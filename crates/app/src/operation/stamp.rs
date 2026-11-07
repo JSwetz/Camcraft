@@ -233,9 +233,9 @@ pub fn current_stamp(
     // Issue #77: a cross drill stands off the setup's RAW stock as well
     // as its part, so the stock it read is an input - a bar re-sized
     // after generation must stale the op, never post the old hops.
-    // Only that kind writes the term: every other stamp keeps its bits.
-    if let OpParams::Drill { cross, .. } = params
-        && !cross.is_empty()
+    // #89 review: an axial drill's reach, R-plane and holder laws read
+    // the stock too, so every Drill writes it; other stamps keep their bits.
+    if matches!(params, OpParams::Drill { .. })
         && !matches!(src, SrcRef::Stock)
     {
         h.write_u8(b'X');
@@ -258,7 +258,12 @@ pub fn current_stamp(
     // longer describes the same cut. With nothing ahead of it nothing
     // is written: first operations' and other kinds' stamps are
     // bit-for-bit what they were before stage D (the inert-data law).
-    if params.kind() == OpType::Pocket3D
+    // Issue #89: an axial Drill's reach, R-plane and holder laws read
+    // what the program ahead removed, so its stamp carries the same
+    // digest - a drill judged against an earlier pocket goes Stale
+    // when that pocket's recorded path moves. Only Drill joins here
+    // (#109 owns the general case for every other kind).
+    if matches!(params.kind(), OpType::Pocket3D | OpType::Drill)
         && let Some(digest) = crate::rest::prior_digest(world, op_name, setup)
     {
         h.write_u8(b'R');
@@ -385,7 +390,7 @@ pub fn stale_reason(
     // clean while the stamp still mismatches, so a cutting
     // predecessor's recorded path is what moved - whatever its own
     // status reads.
-    if op.params.kind() == OpType::Pocket3D
+    if matches!(op.params.kind(), OpType::Pocket3D | OpType::Drill)
         && let Some(name) = model::name_of(world, entity)
         && let Some(why) = crate::rest::prior_stale(world, &name, op.setup.as_deref())
     {

@@ -18,13 +18,36 @@ use crate::machining2d::GenError;
 /// The highest material over the XY disk (`c`, `r`): the part's facets
 /// and the stock's, as they stand (issue #91: the stock above the R
 /// plane is no longer clipped away - [`r_plane_clear`] refuses it
-/// first, so the rapid laws are never asked to vouch for it).
-pub(super) fn top_over(part: &[Triangle], stock: &[Triangle], cx: f64, cy: f64, r: f64) -> Option<f64> {
+/// first, so the rapid laws are never asked to vouch for it). `prior`
+/// is the surface the setup's earlier operations left over the same
+/// disk (issue #89, read conservatively by the caller): the stock
+/// stands no higher than it. `None` is the raw stock.
+pub(super) fn top_over(
+    part: &[Triangle],
+    stock: &[Triangle],
+    cx: f64,
+    cy: f64,
+    r: f64,
+    prior: Option<f64>,
+) -> Option<f64> {
     let p = highest(part, cx, cy, r);
-    let s = highest(stock, cx, cy, r);
+    let s = cut_by(highest(stock, cx, cy, r), prior);
     match (p, s) {
         (Some(a), Some(b)) => Some(a.max(b)),
         (a, b) => a.or(b),
+    }
+}
+
+/// A raw height `z` under the prior surface (issue #89): the lower of
+/// the two when the prior is a number, the raw height otherwise - an
+/// unknown prior is the raw stock, never air.
+pub(super) fn cut_by(z: Option<f64>, prior: Option<f64>) -> Option<f64> {
+    match (z, prior.filter(|p| !p.is_nan())) {
+        // `NaN.min(p)` is `p`: a non-finite raw height stays NaN so the
+        // laws refuse it (#89 review).
+        (Some(z), _) if z.is_nan() => Some(z),
+        (Some(z), Some(p)) => Some(z.min(p)),
+        (z, _) => z,
     }
 }
 
@@ -81,17 +104,24 @@ pub(super) fn facet_top(t: &Triangle, cx: f64, cy: f64, r: f64) -> f64 {
 /// the part (its facets and the hole's entry surface) and the stock
 /// together - the part alone when there is no stock, or the stock is
 /// the op's own source; the message names whichever stands higher.
-/// The stock is read raw: removal by an earlier operation (a facing
-/// pass) is not credited yet (#89), so a faced-first program is refused
-/// too until then - the message says so rather than promise a fix that
-/// cannot pass. A non-finite height is
-/// refused, never waved through.
-pub(super) fn r_plane_clear(part: &[Triangle], stock: &[Triangle], c: &Cycle, body: f64) -> Result<(), GenError> {
+/// Removal by the setup's earlier operations (`prior`, issue #89: the
+/// surface they left over the disk, `None` when unknown) lowers the
+/// stock and the hole's own mouth - a faced or pocketed top is air; an
+/// unknown prior leaves both at their raw heights. A non-finite height
+/// is refused, never waved through.
+pub(super) fn r_plane_clear(
+    part: &[Triangle],
+    stock: &[Triangle],
+    c: &Cycle,
+    body: f64,
+    prior: Option<f64>,
+) -> Result<(), GenError> {
     // The part as it stands before this cycle: its facets over the disk,
     // and the hole's own mouth - the modelled hole is what the cycle
-    // cuts, so its bore is not yet air.
-    let p = highest(part, c.xy.x, c.xy.y, body).map_or(c.entry_z, |p| p.max(c.entry_z));
-    let (top, what) = match highest(stock, c.xy.x, c.xy.y, body) {
+    // cuts, so its bore is not yet air (unless an earlier op cut it).
+    let entry = cut_by(Some(c.entry_z), prior).unwrap_or(c.entry_z);
+    let p = highest(part, c.xy.x, c.xy.y, body).map_or(entry, |p| p.max(entry));
+    let (top, what) = match cut_by(highest(stock, c.xy.x, c.xy.y, body), prior) {
         Some(s) if s >= p || p.is_nan() => (s, "stock"),
         _ => (p, "part"),
     };
@@ -101,7 +131,7 @@ pub(super) fn r_plane_clear(part: &[Triangle], stock: &[Triangle], c: &Cycle, bo
     Err(GenError::Invalid(format!(
         "R plane Z {:.3} is below the {what} top Z {top:.3} over the hole at ({:.3}, {:.3}) - the rapid down to R \
          would cross uncut stock (a collision); raise Top of Part Z (the R plane) to the {what} top or above \
-         (stock faced by an earlier operation still counts at its raw height)",
+         (an earlier operation's removal counts only once that operation is generated, upright, in this setup)",
         c.r_z, c.xy.x, c.xy.y
     )))
 }
