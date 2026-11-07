@@ -74,10 +74,8 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
         actions::redo(state);
     }
     if cmd && !typing {
-        if c {
-            if let Some(name) = state.selected_operation() {
-                actions::copy_operation(state, &name);
-            }
+        if c && let Some(name) = state.selected_operation() {
+            actions::copy_operation(state, &name);
         }
         if v {
             actions::paste_operation(state);
@@ -1558,10 +1556,10 @@ pub fn browser(
         Vec2::new(ui.available_width(), rows.len() as f32 * pal.row_height),
     );
     let hit = painted::tree(ui, rect, &rows, pal, icons);
-    if let Some(ix) = hit.drag_started {
-        if let Some(Leaf::Op(name)) = leaves.get(ix) {
-            state.dragging_op = Some(name.clone());
-        }
+    if let Some(ix) = hit.drag_started
+        && let Some(Leaf::Op(name)) = leaves.get(ix)
+    {
+        state.dragging_op = Some(name.clone());
     }
     // The visual insertion line and the command use the same target row.
     // Only operations in the same setup can be drop targets.
