@@ -45,18 +45,35 @@ pub fn guard_as<F>(
 where
     F: Fn(&Finish3DParams) -> Result<Toolpath, GenError>,
 {
+    guard_shaped(kind, center_cutting, solid, false, fp, run)
+}
+
+/// [`guard_as`] with the tool's shape said: `ball` says the tool is a
+/// ball, whose posed re-entries into an already-cut sphere are no
+/// plunge (`plunge_law::reenters_cut_sphere`, #17).
+pub fn guard_shaped<F>(
+    kind: &str,
+    center_cutting: bool,
+    solid: &Solid,
+    ball: bool,
+    fp: &Finish3DParams,
+    run: F,
+) -> Result<Toolpath, GenError>
+where
+    F: Fn(&Finish3DParams) -> Result<Toolpath, GenError>,
+{
     let path = run(fp)?;
     let r = fp.tool_diameter * 0.5;
-    if center_cutting || plunge_law::first_solid_plunge(&path, r, solid).is_none() {
+    if center_cutting || plunge_law::first_solid_plunge_as(&path, r, solid, ball).is_none() {
         return Ok(path);
     }
     if fp.ramp && fp.entry_ramp {
-        plunge_law::audit(&path, false, r, solid, &format!("{kind}'s entry descent"))?;
+        plunge_law::audit_as(&path, false, r, solid, ball, &format!("{kind}'s entry descent"))?;
         return Ok(path);
     }
     let sloped = Finish3DParams { ramp: true, entry_ramp: true, ..*fp };
     let mut path = run(&sloped)?;
-    plunge_law::audit(&path, false, r, solid, &format!("{kind}'s entry descent, even with ramped entries,"))?;
+    plunge_law::audit_as(&path, false, r, solid, ball, &format!("{kind}'s entry descent, even with ramped entries,"))?;
     path.notes.push(format!("{NOT_CENTER_CUTTING} - {kind}'s entries ramp instead of plunging"));
     Ok(path)
 }

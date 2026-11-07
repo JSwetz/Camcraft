@@ -9,12 +9,17 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
-| 1362b04 | 2026-11-07 | feat(ui): copy and paste operations, close the operation editor, and toggle all toolpaths from the browser and viewport | Unreleased |
-| 0a830e7 | 2026-11-07 | feat(ui): rename Project to Open, add stock and work offset visibility, hide operation overlays, and align offset axis labels | Unreleased |
-| b3fecb3 | 2026-11-06 | feat(ui): browser parents collapse and expand Setup, Models, Tools, and Operations | Unreleased |
-| 96abbce | 2026-11-07 | fix(motion): the finishing march rides a convex fold edge - coarse-mesh scallops under tolerance (#36) | Unreleased |
-| a128a51 | 2026-11-06 | feat(app,ui): rename and reorder operations within a setup; show project filename in the title, add Save As, and make status text copyable (#45) | Unreleased |
-| 4e27eea | 2026-11-07 | fix(motion): 2D Adaptive refuses a long thin channel by name in a second instead of grinding for minutes (#13) | Unreleased |
+| d4dc943 | 2026-11-07 | fix(post)!: Heidenhain DIN/ISO posts the TNC block form; drilling as moves, tapping and non-first offsets refused - breaking post output (#50) | Unreleased |
+| 80aafb4 | 2026-11-07 | fix(post)!: Heidenhain DIN/ISO XY arcs post their absolute centre in its own I/J block - breaking post output (#49) | 0.11.0 |
+| bf92363 | 2026-11-07 | fix(motion,app): Swarf links halved, poses never under level, ball re-entry into its own cut is no plunge (#17) | 0.11.0 |
+| c18254c | 2026-11-07 | fix(app,motion): Rotary Offset plunge audit judges against the true cylinder of the bar (#16) | 0.10.0 |
+| cf5b210 | 2026-11-07 | feat(motion): Rotary Parallel infeeds and Swarf first entry ramp in under the sloped-entry retry (#15) | 0.10.0 |
+| 95881f0 | 2026-11-07 | fix(motion): a straight lead-in outside a round bore is seated inside - one descent per level (#14) | 0.10.0 |
+| 3bfed30 | 2026-11-07 | feat(motion): adaptive arc output refits morph-spiral runs as tangent biarcs - a third fewer moves (#11) | 0.9.0 |
+| 01c6a28 | 2026-11-07 | fix(motion): the load reader faces a chord plan's curve, not the lagging chord (#10) | 0.9.0 |
+| 3b4c35d | 2026-11-07 | fix(motion): each raster pass ends with a rim row where its ground ends - tilted shelf scallop gone (#46) | 0.8.4 |
+| 96abbce | 2026-11-07 | fix(motion): the finishing march rides a convex fold edge - coarse-mesh scallops under tolerance (#36) | 0.8.4 |
+| 4e27eea | 2026-11-07 | fix(motion): 2D Adaptive refuses a long thin channel by name in a second instead of grinding for minutes (#13) | 0.8.4 |
 | 619e479 | 2026-11-07 | fix(sim): Contour moves answer to the part walls along their length; pocket chord law only below the stock top (#43) | 0.8.3 |
 | 5083771 | 2026-11-07 | fix(motion): control compensation refuses a contour the controller cannot offset (#40) | 0.8.3 |
 | 3c0e2d8 | 2026-11-07 | fix(sim): the gouge law measures every chord of an Area move along its length (#42) | 0.8.3 |

@@ -189,31 +189,65 @@ fn the_g_word_posts_state_the_plane_modally() {
     }
 }
 
-#[test]
-fn heidenhain_rides_its_vertical_arcs_as_chords_and_never_switches_plane() {
-    let out = post("heidenhain", &stream(&program()));
-    assert!(!out.contains("G18") && !out.contains("G19"), "no plane switch:\n{out}");
-    // The XY arcs stay arcs; the G18 quarter (r 5) is a fine G1 fan
-    // whose every point sits on its circle in XZ about (X15, Z5).
-    assert!(out.lines().any(|l| l == "G2 X-5 Y5 Z0 I0 J5 F800"), "{out}");
-    let fan: Vec<(f64, f64)> = out
-        .lines()
-        .filter(|l| l.starts_with("G1 ") && l.ends_with("F600"))
+/// The Heidenhain blocks' words (#50: `N<n> <words>*`, TNC 640 ISO
+/// manual 892909-25 p. 130), the number and the terminator stripped.
+fn hh_blocks(out: &str) -> Vec<&str> {
+    out.lines()
+        .filter_map(|l| l.strip_prefix('N')?.split_once(' ')?.1.strip_suffix('*'))
+        .collect()
+}
+
+/// The Heidenhain G01 fan of one vertical arc: the F600 blocks whose
+/// normal coordinate (`fixed`, at `at`) holds, read as in-plane pairs.
+fn hh_fan(out: &str, fixed: char, at: f64, a: char, b: char) -> Vec<(f64, f64)> {
+    hh_blocks(out)
+        .into_iter()
+        .filter(|l| l.starts_with("G01 ") && l.ends_with("F600"))
         .filter_map(|l| {
             let g = |k: char| {
                 l.split(' ')
                     .find(|w| w.starts_with(k))
                     .and_then(|w| w[1..].parse::<f64>().ok())
             };
-            (g('Y') == Some(0.0)).then_some((g('X')?, g('Z')?))
+            (g(fixed) == Some(at)).then_some((g(a)?, g(b)?))
         })
-        .collect();
+        .collect()
+}
+
+/// #18 (final): this DIN/ISO dialect posts no XZ/YZ arc word - both
+/// vertical planes ride 1 um chord fans that sit on the arc's circle
+/// and sweep the arc's own sense (a mirrored fan would gouge).
+#[test]
+fn heidenhain_rides_its_vertical_arcs_as_chords_and_never_switches_plane() {
+    let out = post("heidenhain", &stream(&program()));
+    assert!(!out.contains("G18") && !out.contains("G19"), "no plane switch:
+{out}");
+    // The XY arcs stay arcs; the G18 G3 quarter (r 5) is a fine G1 fan
+    // whose every point sits on its circle in XZ about (X15, Z5), on
+    // the short way round seen from +Y: X15..20, Z0..5.
+    // #49: the centre is its own block, absolute (TNC 640 ISO manual
+    // 892909-25 p. 260); here centre (0, 5) happens to equal the
+    // increment from the start (0, 0).
+    let lines = hh_blocks(&out);
+    assert!(lines.windows(2).any(|w| w == ["I+0 J+5", "G02 X-5 Y+5 Z+0 F800"]), "{out}");
+    let fan = hh_fan(&out, 'Y', 0.0, 'X', 'Z');
     assert!(fan.len() > 20, "a fine fan, {} chords", fan.len());
     for (x, z) in &fan {
         let r = ((x - 15.0).powi(2) + (z - 5.0).powi(2)).sqrt();
         assert!((r - 5.0).abs() < 1e-3, "({x}, {z}) is on the circle");
+        assert!(*x >= 15.0 - 1e-9 && *z <= 5.0 + 1e-9, "({x}, {z}) sweeps the G3 sense");
     }
     assert_eq!(fan.last(), Some(&(15.0, 0.0)), "the fan ends on the arc's end");
+    // The G19 G2 quarter: about (Y10, Z0) at X-5, from (Y5, Z0) up to
+    // (Y10, Z5) - clockwise seen from +X, so Y5..10, Z0..5.
+    let fan = hh_fan(&out, 'X', -5.0, 'Y', 'Z');
+    assert!(fan.len() > 20, "a fine YZ fan, {} chords", fan.len());
+    for (y, z) in &fan {
+        let r = ((y - 10.0).powi(2) + z.powi(2)).sqrt();
+        assert!((r - 5.0).abs() < 1e-3, "({y}, {z}) is on the circle");
+        assert!(*y <= 10.0 + 1e-9 && *z >= -1e-9, "({y}, {z}) sweeps the G2 sense");
+    }
+    assert_eq!(fan.last(), Some(&(10.0, 5.0)), "the YZ fan ends on the arc's end");
 }
 
 #[test]

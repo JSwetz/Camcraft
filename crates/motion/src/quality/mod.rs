@@ -125,7 +125,7 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
     // last rapid. A planar feed above it in air is a lifted return
     // (`lift_len`), not floor air.
     let mut plane: Option<f64> = None;
-    for m in &path.moves {
+    for (mi, m) in path.moves.iter().enumerate() {
         if m.kind == MoveKind::Rapid && desc.0 {
             q.descents += usize::from(desc.1);
             desc = (false, false);
@@ -158,6 +158,8 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
         let air0 = q.air_len;
         let lifted = planar && plane.is_some_and(|z| m.to.z > z + 1e-6);
         let mut bit = false;
+        // The chord leaving this move's end, for the vertex heading.
+        let out = path.moves.get(mi + 1).and_then(|nx| leaving(m, nx));
         for (a, b) in m.segments3(CHORD_TOL) {
             let len = dist3(a, b);
             let n = ((len / step).ceil() as usize).clamp(1, 1 << 16);
@@ -165,7 +167,11 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
             for k in 1..=n {
                 let t = k as f64 / n as f64;
                 let p = Point3::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
-                let deg = contact_deg(dex, p, heading(m, p, prev), rim, spec.wall_below);
+                let mut dir = heading(m, p, prev);
+                if k == n && m.arc.is_none() {
+                    dir = vertex_heading((b.x - a.x, b.y - a.y), out, spec.break_deg).unwrap_or(dir);
+                }
+                let deg = contact_deg(dex, p, dir, rim, spec.wall_below);
                 let piece = len / n as f64;
                 let bore = bores.iter().any(|&(c, rr)| (p.x - c.x).hypot(p.y - c.y) <= rr + 1e-6);
                 if planar && m.kind == MoveKind::Feed && !bore {
@@ -219,7 +225,8 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
 
 /// The tool's heading at sample `p` of `m`, the direction its contact
 /// window faces: on an XY arc (planar or helical) the circle's tangent
-/// there; on a straight, the chord walked (`prev -> p`). The chord of
+/// there; on a straight, the chord walked (`prev -> p`; at the chord's
+/// end vertex `vertex_heading` turns it onto the curve). The chord of
 /// an arc's walk lags the tangent by half its angular step, and the
 /// window turned that far backward reads standing stock behind the
 /// perpendicular that the cutter never touches - a 0.26 mm walk at a
@@ -237,6 +244,38 @@ fn heading(m: &Move, p: Point3, prev: Point3) -> (f64, f64) {
         }
         None => (p.x - prev.x, p.y - prev.y),
     }
+}
+
+/// The XY direction a planar straight feed `m` hands on to the next
+/// move `nx` at its end: `nx`'s start tangent when `nx` continues it (a
+/// planar feed at the same height starting where `m` ends), else `None`.
+fn leaving(m: &Move, nx: &Move) -> Option<(f64, f64)> {
+    let joined = (nx.from.x - m.to.x).hypot(nx.from.y - m.to.y) <= 1e-6 && (nx.from.z - m.to.z).abs() <= 1e-9;
+    if !(planar_feed(m) && planar_feed(nx) && joined) {
+        return None;
+    }
+    let (t0, _) = shape::tangents(nx)?;
+    Some((t0.x, t0.y))
+}
+
+/// The heading at the vertex ending a straight chord `inc` (issue #10):
+/// a chord-posted curve's tangent there is the bisector of the chord
+/// arriving and the one leaving (the centred difference), where the
+/// arriving chord alone lags it by half the turn - the same backward
+/// window the arc heading fixed (M11.4 arc output), read here on chord
+/// plans. A turn past `limit` (the break law's threshold) is a corner,
+/// not a tessellated curve, and keeps the arriving chord; so do the
+/// ends of a pass (`out` = `None`).
+fn vertex_heading(inc: (f64, f64), out: Option<(f64, f64)>, limit: f64) -> Option<(f64, f64)> {
+    let (ox, oy) = out?;
+    let (li, lo) = (inc.0.hypot(inc.1), ox.hypot(oy));
+    if !(li > 1e-12 && lo > 1e-12 && li.is_finite() && lo.is_finite()) {
+        return None;
+    }
+    let (ix, iy, ox, oy) = (inc.0 / li, inc.1 / li, ox / lo, oy / lo);
+    let turn = (ix * ox + iy * oy).clamp(-1.0, 1.0).acos().to_degrees();
+    // A NaN limit reads as a corner: the arriving chord stays.
+    (turn <= limit).then_some((ix + ox, iy + oy))
 }
 
 /// Contact angle at `p` moving along `dir` (XY; degrees): the longest

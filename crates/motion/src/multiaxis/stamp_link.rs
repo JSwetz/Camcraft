@@ -96,7 +96,7 @@ pub(super) fn ruled_sign(a: Point3, held: [f64; 3], last_lean: Option<[f64; 3]>)
 }
 
 /// Degrees between two unit poses.
-fn turn_deg(p: [f64; 3], q: [f64; 3]) -> f64 {
+pub(super) fn turn_deg(p: [f64; 3], q: [f64; 3]) -> f64 {
     (p[0] * q[0] + p[1] * q[1] + p[2] * q[2]).clamp(-1.0, 1.0).acos().to_degrees()
 }
 

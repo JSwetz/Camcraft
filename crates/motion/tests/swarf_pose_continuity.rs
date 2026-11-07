@@ -38,6 +38,9 @@ const CLEARANCE: f64 = 25.0;
 const GUARD_DEG: f64 = 30.0;
 /// Two blade-lying poses in a row hold one end of the ruling.
 const LYING_TURN_DEG: f64 = 10.0;
+/// Level, to float dust: no stated pose points under it (#17; the
+/// law's band was sin 10 degrees, -0.1737, before the rim dip's cure).
+const LEVEL: f64 = -1e-9;
 
 /// The app's blade at debug size: a circular tube about X, radius
 /// 12, 16 rings x 6 stations, capped flat at both ends.
@@ -156,15 +159,25 @@ fn air_links(path: &Toolpath) -> usize {
     n
 }
 
-fn assert_continuous(name: &str, path: &Toolpath) {
+/// The air-link ratchet (#17): the most links each blade run may write.
+/// Before #17 the debug band linked 68 / 106 times (swarf / ladder) and
+/// the full band 93 / 145: half the tube read unruled (the curvature fit
+/// reached across the cap's crease), every raster end turned the lying
+/// tool upright and back, and the rim column's dip kept the hold from
+/// qualifying. Now 34 / 51 and 55 / 84. Any rise fails.
+const LINKS_DEBUG: (usize, usize) = (34, 51);
+const LINKS_FULL: (usize, usize) = (55, 84);
+
+fn assert_continuous(name: &str, path: &Toolpath, max_links: usize) {
     let (max, at, over90, flips, lying_max) = turn_ladder(path);
+    let links = air_links(path);
     eprintln!(
-        "{name}: {} moves, {} air links, max cut turn {max:.2} deg at move {at}, {over90} over 90 deg, \
+        "{name}: {} moves, {links} air links, max cut turn {max:.2} deg at move {at}, {over90} over 90 deg, \
          {flips} past the guard, lying-to-lying worst {lying_max:.2} deg",
         path.moves.len(),
-        air_links(path)
     );
-    assert!(air_links(path) > 0, "{name}: the blade's hand-offs ride air links");
+    assert!(links > 0, "{name}: the blade's hand-offs ride air links");
+    assert!(links <= max_links, "{name}: {links} air links, the ratchet holds {max_links}");
     assert_eq!(flips, 0, "{name}: a program the stamp handed back turns past its guard");
     assert!(max <= GUARD_DEG, "{name}: the worst turn is {max:.1} deg at move {at}");
     assert!(
@@ -177,14 +190,31 @@ fn assert_continuous(name: &str, path: &Toolpath) {
 fn swarf_poses_never_flip_between_consecutive_cuts() {
     let facets = blade();
     let path = swarf5d(&facets, &params(1.0), &control()).expect("swarf on the blade");
-    assert_continuous("swarf", &path);
+    assert_continuous("swarf", &path, LINKS_DEBUG.0);
 }
 
 #[test]
 fn advanced_swarf_poses_never_flip_between_consecutive_cuts() {
     let facets = blade();
     let path = swarf5d_advanced(&facets, &params(1.0), &control(), 2).expect("ladder on the blade");
-    assert_continuous("advanced swarf", &path);
+    assert_continuous("advanced swarf", &path, LINKS_DEBUG.1);
+}
+
+/// #17: the ruling reads the WHOLE tube ruled, end columns included -
+/// the curvature fit no longer reaches across the cap's crease (the
+/// near half of the tube read curved along its ruling before, and lost
+/// its swarf pose mid-line) - and its verdict has one slot per facet
+/// (a facet the fit could not answer used to push none, shifting every
+/// later verdict and running the direction scan off the end).
+#[test]
+fn the_blade_reads_ruled_end_to_end_with_one_verdict_per_facet() {
+    let facets = blade();
+    let f = camcraft_motion::multiaxis::ruling::analyze(&facets).expect("the blade has a ruling");
+    assert_eq!(f.ruled.len(), facets.len(), "one verdict per facet");
+    let tube = 16 * 6 * 2;
+    let unruled = f.ruled[..tube].iter().filter(|r| !**r).count();
+    assert_eq!(unruled, 0, "{unruled} of the tube's {tube} facets read unruled");
+    assert!(f.ux.abs() > 0.999, "the ruling runs along X: ({}, {})", f.ux, f.uy);
 }
 
 /// The exact distance from a point to the blade's solid (the 16-gon
@@ -227,18 +257,19 @@ fn blade_distance(q: Point3) -> f64 {
 fn no_swarf_pose_under_the_equator_is_upright_and_every_flank_clears_the_blade() {
     let facets = blade();
     let (r, tol) = (3.0, 0.1);
-    for (name, path) in [
-        ("swarf", swarf5d(&facets, &params(-11.0), &control()).expect("swarf, full band")),
+    for (name, path, links) in [
+        ("swarf", swarf5d(&facets, &params(-11.0), &control()).expect("swarf, full band"), LINKS_FULL.0),
         (
             "advanced swarf",
             swarf5d_advanced(&facets, &params(-11.0), &control(), 2).expect("ladder, full band"),
+            LINKS_FULL.1,
         ),
     ] {
-        assert_continuous(name, &path);
+        assert_continuous(name, &path, links);
         let (mut under, mut checked) = (0usize, 0usize);
         for (i, m) in path.moves.iter().enumerate() {
             let a = m.axis.unwrap_or([0.0, 0.0, 1.0]);
-            assert!(a[2] >= -0.1737, "{name}: a pose points down at move {i}: {a:?}");
+            assert!(a[2] >= LEVEL, "{name}: a pose points under level at move {i}: {a:?}");
             if m.kind == MoveKind::Rapid || m.from.z >= CLEARANCE - 1e-9 {
                 continue;
             }
@@ -270,7 +301,7 @@ fn no_swarf_pose_under_the_equator_is_upright_and_every_flank_clears_the_blade()
 
 /// The sign rule is continuity, not a hemisphere: the blade-lying
 /// poses are a real population on BOTH ends of the ruling now (the
-/// fixed rule allowed one), and no pose dips past the level band.
+/// fixed rule allowed one), and no pose dips under level.
 #[test]
 fn ruled_poses_ride_both_ends_of_the_ruling_and_never_down() {
     let facets = blade();
@@ -278,10 +309,12 @@ fn ruled_poses_ride_both_ends_of_the_ruling_and_never_down() {
     let (mut plus, mut minus) = (0usize, 0usize);
     for m in &path.moves {
         let Some(a) = m.axis else { continue };
-        // A ruling read at a rim column may dip under level by the
-        // stamp's 10-degree band (continuity holds the end it came
-        // in on rather than flip it); never more.
-        assert!(a[2] >= -0.1737, "a pose points down at {:?}: {a:?}", m.to);
+        // #17: a ruling read at a rim column (the contact on the
+        // facet's edge) used to project into the contact's plane and
+        // dip under level by up to the stamp's 10-degree band (7.3 deg
+        // here, 9.4 on the ladder); the facet's own plane holds the
+        // ruling level, so no pose dips at all now.
+        assert!(a[2] >= LEVEL, "a pose points under level at {:?}: {a:?}", m.to);
         if m.kind != MoveKind::Rapid && lying(a) {
             if a[0] > 0.0 {
                 plus += 1;

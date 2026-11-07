@@ -129,7 +129,14 @@ pub fn rotary_parallel(
         axis: [up.x, up.y, up.z],
     };
     let local = f.local_facets(facets);
-    let q = stations(&local, p, &f, &|h| h - ax.origin.z);
+    let mut q = stations(&local, p, &f, &|h| h - ax.origin.z);
+    // #15: the raster's certified diagonal hops and the rings' ramped
+    // first contacts are an UPRIGHT tool's verbs - on the bar's flank
+    // and end, posed radially, they run down the tool's own axis. The
+    // radial relink owns every entry here, ramped below under the
+    // sloped-entry law.
+    q.ramp = false;
+    q.entry_ramp = false;
     let base = finishing3d::swarf(&local, &q, 1.0, 0.0)?;
     // M13.8: the raster's Z lifts become radial links - out along the
     // radius to the retract cylinder, index, back in along the radius
@@ -137,8 +144,16 @@ pub fn rotary_parallel(
     let r = p.tool_diameter * 0.5;
     let hop = q.retract_z.map_or(q.clearance_z, |h| h.min(q.clearance_z));
     let rho = rotary_links::local_rho_max(&local);
-    let base = rotary_links::radial_relink(&base, r, q.clearance_z, hop, rho, p.feed, p.plunge_feed)?;
-    posed(&f, &base, &ax, c, r)
+    // #15: under the sloped-entry law (`entry_ramp`, the centre-cutting
+    // guard's retry) each infeed ramps along the pass where the ramp is
+    // proved clear of the part; off, every infeed stays a radial plunge.
+    let ramp = p.entry_ramp.then_some(rotary_links::Ramp { deg: p.ramp_angle, facets: &local, tol: p.tolerance });
+    let base = rotary_links::radial_relink(&base, r, q.clearance_z, hop, rho, p.feed, p.plunge_feed, ramp)?;
+    let mut out = posed(&f, &base, &ax, c, r)?;
+    if ramp.is_some() {
+        out.notes.extend(base.notes.iter().filter(|n| n.starts_with("Rotary Parallel:")).cloned());
+    }
+    Ok(out)
 }
 
 /// The contour frame: the axis as local z, the canonical foot as

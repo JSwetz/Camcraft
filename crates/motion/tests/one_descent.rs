@@ -9,7 +9,7 @@
 //!
 //! Gate map (M11.3): covers camcraft_motion::machining3d (descent,
 //! level_ctx, ladder), camcraft_motion::machining2d (contour_bore,
-//! contour_step, descent_dive), camcraft_motion::quality.
+//! contour_step, descent_dive, lead_fit), camcraft_motion::quality.
 
 use camcraft_motion::approach::{Approach, CENTER_CUT_REFUSAL, DEFAULT_PLUNGE_HEIGHT};
 use camcraft_motion::cl::{MoveKind, Toolpath};
@@ -217,18 +217,11 @@ fn the_bore_contour_descends_into_each_level_once() {
                 }
                 let named = t.notes.iter().any(|n| n.contains("second dive"));
                 for (z, n, _) in &per {
-                    // Owed (M11.3): a linear lead on a round bore starts a
-                    // few microns OUTSIDE the eroded disc (a tangent leaves
-                    // a circle at once; the lead fit accepts it within
-                    // tolerance), so no at-depth link to its start can be
-                    // proved - the second dive stays, named, and under the
-                    // centre-cutting law (see the test below).
-                    let owed = matches!(lead, Lead::Linear { .. }) && *n == 2 && named;
-                    if *n != 1 && !owed {
+                    if *n != 1 {
                         bad.push(format!("{what}: level {z}: {n} descents into stock on the entry ({:?})", t.notes));
                     }
                 }
-                if matches!(lead, Lead::None | Lead::Arc { .. }) && named {
+                if named {
                     bad.push(format!("{what}: a second dive where the ring has room: {:?}", t.notes));
                 }
             }
@@ -238,14 +231,16 @@ fn the_bore_contour_descends_into_each_level_once() {
 }
 
 #[test]
-fn the_bore_second_dive_that_remains_is_named_and_refused_for_a_tool_that_cannot_plunge() {
-    // The owed case above: the linear lead's start is unreachable at
-    // depth, so the second dive is posted by name for a centre-cutting
-    // tool and refused by name for one that is not - never a silent plunge.
+fn the_linear_lead_bore_lands_its_one_descent_on_the_lead_start() {
+    // #14: the linear lead's tangent start once stood 4.5 um outside the
+    // eroded disc (inside the lead fit's slack), so no at-depth link to it
+    // could be proved and a named second dive followed. The start is now
+    // seated inside: no second dive, and a tool that cannot plunge never
+    // plunges into stock either.
     let hole = round(10.0);
     let p = bore(Entry3D::Helix, Lead::Linear { length: 2.0 }, Links::PLANAR);
     let t = contour(&hole, &p).expect("bore contour");
-    assert!(t.notes.iter().any(|n| n.contains("second dive")), "{:?}", t.notes);
+    assert!(!t.notes.iter().any(|n| n.contains("second dive")), "{:?}", t.notes);
     let links = Links { approach: Approach { center_cutting: false, ..Links::PLANAR.approach }, ..Links::PLANAR };
     match contour(&hole, &bore(Entry3D::Helix, Lead::Linear { length: 2.0 }, links)) {
         Ok(t) => assert!(!t.moves.iter().any(|m| m.kind == MoveKind::Plunge && m.to.z < 0.0), "{:?}", t.notes),

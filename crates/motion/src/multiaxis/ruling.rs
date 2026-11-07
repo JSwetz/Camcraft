@@ -82,7 +82,11 @@ pub fn analyze(facets: &[Triangle]) -> Result<Field, GenError> {
         facet_area.push(if area.is_finite() && area > 0.0 { area } else { 0.0 });
         a_all += facet_area[i];
         match op {
-            None => {}
+            // No claim, but still a slot: `ruled` is indexed by facet
+            // (the stamp's `ruled[fi]`, the scan's `ruled[i]`), and a
+            // skipped push shifted every later facet's verdict - and
+            // ran the scan off the end (#17).
+            None => ruled.push(false),
             Some(o) => {
                 a_ok += facet_area[i];
                 if o.kmax2 <= K_FLAT * K_FLAT {

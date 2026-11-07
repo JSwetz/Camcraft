@@ -3,6 +3,7 @@
 //! stock in the generator's own frame - its XY footprint and its top -
 //! or, with no separate stock, the material the op cuts. Read only for
 //! a tool that is not centre-cutting, so no centre-cutting path pays.
+//! Rotary Offset reads the true revolved bar instead ([`audit_bar`], #16).
 //!
 //! Provenance: the stock-as-solid reading of the centre-cutting plunge
 //! law (`camcraft_motion::plunge_law`); this project's own design notes.
@@ -70,11 +71,14 @@ pub(super) fn face_air_entry(
 /// twins): the posed path is judged along the tool's own axis
 /// (`plunge_law::posed_axial`), retried with the finish's sloped
 /// entries, else refused by name. A centre-cutting tool reads no stock
-/// and gets `run`'s path untouched.
+/// and gets `run`'s path untouched. `ball` says the tool is a ball nose:
+/// a posed link's re-entry into the sphere the last cut emptied is then
+/// no plunge (`plunge_law::reenters_cut_sphere`, #17).
 #[allow(clippy::too_many_arguments)] // the arm's flat read of the law's inputs
 pub(super) fn guard_posed<F>(
     kind: &str,
     center_cutting: bool,
+    ball: bool,
     stock_facets: Option<&[Triangle]>,
     material: &Material,
     frame: Option<&crate::cl::TiltedFrame>,
@@ -89,7 +93,29 @@ where
     }
     let (top, footprint) = plunge_solid(stock_facets, material, frame);
     let solid = camcraft_motion::plunge_law::Solid { top, footprint: footprint.as_ref() };
-    camcraft_motion::finishing3d::center_cut_guard_as(kind, false, &solid, fp, run)
+    camcraft_motion::finishing3d::center_cut_guard_shaped(kind, false, &solid, ball, fp, run)
+}
+
+/// The same law, audit-only, for Rotary Offset (#16): solid is the
+/// TRUE bar - the setup stock revolved about the part's fitted axis
+/// (`multiaxis::revolved_bar`, read from the generator's own facets so
+/// it stands in the path's frame) - not the box reading of top Z over
+/// the outline, which also counted the air around the bar. A bar that
+/// cannot be read refuses by name: the audit never guesses air.
+pub(super) fn audit_bar(
+    kind: &str,
+    center_cutting: bool,
+    facets: &[Triangle],
+    stock_facets: Option<&[Triangle]>,
+    path: &super::Toolpath,
+    tool_r: f64,
+) -> Result<(), super::GenError> {
+    if center_cutting {
+        return Ok(());
+    }
+    let bar = crate::multiaxis::revolved_bar(facets, stock_facets)
+        .map_err(|e| GenError::Invalid(format!("{kind}: the bar the centre-cutting audit reads cannot be built: {e}")))?;
+    camcraft_motion::plunge_law::audit_bar(path, false, tool_r, &bar, &format!("{kind}'s entry descent"))
 }
 
 /// The same law, audit-only, for a posed kind with no sloped entry to

@@ -939,7 +939,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             };
             let kind = if is_contour { "5-Axis Contour" } else { "5-Axis Parallel" };
             let path = super::plunge_solid::guard_posed(
-                kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+                kind, tool.center_cutting, tool.kind == crate::tools::ToolKind::BallNose, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
             (region, path)
         }
@@ -1026,7 +1026,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             };
             let kind = if is_ladder { "Advanced Swarf" } else { "Swarf" };
             let path = super::plunge_solid::guard_posed(
-                kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+                kind, tool.center_cutting, tool.kind == crate::tools::ToolKind::BallNose, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
             (region, path)
         }
@@ -1120,7 +1120,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // machine states (A/B on a table; C is pinned by name).
             rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, kind)?;
             let path = super::plunge_solid::guard_posed(
-                kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+                kind, tool.center_cutting, tool.kind == crate::tools::ToolKind::BallNose, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
             (region, path)
         }
@@ -1206,11 +1206,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             )?;
             // M11.3 owed (2): the wrap-space entry guard judged the
             // ladder before the wrap posed it; the law judges the FINAL
-            // posed path. Solid is the coarse stock reading (below its
-            // top Z, over its XY outline) - a superset of the bar, so
-            // it errs toward refusal.
-            super::plunge_solid::audit_posed(
-                "Rotary Offset", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &path, d * 0.5,
+            // posed path. Solid is the true bar (#16): the stock
+            // revolved about the same fitted axis, so a move in the air
+            // outside its radius is clean and one into it is judged.
+            super::plunge_solid::audit_bar(
+                "Rotary Offset", tool.center_cutting, &material.facets, stock_facets.as_deref(), &path, d * 0.5,
             )?;
             (region, path)
         }
@@ -1378,7 +1378,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let shank = (*shank_avoid).then(|| shank_of(&tool));
             let run = |q: &Finish3DParams| crate::multiaxis::flow5d(&material.facets, q, &axis, shank.as_ref());
             let path = super::plunge_solid::guard_posed(
-                "5-Axis Flow", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+                "5-Axis Flow", tool.center_cutting, tool.kind == crate::tools::ToolKind::BallNose, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
             (region, path)
         }

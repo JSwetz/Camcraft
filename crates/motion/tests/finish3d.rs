@@ -248,11 +248,13 @@ fn envelope(facets: &[Triangle], t: &Toolpath) -> camcraft_motion::stock_sim::En
 /// `stock_sim::ridge`). The convex folds' edge contact (#36,
 /// `finishing3d::edge`) closed the strict tangency's fold annulus
 /// (`r·Δm`, 0.47 mm between the hill's 9° bands): every hill entry and
-/// the dome multidirection read 0 since. What stays is the tilted
-/// shelf's high rim corner (7.19, -7.81) - a single plane, no fold; the
-/// hop path reads the same 0.1698, so neither the ramp nor the fold law
-/// owns it.
-const SCALLOP_RATCHET: &[(&str, f64)] = &[("tilted ramp", 0.170)];
+/// the dome multidirection read 0 since. The tilted ramp's 0.1698 at
+/// the high rim corner (7.19, -7.81) was a real gap: the fixed-phase
+/// line grid's last line with ground contacted 1.2 mm short of the
+/// rim; the rim row (#46, `finishing3d::rim`) lays a line where the
+/// ground ends and it reads 0. The table is empty - every fixture
+/// answers to the gate; it stays as the place a future pin goes.
+const SCALLOP_RATCHET: &[(&str, f64)] = &[];
 
 fn scallop_ratchet(fixture: &str, rep: &camcraft_motion::stock_sim::EnvelopeReport) {
     let cap = SCALLOP_RATCHET

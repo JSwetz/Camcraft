@@ -1,3 +1,86 @@
+# CamCraft 0.11.0 (clean-room implementation)
+
+A minor release, breaking first: Heidenhain NC output changes for every XY
+arc (issues #49, #17, #18).
+
+## Breaking
+- **Heidenhain DIN/ISO arcs post their true centre** (#49). The TNC reads
+  I/J as the absolute circle centre, entered in its own block before the
+  G02/G03 (TNC 640 ISO programming manual). The post wrote the centre
+  relative to the arc start, so a real control would cut around the wrong
+  centre. Every Heidenhain XY arc's output changes; an arc without a centre
+  is now refused by name.
+
+## Fixed
+- **Swarf links half as often and never tilts under level** (#17): about
+  half the air links on the blade, the lowest pose level instead of 7-9
+  degrees under, and a ball tool's re-entry into the cut it just left is no
+  longer refused as a plunge.
+
+## Decided
+- **Heidenhain vertical arcs and oblique entries stay chord fans** (#18):
+  the manuals give no rotation sense for off-plane arcs, so a native arc
+  would be a guess; the fan is exact to the output resolution.
+
+---
+
+# CamCraft 0.10.0 (clean-room implementation)
+
+A minor release: one new capability and two fixes (issues #15, #14, #16).
+
+## New
+- **Rotary Parallel and Swarf ramp in on their first entry** (#15). Where a
+  straight plunge is refused, the first infeed now comes in on a sloped ramp,
+  each one proved clear of the part and the stock before it is kept.
+
+## Fixed
+- **A lead-in outside a round bore is seated inside it** (#14): one descent
+  per level instead of a plunge into material beside the bore.
+- **Rotary Offset is judged against the real round bar** (#16). Its plunge
+  check now uses the true stock cylinder about the rotary axis instead of a
+  box around it, so moves in the air beside the bar are no longer refused.
+
+---
+
+# CamCraft 0.9.0 (clean-room implementation)
+
+A minor release: one new capability and one measurement fix (issues #11, #10).
+
+## New
+- **Adaptive arc output covers the growing spiral** (#11). Where a single
+  arc could not follow the spiral's changing curvature, the path is now
+  fitted with pairs of tangent arcs (biarcs), each proved inside the area,
+  crossing-free and kink-free - about a third fewer moves: rectangle
+  18,372 → 12,730, L-pocket 51,788 → 34,582, slot 23,382 → 14,748.
+
+## Fixed
+- **The load reader reads chord paths at their true engagement** (#10): it
+  faces the path's real direction at each corner, not the lagging chord, so
+  readings on straight-segment paths dropped (e.g. the L-pocket from 22.2 %
+  to 21.4 % of the tool diameter at the coarse grid).
+
+---
+
+# CamCraft 0.8.4 (clean-room implementation)
+
+A patch release: three fixes (issues #13, #36, #46).
+
+## Fixed
+- **2D Adaptive no longer hangs on a long thin band** (#13). A channel too
+  long and narrow for the adaptive spiral is refused in about a second with
+  its size named, and Offset rings cut it - instead of planning for minutes.
+- **Finishing passes ride over mesh folds** (#36). On coarse meshes the
+  rows no longer skip a strip at every fold, so the scallop stays within
+  tolerance on curved parts.
+- **Raster passes reach the rim** (#46). Each pass ends with a row where its
+  ground ends, so tilted and flat shelves are finished to the edge.
+
+## Also in this build
+- The 2D Adaptive trochoid fallback is wired but still refused by name in
+  every case (its landings are #47); output is unchanged.
+
+---
+
 # CamCraft 0.8.3 (clean-room implementation)
 
 A patch release: four fixes, three of them safety (issues #12, #42, #43, #40).

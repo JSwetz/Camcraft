@@ -246,9 +246,13 @@ fn the_stepped_block_holds_the_planner_laws_level_by_level() {
     // The planner's verdict on this island area is the crossing law
     // (the verifier's, asked of the plan first); the sentence names the
     // level's Z so the status line reads which level cut rings.
+    // Since #13 the growth budget refuses this island before the crossing
+    // law is asked ("ran past its planning budget"); either named reason
+    // pins the law - the level falls back by name with its Z.
     assert!(
-        path.notes.iter().any(|n| n.starts_with("adaptive: the HSM plan for this area crosses itself at (")
-            && n.ends_with(") - Offset rings cut the level at Z -10.000 instead")),
+        path.notes.iter().any(|n| (n.starts_with("adaptive: the HSM plan for this area crosses itself at (")
+            || n.starts_with("adaptive: the HSM plan is refused: growing the cleared area ran past its planning budget"))
+            && n.ends_with(" - Offset rings cut the level at Z -10.000 instead")),
         "{:?}",
         path.notes
     );

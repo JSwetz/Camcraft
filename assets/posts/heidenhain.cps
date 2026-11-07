@@ -1,14 +1,15 @@
 // Heidenhain TNC 3X milling post - the control family's documented
 // DIN/ISO programming mode, not the native conversational language
 // (a KLAR-style post is a separate, later candidate; see
-// RECOMMENDED.md M3.3 B). Provenance: the G-dialect from public DIN
-// 66025 / ISO 6983 documentation and the family's published operator
-// conventions (behavior only, per this repo's Clean-Room Protocol);
-// the hook contract from Autodesk's published post docs. No vendor
-// script text; original work. Where a public convention leaves a
-// hole, the house style (see fanuc.cps) decides, and the conformance
+// RECOMMENDED.md M3.3 B). Provenance: HEIDENHAIN "TNC 640 User's
+// Manual, ISO programming", ID 892909-25, 9/2016 (public user
+// documentation, behavior only, per this repo's Clean-Room Protocol)
+// for the block form, words and functions (#49, #50); the hook
+// contract from Autodesk's published post docs. No vendor script
+// text; original work. Where the manual leaves a hole, the post
+// refuses by name or the house style decides, and the conformance
 // goldens lock that decision, not any vendor's.
-description = "Heidenhain TNC (3-axis mill, DIN/ISO mode, cycles G73-G89, G2/G3)";
+description = "Heidenhain TNC (3-axis mill, DIN/ISO mode, numbered * blocks, drilling as G00/G01)";
 vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
@@ -26,10 +27,13 @@ var sRpm = 0;
 var spindleWait = false;
 var toolWait = false;
 var tNo = 0;
-var inCycle = false;
 var coolant = "";
 var sectionOpen = false;
+var modalWait = false;  // G40 G90 rides the section's first motion block
+var pendingDwell = null; // {z, s}: the open hole's dwell, owed at its bottom
 var orgX = 0, orgY = 0, orgZ = 0;
+var pgmName = "CAMCRAFT";
+var blockNo = 0;
 
 // ------------------------------------------------------------ helpers
 function has(v) { return v !== null && v !== undefined && isFinite(v); }
@@ -41,24 +45,41 @@ function fu(v) {  // mm at three decimals, trailing zeros trimmed
 }
 function ff(v) { return has(v) && v > 0 ? String(Math.round(v)) : "0"; }
 function ni(v) { return has(v) ? String(Math.round(v)) : "0"; }
-function w(letter, v) { return has(v) ? letter + fu(v) : ""; }
-function fw(v) { return has(v) ? "F" + ff(v) : ""; }
-function block(words) {  // join the non-empty words onto one line
-  var a = [];
-  for (var i = 0; i < words.length; i++) {
-    if (words[i] !== "" && words[i] !== null && words[i] !== undefined) a.push(words[i]);
-  }
-  if (a.length > 0) writeln(a.join(" "));
+// #50 - the block form of the manual (ID 892909-25): "The TNC numbers
+// the blocks of a part program" (p. 130), each block a line ending in
+// `*`, the first `%name G71 *`, the last `N99999999 %name G71 *`, and
+// every coordinate word signed (`X+0 Y+38.5`, `Z-40`; pp. 131, 134).
+// N steps by 10 as the manual's own programs do; a program long
+// enough to reach the end block's number is refused, never wrapped.
+var N_STEP = 10, N_LAST = 99999999;
+var nRefused = false;
+function sgn(letter, v) {  // a signed coordinate word, e.g. X+25 / Z-1.5
+  var s = fu(v);
+  return letter + (s.charAt(0) === "-" ? s : "+" + s);
 }
-function skip(words) {  // an optional block: '/' prefix, the family law
+function fw(v) { return has(v) ? "F" + ff(v) : ""; }
+function block(words) {  // one numbered block: N.. words *
   var a = [];
   for (var i = 0; i < words.length; i++) {
     if (words[i] !== "" && words[i] !== null && words[i] !== undefined) a.push(words[i]);
   }
-  if (a.length > 0) writeln("/" + a.join(" "));
+  if (a.length === 0) return;
+  blockNo += N_STEP;
+  if (blockNo >= N_LAST && !nRefused) {
+    nRefused = true;
+    msg("program too long for TNC block numbers (N reaches 99999999, the end block's own number)");
+  }
+  writeln("N" + blockNo + " " + a.join(" ") + "*");
+}
+// A motion block: the section's first one also states G40 G90 (the
+// manual's positioning form, `G00 G40 G90 Z+250*`, p. 66).
+function motion(g, words) {
+  var head = [g];
+  if (modalWait) { head.push("G40", "G90"); modalWait = false; }
+  block(head.concat(words));
 }
 function xyz(p) { return [wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ)]; }
-function wo(letter, v, o) { return has(v) ? letter + fu(v - o) : ""; }
+function wo(letter, v, o) { return has(v) ? sgn(letter, v - o) : ""; }
 function msg(s) {  // counted warning where the host offers message()
   if (typeof message === "function") message(s); else writeln("; " + s);
 }
@@ -88,11 +109,16 @@ function coolantCode() {
 }
 
 // -------------------------------------------------------------- header
-// Identity in one parenthetical comment - the mode needs no fence and
-// the post writes no program number (the control names its programs).
+// #50: "The first block of a program is identified by %, the program
+// name and the active unit of measure" (p. 130): `%NAME G71 *`, G71 =
+// mm (p. 755, "at start of program"). The stream carries no program
+// name, so the machine's name stands in, cut to the file-name
+// characters the manual permits (A-Z a-z 0-9 . _ -, p. 143). The old
+// parenthetical identity line is gone: `( )` is no TNC comment form.
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
-  block(["(" + nm + ")"]);
+  pgmName = String(nm).replace(/[^A-Za-z0-9._-]/g, "_") || "CAMCRAFT";
+  writeln("%" + pgmName + " G71 *");
 }
 
 // Cutter compensation in the control (M13.11): this dialect does not
@@ -102,8 +128,19 @@ function onRadiusCompensation() {
   msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
 }
 
+// #50: in this mode G54 is DATUM SHIFT with axis values and G55 a
+// touch-probe cycle (pp. 753-756: "G54 X+20 Y+30 Z+10"), not a
+// work-offset register. The first work offset is therefore the
+// control's active preset - no word; any other is refused by name
+// (preset selection is cycle G247, whose parameters this post was
+// not specced from), never posted as a word the TNC reads otherwise.
 function onParameter(name, value) {
-  if (name === "WorkOffset" && value) wcsWord = String(value);
+  if (name === "WorkOffset" && value) {
+    wcsWord = String(value);
+    if (wcsWord !== "G54") {
+      msg("work offset " + wcsWord + " has no TNC DIN/ISO form in this post - use the first work offset (the active preset)");
+    }
+  }
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
   else if (name === "OriginZ" && has(value)) orgZ = Number(value);
@@ -123,18 +160,25 @@ function onToolChange(number, name) {
 }
 
 // The preamble closes over everything a raw motion line needs to be a
-// legal program. The tool call is one word plus the change - the mode
-// selects tool geometry with the T word itself.
+// legal program. #50: the tool call is the T block, `T5 G17 S4500*`
+// (pp. 71, 218: number, spindle axis, speed; it applies the tool's
+// length) - M6 is machine-dependent (p. 392) and not written. A speed
+// change without a tool change is a T block of the speed only (p.
+// 201). G40 G90 ride the first positioning block. The old preamble
+// words are gone: G54 (datum shift), G80 (WORKING PLANE, p. 756) are
+// not what a TNC reads them as.
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
-  block(["G17", "G90", wcsWord, "G40", "G80"]);
+  modalWait = true;
   if (toolWait) {
-    block(["T" + ni(tNo), "M6"]);
+    block(["T" + ni(tNo), "G17", spindleWait ? "S" + ff(sRpm) : ""]);
     toolWait = false;
+  } else if (spindleWait) {
+    block(["S" + ff(sRpm)]);
   }
   if (spindleWait) {
-    block(["S" + ff(sRpm), "M3"]);
+    block(["M3"]);
     spindleWait = false;
   }
   coolant = coolantCode();
@@ -144,8 +188,7 @@ function startPreamble() {
 function endPreamble() {
   if (!sectionOpen) return;
   sectionOpen = false;
-  if (inCycle) block(["G80"]);
-  inCycle = false;
+  owedDwell();
   if (coolant) block(["M9"]);
   block(["M5"]);
 }
@@ -154,18 +197,19 @@ function onSection() { startPreamble(); }
 function onSectionEnd() { endPreamble(); }
 
 // ------------------------------------------------------------- motions
-// While a canned-cycle group is open its expanded hole chain is the
-// cycle block's business only - the chain is the generator's truth,
-// not a second copy of output.
+// #50: the words are the manual's two-digit G00/G01/G02/G03 (the
+// function overview, p. 752). Drilling posts as its expanded chain
+// (see onCycle), so no motion is ever suppressed here.
 function onRapid() {
   startPreamble();
-  if (!tiltOk(properties) || inCycle) return;
-  block(["G0"].concat(xyz(properties)));
+  if (!tiltOk(properties)) return;
+  motion("G00", xyz(properties));
 }
 function onLinear() {
   startPreamble();
-  if (!tiltOk(properties) || inCycle) return;
-  block(["G1"].concat(xyz(properties), [fw(properties.FeedRate)]));
+  if (!tiltOk(properties)) return;
+  motion("G01", xyz(properties).concat([fw(properties.FeedRate)]));
+  dwellAtBottom(properties.Z);
 }
 // M11.2 A - arcs off the XY plane. This family's DIN/ISO mode binds
 // the main plane to the spindle axis the T block sets (the published
@@ -174,11 +218,15 @@ function onLinear() {
 // tilted-plane function's or Q-parameter work). A free G18/G19 word is
 // therefore not this dialect's way to state an XZ/YZ arc, and writing
 // one would be re-interpreting the program's tool axis. The house
-// choice: a vertical-plane arc posts as its chord polyline, G1 blocks
+// choice: a vertical-plane arc posts as its chord polyline, G01 blocks
 // whose sagitta stays within ARC_CHORD_TOL (1 um - under the 3-decimal
 // word resolution), the normal coordinate linear along the sweep. The
 // motion is the arc's own to the output resolution; the plane word
 // is never touched, so G17 stays the program's only plane.
+// #18 made this final: the public manuals allow G2/G3 with axes off
+// the working plane only as a spatial-arc case and state no rotation
+// sense for it (its I/J/K are absolute centres, #49) -
+// a native XZ/YZ arc would be a guess at a mirrorable direction.
 var ARC_CHORD_TOL = 0.001;
 var ARC_MAX_CHORDS = 1024;
 function verticalArc(p) {
@@ -211,61 +259,85 @@ function verticalArc(p) {
       var u = cu + r * Math.cos(th), v = cv + r * Math.sin(th), wn = w0 + (w1 - w0) * f;
       if (yz) { x = wn; y = u; z = v; } else { x = v; y = wn; z = u; }
     }
-    block(["G1", wo("X", x, orgX), wo("Y", y, orgY), wo("Z", z, orgZ), fw(p.FeedRate)]);
+    motion("G01", [wo("X", x, orgX), wo("Y", y, orgY), wo("Z", z, orgZ), fw(p.FeedRate)]);
   }
 }
 
 function onCircular() {
   startPreamble();
-  if (!tiltOk(properties) || inCycle) return;
+  if (!tiltOk(properties)) return;
   var p = properties;
   if (p.CircularPlane === "XZ" || p.CircularPlane === "YZ") {
     verticalArc(p);
     return;
   }
+  // #49: in this dialect I/J are the circle centre's Cartesian
+  // coordinates - ABSOLUTE unless the word carries G91 (TNC 640 ISO
+  // Programming User's Manual, ID 892909-25, 9/2016, pp. 260-261:
+  // "Circle center I, J"; "Entering the circle center incrementally"
+  // is relative to the last programmed position only when entered
+  // incrementally; G91 is written before the word, p. 128). The
+  // manual's form sets the centre in its own block before the
+  // G02/G03 ("you must first enter the circle center I, J"), so it is
+  // posted that way. Absolute: the work origin shifts the centre like
+  // any position word (wo), never a start-relative difference.
   var c = p.IJKIncrement || {};
-  block([
-    p.CircularDirection === "CW" ? "G2" : "G3",
+  if (!has(c.I) || !has(c.J)) {
+    msg("arc without an XY centre - refused, not guessed");
+    return;
+  }
+  block([wo("I", c.I, orgX), wo("J", c.J, orgY)]);
+  motion(p.CircularDirection === "CW" ? "G02" : "G03", [
     wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ),
-    // I/J are increments: a shared translation cancels, so the origin
-    // must NOT enter them - center minus start in the stream's frame.
-    w("I", has(c.I) && has(p.StartX) ? c.I - p.StartX : null),
-    w("J", has(c.J) && has(p.StartY) ? c.J - p.StartY : null),
     fw(p.FeedRate),
   ]);
 }
 
-// ------------------------------------------------------- canned cycles
-// The cycle record replaces its whole move group. The mode's plain
-// G81-G89 cycles retract to the R plane by documented default - no
-// G98 word exists to write, so none is invented; each hole restates
-// its position, which is also what the family's own examples show.
+// ------------------------------------------------------------ drilling
+// #50: this mode has no G81-G89. Its drilling cycles are G200-G209
+// (p. 752), defined with Q parameters (`G200 DRILLING Q200=..`, p. 71)
+// and called with M99/G79 - and G73 is ROTATION, G80 WORKING PLANE
+// (p. 756), so the old `G73 X.. Q..` peck would have rotated the
+// coordinate system. The Q parameters' meanings live in the separate
+// Cycle Programming manual, which this post was not specced from, so
+// no cycle is written: every hole posts as its expanded chain - the
+// generator's own plunges, peck retracts and exits, the exact motion
+// the simulation verified. A dwell becomes FUNCTION DWELL TIME<s>
+// (seconds, p. 456) right after the move that reaches the hole's
+// bottom. Tapping cannot be plain moves (the feed out of a tap needs
+// the spindle reversed in step with it), so TAP is refused by name.
+var DWELL_TOL = 1e-6;
 function onCycle() {
   startPreamble();
+  owedDwell();
   var p = properties;
-  var ms = has(p.P) ? Math.round(p.P * 1000) : 0; // P is seconds
-  var g = "G81";
-  if (p.CycleType === "SPOT" || p.CycleType === "DRILL") g = ms > 0 ? "G82" : "G81";
-  else if (p.CycleType === "PECK") g = "G73";
-  else if (p.CycleType === "DEEP") g = "G83";
-  else if (p.CycleType === "TAP") g = "G84";
-  else if (p.CycleType === "BORE") g = "G86";
-  else if (p.CycleType === "BACKBORE") g = "G89";
-  var words = [g, wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), wo("R", p.R, orgZ)];
-  if ((p.CycleType === "PECK" || p.CycleType === "DEEP") && has(p.Q) && p.Q > 0) {
-    words.push(w("Q", p.Q)); // an increment (peck depth): no origin shift
+  if (p.CycleType === "TAP") {
+    msg("tapping has no TNC DIN/ISO form in this post (cycles G206/G207 are not specced) - refused, not posted as plain moves");
+    return;
   }
-  if (ms > 0 && g !== "G73" && g !== "G84") words.push("P" + ms);
-  words.push(fw(p.FeedRate));
-  block(words);
-  inCycle = true;
+  if (has(p.P) && p.P > 0) pendingDwell = { z: Number(p.Z), s: Number(p.P) };
+}
+function dwellAtBottom(z) {
+  if (pendingDwell === null || !has(z) || Math.abs(z - pendingDwell.z) > DWELL_TOL) return;
+  block(["FUNCTION DWELL TIME" + fu(pendingDwell.s)]);
+  pendingDwell = null;
+}
+// A dwell whose chain never reached its bottom is refused, never lost.
+function owedDwell() {
+  if (pendingDwell === null) return;
+  pendingDwell = null;
+  msg("drilling dwell without a feed move to the hole bottom - refused, not dropped");
 }
 
 // ------------------------------------------------------------ footer
-// Homing rides machine coordinates as an optional block, the family's
-// documented convention for a line the operator may choose to skip.
+// #50: the program ends M2 (p. 66: `G00 Z+250 M2*`), then the end
+// block `N99999999 %NAME G71 *` (p. 130). The old optional `/G53 Z0`
+// homing is gone: G53 is a datum-table shift in this mode (p. 753),
+// and machine-referenced moves (M91, p. 393) depend on a datum the
+// machine builder sets - the program ends where its last retract left
+// the tool, as the manual's own programs do.
 function onClose() {
   endPreamble();
-  skip(["G53", "Z0"]);
   block(["M2"]);
+  writeln("N" + N_LAST + " %" + pgmName + " G71 *");
 }

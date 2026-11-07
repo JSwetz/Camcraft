@@ -9,6 +9,7 @@ use super::ladder::levels;
 use super::params::{Finish3DParams, FinishPattern, dirs, refinement_floor, scallop_stepdown, scallop_stepover, validate};
 use super::support::{Sup, build_sups, plunge_support};
 use super::march::{emit_runs, march_curve};
+use super::rim::rim_rows;
 use super::rings::emit_rings;
 /// One Z-following raster pass: lines perpendicular to `(ux, uy)`
 /// across the shallow facets' padded bounds, stepped by the cos-law
@@ -96,14 +97,11 @@ pub(super) fn raster_pass_spaced(
     };
 
     let n_lines = ((vmax - vmin) / step).floor() as i64 + 1;
-    let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
-    for j in 0..n_lines.max(1) {
-        let v = vmin + step * j.min(n_lines - 1) as f64;
-        let pos = |t: f64| at(t, v);
-        let mut pieces = march_curve(
+    let line = |v: f64| {
+        march_curve(
             umin,
             umax,
-            &pos,
+            &|t: f64| at(t, v),
             &|a, c| (c - a).abs(),
             &|_| 1.0,
             &sup,
@@ -111,8 +109,36 @@ pub(super) fn raster_pass_spaced(
             p.tolerance,
             eps_chord,
             refinement_floor(delta0, p.min_step),
-        );
-        if j % 2 == 1 {
+        )
+    };
+    // (offset, pieces, runs back) per line; serpentine parity is the
+    // grid index's, so a rim row (#46, `rim`) takes its empty
+    // neighbour's parity and every grid line keeps its own.
+    type Line = (f64, Vec<Vec<(Point2, f64)>>, bool);
+    let mut lines: Vec<Line> = (0..n_lines.max(1))
+        .map(|j| {
+            let v = vmin + step * j.min(n_lines - 1) as f64;
+            (v, line(v), j % 2 == 1)
+        })
+        .collect();
+    let vs: Vec<f64> = lines.iter().map(|l| l.0).collect();
+    let filled: Vec<bool> = lines.iter().map(|l| !l.1.is_empty()).collect();
+    // The probes are questions, not cuts: their trimmed samples are
+    // not this pass's notes (the chosen row re-marches and counts).
+    let seen = trimmed.get();
+    let (low, high) = rim_rows(&vs, &filled, vmax, step, spacing_tol, &mut |v| !line(v).is_empty());
+    trimmed.set(seen);
+    if let Some(v) = high {
+        let jl = filled.iter().rposition(|f| *f).unwrap_or(0);
+        lines.insert(jl + 1, (v, line(v), (jl + 1) % 2 == 1));
+    }
+    if let Some(v) = low {
+        let jf = filled.iter().position(|f| *f).unwrap_or(0);
+        lines.insert(jf, (v, line(v), jf % 2 == 0));
+    }
+    let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
+    for (_, mut pieces, back) in lines {
+        if back {
             for pc in pieces.iter_mut() {
                 pc.reverse();
             }

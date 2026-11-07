@@ -10392,7 +10392,22 @@ Owed:
 - Rotary Parallel's `radial_relink` always rebuilds infeeds as radial
   plunges, so the ramp retry cannot change them.
 - Swarf's first raster entry always plunges.
-- Rotary Offset needs a true cylinder solid.
+- Rotary Offset needs a true cylinder solid. *Done (#16): see below.*
+
+**#16 (2026-11-07): Rotary Offset's audit reads the true bar.** The
+solid was the box reading (`plunge_solid::audit_posed`: below the
+stock's top Z over its XY outline), which also counted the air around
+the bar. It is now `multiaxis::revolved_bar`: the stock (the part's
+skin with none) revolved about the same fitted axis the ladder wraps
+about - radius the stock's farthest vertex, never less than the
+part's; length the stations stock and part span - judged by
+`plunge_law::first_bar_plunge` (same axial cone and cleared-column law;
+a tip in stock iff closer to the axis than the radius and between the
+stations). Chosen over adding a cylinder field to `Solid` (30 literal
+sites). A block stock sweeps the cylinder through its corner, so the
+bar is a superset of it: it still errs toward solid. A bar that cannot
+be read refuses by name. The cylinder is a subset of the box, so the
+change can only drop convictions in air, never one in the bar.
 
 ## M11.5: open boundary on Contour: two decisions (2026-11-06)
 
@@ -11805,3 +11820,353 @@ refining across the edge arcs). Dropped: the belt's gap law (a slack in the
 facet test - forgives a sunk centre on a convex fold, the corrugated belt's
 0.0317 mm bite); vertex contacts (the vertex gaps are points the readings no
 longer see; owed only if a fixture shows them).
+
+## #17 (M11.3): the swarf pose-law leftovers - link count, re-entry audit, rim dip: five decisions (2026-11-07, Prime Directive)
+
+Readings on the motion suite's debug blade (`swarf_pose_continuity`, the
+16 x 6 capped tube; the "172" of the M13.7 entry was an earlier landing's
+count, 153 / 234 after the normal-retract fix on the app fixture):
+
+| run | air links before | after |
+|---|---|---|
+| swarf, debug band | 68 | 34 |
+| ladder, debug band | 106 | 51 |
+| swarf, full band | 93 | 55 |
+| ladder, full band | 145 | 84 |
+
+Lowest stated pose: -7.3 deg (swarf) / -9.4 deg (ladder) under level before,
+level (-1e-17) after.
+
+(1) **The curvature fit reads one sheet at a time** (`curv::CREASE_COS`, a
+neighbour whose normal turns more than 60 deg off the facet's is across a
+crease and is skipped). The first cause found: the fit's neighbourhood is
+1.5 x 4 mean edges (27 mm on the blade) and its 64-neighbour cap fills in
+grid order from -x first, so every facet on the -x half of the tube took
+the -x cap's normals (90 deg round the rim) as curvature along the ruling,
+read unruled, and lost the swarf pose to the lean law mid-line: a 75 deg and
+a 105 deg air link on every raster line. Now all 192 tube facets read ruled.
+Alone it moved the count nowhere (68 -> 71: the mid-line pair became a
+line-start pair at the rim); with (3) and (4) together 34 (the hold in air took it to 23 but was dropped, see (3)).
+Dropped: nearest-first neighbour selection (would make both ends unruled
+near the caps symmetrically - still the crease read as curvature); a
+narrower radius (changes every flow fixture's field for no law).
+
+(2) **`ruling::analyze` keeps one verdict per facet** - a facet the fit
+could not answer pushed nothing, shifting every later facet's `ruled` flag
+and indexing the direction scan past the end (a panic the crease fix
+exposed: the flat caps' fits went singular once their tube neighbours were
+excluded). It now pushes `false` ("no claim").
+
+(3) **The swarf hold** (`stamp_pose::hold`): wherever the ball is in
+contact but the ruling does not speak (a level floor, a rim or cap edge -
+the stations the lean law answers), a pose that would turn past
+`LINK_TURN_DEG` off the held one keeps the held pose, if that pose is a
+lean, not under level, and its flank is proved in air (`flank_clear`, the
+stamp's own proof). The ball cuts the same surface under any pose about its
+centre; only the flank could differ, and it is proved. This removes the rim
+station's turn at the raster ends and most cap-ring turns. NOT in air: a
+first draft also held the pose on the exit rise (a Feed off the part) and
+reached 23 links, but the app blade's verifier read that posed feed in air
+as an Envelope rest of 14.8 mm (`swarf_generates_blade_lying_axes_and_
+verifies_clean`, `advanced_swarf_adds_the_coarse_rungs`); a feed in air
+keeps the modal upright, so each raster end still links once on its exit
+rise. Owed: let the exit rise be a Rapid (or let the posed contact law
+excuse a feed that leaves contact along the normal) and the raster-end link
+goes too. This is the "lead-out blend" option of the owed line in its
+simplest form - no turn at all; dropped: a retract-height lift (it shortens
+each link but cuts none), and a blended pose ramp over the line's last
+stations (a turn on a cut, which the guard exists to refuse). Not proved
+here: the heavy pivot5d envelope scan (release lane) - the hold's flank
+proof is the same proof every swarf station already carries, but the scan
+is the judge of record and must run at the next cut.
+
+(4) **The rim dip is fixed, not bounded** (`stamp_pose::level_ruling`): a
+ruled contact read off a facet's EDGE projected the ruling into the contact
+normal's plane, which leans along the ruling by up to sin 10 deg, so the
+pose dipped by as much. The facet's own plane holds the ruling exactly;
+where that reading is level or above and its flank clears, it is the pose.
+The pinned bound in `swarf_pose_continuity` tightens from -0.1737 to
+-1e-9 (level). This also lets the hold (3) qualify at the cap rings, where
+the dipped lying pose used to fail the hold's not-under-level test.
+
+(5) **The re-entry plunge audit reads the already-cut sphere for a ball
+tool** (`plunge_law::reenters_cut_sphere`, `first_solid_plunge_as` /
+`audit_as` with `ball`, wired through `center_cut::guard_shaped` and
+`plunge_solid::guard_posed` with `tool.kind == BallNose`). The owed line
+said the audit read a near-vertical re-entry "by tip column rather than by
+the already-cut sphere (a non-centre-cutting tool could be refused there)":
+the defect is the false refusal. A link's re-entry whose incoming pose
+lies within the core's 30 deg cone of the contact normal is axial, and its
+tip column was never cut down the NEW axis (the pose turned), so the column
+law convicts it - though the ball only retraces its own retract and ends on
+the centre the last cut finished on. Acquitted only when all of: a posed
+Plunge; its end ball centre equals the last cutting move's end centre; the
+first rapid after that cut starts at that centre and ends where the plunge
+starts (both within 1e-6). Every other plunge, and every non-ball tool,
+keeps the tip-column reading verbatim (`swarf_reentry` pins both arms and
+two misses). The retract rapid itself stays the verifier's to judge (the
+posed rapid solid law) - the audit acquits only what that rapid already
+answers for. Dropped: acquitting any plunge ending inside an earlier ball's
+sphere (a plunge from elsewhere sweeps unretraced material on its way).
+
+## #18 - M11.2 verdicts made final: oblique entries and Heidenhain vertical arcs stay chords: three decisions (2026-11-07)
+
+(1) **Heidenhain keeps vertical arcs as 1 um chord fans - final.** The
+brief recommended native XZ/YZ arcs; dropped for a hard reason. The
+post is the TNC's DIN/ISO mode (M3.3 B), not plain language, so the
+CC / C DR+/- spelling does not apply. The public TNC 620/640 DIN/ISO
+manuals say I/J are the absolute Cartesian circle centre in the
+working plane (not start-relative increments). An arc with axes off
+that plane (`G2 Z.. X..` under a Z tool axis) appears only as the
+spatial-arc case, with no stated rotation sense for the ZX/YZ view and
+no rule on axis order. A native arc would therefore guess a direction
+that can mirror, and a mirrored vertical entry gouges. The fan is
+exact to the 3-decimal word resolution, so nothing is lost but block
+count. `arc_planes::heidenhain_rides_its_vertical_arcs_as_chords_and_
+never_switches_plane` now pins both planes: on the circle, the arc's
+own sweep sense (G3 in XZ, G2 in YZ) and the exact end. Reopen only
+with a documented sense rule, or with a KL-mode post (M3.3 B).
+
+(2) **Oblique entry chords stay a chord fan with one note - final.**
+G17/G18/G19 are the only arc planes ISO 6983 / RS-274 define. A tilted
+working plane per entry (G68.2 / PLANE SPATIAL) changes the post's
+frame for a single lead move, and every dialect would need its own
+tilt-and-restore block pair and its own refusal paths. That is not
+cheap and not safe for one entry arc. Already pinned by
+`vertical_arc_entry::an_oblique_first_cut_stays_chords_and_says_so_once`.
+The near-axis snap (M11.2 B (4)) still turns the cases that are
+within tolerance of an axis into true arcs.
+
+(3) **Finding, filed separately: the Heidenhain XY arc centre words.**
+The post writes `I`/`J` as centre-minus-start increments (Fanuc
+semantics). The same manual reading says this mode's I/J are the
+absolute centre, so XY arcs that don't start at the centre's origin
+offset may be read wrong by a real TNC. That is outside #18's scope and
+golden-locked, so it is left for its own issue (#49, P0: wrong
+output) and not changed here.
+
+## #49: Heidenhain DIN/ISO XY arcs post the absolute centre, in its own block (2026-11-07, Prime Directive)
+
+Primary source, read in full (not a summary): HEIDENHAIN "TNC 640
+User's Manual, ISO programming", NC software 340590-07 / 340591-07 /
+340595-07, ID 892909-25, English, 9/2016, hosted at
+content.heidenhain.de (`.../TNC640/34059x-07/diniso/892909-25.pdf`).
+
+(1) **I/J are the absolute circle centre - the post now says so.**
+p. 260 "Circle center I, J": the centre is entered as "the Cartesian
+coordinates of the circle center in the working plane", stays in
+effect "until a new circle center is programmed", and is relative to
+the last programmed position only "if you enter the circle center
+with incremental coordinates". p. 128: an incremental coordinate is
+written with G91 *before the word*; this post writes G90 in the
+preamble and never G91. The manual's own full-circle example (p. 267:
+`N50 I+50 J+50`, start `X+0 Y+50`, `G02 X+0`) is only consistent with
+absolute centres. The old output (centre minus start, Fanuc's
+increment) was therefore wrong on every XY arc whose start is not the
+work origin - a real TNC would cut about a different centre, i.e.
+gouge or refuse on its 0.016 mm circle check. Fixed: I/J are the
+CL centre shifted by the work origin, exactly like X/Y (`wo`).
+
+(2) **The centre gets its own block before the G2/G3.** p. 261:
+"Before programming a circular arc, you must first enter the circle
+center I, J. The last programmed tool position will be the starting
+point of the arc"; every example in the manual writes `N.. I.. J..`
+alone, then `G02/G03 X.. Y..`. Writing I/J inside the G2 block (the
+Fanuc shape) is not documented for this mode, so it is not relied on.
+Considered and dropped: keeping one block (fewer lines, smaller golden
+diff) - undocumented, and the manual is the only authority we may use.
+An arc reaching the post without an XY centre is now refused by name
+(counted warning) instead of posting a G2 without one.
+
+Golden diffs: only the I/J words moved (to a preceding line, absolute
+values); X/Y/Z/F and every other block are byte-identical.
+Pinned by `heidenhain_arc_centre::heidenhain_arc_centre_words_are_the_
+absolute_centre` and `..._shifts_with_the_work_origin` (CW and CCW
+arcs ~100 mm from the origin, so absolute and incremental differ; the
+centre rebuilt from the words as the manual defines must equal the CL
+centre within 3-decimal resolution, start/end on one circle), plus the
+updated `arc_planes` and `conformance` goldens.
+
+Left open (not this issue): the manual writes signed words (`X+25`)
+and `N` block numbers with `*` terminators; the post's unsigned,
+unnumbered style is the house choice locked since M3.3 B. Whether a
+real TNC accepts that style is a separate question.
+
+
+## #50: Heidenhain DIN/ISO block form, program frame and drilling - from the manual (2026-11-07, Prime Directive)
+
+Primary source, read as a PDF (not a summary): HEIDENHAIN "TNC 640
+User's Manual, ISO programming", ID 892909-25, English, 9/2016
+(content.heidenhain.de `.../TNC640/34059x-07/diniso/892909-25.pdf`).
+The issue named four items; reading the function overview turned up
+four more words the control reads as something else, so all eight are
+fixed here. Each was "would the TNC reject or misread it?":
+
+(1) **N block numbers and the `*` terminator - fixed.** p. 130: "A
+machining program consists of a series of NC blocks ... The TNC numbers
+the blocks"; every program in the manual is `N<n> words*`. Unnumbered,
+unterminated lines are not this mode's block form, so not relied on.
+Chosen: N10, step 10 (the manual's own programs); a program long enough
+for N to reach 99999999 (the end block's number) is refused by name.
+
+(2) **Signed coordinate words - fixed.** Every coordinate in the
+manual is signed (`X+0 Y+38.5`, `Z-40`, `I+50 J+50`; pp. 66, 131, 267).
+X/Y/Z/I/J now always carry `+`/`-`; F, S, T stay unsigned as there.
+G words are written two-digit (`G00`..`G03`, the overview p. 752).
+
+(3) **Program begin/end - fixed.** p. 130: first block `%name G71 *`
+(G71 = mm "at start of program", p. 755), last `N99999999 %name G71 *`.
+The stream has no program name, so the machine's name stands in, cut
+to the file-name characters of p. 143 (`VMC 3-AXIS` -> `VMC_3-AXIS`).
+The old `(name)` line is gone: parentheses are no TNC comment (p. 172,
+comments are `;`). Dropped: a fixed name `CAMCRAFT` (loses the
+identity line for nothing).
+
+(4) **Drilling - G81-G89 were wrong, and dangerously so.** p. 752 lists
+the drilling cycles as G200-G209 only; p. 756 shows G73 is ROTATION
+(`G73 H+45`) and G80 the tilted WORKING PLANE. The old peck
+`G73 X.. Y.. Z.. R.. Q..` would therefore have been read as a
+coordinate rotation, and the preamble's bare `G80` as a working-plane
+reset. Chosen: no cycle word at all - every hole posts its expanded
+chain (the generator's own plunges, peck retracts and exits, exactly
+what the simulation verified) as G00/G01; a dwell is `FUNCTION DWELL
+TIME<s>` (seconds, p. 456) right after the move reaching the bottom
+(a dwell whose chain never reaches it is refused, never dropped).
+Tapping is refused by name: plain moves cannot reverse the spindle in
+step with the feed. Dropped: `G200`/`G205`/`G207` with Q values -
+their Q meanings (Q200 set-up clearance, Q201 depth sign, Q202
+plunging depth, Q395 depth reference, ...) are defined in the separate
+Cycle Programming manual, not in 892909-25 (p. 71 shows only the
+block shape), so mapping them would be guessing. Reopen with that
+manual if native cycles are wanted (shorter programs, control-side
+peck). BORE and BACKBORE are our own feed-in/rapid-out and
+feed-in/feed-out definitions (`cl::CycleKind`), so the chain IS their
+meaning; nothing is lost.
+
+(5) **Work offset - G54/G55 were wrong.** p. 756: G54 is DATUM SHIFT
+with axis values (`G54 X+20 Y+30 Z+10`); G55 is a touch-probe cycle in
+the overview (p. 754). Chosen: the first work offset is the control's
+active preset (no word); any other is refused by name. Dropped:
+cycle G247 preset selection - its Q parameter is in the Cycle manual.
+
+(6) **Tool call - `T.. M6` replaced.** pp. 71, 218: the tool call is
+the T block `T5 G17 S4500*` (number, spindle axis, speed; it applies
+the tool's length); M6 is "Tool change ... depends on machine"
+(p. 392). Now `T<n> G17 [S<rpm>]`, `M3` in its own block; a speed
+change alone is a T block of `S` only (p. 201). G40 G90 ride the
+section's first positioning block (`G00 G40 G90 Z+250*`, p. 66), the
+old standalone `G17 G90 G54 G40 G80` block is gone.
+
+(7) **Homing - `/G53 Z0` removed.** G53 is DATUM SHIFT from datum
+tables (p. 753); machine-referenced moves are M91/M92 (p. 393), whose
+datum the machine builder sets - an M91 Z0 rapid could go anywhere.
+The program ends `M2` and the end block, where the toolpath's last
+retract left the tool, as the manual's own programs do. Dropped: a
+`/` optional M91 retract (no documented safe position).
+
+(8) **Judged harmless, left:** M8/M9/M5/M2 standalone blocks (p. 392,
+`N20 M30*` p. 133); file extension `.nc` (the TNC's ISO programs are
+`.I`, p. 143 - the extension is a transfer-time rename and the host
+does not read it; worth a follow-up issue); no G30/G31 blank (only
+needed for graphics, p. 131); no spindle axis when the stream has no
+tool call (the active tool's axis stands, as before).
+
+Golden diffs, reviewed by normalizing the new form back (strip N/`*`,
+signs, two-digit G): every contour/face/pocket/slot/trace golden is
+motion-identical; only the frame, the T block and the drilling changed
+(drill_plate/drill_peck/synth now show the chain and the dwell);
+`heidenhain/tap_plate.nc` is deleted (that golden is now a named
+refusal in `conformance::REFUSED`). The Heidenhain synth golden posts
+the synth stream with G54 and without the tap; the stream now carries
+real chains (other dialects' synth goldens byte-identical). Pinned by
+`heidenhain_block_form::heidenhain_posts_the_manuals_numbered_signed_block_form`,
+`..._drilling_posts_its_chain_with_the_dwell_at_the_bottom`,
+`..._refuses_a_dwell_its_chain_never_reaches`,
+`..._refuses_tapping_and_a_non_first_work_offset_by_name`, plus the
+updated `conformance`, `arc_planes`, `heidenhain_arc_centre`.
+
+## #7 round 8: riding the corner pieces' leads as cuts fixes the island's hops; the spiral's own load near the island still holds it back (2026-11-07)
+
+**Tried, the round-7 proposal**: `LinkLaw::ride_lead` (adaptive/lift_link.rs), the step
+after `late` in `lift::schedule`. A late piece whose lead holds stock right up to its
+first point starts at the lead's first point instead. Its lead is ridden at the floor
+as a cut, the way the spiral rode it, so each lap shaves the west-wall sub-bite slivers.
+That start also holds the slivers in the rim, so the cut begins further back, on the
+walk's own path onto the previous piece: the previous piece's air lead where it runs on
+to it, then the piece itself. The ride steps back 0 / 1 / 2 / 4 / 6 / 9 / 13 / 18 mm on
+the exact walk vertices, never resampled, because a re-ridden stretch resampled at
+0.25 mm posted segments a hair off the posted ones and the crossing law read them as a
+crossing at (6.67, 34.60). The return onto it is `find`, else `high`. The ridden stretch
+must read within `bound` on the stock as it stands. To reach the lift, `WORK_MAX` was
+raised to 40,000 r locally.
+
+**Readings** (release, `hsm_one` island 60x40 with a 12x12 island, D/120):
+- **Baseline:** 9 hops (pieces 197..237 step 4, leads 24.7-24.9 mm), 4 highs, 1 ride.
+- **Lead ride:** 2 hops (cap 8), 30 highs, 9 rides, 6 leads ridden as cuts, 620
+  microlift returns. The ridden leads read 17-31 deg against the bound of 47.5.
+- **The island now plans on HSM, with no ring fallback and the verifier silent.**
+  - Out of cut: air 2,912 + lift 6,429 = 9,341 mm, against 8,221 mm in cut, so
+    x1.14, inside the x1.5 budget. 61,848 moves, rest 3.5 mm2.
+- **Not landed: the island now fails the judge's other laws.**
+  - 176 in-cut breaks past 5 deg (worst 80.2).
+  - 6 descents into stock for 2 levels.
+  - The worst load is 125 deg = 79.4 % D at (43.66, 25.81), and the plan names it ("no
+    step held the load somewhere - the least overload was cut").
+  - The breaks and the overload sit round the island's NE corner (41-47, 26-34), in the
+    spiral's growth, not at the ridden leads (x 5.3-8.4 on the west wall). The spiral
+    itself already reads 125.0 there (the lifted plan reads the same 125.0).
+  - Before this, `hsm_report_full_resolution` skipped the island because it fell back.
+    Landing this would turn that lane red on breaks, load and descents.
+  - The 3D stepped-block island level still falls back. `pocket3d_hsm` passes unchanged,
+    so its reason was not re-read.
+- **Budget:** not recalibrated. The island's growth needs ~31,090 r, and 40,000 was only
+  a probe. That should wait until the plan it buys is legal.
+
+**Chosen:** hold the patch (tmp/issue7-r8-lead-ride.patch in the main checkout,
+including the 40,000 probe), keep the fallback, land nothing in code. The hop law is
+solved by the ride. What blocks the island now is the growth spiral's load and kinks
+round the island's corner. **Next:** the growth near an island corner ("no step held the
+load"), then the extra descents (the 2 remaining hops plus high descents read as
+descents into stock?), then the budget at ~32,000 r with the #13 band test re-timed.
+**Dropped:** riding the lead from its own first point (that point holds stock in the
+rim, so every return was refused); a resampled ride back (it reads as a crossing).
+
+## Branch / PR flow for issues and cuts (user, 2026-11-07)
+
+The user reworked the procedure: start each issue from the latest main on
+a branch of its own; finishing an issue pushes the branch (PR), never merges
+it; a cut goes PR review -> merge to main -> tag. Decisions taken filling in
+the mechanics (AGENTS.md Issue Law and "A cut goes PR review"):
+
+1. **Branch names** `issue/N-<slug>` (and `release/vX.Y.Z`, `docs/<slug>`):
+   the issue number leads, so `gh pr list` and `git branch` sort by issue.
+2. **A new `in-review` label** replaces `claimed` once the PR is open, and
+   the pick query skips it - otherwise a pushed-but-unmerged issue would
+   look stale after 4 h and get reclaimed. Dropped: leaving `claimed` on
+   (stale-claim rule fires), closing the issue by hand at push (the law
+   closes only from a merged keyword).
+3. **Changelog rows are written at the cut, on the release branch**, from
+   each PR's `Changelog:` line. Dropped: a row per issue branch - every
+   open branch would edit the table's top line, so every second PR would
+   conflict. The row names the merge commit and the PR.
+4. **Merge commits, never squash/rebase** (`gh pr merge --merge`): branch
+   commit hashes survive, so the `fix on ...` comments and `Fixes #N`
+   commits stay findable. A branch behind main takes `git merge
+   origin/main` (no force-push, which the law forbids).
+5. **Review = a subagent that did not write the change**, under the
+   Autonomous Work Law (the user reviews afterwards, not in the loop). The
+   user can review or hold any PR on GitHub at any time; a hold is a PR
+   comment the next cut honours.
+6. **Docs/process/CI-only PRs merge once reviewed**, without a cut - they
+   carry no behaviour and need no tag, and laws must reach main to bind
+   agents.
+7. **`release.ps1 -NoTag`** commits the bump and builds on the release
+   branch (and refuses to on main); the tag is made on the release PR's
+   merge commit after `git diff <recorded tip> <merge commit>` shows the
+   trees match, so the zip is the tagged tree. Nothing else merges to main
+   from the first issue-PR merge to the tag (a reviewer of this PR found
+   the plain `release/vX.Y.Z` name is gone once `--delete-branch` runs, and
+   a mid-cut docs merge would make the trees differ).
+8. **Overlapping issues stack** on the open PR's branch (parent merges
+   first, child retargeted to main), since fixes stay unmerged until the
+   cut; an issue PR closed unmerged leaves `in-review` with a comment.

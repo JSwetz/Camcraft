@@ -26,6 +26,13 @@ const N_MIN: usize = 6;
 const N_CAP: usize = 64;
 /// How many mean-edge spacings out the neighbourhood reaches.
 const R_EDGES: f64 = 4.0;
+/// A neighbour whose normal turns more than 60 degrees off the
+/// facet's own stands across a crease (feature edge), on another
+/// sheet: the fit reads one smooth sheet at a time (#17 - the
+/// blade's flat caps, 90 degrees round the rim, read the near half
+/// of the tube as curved along its ruling, and that half lost its
+/// swarf pose to the lean law mid-line).
+const CREASE_COS: f64 = 0.5;
 
 /// The symmetric 3x3 shape operator of one facet, stored by its six
 /// independent entries, with the principal curvatures squared of
@@ -116,6 +123,13 @@ pub(super) fn shape_operators(facets: &[Triangle]) -> Vec<Option<Op>> {
                     };
                     for &j in bucket {
                         if j == i || areas[j] <= 0.0 {
+                            continue;
+                        }
+                        // A neighbour across a crease lies on another
+                        // sheet of the surface (a blade's flat cap past
+                        // its rim): its normal difference is the edge's
+                        // turn, not the sheet's curvature (#17).
+                        if nrm[j].dot(nrm[i]) < CREASE_COS {
                             continue;
                         }
                         let (dp, dn) = (q3(cent[j] - cent[i]), q3(nrm[j] - nrm[i]));
