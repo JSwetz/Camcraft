@@ -8,8 +8,9 @@
 //!
 //! 1. `CAMCRAFT_THEMES` - an absolute directory the user names;
 //! 2. `<exe dir>/assets/themes` - the zip layout;
-//! 3. `<exe dir>/../../assets/themes` - a dev run from `target/<profile>/`;
-//! 4. `<this crate>/../../assets/themes` - the old compile-time path, a
+//! 3. `<app>/Contents/Resources/assets/themes` - a macOS app bundle;
+//! 4. `<exe dir>/../../assets/themes` - a dev run from `target/<profile>/`;
+//! 5. `<this crate>/../../assets/themes` - the old compile-time path, a
 //!    dev fallback LAST (the headless suites run from `target/*/deps/`).
 //!
 //! The walk is pure: the inputs (env value, exe path, manifest dir) and
@@ -36,12 +37,17 @@ pub const NOT_FOUND: &str = "no theme folder found beside the exe - the built-in
 /// to be", which is not a place a user can predict.
 #[must_use]
 pub fn candidates(env: Option<&Path>, exe: Option<&Path>, manifest_dir: Option<&Path>) -> Vec<PathBuf> {
-    let mut out = Vec::with_capacity(4);
+    let mut out = Vec::with_capacity(5);
     if let Some(dir) = env.filter(|p| p.is_absolute() && !p.as_os_str().is_empty()) {
         out.push(dir.to_path_buf());
     }
     if let Some(exe_dir) = exe.and_then(Path::parent) {
         out.push(exe_dir.join("assets").join("themes"));
+        if exe_dir.file_name().is_some_and(|name| name == std::ffi::OsStr::new("MacOS"))
+            && let Some(contents) = exe_dir.parent()
+        {
+            out.push(contents.join("Resources").join("assets").join("themes"));
+        }
         if let Some(repo) = exe_dir.parent().and_then(Path::parent) {
             out.push(repo.join("assets").join("themes"));
         }
@@ -140,6 +146,14 @@ mod tests {
         let both = dirs(&["/opt/cc/target/release/assets/themes", "/opt/cc/assets/themes"]);
         let got = resolve(None, Some(&p(EXE)), Some(&p(MANIFEST)), both);
         assert_eq!(got, Ok(p("/opt/cc/target/release/assets/themes")));
+    }
+
+    #[test]
+    fn macos_bundle_resources_are_found_beside_the_executable() {
+        let exe = p("/Applications/CamCraft.app/Contents/MacOS/camcraft-ui");
+        let themes = "/Applications/CamCraft.app/Contents/Resources/assets/themes";
+        let got = resolve(None, Some(&exe), None, dirs(&[themes]));
+        assert_eq!(got, Ok(p(themes)));
     }
 
     #[test]
