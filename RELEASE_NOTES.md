@@ -1,3 +1,43 @@
+# CamCraft 0.13.0 (clean-room implementation)
+
+A minor release: CamCraft now ships for Linux and macOS as well as Windows,
+three collision checks are tighter (issues #84, #91, #96), and a keyed shaft
+is no longer refused on the lathe (issue #71).
+
+## New
+- **Packages for Linux and macOS** (contributed by linuxguy123): macOS ZIP
+  and DMG, AppImage, Snap, Flatpak, and Linux x86_64 TAR.GZ, DEB and RPM,
+  next to the Windows ZIP and installer; an Arch Linux source package
+  (PKGBUILD) is in `aur/`. This is the first release these packages are
+  built for on GitHub - the macOS, Snap and Flatpak builds have not run on a
+  real runner before, so report anything that does not install or start. The
+  macOS build is not notarized yet - Gatekeeper may call a downloaded DMG
+  damaged until its quarantine flag is cleared.
+
+## Fixed
+- **Drilling checks the tool can reach** (#84): a hole deeper from the stock
+  surface than the drill's flute is refused by name (a bore or tap in an
+  existing hole only needs a shank that fits it), and the holder is proved
+  clear of the stock (including the cross drill's swing over the end face).
+- **A drill R plane below the stock or part top is refused** (#91): the rapid
+  down to R used to cut through material and post silently.
+- **A rapid straight down into uncut stock blocks the post** (#96), for every
+  milling and drilling operation - unless an earlier operation of the setup
+  already removed that stock. Turning rapids along the spindle axis keep their
+  old reading for now (#103).
+- **Keyed and flatted shafts turn** (#71): the lathe axis is read on the
+  turned surface, so a correctly placed keyed shaft is no longer refused; a
+  note names the share of the surface (keyways, flats, holes) left for a later
+  setup.
+- **The AppImage starts** (linuxguy123).
+
+Known limits: with stock declared, a hole on an already-machined pocket floor,
+or face-then-drill, may be refused by the drilling checks until they learn what
+earlier operations removed (#89); a large keyway is still refused as "not
+revolved" (#110).
+
+---
+
 # CamCraft 0.12.1 (clean-room implementation)
 
 A patch release: four fixes, one of them a collision (issues #77, #79, #67,

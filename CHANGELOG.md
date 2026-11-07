@@ -10,6 +10,14 @@ v0.8.1).
 
 | Commit | Date | Change | Version |
 |---|---|---|---|
+| 329871c | 2026-11-07 | fix(motion,app): the lathe axis fit sets keyways, flats and cross holes aside, so a correctly placed keyed shaft passes the spindle law; a non-blocking note names the share set aside; the refusal gives move-the-offset advice only for a misplaced part (issue #71, PR #115) | 0.13.0 |
+| 1eae68e | 2026-11-07 | fix(sim,app): a vertical rapid going down into uncut stock blocks the post, judged against what earlier operations of the setup removed (turning rapids along the spindle axis keep their old reading) (issue #96, PR #105) | 0.13.0 |
+| 57b2002 | 2026-11-07 | fix(app): drilling refuses by name an R plane below the part or unfaced stock top - the rapid down to R crossed material and posted silently (issue #91, PR #97) | 0.13.0 |
+| f4c0679 | 2026-11-07 | fix(app): drilling refuses a hole deeper than the flute from the stock surface (bores and taps in an existing hole need only a shank that fits) and proves the holder clear of the stock, per Z band, incl. the cross-drill end-face swing (issue #84, PR #90) | 0.13.0 |
+| 588bccd | 2026-11-07 | fix(build): the AppImage no longer crashes at startup (PR #102, by linuxguy123) | 0.13.0 |
+| 902a1b1 | 2026-11-07 | feat(build): macOS (ZIP, DMG), AppImage, Snap and Flatpak release packages (PR #98, by linuxguy123) | 0.13.0 |
+| f8dba8f | 2026-11-07 | feat(build): Linux x86_64 TAR.GZ, DEB and RPM release packages (PR #95, by linuxguy123) | 0.13.0 |
+| 0abcdeb | 2026-11-07 | build(aur): Arch Linux source package (PKGBUILD, .SRCINFO) in aur/ (PR #114, by linuxguy123) | 0.13.0 |
 | 685b0e7 | 2026-11-07 | fix(sim): the post gate's rapid-in-stock law now judges radial (cross-drill) programs against the raw stock - a rapid through uncut stock is named RapidInStock and blocks the post; retracts up a drilled hole stay clean (#79, PR #83) | 0.12.1 |
 | 4fb33d3 | 2026-11-07 | fix(app): cross drill stands off the larger of the raw stock and the part, so no rapid between stations passes through uncut stock; refuses by name any rapid that would; resizing the stock stales the op (#77, PR #86) | 0.12.1 |
 | 053e0c7 | 2026-11-07 | fix(app): cross drill measures its clearance and standoffs about the work offset's spindle, refuses a mill-turn bar off its work offset, and refuses on a lathe a part that can't be read as turned (#67, PR #78) | 0.12.1 |
