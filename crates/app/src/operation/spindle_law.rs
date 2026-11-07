@@ -22,6 +22,13 @@
 //! part's height; a thin wide flange is judged by its radius, a long
 //! bar by its length.
 //!
+//! The fit is outlier-resistant (issue #71): a keyway, flat or cross
+//! hole is set aside and the axis read on the revolved surface, so the
+//! refusal names that share and tells a misplaced part (move the work
+//! offset) from a fit the features left in doubt (moving it may not
+//! help). A part that passes with features set aside generates with a
+//! note naming that share: those features are not turned.
+//!
 //! Provenance: a lathe's programmed X is the diameter about the spindle
 //! centreline and Z is measured along it (RS-274 / ISO 6983 lathe
 //! convention, any turning handbook); the tolerance is the posts' own
@@ -59,6 +66,12 @@ pub struct SpindleReading {
     pub radial: f64,
     /// The worst height disagreement over the part's vertices, mm.
     pub axial: f64,
+    /// The area share (0..1) of the part's surface the fit set aside
+    /// as not revolved - keyways, flats, cross holes (issue #71).
+    pub outlier_share: f64,
+    /// False when that share was too large for the fit to refit on:
+    /// the axis is then the plain fit, biased by those features.
+    pub trusted: bool,
 }
 
 impl SpindleReading {
@@ -81,7 +94,8 @@ impl SpindleReading {
 /// about the spindle as it stands).
 #[must_use]
 pub fn spindle_reading(facets: &[Triangle], origin: [f64; 3]) -> Option<SpindleReading> {
-    let ax = crate::multiaxis::axis::fit(facets).ok()?;
+    let fit = crate::multiaxis::axis::fit_report(facets).ok()?;
+    let ax = fit.axis;
     let d = ax.dir;
     let n = d.dot(d).sqrt();
     if !n.is_finite() || n <= 0.0 {
@@ -131,23 +145,80 @@ pub fn spindle_reading(facets: &[Triangle], origin: [f64; 3]) -> Option<SpindleR
         mid_z,
         radial,
         axial,
+        outlier_share: fit.outlier_share,
+        trusted: fit.trusted,
     })
+}
+
+/// Below this set-aside share (0..1) the fit's outliers are read as
+/// noise and the generation note stays silent: a plain revolve sets
+/// nothing aside, and 0.05 % of the turned surface is no feature.
+const NOTE_FLOOR: f64 = 0.0005;
+
+/// The set-aside share as a percentage for the messages: one decimal,
+/// and never "0.0%" for a share the fit did set aside.
+fn shown_pct(share: f64) -> f64 {
+    (100.0 * share).max(0.1)
+}
+
+/// The non-blocking note a trusted fit carries when it set features
+/// aside (issue #71 review): the op turns the revolved surface only, so
+/// an eccentric pin is turned as a concentric cylinder about the axis
+/// (material left on) and a keyway is left standing - said by name,
+/// never in silence. Not a warning: nothing unsafe is cut, so it does
+/// not hold the post. `None` below [`NOTE_FLOOR`] or for an untrusted
+/// reading (which [`check`] refuses).
+#[must_use]
+pub fn set_aside_note(r: &SpindleReading) -> Option<String> {
+    if !r.trusted || !r.outlier_share.is_finite() || r.outlier_share <= NOTE_FLOOR {
+        return None;
+    }
+    let pct = shown_pct(r.outlier_share);
+    Some(format!(
+        "the lathe axis was read on the revolved surface; {pct:.1}% of the turned (non-end-face) \
+         surface (keyways, flats, holes, eccentric sections) was set aside and is not turned - \
+         machine those features in a later setup"
+    ))
 }
 
 /// Refuse by name a part that reads differently about its fitted axis
 /// than about world Z through `origin` (the work offset's world
-/// position) by more than [`SPINDLE_TOL`] anywhere on it.
-pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result<(), GenError> {
+/// position) by more than [`SPINDLE_TOL`] anywhere on it. A pass
+/// returns the fit's [`set_aside_note`], if any, for the op to carry.
+pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result<Option<String>, GenError> {
     let Some(r) = spindle_reading(facets, origin) else {
-        return Ok(());
+        return Ok(None);
     };
     let worst = r.worst();
     if worst.is_finite() && worst <= SPINDLE_TOL {
-        return Ok(());
+        return Ok(set_aside_note(&r));
     }
+    let pct = shown_pct(r.outlier_share);
+    if !r.trusted {
+        // The fit itself is in doubt: moving the work offset onto a
+        // biased axis may only move the error (issue #71).
+        return Err(GenError::Invalid(format!(
+            "the part's axis of revolution cannot be read to the lathe spindle's {SPINDLE_TOL} mm: \
+             {pct:.1}% of the part's turned (non-end-face) surface does not revolve about any one \
+             axis (off-centre features - keyways, flats, cross holes), and the axis read through \
+             them stands {:.3} mm off the {slot} origin, leaning {:.3} degrees - the reading is \
+             biased by off-centre features; moving the work offset may not fix it; turn the \
+             revolved stock first and machine those features in a later setup, or model them \
+             out of the turned part",
+            r.offset_mid, r.lean_deg
+        )));
+    }
+    let aside = if r.outlier_share > 0.0 {
+        format!(
+            " (read on the revolved surface; {pct:.1}% of the part's turned (non-end-face) surface - \
+             keyways, flats, holes - set aside)"
+        )
+    } else {
+        String::new()
+    };
     Err(GenError::Invalid(format!(
         "the part's axis of revolution is not the lathe spindle: it leans {:.3} degrees \
-         off world Z and stands {:.3} mm off the {slot} origin at Z{:.3}, moving a part \
+         off world Z and stands {:.3} mm off the {slot} origin at Z{:.3}{aside}, moving a part \
          point {worst:.4} mm (the lathe programs diameters about world Z through the work \
          offset, {SPINDLE_TOL} mm allowed) - turned as posted it would cut a taper, an \
          eccentric or a coned face; align the part's axis with world Z and move the work \

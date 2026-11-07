@@ -45,6 +45,8 @@ use crate::machining2d::GenError;
 
 use super::linalg::{solve3, sym_eigen, unit};
 
+pub use super::axis_robust::Fit;
+
 /// The fitted axis: a canonical point (`o . u = 0` from the mesh's
 /// own coordinates) and a unit direction. The generators rotate the
 /// work about this line into their local frames.
@@ -62,14 +64,14 @@ const OK_SHARE: f64 = 0.9;
 /// about the candidate - the sagitta budget, applied both to the
 /// residual (a fine mesh's vertices are the true surface's) and to
 /// the azimuthal skip that measures the same faceting from below.
-const REL_TOL: f64 = 0.03;
+pub(super) const REL_TOL: f64 = 0.03;
 /// Eigen ratios that say "every direction fits equally" - a sphere's
 /// normals are concurrent at a POINT, so no axis claims the fit over
 /// any other and both candidate axes would pass the concurrency test.
 const ISO: f64 = 0.5;
 /// Below this angle (radians) the refined direction is the eigen one
 /// rounded differently, and the eigen bits stand.
-const REFINE_FLOOR: f64 = 1e-12;
+pub(super) const REFINE_FLOOR: f64 = 1e-12;
 
 /// One facet's claim: its plane normal, the circumcenter it belongs
 /// at, and its area.
@@ -80,8 +82,17 @@ pub(super) struct Datum {
 }
 
 /// Read the rotation axis off the mesh, or refuse by name with the
-/// kind that speaks for this geometry.
+/// kind that speaks for this geometry. Outlier-resistant: facets whose
+/// normal lines miss the candidate axis (a keyway's walls, a flat, a
+/// cross hole) are set aside and the line refitted on the revolved
+/// surface (`axis_robust.rs`); an evenly revolved part keeps its plain
+/// fit bit for bit.
 pub fn fit(facets: &[Triangle]) -> Result<Axis, GenError> {
+    fit_report(facets).map(|f| f.axis)
+}
+
+/// [`fit`], with what it set aside and the plain fit it started from.
+pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
     let mut data: Vec<Datum> = Vec::with_capacity(facets.len());
     let mut a_total = 0.0;
     for f in facets {
@@ -166,7 +177,7 @@ pub fn fit(facets: &[Triangle]) -> Result<Axis, GenError> {
         }
     });
     match best {
-        Some((_, ax)) => Ok(ax),
+        Some((_, ax)) => Ok(super::axis_robust::reweigh(&data, ax, a_total)),
         None => Err(GenError::Invalid(
             "the model's normals share no rotation axis - a turned workpiece is rotary work; finish a freeform with the 5-Axis kinds".into(),
         )),
@@ -180,6 +191,14 @@ pub fn fit(facets: &[Triangle]) -> Result<Axis, GenError> {
 /// direction, or a bearing skip too wide to call the walls round).
 /// Returns (root-mean-square residual, the axis) for ranking.
 fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
+    let (ax, rho) = line(data, u0, a_total)?;
+    judge(data, ax, rho, a_total).map(|r| (r, ax))
+}
+
+/// The least-squares axis LINE about direction `u0` (signed
+/// determinately) over `data`, with the area-weighted mean radius
+/// about it; `None` when the rows cannot place a line.
+pub(super) fn line(data: &[Datum], u0: Point3, a_total: f64) -> Option<(Axis, f64)> {
     let u = unit(u0)?;
     // Determinately signed: the axis points up, or (for a flat-lying
     // fit) along +x, or +y - the generators read stations along the
@@ -192,7 +211,6 @@ fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
     let mut m = [[0.0f64; 3]; 3];
     let mut b = [0.0f64; 3];
     let mut rows = 0usize;
-    let mut area_ok = 0.0;
     let mut area_ans = 0.0;
     let mut r_wsum = 0.0;
     for d in data {
@@ -253,11 +271,22 @@ fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
         if o.y.abs() <= nz { 0.0 } else { o.y },
         if o.z.abs() <= nz { 0.0 } else { o.z },
     );
+    Some((Axis { origin: o, dir: u }, rho))
+}
+
+/// Judge the line `ax` against ALL the normal lines: the concurrency
+/// share and the coarseness gate; the area-weighted RMS residual when
+/// it passes as a surface of revolution, `None` when it does not.
+pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<f64> {
+    let (u, o) = (ax.dir, ax.origin);
     let tol = (REL_TOL * rho).max(1e-9);
-    let mut sq = 0.0;
+    let (mut sq, mut area_ok, mut area_ans) = (0.0, 0.0, 0.0);
     for d in data {
         let k = d.n.cross(u);
         let kn = k.dot(k).sqrt();
+        if k.dot(k) > 1e-8 {
+            area_ans += d.a;
+        }
         if kn <= 1e-4 {
             continue;
         }
@@ -305,7 +334,7 @@ fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
     if gap > (8.0 * REL_TOL).sqrt() {
         return None;
     }
-    Some(((sq / a_total).sqrt(), Axis { origin: o, dir: u }))
+    Some((sq / a_total).sqrt())
 }
 
 /// The triangle's circumcenter, in its own plane; `None` when the

@@ -82,6 +82,10 @@ pub struct GenJob {
     /// through it. The cross drill measures its standoffs from this
     /// line (issue #67), not from the world origin.
     pub(super) wcs_origin: [f64; 3],
+    /// The spindle law's non-blocking note (issue #71 review): the
+    /// share of the turned surface the axis fit set aside, which the
+    /// op does not turn. Carried onto the path's notes by `run_job`.
+    pub(super) spindle_note: Option<String>,
 }
 
 /// The tripwire phrase for a stored precompute whose arm never collected
@@ -217,9 +221,11 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // The mill-turn's cross drill joins it (issue #67): its standoffs
     // are measured about that same line.
     let (slot, wcs_origin) = crate::posting::wcs_context(world, setup, &op.params);
-    if super::spindle_law::turns(world, &op.params) {
-        super::spindle_law::check(&material.facets, wcs_origin, slot)?;
-    }
+    let spindle_note = if super::spindle_law::turns(world, &op.params) {
+        super::spindle_law::check(&material.facets, wcs_origin, slot)?
+    } else {
+        None
+    };
     let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);
@@ -260,6 +266,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         part_solid,
         area,
         wcs_origin,
+        spindle_note,
     })
 }
 

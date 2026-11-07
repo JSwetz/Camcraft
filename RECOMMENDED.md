@@ -12975,6 +12975,42 @@ keeps the part-only chain bit for bit.
   no graphics adapter for a headless launch; the desktop run was checked on
   Fedora.
 
+## #71: the lathe axis fit sets off-centre features aside (2026-11-07, Prime Directive)
+
+**Chosen.** `axis::fit` keeps its plain least-squares concurrency fit and
+then reweighs it (new `multiaxis/axis_robust.rs`): the facets whose normal
+lines meet the candidate axis within the fit's own concurrency tolerance
+(`REL_TOL * rho`, 3 % of the mean radius) are the revolved surface; the rest
+(keyway walls, cross-hole walls) get weight 0 and the line plus its
+direction refinement are refitted on the inliers, up to 4 rounds until the
+inlier set stops changing. The refit must pass the full judgement on every
+facet (the 90 % concurrency share and coarseness gates), so it only moves an
+axis the part already earns. Nothing set aside -> the plain fit returns
+untouched (bit-identical; every rotary/turning golden stands). Guard: inliers
+under 50 % of the answering area or under 8 facets -> plain fit, marked
+untrusted. The guard is a backstop: it rarely fires, because `judge` already
+requires a 90 % concurrency share, so a part the plain fit earned seldom loses
+half its area to the trim. `axis::fit_report` exposes the plain axis, the set-aside share and
+the trust bit; the spindle law names the share and gives the move-the-offset
+advice only for a trusted (misplaced) reading - an untrusted one says the
+reading is biased by off-centre features and moving the work offset may not
+fix it (the share is of the turned, non-end-face surface). A trusted pass
+with more than 0.05 % set aside generates with a named, non-blocking path
+note (keyways, flats, holes, eccentric sections are not turned - machine them
+in a later setup), so an eccentric pin turned as a concentric cylinder is
+never silent; a plain revolve carries no note. Measured on a 72-segment D20 shaft with a
+10 mm-long keyway: plain fit 0.153 mm (5.18 mm key) / 0.058 mm (10 mm key)
+off G54, robust fit 0.000 mm.
+
+**Considered, dropped.** A soft (Huber/Tukey) weight: needs a scale estimate
+and never reaches exactly zero residual, so a keyed shaft would still read a
+few microns off; the hard trim reaches the exact axis on circumcenter-anchored
+facets. RANSAC sampling: nondeterministic and unnecessary when the plain fit
+is already within tolerance of the true axis. Loosening `OK_SHARE` so parts
+with more than 10 % off-axis area are read: out of scope - a part whose plain
+fit misses by more than the concurrency tolerance is still refused as not
+revolved (follow-up material if users hit it with long keyways).
+
 ## #72: Arch Linux source package
 
 - Add a `camcraft` source recipe under `aur/`, pinned to tag `v0.12.1` and
