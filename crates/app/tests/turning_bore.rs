@@ -25,6 +25,8 @@ use camcraft_app::commands::{
     AddTool, ChangeTool, CreateOperation, EditOperationParams, GenerateOperation, History,
     ImportModel, LoadMachine, SetStock,
 };
+use camcraft_app::drilling::{CycleChoice, Hole};
+use camcraft_app::geo2d::Point2;
 use camcraft_app::geometry::{Mesh, Point3, Triangle};
 use camcraft_app::machine::Machine;
 use camcraft_app::model;
@@ -139,6 +141,10 @@ fn bore_world() -> (World, History) {
     add_tool(&world, &mut history, "BR-1000");
     add_tool(&world, &mut history, "TN-1600-0R8");
     add_tool(&world, &mut history, "EM-0400-2FL");
+    // The pilot's long-series drill: 70 mm of flute for the 62 mm hole.
+    let mut long = catalog_tool("DR-0400");
+    long.flute_len = 70.0;
+    history.execute(&world, AddTool::new(&world, "DR-0400-L", long).expect("a sane drill"));
     history.execute(&world, ImportModel::from_mesh("bar", bored()));
     history.execute(&world, ImportModel::from_mesh("wall", wall()));
     (world, history)
@@ -168,6 +174,30 @@ fn create(world: &World, history: &mut History, name: &str, params: OpParams) {
     create_on(world, history, name, "BR-1000", "bar", params);
 }
 
+/// The pilot a boring bar needs (#103): an axial drill ahead (AX0 -
+/// program order reads names, so it sorts ahead of BR1 and ST), r 2 down
+/// the bar's axis from its top to Z -12 - under the ride's -10 window,
+/// over the model's -20 floor. The bar stock is solid; the bar's
+/// approach runs down this hole, and the rapid law credits it.
+fn pilot(world: &World, history: &mut History) {
+    let hole = Hole { xy: Point2::new(0.0, 0.0), radius: 2.05, entry_z: 50.0, floor_z: -12.0, through: false, stepped: false };
+    let params = OpParams::Drill {
+        clearance_z: Height::fixed(60.0),
+        retract_z: None,
+        top_z: Height::fixed(50.0),
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 120.0,
+        plunge_feed: 80.0,
+        holes: vec![hole],
+        cross: vec![],
+    };
+    create_on(world, history, "AX0", "DR-0400-L", "bar", params);
+    assert_eq!(status(world, "AX0"), OpStatus::Ok, "the pilot drills");
+}
+
 #[test]
 fn a_bored_op_runs_clean_in_the_document() {
     // The document's whole life: create, generate, and the envelope
@@ -177,6 +207,7 @@ fn a_bored_op_runs_clean_in_the_document() {
     // and the bar travels to and from the cut down the hole's AXIS -
     // the rapids are the hole's air, not the blank's outside.
     let (world, mut history) = bore_world();
+    pilot(&world, &mut history);
     create(&world, &mut history, "BR1", bore_params());
     let c = cache(&world, "BR1").expect("cached");
     assert_eq!(status(&world, "BR1"), OpStatus::Ok, "the wall verdict is silent");
@@ -192,6 +223,24 @@ fn a_bored_op_runs_clean_in_the_document() {
     }
     assert!((feeds.last().unwrap().to.z - 40.0).abs() < 0.05, "the ride spends the window's top");
     assert!(t.is_chained(), "the chain holds");
+}
+
+#[test]
+fn a_boring_approach_into_a_solid_bar_with_no_pilot_is_convicted_and_blocks_the_post() {
+    // #103: the bar's approach runs down the axis (r 0, Z 60 -> -10);
+    // with no drill ahead the solid bar stands there - the part's own
+    // hole is not in the stock until something cuts it.
+    let (world, mut history) = bore_world();
+    create(&world, &mut history, "BR1", bore_params());
+    let c = cache(&world, "BR1").expect("cached");
+    assert!(c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: 0 }), "the approach went unnamed: {:?}", c.warnings);
+    let out = std::env::temp_dir().join(format!("camcraft-bore-nopilot-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&out);
+    match camcraft_app::posting::post_setup(&world, &out) {
+        Ok(_) => panic!("a boring bar rapiding into a solid bar posted"),
+        Err(e) => assert!(e.contains("post blocked") && e.contains("rapid move 0 "), "refused, but not by the rapid law: {e}"),
+    }
+    assert!(!out.exists(), "a refused post writes nothing");
 }
 
 #[test]
@@ -236,6 +285,7 @@ fn a_regrind_of_the_nose_convicts_through_the_digest() {
     // Undoing the grind reads Stale again: the digest is a question
     // about NOW, never a remembered verdict.
     let (world, mut history) = bore_world();
+    pilot(&world, &mut history);
     create(&world, &mut history, "BR1", bore_params());
     assert_eq!(status(&world, "BR1"), OpStatus::Ok);
     let mut fatter = catalog_tool("BR-1000");
@@ -278,6 +328,7 @@ fn the_bore_seed_stands() {
         panic!("the seed must be bore params");
     };
     assert_eq!((*tolerance, *feed, *plunge_feed), (0.05, 120.0, 40.0), "the seed carries the setup's numbers");
+    pilot(&world, &mut history);
     create_on(&world, &mut history, "ST", "BR-1000", "bar", seed);
     let c = cache(&world, "ST").expect("cached");
     assert_eq!(status(&world, "ST"), OpStatus::Ok, "the seed's numbers stand");

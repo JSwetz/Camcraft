@@ -2,68 +2,18 @@
 
 use crate::cl::{MoveKind, Toolpath};
 use crate::geometry::{Point3, Triangle};
-use crate::turning::profile::{silhouette, Frame};
+use crate::rest::DrillAhead;
+use crate::turning::profile::Frame;
 use crate::verify::Warning;
 
 use super::drill_prior::{PriorCell, PriorRead};
 use super::kinds::Section;
+use super::turning_outline::Revolved;
 use super::OpParams;
 
-/// Chord tolerance of the revolved outlines (mm). The outline is read
-/// `OUTLINE_TOL` wider than the silhouette says, so a chord below an
-/// arc never reads air where steel stands.
-const OUTLINE_TOL: f64 = 0.01;
 /// Most stations one rapid is sampled at: a longer rapid samples more
 /// sparsely, never unboundedly.
 const MAX_SAMPLES: f64 = 20_000.0;
-
-/// A revolved outline: the material radius per station.
-enum Outline {
-    /// The silhouette's ascending (station, radius) polyline.
-    Poly(Vec<(f64, f64)>),
-    /// No silhouette could be read: the vertices' station span at
-    /// their largest radius - exact for a box or bar, never less.
-    Span { s0: f64, s1: f64, r: f64 },
-}
-
-impl Outline {
-    fn of(facets: &[Triangle], f: &Frame) -> Option<Outline> {
-        if let Ok(p) = silhouette(facets, f, OUTLINE_TOL)
-            && p.len() >= 2
-        {
-            return Some(Outline::Poly(p));
-        }
-        let (mut s0, mut s1, mut r) = (f64::INFINITY, f64::NEG_INFINITY, 0.0f64);
-        for q in facets.iter().flat_map(|t| [t.a, t.b, t.c]) {
-            let (s, rho) = f.sr(q);
-            if !(s.is_finite() && rho.is_finite()) {
-                return None;
-            }
-            (s0, s1, r) = (s0.min(s), s1.max(s), r.max(rho));
-        }
-        (s0 <= s1).then_some(Outline::Span { s0, s1, r })
-    }
-
-    /// The material radius at station `s` (0 off the body).
-    fn radius(&self, s: f64) -> f64 {
-        match self {
-            Outline::Span { s0, s1, r } => if (*s0..=*s1).contains(&s) { *r + OUTLINE_TOL } else { 0.0 },
-            Outline::Poly(p) => {
-                let mut best = 0.0f64;
-                for w in p.windows(2) {
-                    let ((sa, ra), (sb, rb)) = (w[0], w[1]);
-                    if s < sa.min(sb) || s > sa.max(sb) {
-                        continue;
-                    }
-                    let d = sb - sa;
-                    let r = if d.abs() <= 1e-12 { ra.max(rb) } else { ra + (rb - ra) * (s - sa) / d };
-                    best = best.max(r);
-                }
-                if best > 0.0 { best + OUTLINE_TOL } else { 0.0 }
-            }
-        }
-    }
-}
 
 /// What a turned path's axial rapids are judged against.
 pub(super) struct Meridian<'a> {
@@ -75,6 +25,9 @@ pub(super) struct Meridian<'a> {
     /// The margin a reading must clear by (the gouge tolerance).
     pub margin: f64,
     pub z_tol: f64,
+    /// The Drill ops ahead: an axial pilot is a removed cylinder with
+    /// its point's cone, read on a lathe too.
+    pub drills: &'a [DrillAhead],
 }
 
 /// Law (d) for the turned family: the column law's word on a turned
@@ -106,9 +59,14 @@ pub(super) fn judge_axial_rapids(
         })
     };
     let Ok(frame) = Frame::about(cx.part) else { return };
-    let part = Outline::of(cx.part, &frame);
-    let stock = cx.stock.and_then(|s| Outline::of(s, &frame));
-    let Some(part) = part else { return };
+    let Some(part) = Revolved::of(cx.part, &frame) else { return };
+    let stock = match cx.stock {
+        Some(s) => match Revolved::of(s, &frame) {
+            Some(r) => Some(r),
+            None => return, // an unreadable stock: the column's word stands
+        },
+        None => None,
+    };
     warns.retain(|w| !matches!(*w, Warning::RapidInStock { at } if axial(at)));
     let sm = SignedMeridian::of(&frame, path);
     let mut cap: Option<Option<f64>> = None; // the faced end, read once
@@ -189,8 +147,8 @@ fn enters(
     i: usize,
     path: &Toolpath,
     sm: &SignedMeridian,
-    part: &Outline,
-    stock: Option<&Outline>,
+    part: &Revolved,
+    stock: Option<&Revolved>,
     cap: Option<f64>,
     cx: &Meridian,
 ) -> bool {
@@ -204,15 +162,20 @@ fn enters(
         .map(|m| (sm.sr(m.from), sm.sr(m.to)))
         .filter(|(p, q)| p.0.max(q.0) + rn >= lo && p.0.min(q.0) - rn <= hi)
         .collect();
+    let pilots = pilots(cx.drills, sm);
     let solid = |s: f64, rho: f64| {
         let r = rho.abs();
-        let in_part = r < part.radius(s) - cx.margin;
-        let in_stock = stock.is_some_and(|o| r < o.radius(s) - cx.margin && cap.is_none_or(|c| s < c - cx.margin));
-        if !(in_part || in_stock) {
-            return false;
-        }
         let reach = rn + cx.margin;
-        !feeds.iter().any(|&(p, q)| seg_dist((s, rho), p, q) <= reach || seg_dist((s, -rho), p, q) <= reach)
+        if feeds.iter().any(|&(p, q)| seg_dist((s, rho), p, q) <= reach || seg_dist((s, -rho), p, q) <= reach) {
+            return false; // this path's own kerf
+        }
+        if pilots.iter().any(|p| p.removed(s, r)) {
+            return false; // a drill ahead's hole
+        }
+        // The cheap outer reading first: the bodies' ray parity is
+        // asked only inside their skins.
+        part.solid(s, r, cx.margin)
+            || (cap.is_none_or(|c| s < c - cx.margin) && stock.is_some_and(|o| o.solid(s, r, cx.margin)))
     };
     let len = (b.0 - a.0).hypot(b.1 - a.1);
     let step = (rn * 0.5).max(0.05).max(len / MAX_SAMPLES);
@@ -227,6 +190,46 @@ fn enters(
         let (s, rho) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
         ring.iter().any(|&(ds, dr)| solid(s + ds, rho + dr))
     })
+}
+
+/// A drill ahead's cut on the spindle axis, in the meridian plane:
+/// stations `lo` (the point's tip) to `hi`, radius `r`, the point's
+/// cone widening `1/cot` per unit above the tip (#89's drill atom).
+struct Pilot {
+    lo: f64,
+    hi: f64,
+    r: f64,
+    cot: Option<f64>,
+}
+
+impl Pilot {
+    fn removed(&self, s: f64, r: f64) -> bool {
+        if s < self.lo || s > self.hi {
+            return false;
+        }
+        let wide = match self.cot {
+            Some(k) if k > 0.0 => ((s - self.lo) / k).min(self.r),
+            _ => self.r,
+        };
+        r < wide
+    }
+}
+
+/// The drills' cutting moves that run ON the spindle axis (an off-axis
+/// hole on a lathe is not a cylinder about it, and credits nothing).
+fn pilots(drills: &[DrillAhead], sm: &SignedMeridian) -> Vec<Pilot> {
+    const ON_AXIS: f64 = 1e-3;
+    drills
+        .iter()
+        .filter(|d| d.radius.is_finite() && d.radius > 0.0)
+        .flat_map(|d| {
+            d.moves.iter().filter(|m| m.kind != MoveKind::Rapid && m.arc.is_none()).filter_map(move |m| {
+                let (a, b) = (sm.sr(m.from), sm.sr(m.to));
+                (a.1.abs() <= ON_AXIS && b.1.abs() <= ON_AXIS)
+                    .then(|| Pilot { lo: a.0.min(b.0), hi: a.0.max(b.0), r: d.radius, cot: d.cone })
+            })
+        })
+        .collect()
 }
 
 /// Distance from `p` to the segment `a`-`b` in the meridian plane.
@@ -283,7 +286,7 @@ mod tests {
         };
         let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() };
         let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, 16.0));
-        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6 };
+        let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[] };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
         warns
@@ -309,9 +312,11 @@ mod tests {
     }
 
     #[test]
-    fn a_span_outline_reads_the_stock_its_full_radius_inside_its_stations_and_air_off_them() {
-        let o = Outline::Span { s0: 0.0, s1: 10.0, r: 20.0 };
-        assert!(o.radius(5.0) >= 20.0);
-        assert_eq!(o.radius(11.0), 0.0);
+    fn a_pilot_removes_its_cylinder_and_its_point_cone_only() {
+        let p = Pilot { lo: -10.0, hi: 20.0, r: 2.0, cot: Some(0.6) };
+        assert!(p.removed(0.0, 1.9));
+        assert!(!p.removed(0.0, 2.1));
+        assert!(!p.removed(-9.0, 1.9), "the point's cone is not a flat floor");
+        assert!(!p.removed(-10.5, 0.0));
     }
 }

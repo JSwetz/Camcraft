@@ -13236,3 +13236,29 @@ revolved (follow-up material if users hit it with long keyways).
   therefore never post - a false refusal class the law must lose before
   #103 closes: read each body's meridian section (inner and outer
   radius per station), and credit an axial drill ahead.
+
+### #103 closed out: the bore reads as air, a pilot drill ahead is credited
+
+- **Annulus, not disc.** `operation/turning_outline.rs` reads the part
+  and the stock per station as material between r_in and r_out: r_out
+  from the turned silhouette (span fallback), r_in by ray parity from
+  the axis point (Moller-Trumbore, four skewed directions, read a hair
+  either side of the station so an end face's own plane never counts
+  edge-on): an odd count in any direction is a core to the axis (r_in
+  0), else r_in is the nearest wall (no wall: nothing there). A bored
+  part's hole and a tube's bore are air; a Cylinder with no bore is
+  solid to the axis. Cached per station; read only inside the outer
+  skin and only after the cheap credits miss. Owed: cost on very large
+  meshes (a facet scan per station read, span-filtered).
+- **Pilot credit.** An axial Drill ahead in the setup (`rest::drills_ahead`,
+  on a lathe too; drill_prior's facing-only prior unchanged) is a removed
+  cylinder of the drill radius over its plunge's stations, its point a
+  cone of the tool's tip angle (#89's drill atom). Off-axis holes credit
+  nothing. Like the facing prior, the turned op's stamp does not digest
+  the drill ahead (#109 scope).
+- **turning_bore fixture:** the bored bar now has its pilot - an axial
+  r 2 drill (AX0, a 70 mm flute DR-0400; names sort ahead of the bore
+  ops, which is program order) from the top to Z -12, under the ride's
+  -10 window. Chosen over a tube stock: the fixture models a finished
+  bore in solid bar, and a pilot is how a bore pass starts. Pinned:
+  `a_boring_approach_into_a_solid_bar_with_no_pilot_is_convicted_and_blocks_the_post`.

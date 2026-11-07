@@ -422,3 +422,24 @@ pub fn prior_stale(world: &World, name: &str, setup: Option<&str>) -> Option<Str
             )
         })
 }
+
+/// A twist drill ahead in the setup, as the turned family's rapid law
+/// credits it (#103): its cut moves, the drill's radius and the cot of
+/// its point's half-angle (`None` reads a flat point - less removed).
+pub struct DrillAhead {
+    pub radius: f64,
+    pub cone: Option<f64>,
+    pub moves: Vec<Move>,
+}
+
+/// Every Drill operation ahead of `name` in its setup that has cut. Read
+/// on a lathe too - the axial hole is a cylinder about the spindle, so
+/// the meridian law reads it without the column grid (the prior plan's
+/// facing-only rule is unchanged).
+pub fn drills_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<DrillAhead> {
+    ahead_of(world, name, setup)
+        .into_iter()
+        .filter(|a| a.cut && a.kind == crate::operation::OpType::Drill && a.radius > 0.0)
+        .map(|a| DrillAhead { radius: a.radius, cone: a.cone, moves: a.moves })
+        .collect()
+}
