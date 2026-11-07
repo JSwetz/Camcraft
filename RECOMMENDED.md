@@ -13601,6 +13601,21 @@ revolved (follow-up material if users hit it with long keyways).
   on every facet as before; `axis_robust` then trims and tightens as
   for any fit. Only pole candidates get this, so no eigen-path fit
   changes.
+- **Review of PR #204 (re-centring guards, all three kept):** a
+  100 x 100 x 10 plate with an r5 boss at (20, 20) read as a trusted
+  (0.667, 0.667, 0.333) axis: the trimmed half was taken by facet count
+  (the boss is 792 of 804 facets, 1.3 % of the area), and the plate's
+  two-triangle faces put every normal line through its centre, which
+  any line through it meets - `judge` is necessary, not sufficient.
+  Now (1) the median is AREA-weighted, (2) the kept half must carry
+  `MIN_KEPT_SHARE` of the answering area on `MIN_KEPT` facets (shared
+  with `axis_robust::reweigh`), and (3) re-centring runs only when the
+  moment is isotropic - elsewhere the plain line's drag stays the
+  evidence it was on main. (3) is what refuses the plate (its moment
+  is not isotropic); (1) and (2) guard an isotropic part the same way.
+  Pinned: `a_plate_with_an_off_centre_boss_is_refused_by_name`. The
+  wrong axes the review found on main (boss at (10, 0); single-band
+  shaft with a D-flat) are left to their own issue.
 - **`punched_bar` stays at z -80..20:** back at r10 x 40 the
   three-hole box fixtures (`drilling_cross_box`) still refuse - three
   holes plus their images are past the 10 % concurrency share on the

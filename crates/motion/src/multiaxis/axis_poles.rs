@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use crate::geometry::Point3;
 
 use super::axis::{judge, line, try_axis, Axis, Datum};
-use super::axis_robust::dist;
+use super::axis_robust::{dist, MIN_KEPT, MIN_KEPT_SHARE};
 use super::linalg::unit;
 
 /// Least share of the whole area one flat must carry to be offered:
@@ -77,26 +77,32 @@ pub(super) fn candidates(data: &[Datum], a_total: f64) -> Vec<Point3> {
 /// Judge the pole direction `u` (`axis::try_axis`). A short bar's
 /// plain least-squares line is dragged by an off-centre feature (one
 /// radial hole on an r10 x 40 bar pulls it 0.4 mm, past the sagitta
-/// band, so half the wall misses it): when the plain line fails, it is
-/// re-centred by least trimmed squares - refitted on the half of the
-/// normal lines that miss it least, until that half stops changing -
-/// and the re-centred line must still pass the full judgement on every
-/// facet, so this can only find an axis the part earns.
-pub(super) fn try_pole(data: &[Datum], u: Point3, a_total: f64) -> Option<(f64, Axis)> {
+/// band, so half the wall misses it). When the plain line fails on an
+/// ISOTROPIC part (`iso`, the short-bar window this exists for), it is
+/// re-centred by least trimmed squares: refitted on the half of the
+/// answering AREA whose normal lines miss it least, until that half
+/// stops changing. The re-centred line must then pass the full
+/// judgement on every facet.
+///
+/// The judgement is necessary, not sufficient: a prism's two-triangle
+/// faces put their normal lines through one point, which any line
+/// through it meets. So the drag stays the evidence everywhere else -
+/// a plate with an off-centre boss (not isotropic) is never re-centred
+/// onto the plate's centre - and the half is weighed by area, so a
+/// finely meshed small feature cannot outvote the part by facet count
+/// (review of PR #204).
+pub(super) fn try_pole(data: &[Datum], u: Point3, a_total: f64, iso: bool) -> Option<(f64, Axis)> {
     if let Some(sol) = try_axis(data, u, a_total) {
         return Some(sol);
+    }
+    if !iso {
+        return None;
     }
     let (mut ax, rho) = line(data, u, a_total)?;
     let mut keep: Vec<bool> = Vec::new();
     for _ in 0..LTS_ROUNDS {
         let miss: Vec<Option<f64>> = data.iter().map(|d| dist(d, ax)).collect();
-        let mut sorted: Vec<f64> = miss.iter().flatten().copied().collect();
-        if sorted.len() < 2 {
-            return None;
-        }
-        sorted.sort_by(|a, b| a.total_cmp(b));
-        let med = sorted[sorted.len() / 2];
-        let next: Vec<bool> = miss.iter().map(|m| m.is_none_or(|e| e <= med)).collect();
+        let next = lower_half(data, &miss)?;
         if next == keep {
             break;
         }
@@ -111,6 +117,36 @@ pub(super) fn try_pole(data: &[Datum], u: Point3, a_total: f64) -> Option<(f64, 
         keep = next;
     }
     judge(data, ax, rho, a_total).map(|r| (r, ax))
+}
+
+/// The keep mask of the answering facets whose miss is at most the
+/// AREA-weighted median miss (pole facets, `None`, are kept: they
+/// give no row). `None` when the kept half rests on too few facets or
+/// too little of the answering area to place a line honestly.
+fn lower_half(data: &[Datum], miss: &[Option<f64>]) -> Option<Vec<bool>> {
+    let mut rows: Vec<(f64, f64)> = data.iter().zip(miss).filter_map(|(d, m)| m.map(|e| (e, d.a))).collect();
+    let ans: f64 = rows.iter().map(|r| r.1).sum();
+    if rows.len() < MIN_KEPT || ans <= 0.0 || !ans.is_finite() {
+        return None;
+    }
+    rows.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let (mut acc, mut med) = (0.0, f64::INFINITY);
+    for (e, a) in &rows {
+        acc += a;
+        if acc >= 0.5 * ans {
+            med = *e;
+            break;
+        }
+    }
+    let next: Vec<bool> = miss.iter().map(|m| m.is_none_or(|e| e <= med)).collect();
+    let (mut a_kept, mut n_kept) = (0.0, 0usize);
+    for ((d, m), k) in data.iter().zip(miss).zip(&next) {
+        if *k && m.is_some() {
+            a_kept += d.a;
+            n_kept += 1;
+        }
+    }
+    (n_kept >= MIN_KEPT && a_kept >= MIN_KEPT_SHARE * ans).then_some(next)
 }
 
 /// `n` or `-n`, whichever has its largest component positive - the

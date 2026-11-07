@@ -155,7 +155,7 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
     }
     let poles = super::axis_poles::candidates(&data, a_total);
     let tries = cands.into_iter().map(|c| try_axis(&data, c, a_total));
-    let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total)));
+    let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total, iso)));
     let mut best: Option<(f64, Axis)> = None;
     for sol in tries.flatten() {
         if best.as_ref().is_none_or(|(r, _)| sol.0 < *r) {

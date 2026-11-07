@@ -52,9 +52,9 @@ use super::axis::{judge, line, Axis, Datum, REFINE_FLOOR, REL_TOL};
 /// part the plain fit earned seldom loses half its area to the trim;
 /// it guards the refit against a pathological inlier set (few or
 /// tiny facets) the share gate alone would not catch.
-const MIN_KEPT_SHARE: f64 = 0.5;
+pub(super) const MIN_KEPT_SHARE: f64 = 0.5;
 /// Fewest non-pole facets a refit may rest on (backstop, as above).
-const MIN_KEPT: usize = 8;
+pub(super) const MIN_KEPT: usize = 8;
 /// Reweighting rounds: the inlier set settles in one or two.
 const ROUNDS: usize = 4;
 /// The tightened band, in noise sigmas: wide enough to cut no tail of

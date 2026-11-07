@@ -92,3 +92,24 @@ fn a_sphere_is_still_refused_by_name() {
     let e = fit(&s).expect_err("a sphere has no one axis");
     assert!(e.to_string().contains("equally"), "{e}");
 }
+
+#[test]
+fn a_plate_with_an_off_centre_boss_is_refused_by_name() {
+    // Review of PR #204: a 100 x 100 x 10 plate, two triangles a face,
+    // with a turned r5 h10 boss at (20, 20). The boss is most of the
+    // facets but 1.3 % of the area; the plate's face lines all meet at
+    // its centre. Neither may lend the part an axis.
+    let q = Point3::new;
+    let (a, t) = (50.0, 10.0);
+    let v = [q(-a, -a, 0.0), q(a, -a, 0.0), q(a, a, 0.0), q(-a, a, 0.0), q(-a, -a, t), q(a, -a, t), q(a, a, t), q(-a, a, t)];
+    let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+    let mut f = Vec::new();
+    for [i, j, k, l] in quads {
+        f.push(Triangle::new(v[i], v[j], v[k]));
+        f.push(Triangle::new(v[i], v[k], v[l]));
+    }
+    let m = |p: Point3| q(p.x + 20.0, p.y + 20.0, p.z + 15.0);
+    f.extend(bar(5.0, 10.0, false).iter().map(|b| Triangle::new(m(b.a), m(b.b), m(b.c))));
+    let e = fit(&f).expect_err("a plate is not turned about a point of its faces");
+    assert!(e.to_string().contains("share no rotation axis"), "{e}");
+}
