@@ -12510,6 +12510,69 @@ fail-open at its edges. Taken:
   it speaks whatever #82 does to the planner. The 44 mm box test stays as
   the planner-tracking twin (vacuous after #82, by design).
 
+## #74: GPU adapter selection on hybrid laptops, frame-time budget (2026-11-07)
+
+User report: Intel UHD + Quadro P3200 laptop never renders on the Intel
+adapter, the NVIDIA chip does not take over, and the P3200 lags 1-2 s on an
+empty scene. Chosen:
+
+- **Adapter order** (`egui_app/gpu_select.rs`, pure, unit-tested on a
+  synthetic hybrid list): inside each backend mask of the existing chain
+  (preferred -> PRIMARY -> all), enumerate every adapter and log it (name,
+  vendor, device, type, backend, presentable or not), then try: the adapter
+  the user named -> the GPU wgpu's `PowerPreference::HighPerformance`
+  request answers with (any of its backends) -> every other presentable
+  adapter, discrete -> integrated -> virtual -> other -> cpu; ties go to the
+  platform's native backend (DX12 on Windows, Metal on macOS, Vulkan
+  elsewhere), then enumeration order. Adapters that cannot present to the
+  window are skipped by name. Each candidate must give a device AND a
+  surface configure that passes a validation scope; a failure logs its
+  reason and moves to the next adapter, and adapters that failed under an
+  earlier mask are not retried. When none works the refusal names every
+  adapter tried and why, on stderr and in a native dialog.
+- **Native backend before Vulkan for the same GPU**: on Optimus laptops a
+  discrete Vulkan device presents through a cross-adapter copy to the
+  iGPU-owned display; DXGI (DX12) does that natively. Ranking by backend
+  inside the HP pick is the one change in default behaviour on Windows.
+- **Surface config from capabilities**: the surface's own first format,
+  Fifo (present in every spec-conforming surface) unless absent, Opaque
+  alpha when offered else the first reported. Replaces get_default_config +
+  a hard-wired AutoVsync.
+- **Adapter choice setting**: `--gpu <name substring>` over
+  `CAMCRAFT_GPU=<substring>`, the pattern `--gpu-backend` /
+  `CAMCRAFT_GPU_BACKEND` already set. Not a world setting through the
+  command path: the choice is consumed before the window and the document
+  exist, cannot be changed live, and is per machine, not per project.
+  Dropped for now: a preferences page entry (no persisted per-machine
+  settings store exists yet - it would have to be built first).
+- **Stall**: no blocking readback or `device.poll(Wait)` is on the idle
+  frame path (the readbacks are test/diagnostic only; the traced-stock eye
+  only marches with Deviate/playback armed). Not reproducible headlessly, so
+  a frame-time budget (`egui_app/frame_watch.rs`) logs any frame over
+  100 ms naming its phases (commands+scene, ui, acquire, encode,
+  submit+present), rate-limited to one line per 5 s. The reporter's log
+  pins the phase; the DX12-first ordering is the leading suspect fix.
+  Dropped: switching the loop from Poll to redraw-on-input (changes
+  playback animation behaviour; not proven to be the cause).
+- **Review fixes (PR #76)**: (1) each candidate's configure, View3D build
+  and a presented test frame (acquire, clear, submit, present, then a
+  5 s-bounded `device.poll`) run inside Validation + OutOfMemory + Internal
+  error scopes - OOM/Internal would otherwise reach wgpu's panicking
+  default handler - and a device-lost callback flags a lost device, which
+  wgpu 30 reports only through that callback; any of these fails the
+  adapter by name and the next one is tried. Occluded/Timeout/Outdated on
+  the test frame are not held against the adapter (window not presentable
+  yet). (2) "Same GPU" across backends matches on PCI vendor + device ids
+  when both are non-zero (DXGI and Vulkan name GPUs differently), the name
+  only otherwise, so the DX12 entry shares the HP rank. (3) The refusal
+  lists skipped adapters and empty backend masks, not "no adapter found".
+  (4) The View3D pipeline is built per candidate: a failure there drops
+  that adapter and tries the next, instead of exiting with no dialog.
+  (5) `--gpu=x` / `--gpu-backend=x` parse; a surface-handle failure keeps
+  the failures collected so far. Dropped: rendering a full egui frame as
+  the test (needs the renderer per candidate; a clear+present exercises
+  the same present path).
+
 ## #67: the cross drill measures about the work offset's spindle (2026-11-07)
 
 `drilling::cross_drill` measures every standoff (bar radius, a station's
