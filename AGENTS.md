@@ -50,10 +50,19 @@ design context, never add work to them. Decisions still go to
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked"`
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review"`
   and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
+- **Start from the latest main, on a branch of its own** (user, 2026-11-07:
+  "make sure we are on the latest main by pulling data from github then
+  create a new branch to work off of"). Before the first edit:
+  `git fetch origin && git switch main && git pull --ff-only origin main`,
+  then `git switch -c issue/N-<slug>` (a worktree agent:
+  `git worktree add -b issue/N-<slug> <path> origin/main`). One issue, one
+  branch; every commit for it lands there, never on `main`. Work that needs
+  an unmerged branch branches off that branch and its PR says
+  "stacked on #M".
 - **Claim before any code.** One command, so every agent sees it at once:
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
@@ -66,26 +75,39 @@ design context, never add work to them. Decisions still go to
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
   work, open a new issue for it (labels: one `P*`, one or more `area:*`)
   rather than burying it.
-- **Close only when the fix is on GitHub.** The fixing commit ends its body
-  with `Fixes #N` (`Refs #N` for partial work, which never closes). The
-  issue closes when that commit is pushed to `origin/main` - GitHub closes
-  it from the keyword; a local commit closes nothing. Then, in the same
-  step: remove `claimed`, and comment `fixed in <commit> · pinned by <test
-  name(s)> · ships in the next release (Unreleased)`.
+- **Done on a branch = pushed + PR, never merged to main** (user,
+  2026-11-07: "when closing an issue we should push the branch, not merge
+  to main"). The fixing commit ends its body with `Fixes #N` (`Refs #N` for
+  partial work, which never closes). When its gate is green:
+  `git push -u origin issue/N-<slug>`, then
+  `gh pr create --base main --head issue/N-<slug> --title "<conventional
+  subject>" --body-file <file>` - the body says what changed, the readings,
+  the pinning test(s), a `Changelog:` line (the one-line row text, or
+  `none` for docs/test-only) and ends `Fixes #N`. Then, in the same step:
+  swap `claimed` for `in-review`, and comment `fix on issue/N-<slug> · PR #M
+  · pinned by <test name(s)> · merges at the next cut`. The issue closes
+  when the PR merges to `main` (GitHub closes it from the keyword). A
+  review finding is fixed on the same branch and pushed (plain push, never
+  force).
 - **Never close by hand without a commit**, except: a duplicate (link the
   original), already done (name the commit that did it), or a decided
   won't-do (label `wontfix`, give the reason). Each needs that comment.
 - **User-reported bugs reopen, never re-file.** If the user still sees the
   bug in a build that carries the fix, reopen the same issue with what they
   saw; the claim starts again.
-- **At a release cut**, comment `shipped in vX.Y.Z` on every issue closed
-  since the previous cut (the `Unreleased` rows of `CHANGELOG.md` name them).
+- **At a release cut**, comment `shipped in vX.Y.Z` on every issue the cut's
+  merged PRs closed (their `Fixes #N`), and drop `in-review` from them.
 - **Giving up without a fix:** remove `claimed`, comment what was learned,
-  leave it open.
-- **Changelog.** Every commit that changes behaviour adds one row to the
-  table in `CHANGELOG.md`: `| <short commit> | <YYYY-MM-DD> | <change, one
-  line> (#N) | Unreleased |`; a release cut replaces `Unreleased` with the
-  version it ships in. Docs-only and release-mechanics commits need no row.
+  leave it open. A pushed branch with held work is named in that comment;
+  an empty one is deleted (`git push origin --delete issue/N-<slug>`).
+- **Changelog.** Every PR that changes behaviour carries its row text in
+  its body (`Changelog:` line); the row is written into `CHANGELOG.md` on
+  the release branch at the cut, not on the issue branch (each branch
+  writing the table's top row would make every open PR conflict):
+  `| <short merge commit> | <YYYY-MM-DD> | <change, one line> (#N, PR #M) |
+  X.Y.Z |`. Docs-only and release-mechanics PRs need no row. Rows marked
+  `Unreleased` (from before the branch flow) take the version at the next
+  cut.
 
 ## Clean-Room Protocol
 
@@ -353,23 +375,53 @@ While the major is 0 (until the clean-room audit releases 1.0.0), a breaking
 change bumps MINOR instead and its release notes say "breaking" first.
 
 **When to cut.** Fixing an issue ends in a patch release; landing a feature
-ends in a minor one - cut as soon as the change is committed and gated,
-not on a calendar (the release train in the frozen ROADMAP.md is retired).
-Several fixes that land in one sitting share one patch. **Only MAJOR and
+ends in a minor one - cut as soon as one or more issue PRs are gated and
+waiting, not on a calendar (the release train in the frozen ROADMAP.md is
+retired). Several fixes from one sitting share one cut. **Only MAJOR and
 MINOR tags build on GitHub**: `release.yml` triggers on `vX.Y.0` alone, so a
 patch tag is pushed as a marker (and its local zip is the hand-test build)
 while GitHub builds and publishes an artifact only for a feature release -
 each such build costs ~30-40 billed minutes of the Actions budget. To ship a
-patch artifact anyway, run Release by hand (`workflow_dispatch`). The cut:
-`scripts/release.ps1 -Version X.Y.Z` (runs the release gate tier unless the
-same tree already passed it), CHANGELOG.md's `Unreleased` rows become
-`X.Y.Z`, then publish (below) and comment `shipped in vX.Y.Z` on every
-issue it closed.
+patch artifact anyway, run Release by hand (`workflow_dispatch`). PRs run no
+Actions (no `pull_request` trigger), so the PR flow costs no minutes.
 
-**Every cut tag is published.** A release cut is not done until it is on
-GitHub: after the tag is made locally (`scripts/release.ps1`), push the
-branch, then the tag - `git push origin main && git push origin vX.Y.Z` -
-which, for a MAJOR or MINOR tag, fires `release.yml` and attaches the
-built artifact to a GitHub release (a patch tag is pushed without a build). A tag that exists only locally is an unfinished cut. Never move or
-re-push an existing tag; a fix after a cut is the next patch version. Never
-force-push.
+**A cut goes PR review → merge to main → tag** (user, 2026-11-07: "when
+cutting a tag, we are doing that by PR review, merging to main, then we cut
+a tag"):
+
+1. **Review and merge the issue PRs.** Each open `in-review` PR gets a
+   review by a subagent that did not write it (`/code-review` on the PR, or
+   a reviewer briefed with the diff, not the author's conclusion); findings
+   are fixed on that branch and pushed. A PR that no longer merges cleanly
+   takes `git merge origin/main` on its branch (append-only files such as
+   `RECOMMENDED.md` keep both sides), is re-gated (quick), and pushed. Then
+   `gh pr merge M --merge --delete-branch` - merge commits, never squash or
+   rebase, so branch commits keep the hashes the issue comments name.
+2. **Release branch.** Sync main (`git pull --ff-only`), then
+   `git switch -c release/vX.Y.Z`. The version is the highest bump among
+   the merged PRs' commits (table above). Run the release gate tier on it;
+   write `RELEASE_NOTES.md` and the `CHANGELOG.md` rows (one per merged
+   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows),
+   commit as `docs: X.Y.Z release notes; changelog`; then
+   `scripts/release.ps1 -Version X.Y.Z -SkipGate -NoTag` (the version bump
+   commits, the zip and installer - no tag yet).
+3. **Release PR.** `git push -u origin release/vX.Y.Z`,
+   `gh pr create --base main --title "chore(release): X.Y.Z"`, reviewed like
+   any PR, then `gh pr merge --merge --delete-branch`.
+4. **Tag main.** Sync main; check `git diff release/vX.Y.Z main` is empty
+   (the zip's tree is the merged tree), then
+   `git tag -a vX.Y.Z -m "CamCraft X.Y.Z"` on main's merge commit and
+   `git push origin vX.Y.Z`. Comment `shipped in vX.Y.Z` on every issue the
+   cut closed.
+
+Docs-, process- and CI-only PRs (no behaviour, no release) merge once
+reviewed, without waiting for a cut.
+
+**Every cut tag is published.** A release cut is not done until its tag is
+on GitHub: the tag is made on `main` after the release PR merges (step 4)
+and pushed at once - `git push origin vX.Y.Z` - which, for a MAJOR or MINOR
+tag, fires `release.yml` and attaches the built artifact to a GitHub
+release (a patch tag is pushed without a build). A tag that exists only
+locally is an unfinished cut. Never move or re-push an existing tag; a fix
+after a cut is the next patch version. Never force-push - not `main`, not a
+branch with an open PR.

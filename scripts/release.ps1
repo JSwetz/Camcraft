@@ -10,7 +10,11 @@ param(
     [switch]$SkipGate,
     [switch]$SkipBuild,
     [switch]$Installer,
-    [switch]$DryRun
+    [switch]$DryRun,
+    # Branch/PR flow (AGENTS.md "A cut goes PR review -> merge -> tag"):
+    # commit the bump on release/vX.Y.Z and build, but leave the tag to
+    # main after the release PR merges.
+    [switch]$NoTag
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -116,7 +120,8 @@ if ($DryRun) {
     Write-Host "[dry-run] git add Cargo.toml RELEASE_NOTES.md TESTING.md RECOMMENDED.md (if changed)"
     Write-Host "[dry-run] git commit -m 'chore(release): $Version - $Title' (+ Co-Authored-By)"
     Write-Host "[dry-run] git add Cargo.lock; git commit -m 'chore(release): sync Cargo.lock to $Version'"
-    Write-Host "[dry-run] git tag -a $tag -m 'CamCraft $Version'"
+    if ($NoTag) { Write-Host "[dry-run] no tag (-NoTag): tag main after the release PR merges" }
+    else { Write-Host "[dry-run] git tag -a $tag -m 'CamCraft $Version'" }
 } else {
     foreach ($f in @("Cargo.toml", "RELEASE_NOTES.md", "TESTING.md", "RECOMMENDED.md")) {
         if (git status --porcelain -- $f) { git add -- $f; if ($LASTEXITCODE -ne 0) { Fail "git add $f" } }
@@ -124,7 +129,8 @@ if ($DryRun) {
     Run "git" @("commit", "-m", $msg1)
     Run "git" @("add", "Cargo.lock")
     Run "git" @("commit", "-m", $msg2)
-    Run "git" @("tag", "-a", $tag, "-m", "CamCraft $Version")
+    if ($NoTag) { Write-Host "no tag (-NoTag): tag main after the release PR merges" }
+    else { Run "git" @("tag", "-a", $tag, "-m", "CamCraft $Version") }
 }
 
 # ---- 5. Build -----------------------------------------------------------
@@ -205,6 +211,12 @@ if (-not $Installer) {
 Banner "Phase 10/10: done"
 Write-Host "Zip: $zip"
 if ($Installer -and (Test-Path $setup)) { Write-Host "Installer: $setup" }
-Write-Host "To publish: git push origin main && git push origin $tag"
+if ($NoTag) {
+    $branch = (git rev-parse --abbrev-ref HEAD)
+    Write-Host "Next: git push -u origin $branch; gh pr create --base main --title 'chore(release): $Version'"
+    Write-Host "      after it merges: git switch main; git pull --ff-only; git tag -a $tag -m 'CamCraft $Version'; git push origin $tag"
+} else {
+    Write-Host "To publish: git push origin main && git push origin $tag"
+}
 Write-Host "NOTHING WAS PUSHED. Pushing is left to you."
 exit 0

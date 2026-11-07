@@ -55,7 +55,9 @@ filter by default, the exact fn name with `-Exact`. A match that is
 
 ## Release
 
-`release.ps1` cuts a release: preflight, gate, version bump, commits and tag,
+`release.ps1` cuts a release: preflight, gate, version bump, commits and tag
+(`-NoTag` on a `release/vX.Y.Z` branch: no tag - main is tagged after the
+release PR merges, AGENTS.md "A cut goes PR review"),
 release build, signing (if configured), the portable zip (same layout as
 `.github/workflows/release.yml`) and, on request, the installer.
 
