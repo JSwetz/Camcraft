@@ -13183,6 +13183,23 @@ revolved (follow-up material if users hit it with long keyways).
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
 
+## #61: split stock simulation at domain seams (2026-11-07)
+
+- **Chosen:** Move `Stock::block`, `from_shape`, `from_facets`, and private
+  `block_field` into `backend_build.rs`; keep simulation, verdict methods,
+  and existing API paths in `backend.rs`. Move `Sweep`, its golden-section
+  constants, and `window_of` into `field_sweep.rs`; keep `SdfTool` and field
+  subtraction entry points in `field_cut.rs`, re-exporting `Sweep` there as
+  `pub(crate)` for current sibling callers. Register both private modules
+  and preserve the moved bodies. Provenance remains the existing CamCraft
+  modules; no external or vendor source is introduced.
+- **Dropped:** Algorithm or public-API redesign, a new helper abstraction,
+  and arbitrary mid-function cuts; domain seams reduce size without
+  widening behavior. No dependency, golden, or test edits; existing sim
+  and app `stock_*` / `lathe_field_sim` suites remain the guard.
+- **Cost to change later:** Reverse the two private module moves; callers
+  retain the current `field_cut` `Sweep` path.
+
 ## #117 - the cross drill is judged against the finished part (2026-11-07, Prime Directive)
 
 - **Chosen:** the cross arm refuses by name (a `GenError`, so nothing
@@ -13273,20 +13290,3 @@ revolved (follow-up material if users hit it with long keyways).
   them. Dropped: an exact disc-versus-polygon minimum of the lifted
   surface (needs a lifted-tool / stock-edge distance per wall segment;
   the ring bound d / 8 plus the chord bulge is stated instead).
-
-## #61: split stock simulation at domain seams (2026-11-07)
-
-- **Chosen:** Move `Stock::block`, `from_shape`, `from_facets`, and private
-  `block_field` into `backend_build.rs`; keep simulation, verdict methods,
-  and existing API paths in `backend.rs`. Move `Sweep`, its golden-section
-  constants, and `window_of` into `field_sweep.rs`; keep `SdfTool` and field
-  subtraction entry points in `field_cut.rs`, re-exporting `Sweep` there as
-  `pub(crate)` for current sibling callers. Register both private modules
-  and preserve the moved bodies. Provenance remains the existing CamCraft
-  modules; no external or vendor source is introduced.
-- **Dropped:** Algorithm or public-API redesign, a new helper abstraction,
-  and arbitrary mid-function cuts; domain seams reduce size without
-  widening behavior. No dependency, golden, or test edits; existing sim
-  and app `stock_*` / `lathe_field_sim` suites remain the guard.
-- **Cost to change later:** Reverse the two private module moves; callers
-  retain the current `field_cut` `Sweep` path.
