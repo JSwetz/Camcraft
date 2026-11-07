@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=CamCraft
+Comment=Computer-aided manufacturing
+Exec=camcraft
+Icon=camcraft
+Terminal=false
+Categories=Graphics;Engineering;

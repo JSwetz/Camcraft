@@ -1,0 +1,58 @@
+# CamCraft source package for Arch Linux and the AUR.
+# Provenance: Arch Linux Rust package guidelines and CamCraft's release layout.
+pkgname=camcraft
+pkgver=0.12.1
+pkgrel=1
+pkgdesc='Computer-aided manufacturing application'
+arch=('x86_64')
+url='https://github.com/NeoTech/Camcraft'
+license=('MIT')
+depends=('glibc' 'libgcc' 'libxkbcommon' 'libxkbcommon-x11' 'libx11'
+         'wayland' 'vulkan-icd-loader' 'libglvnd')
+makedepends=('cargo' 'pkgconf')
+# Flecs compiles bundled C with cc-rs; Arch GCC LTO objects cannot be linked
+# by rust-lld, leaving every Flecs C symbol undefined at the final link.
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        'camcraft.desktop')
+sha256sums=('3b36cfef889001d3692d079a99db3b51fa313737782169519144564dd61c66a6'
+            '55fc7185f3f84c3db22e4210e049f1838c3ace8c158c4f20cebed4ce31b44621')
+
+prepare() {
+    cd "$srcdir/Camcraft-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+    cd "$srcdir/Camcraft-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+    cargo build --frozen --release -p camcraft-ui -p camcraft-app -p camcraft-post
+}
+
+check() {
+    cd "$srcdir/Camcraft-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+    cargo test --frozen -p camcraft-app -p camcraft-post --lib
+}
+
+package() {
+    cd "$srcdir/Camcraft-$pkgver"
+    install -dm755 "$pkgdir/usr/lib/camcraft/assets" "$pkgdir/usr/bin"
+    for _binary in camcraft-ui camcraft-cli post; do
+        install -Dm755 "target/release/$_binary" "$pkgdir/usr/lib/camcraft/$_binary"
+    done
+    for _asset in posts machines ui scripts themes; do
+        cp -a "assets/$_asset" "$pkgdir/usr/lib/camcraft/assets/$_asset"
+    done
+    for _pair in camcraft:camcraft-ui camcraft-cli:camcraft-cli camcraft-post:post; do
+        _command=${_pair%%:*}
+        _binary=${_pair#*:}
+        printf '#!/bin/sh\nexec /usr/lib/camcraft/%s "$@"\n' "$_binary" > "$pkgdir/usr/bin/$_command"
+        chmod 755 "$pkgdir/usr/bin/$_command"
+    done
+    install -Dm644 "$srcdir/camcraft.desktop" "$pkgdir/usr/share/applications/camcraft.desktop"
+    install -Dm644 assets/ui/cube.png "$pkgdir/usr/share/pixmaps/camcraft.png"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/camcraft/LICENSE"
+    install -Dm644 TESTING.md "$pkgdir/usr/share/doc/camcraft/TESTING.md"
+}
