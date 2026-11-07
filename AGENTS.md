@@ -74,11 +74,21 @@ design context, never add work to them. Decisions still go to
   carries `claimed` unless its last claim comment is older than 4 hours with
   no newer comment from the claimant - then it is stale: comment "reclaimed
   from <old claimant> (stale)" and take it.
+- **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
+  an Agent should have the tag source:agent"). Every issue an agent opens
+  carries the `source:agent` label alongside its `P*` and `area:*` labels -
+  including a bug the user reported in chat and an agent filed for them.
+  An issue a human opens on GitHub never gets it. Agents and the user share
+  one GitHub account, so the label, not the author, tells them apart.
+- **Outside contributors' claims count.** A claim comment from a
+  contributor without label rights is a claim: the main session sets
+  `claimed` and the assignee for them and replies, and their issue is not
+  picked while the claim is fresh (4 h rule).
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
   work, open a new issue for it (labels: one `P*`, one or more `area:*`)
-  rather than burying it.
+  rather than burying it (and `source:agent`).
 - **Done on a branch = pushed + PR, never merged to main** (user,
   2026-11-07: "when closing an issue we should push the branch, not merge
   to main"); issue PRs merge only at a cut (docs/process/CI-only PRs are
@@ -434,11 +444,29 @@ a tag"):
 unauthorized pushes into main instead they follow the rules"): every change
 reaches it through a PR (0 approvals required - the agent and the user push
 as the same account, which cannot approve its own PR; the review is the
-subagent's), admins included; no force-push, no deletion; open review
+subagent's, for our own PRs; outside PRs wait for the user, below), admins included; no force-push, no deletion; open review
 conversations must be resolved before a merge; the repo allows merge
 commits only (squash and rebase merging are off). A direct `git push origin
 main` is refused by GitHub - the legacy direct cut is gone. Tags are not
 covered and are pushed as before (step 4).
+
+**Outside PRs are reviewed with `/review-prs`** (user, 2026-11-07: "Add the
+use of the /review-prs into agents.md"). A pull request from a fork gets a
+review by the `PR-reviewer` agent (`.claude/agents/PR-reviewer.md`),
+dispatched by the project skill `/review-prs` (`.claude/skills/review-prs/`) -
+run on demand (`/review-prs`, or `/review-prs <N>` for one PR) and on a loop
+(`/loop 10m /review-prs`, every 10 minutes). The agent trial-merges the PR with current main in
+its own worktree, builds, runs the suites it touches and clippy, checks this
+file's laws, and posts a plain review **comment** whose first line is
+`<!-- pr-reviewer: <head sha> -->` (the marker that stops a second review of
+the same push). It never approves, requests changes, merges, pushes or labels:
+the user approves and merges an outside PR by hand ("make sure u leave a
+comment and allow us to approve it manually"). **Never two PR reviews at
+once** ("make sure we are not running concurrent PR reviews"): one PR per
+`/review-prs` run, guarded by the lock `.claude/pr-review.lock` (`<N> <sha>
+<UTC>`) - a run that finds a lock younger than 90 min stops; an older one is
+stale and is cleared with its leftover `../cc-pr<N>-review` worktree. Our own
+issue PRs are not reviewed here; the cut reviews them (step 1 above).
 
 Docs-, process- and CI-only PRs (no behaviour, no release) merge once
 reviewed by a subagent that did not write them, without waiting for a cut;

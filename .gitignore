@@ -17,7 +17,12 @@
 
 # --- editor / agent / personal local config -----------------------------
 # .github/ stays tracked: CI + the release pipeline that builds the artifact.
-/.claude/
+# .claude: share the project's agents and skills; keep machine-local state out
+# (settings*.json, worktrees/, lock files, anything else Claude Code writes).
+/.claude/*
+!/.claude/agents/
+!/.claude/skills/
+/.claude/**/*.lock
 /.vscode/
 /.idea/
 run.sh

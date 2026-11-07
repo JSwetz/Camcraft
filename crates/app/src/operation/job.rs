@@ -183,6 +183,16 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
     let machine_kind = crate::machine::kind_of(world);
+    // The lathe spindle law (issue #62): every kind that turns about the
+    // fitted axis - the turning family, and the lathe's axial Drill -
+    // must have that axis ON the spindle the post programs (world Z
+    // through the work offset's origin, the very origin `wcs_context`
+    // hands the post), or it is refused here, before a move exists.
+    // (The post reads it again, against the origin it is handed then.)
+    if super::spindle_law::turns(world, &op.params) {
+        let (slot, origin) = crate::posting::wcs_context(world, setup, &op.params);
+        super::spindle_law::check(&material.facets, origin, slot)?;
+    }
     let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);

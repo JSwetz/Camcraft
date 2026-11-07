@@ -44,7 +44,7 @@ use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
 use crate::model;
 use crate::schema::{
-    Location, Operation, SetupDef, StockDef, Wcs, STOCK_NAME, WCS_SLOTS,
+    Location, Operation, OperationMeta, SetupDef, StockDef, Wcs, STOCK_NAME, WCS_SLOTS,
 };
 use crate::setup;
 use crate::stock::StockShape;
@@ -366,6 +366,8 @@ pub struct SetOperationSetup {
     name: String,
     prev: Operation,
     next: Operation,
+    prev_meta: OperationMeta,
+    next_meta: OperationMeta,
 }
 
 impl SetOperationSetup {
@@ -393,10 +395,17 @@ impl SetOperationSetup {
             setup: target.map(str::to_string),
             ..prev.clone()
         };
+        let prev_meta = model::operation_meta_of(world, &entity);
+        let mut next_meta = prev_meta.clone();
+        // A rank belongs to its old setup. A moved operation joins the
+        // target's unranked tail until the user places it there.
+        next_meta.order = None;
         Ok(SetOperationSetup {
             name: op_name.to_string(),
             prev,
             next,
+            prev_meta,
+            next_meta,
         })
     }
 }
@@ -405,12 +414,14 @@ impl Command for SetOperationSetup {
     fn apply(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             entity.entity_view(world).set(self.next.clone());
+            entity.entity_view(world).set(self.next_meta.clone());
         }
     }
 
     fn invert(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             entity.entity_view(world).set(self.prev.clone());
+            entity.entity_view(world).set(self.prev_meta.clone());
         }
     }
 }

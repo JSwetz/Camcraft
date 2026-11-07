@@ -346,7 +346,7 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
 /// what would post* holds by construction, not by two copies of the
 /// law agreeing (stage D makes the agreement load-bearing).
 pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
-    // THE order law by call (M3.2 A): setup rank, then name - the same
+    // THE order law by call (M3.2 A): setup rank, then operation position - the same
     // walk re-machining, the sim and the machine-limit check make.
     let ops: Vec<(String, Entity)> = crate::setup::operation_order(world);
     if ops.is_empty() {
@@ -363,6 +363,15 @@ pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
         // the tool went wrong never posts behind the warning.
         if let Some(why) = operation::tool_gate::tool_problem_of(world, e) {
             return Err(format!("{why} - fix the tool before posting"));
+        }
+        // Issue #62 at the post, before freshness (like the tool gate:
+        // "regenerate" alone is the wrong advice when generation would
+        // refuse too): the post measures every diameter from where the
+        // work offset is NOW, so the spindle law is read again against
+        // that origin - a moved offset refuses by name, whatever the
+        // stamp says.
+        if let Some(why) = operation::spindle_law::post_problem(world, name, e) {
+            return Err(why);
         }
         match operation::status_of(world, e) {
             OpStatus::Never => {
@@ -583,8 +592,9 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             ),
             _ => (None, false, false, None),
         };
+        let display_name = model::operation_label(world, name, e);
         let d = Dump {
-            op_name: name,
+            op_name: &display_name,
             part_load,
             part_unload,
             part_transfer,

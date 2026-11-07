@@ -1,4 +1,4 @@
-//! Project save/load: `.camproj`, JSON, version 20.
+//! Project save/load: `.camproj`, JSON, version 50.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -97,7 +97,7 @@ use crate::machining3d::Entry3D;
 use crate::model;
 use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
-    FixtureDef, Location, Operation, STOCK_NAME, SetupDef, StockDef, ToolDef,
+    FixtureDef, Location, Operation, OperationMeta, STOCK_NAME, SetupDef, StockDef, ToolDef,
     Toolpath as ToolpathCache, WCS_SLOTS, Wcs,
 };
 use crate::stock::{self, StockShape};

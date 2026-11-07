@@ -71,14 +71,16 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
     }
     let mvp = state.cam.mvp(f64::from(w / h));
     let eye = state.cam.eye();
-    let hidden = |name: &str| state.hidden_models.iter().any(|h| h == name);
+    let hidden = |name: &str| state.hidden_in_view(name);
     let mut entities: Vec<(String, flecs_ecs::prelude::Entity)> =
         model::model_entities(&state.world).into_iter().filter(|(n, _)| !hidden(n)).collect();
     let stock_name = camcraft_app::setup::stock_entity_name(
         &state.world,
         camcraft_app::setup::active(&state.world).as_deref(),
     );
-    if let Some(stock) = model::find_by_name(&state.world, &stock_name) {
+    if !state.active_stock_hidden()
+        && let Some(stock) = model::find_by_name(&state.world, &stock_name)
+    {
         entities.push((stock_name, stock));
     }
     // (entity, id, world position) per candidate, aligned with `pts`.

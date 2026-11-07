@@ -8,7 +8,7 @@ use super::*;
 /// is exactly the "Stale" reading a deleted tool should give.
 /// The digest of an operation's inputs as they stand right now.
 /// `op_name` is the operation's own name: re-machining digests the
-/// program AHEAD of it (M3.1 D), and program order is name order, so
+/// program AHEAD of it (M3.1 D), and its position can be edited, so
 /// the name is part of the question. Callers that build a stamp for an
 /// operation that has no entity yet (or none that matters) pass `""`,
 /// which reads as "no predecessors" and writes no rest term.
@@ -116,6 +116,19 @@ pub fn current_stamp(
         h.write_u8(0xCC);
     }
     params.stamp_with(world, setup, Some(src), &mut h);
+    // Issue #62: a kind that turns about the spindle measures every
+    // diameter from its work offset's origin, so moving that origin is
+    // a moved input - the op goes Stale. Written only off the world
+    // origin, so no digest of an op on an untouched offset changes.
+    if super::spindle_law::turns(world, params) {
+        let (_, o) = crate::posting::wcs_context(world, setup, params);
+        if o != [0.0; 3] {
+            h.write(b"spindle-origin");
+            for v in o {
+                w(&mut h, v);
+            }
+        }
+    }
     match src {
         SrcRef::Stock => {
             h.write_u8(b'S');

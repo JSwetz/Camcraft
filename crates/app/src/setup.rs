@@ -18,7 +18,8 @@
 //!   untouched. `None` anywhere a setup is expected means "the first
 //!   setup by name", which collapses to that same legacy behavior.
 //! - **One order law, shared by call.** [`operation_order`] is THE
-//!   program sequence: setup rank first, name order within a setup
+//!   program sequence: setup rank first, explicit operation position
+//!   within a setup (name order for legacy operations without a position)
 //!   (`Setup1` before `Setup2`, always). The post, re-machining, the
 //!   document sim and batch regenerate all call this one function,
 //!   upgrading M3.1 D's "shared by reference" to "shared by call" -
@@ -136,23 +137,25 @@ pub fn rank(order: &[String], declared: Option<&str>) -> usize {
     }
 }
 
-/// Every operation in program order: setup rank, then name. THE
+/// Every operation in program order: setup rank, then explicit position,
+/// then stable key. Older operations without a position retain name order. THE
 /// sequence - see the module header; `posting::program_ops`,
 /// `rest::ahead_of`, `stock_sim::simulate_document`,
 /// `machine::check_document` and `RegenerateAll` all walk this.
 #[must_use]
 pub fn operation_order(world: &World) -> Vec<(String, flecs_ecs::prelude::Entity)> {
     let order = names(world);
-    let mut ops: Vec<(usize, String, flecs_ecs::prelude::Entity)> = model::named_entities(world)
+    let mut ops: Vec<(usize, u32, String, flecs_ecs::prelude::Entity)> = model::named_entities(world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(world, e))
         .map(|(n, e)| {
             let declared = model::operation_of(world, &e).and_then(|o| o.setup);
-            (rank(&order, declared.as_deref()), n, e)
+            let position = model::operation_meta_of(world, &e).order.unwrap_or(u32::MAX);
+            (rank(&order, declared.as_deref()), position, n, e)
         })
         .collect();
-    ops.sort_by_key(|(r, _, _)| *r); // stable: name order survives within a rank
-    ops.into_iter().map(|(_, n, e)| (n, e)).collect()
+    ops.sort_by_key(|(r, position, _, _)| (*r, *position)); // stable: key order breaks ties
+    ops.into_iter().map(|(_, _, n, e)| (n, e)).collect()
 }
 
 /// Does an operation with this declared setup machine in `target`? The
