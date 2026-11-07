@@ -474,6 +474,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // stamp digest changed, so it regenerates once, saying so.
         file.version = 49;
     }
+    if file.version == 49 {
+        // v49 has no explicit order or display labels; the optional keys
+        // default to name order and the stable entity name respectively.
+        file.version = 50;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -490,6 +495,18 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     // in the list must not leave a half-loaded document behind.
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
+    }
+    let keys: std::collections::HashSet<&str> = file.entities.iter()
+        .filter(|e| e.kind == Some(EntityKind::Operation))
+        .map(|e| e.name.as_str()).collect();
+    let mut labels = std::collections::HashSet::new();
+    for dto in &file.entities {
+        if let Some(op) = &dto.operation {
+            let label = op.label.as_deref().unwrap_or(&dto.name);
+            if !labels.insert(label) || (label != dto.name && keys.contains(label)) {
+                return Err(corrupt(format!("operation label '{label}' conflicts with another operation")));
+            }
+        }
     }
     if let Some(m) = &file.machine
         && !m.machine.is_sane()
@@ -646,6 +663,12 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     setup: odto.setup,
                     area: odto.area.to_controls(),
                 });
+                if odto.label.is_some() || odto.order.is_some() {
+                    entity.entity_view(world).set(OperationMeta {
+                        label: odto.label,
+                        order: odto.order,
+                    });
+                }
                 if let Some(cache) = &odto.cache {
                     entity.entity_view(world).set(cache.to_cache());
                 }

@@ -265,6 +265,12 @@ pub struct FixtureDto {
 /// on screen) is legitimate and reads Stale.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct OperationDto {
+    /// Optional UI label; the enclosing entity name remains its stable key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Position within the setup; absent preserves legacy name order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
     pub tool: String,
     pub src: SrcDto,
     pub params: ParamsDto,

@@ -11,7 +11,7 @@ use flecs_ecs::prelude::{Entity, World};
 
 use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
 use crate::schema::{
-    Facets, Location, Name, Operation, Selected, StockDef, ToolDef, Toolpath, Wcs,
+    Facets, Location, Name, Operation, OperationMeta, Selected, StockDef, ToolDef, Toolpath, Wcs,
 };
 use crate::stock::StockShape;
 
@@ -105,6 +105,18 @@ pub fn find_by_name(world: &World, name: &str) -> Option<Entity> {
         }
     });
     found
+}
+
+/// Optional presentation data; old documents and test worlds use defaults.
+#[must_use]
+pub fn operation_meta_of(world: &World, entity: &Entity) -> OperationMeta {
+    entity.entity_view(world).try_get::<&OperationMeta>(Clone::clone).unwrap_or_default()
+}
+
+/// The name shown to people, separate from the stable entity key.
+#[must_use]
+pub fn operation_label(world: &World, key: &str, entity: &Entity) -> String {
+    operation_meta_of(world, entity).label.unwrap_or_else(|| key.to_owned())
 }
 
 /// All named entities, sorted by name - the serializer's iteration order.

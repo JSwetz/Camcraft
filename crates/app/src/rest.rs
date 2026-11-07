@@ -9,7 +9,7 @@
 //! ## The laws
 //!
 //! - **Program order is the post's order - by CALL, not by reference.**
-//!   [`crate::setup::operation_order`]: setup rank first, name order
+//!   [`crate::setup::operation_order`]: setup rank, then operation position
 //!   within a setup - the very function `posting::program_ops` calls.
 //!   What the machine will do first IS what was cut first; the sort's
 //!   known wart (an operation named `Operation10` sorts before

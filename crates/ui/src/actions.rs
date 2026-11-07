@@ -67,6 +67,10 @@ pub(crate) fn save_project(state: &mut State) {
     state.pending.push_back(CommandKind::SaveProjectDialog);
 }
 
+pub(crate) fn save_project_as(state: &mut State) {
+    state.pending.push_back(CommandKind::SaveProjectAsDialog);
+}
+
 /// Post every operation to one NC program (M1.7b). The dialog arm picks
 /// the path; the gate itself - generated, fresh, warning-free or refused
 /// by name - lives once in the app layer (camcraft_app::posting).
@@ -91,6 +95,14 @@ pub(crate) fn redo(state: &mut State) {
 
 pub(crate) fn delete_selected(state: &mut State) {
     state.pending.push_back(CommandKind::DeleteSelected);
+}
+
+pub(crate) fn copy_operation(state: &mut State, name: &str) {
+    state.copy_operation(name);
+}
+
+pub(crate) fn paste_operation(state: &mut State) {
+    state.paste_operation();
 }
 
 /// View: reframe the camera on the whole document (ephemeral, like the

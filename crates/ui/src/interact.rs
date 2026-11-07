@@ -129,7 +129,7 @@ fn pick_model(state: &mut State, p: [f32; 2]) {
     // stock hit is read against the machined mesh when one is drawn
     // (M13.1 owed): the click lands on what the viewer shows.
     let hit = pick::first_hit_f(&state.world, origin, dir, |name| {
-        state.hidden_models.iter().any(|h| h == name)
+        state.hidden_in_view(name)
     });
     let hit = crate::machined::filter_hit(state, origin, dir, hit);
     // The click also tells us the exact facet under the pointer;
@@ -224,7 +224,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     let facet = ray_at(state, p)
         .and_then(|(origin, dir)| {
             pick::first_hit_f(&state.world, origin, dir, |name| {
-                state.hidden_models.iter().any(|h| h == name)
+                state.hidden_in_view(name)
             })
         })
         .map_or(usize::MAX, |(_, facet, _)| facet);
@@ -246,7 +246,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
 fn hover_feature_at(state: &mut State, p: [f32; 2]) -> Option<(String, FeatureSel)> {
     let (origin, dir) = ray_at(state, p)?;
     let (entity, facet, _) = pick::first_hit_f(&state.world, origin, dir, |name| {
-        state.hidden_models.iter().any(|h| h == name)
+        state.hidden_in_view(name)
     })?;
     let sel = feature_of_facet(state, &entity, facet);
     state.hover = Some(HoverHit {
@@ -305,7 +305,7 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
     };
     let mode = state.geo_pick;
     let hit = pick::first_hit_f(&state.world, origin, dir, |name| {
-        state.hidden_models.iter().any(|h| h == name)
+        state.hidden_in_view(name)
     });
     // The machined mesh, when drawn, is what a stock hover reports
     // (M13.1 owed) - never the uncut box the ray crossed.
@@ -389,7 +389,9 @@ pub(crate) fn edge_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<(S
         &state.world,
         camcraft_app::setup::active(&state.world).as_deref(),
     );
-    if let Some(stock) = model::find_by_name(&state.world, &stock_name) {
+    if !state.active_stock_hidden()
+        && let Some(stock) = model::find_by_name(&state.world, &stock_name)
+    {
         entities.push((stock_name, stock));
     }
     let to_px = |uv: [f32; 2]| [x0 + uv[0] * w, y0 + uv[1] * h];
@@ -581,8 +583,8 @@ fn gizmo_len(state: &State) -> f64 {
 /// are the work offsets themselves.
 fn gizmos(state: &State) -> Vec<Gizmo> {
     let mut out: Vec<Gizmo> = Vec::new();
-    for (_, entity) in model::named_entities(&state.world) {
-        if !model::is_wcs(&state.world, &entity) {
+    for (name, entity) in model::named_entities(&state.world) {
+        if state.hidden_offsets.contains(&name) || !model::is_wcs(&state.world, &entity) {
             continue;
         }
         let Some(loc) = model::transform_of(&state.world, &entity) else {
@@ -655,7 +657,7 @@ pub(crate) fn feature_segments(
     aspect: f64,
     out: &mut Vec<([f32; 2], [f32; 2])>,
 ) {
-    if state.hidden_models.iter().any(|m| m == entity) {
+    if state.hidden_in_view(entity) {
         return;
     }
     let Some(found) = model::find_by_name(&state.world, entity) else {
@@ -794,9 +796,9 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
         for (axis, (rgb, dir)) in AXES.iter().enumerate() {
             let p = transform_point(
                 Point3::new(
-                    base.x + dir[0] * len * 1.08,
-                    base.y + dir[1] * len * 1.08,
-                    base.z + dir[2] * len * 1.08,
+                    dir[0] * len * 1.08,
+                    dir[1] * len * 1.08,
+                    dir[2] * len * 1.08,
                 ),
                 base,
                 gizmo.rot,
@@ -908,7 +910,7 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
     // M13.4: the move kinds wear the viewer's colour-vision palette
     // (Off = the three consts above, unchanged).
     let pal = crate::egui_app::colorvision::palette_of(&state.world);
-    for (name, entity) in model::named_entities(&state.world) {
+    for (name, entity) in camcraft_app::setup::operation_order(&state.world) {
         // Browser-eye hidden: the cache still exists and still posts, it
         // just does not draw (display state, never a geometry change).
         if state.hidden_paths.contains(&name) {
@@ -1059,8 +1061,9 @@ pub(crate) fn capped(mut lines: Vec<[f32; 6]>) -> Vec<[f32; 6]> {
 /// outline.
 pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
     let mut out = Vec::new();
-    for (_, entity) in model::named_entities(&state.world) {
-        if !model::is_operation(&state.world, &entity)
+    for (name, entity) in model::named_entities(&state.world) {
+        if state.hidden_paths.contains(&name)
+            || !model::is_operation(&state.world, &entity)
             || !model::is_selected(&state.world, &entity)
         {
             continue;
@@ -1113,8 +1116,9 @@ pub(crate) const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
 /// covers where no outline stands.
 pub(crate) fn shown_regions(state: &State) -> Vec<(f64, Option<Region>)> {
     let mut out = Vec::new();
-    for (_, entity) in model::named_entities(&state.world) {
-        if !model::is_operation(&state.world, &entity)
+    for (name, entity) in model::named_entities(&state.world) {
+        if state.hidden_paths.contains(&name)
+            || !model::is_operation(&state.world, &entity)
             || !model::is_selected(&state.world, &entity)
         {
             continue;
@@ -1168,7 +1172,7 @@ pub(crate) struct HeightPlane {
 /// spinning Clearance visibly walks the plane before Apply commits it.
 /// No operation open (empty or unresolved name): no planes, ever.
 pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
-    if state.op_ui.name.is_empty() {
+    if state.op_ui.name.is_empty() || state.hidden_paths.contains(&state.op_ui.name) {
         return Vec::new();
     }
     let Some(entity) = model::find_by_name(&state.world, &state.op_ui.name) else {
@@ -1572,7 +1576,7 @@ pub(crate) fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
 /// stale id - draws nothing rather than a ghost, the hover rule again.
 pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
-    if state.op_ui.name.is_empty() {
+    if state.op_ui.name.is_empty() || state.hidden_paths.contains(&state.op_ui.name) {
         return Vec::new(); // nothing open: nothing picked to pin down
     }
     let Some(op) = model::find_by_name(&state.world, &state.op_ui.name)
@@ -1585,7 +1589,7 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     };
     let mut out = Vec::new();
     for item in items {
-        if state.hidden_models.iter().any(|m| m == &item.entity) {
+        if state.hidden_in_view(&item.entity) {
             continue; // display-off models are transparent to picking and drawing
         }
         let Some(entity) = model::find_by_name(&state.world, &item.entity) else {

@@ -8,7 +8,7 @@ use super::*;
 /// is exactly the "Stale" reading a deleted tool should give.
 /// The digest of an operation's inputs as they stand right now.
 /// `op_name` is the operation's own name: re-machining digests the
-/// program AHEAD of it (M3.1 D), and program order is name order, so
+/// program AHEAD of it (M3.1 D), and its position can be edited, so
 /// the name is part of the question. Callers that build a stamp for an
 /// operation that has no entity yet (or none that matters) pass `""`,
 /// which reads as "no predecessors" and writes no rest term.

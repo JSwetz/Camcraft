@@ -28,7 +28,7 @@ use camcraft_app::schema::WCS_SLOTS;
 use camcraft_app::tools::ToolKind;
 
 use crate::actions;
-use crate::state::{CommandKind, DisplayMode, Sim, State, UiTarget};
+use crate::state::{CommandKind, DisplayMode, Sim, State, TreeMenuTarget, UiTarget};
 
 use super::icons::{Icon, IconSet};
 use super::layout;
@@ -49,7 +49,7 @@ pub(crate) const TYPES: [&str; camcraft_app::operation::KIND_COUNT] =
 /// `crate::actions`, the same entry the ribbon uses.
 pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     let typing = ui.memory(|m| m.focused().is_some());
-    let (modifiers, n, o, s, p, q, z, y, del, f) = ui.input(|i| {
+    let (modifiers, n, o, s, p, q, z, y, del, f, c, v) = ui.input(|i| {
         (
             i.modifiers,
             i.key_pressed(Key::N),
@@ -61,6 +61,8 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
             i.key_pressed(Key::Y),
             i.key_pressed(Key::Delete),
             i.key_pressed(Key::F),
+            i.key_pressed(Key::C),
+            i.key_pressed(Key::V),
         )
     });
     let cmd = modifiers.command;
@@ -72,9 +74,14 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
         actions::redo(state);
     }
     if cmd && !typing {
+        if c && let Some(name) = state.selected_operation() {
+            actions::copy_operation(state, &name);
+        }
+        if v {
+            actions::paste_operation(state);
+        }
         // The File tips' keys (ribbon.rs strings): N new, O a model,
-        // Shift+O a project, S save. Shift is what tells the two opens
-        // apart, so it must be tested, not ignored (imgui law).
+        // Shift+O a project, S save, Shift+S save as.
         if n {
             actions::new_document(state);
         }
@@ -85,7 +92,11 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
             actions::open_project(state);
         }
         if s {
-            actions::save_project(state);
+            if modifiers.shift {
+                actions::save_project_as(state);
+            } else {
+                actions::save_project(state);
+            }
         }
         if p {
             // M1.7b: posting joins the file lane - the same dialog law
@@ -121,6 +132,7 @@ pub(super) enum Cmd {
     Model,
     Project,
     Save,
+    SaveAs,
     Post,
     Stock,
     Origin,
@@ -155,7 +167,7 @@ pub(super) enum Cmd {
 /// to kinds 0..=7 while the table grew - the registry counts the
 /// kinds, this comment never must.
 const FILE: (&str, &[Cmd]) =
-    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::Post]);
+    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::SaveAs, Cmd::Post]);
 const SETUP: (&str, &[Cmd]) =
     ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine]);
 
@@ -262,8 +274,9 @@ fn label_of(c: Cmd) -> &'static str {
     match c {
         Cmd::New => "New",
         Cmd::Model => "Model",
-        Cmd::Project => "Project",
+        Cmd::Project => "Open",
         Cmd::Save => "Save",
+        Cmd::SaveAs => "Save As",
         Cmd::Post => "Post",
         Cmd::Stock => "Stock",
         Cmd::Origin => "Origin",
@@ -333,6 +346,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Model => "Open a mesh model\tCtrl+O".into(),
         Cmd::Project => "Open a project\tCtrl+Shift+O".into(),
         Cmd::Save => "Save the project\tCtrl+S".into(),
+        Cmd::SaveAs => "Save the project under a new name\tCtrl+Shift+S".into(),
         Cmd::Post => "Post NC program (validation gate), then review it\tCtrl+P".into(),
         Cmd::Stock => "Stock definition".into(),
         Cmd::Origin => "Work offset (WCS)".into(),
@@ -383,7 +397,11 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Run => "Generate the selected operation".into(),
         Cmd::Delete => "Delete the selection\tDel".into(),
         Cmd::Frame => "Frame all\tF".into(),
-        Cmd::Paths => "Show every cached toolpath".into(),
+        Cmd::Paths => if state.show_all_paths {
+            "Hide every toolpath".into()
+        } else {
+            "Show every cached toolpath".into()
+        },
         Cmd::Simulate => "Simulate tool moves (transport bar)".into(),
         Cmd::Deviate => {
             "Judge the program's stock against the model (deviation map)".into()
@@ -500,6 +518,7 @@ fn icon_of(c: Cmd) -> Option<Icon> {
         Cmd::Model => Some(Icon::OpenModel),
         Cmd::Project => Some(Icon::OpenProject),
         Cmd::Save => Some(Icon::Save),
+        Cmd::SaveAs => Some(Icon::Save),
         Cmd::Post => Some(Icon::Post),
         Cmd::Stock => Some(Icon::Stock),
         Cmd::Origin => Some(Icon::WorkOffset),
@@ -623,6 +642,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Model => actions::open_model_dialog(state),
         Cmd::Project => actions::open_project(state),
         Cmd::Save => actions::save_project(state),
+        Cmd::SaveAs => actions::save_project_as(state),
         Cmd::Post => actions::post_program(state),
         Cmd::Stock => actions::target(state, UiTarget::Stock),
         Cmd::Origin => {
@@ -636,7 +656,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Run => actions::generate_selected(state),
         Cmd::Delete => actions::delete_selected(state),
         Cmd::Frame => actions::frame_all(state),
-        Cmd::Paths => state.show_all_paths = !state.show_all_paths,
+        Cmd::Paths => state.toggle_all_toolpaths(),
         Cmd::Simulate => {
             // View state, like Paths: the cell arms or disarms the
             // transport. The playhead inside is immediate-mode by
@@ -1227,7 +1247,14 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         })
         .count();
     ui.horizontal(|ui| {
-        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(false));
+        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(true))
+            .on_hover_text(text.as_str())
+            .context_menu(|ui| {
+                if ui.button("Copy message").clicked() {
+                    ui.ctx().copy_text(text.clone());
+                    ui.close();
+                }
+            });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new("egui shell (M-g) - imgui retired")
@@ -1248,9 +1275,24 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
 // ------------------------------------------------------------------ browser
 
 /// What a browser row's click means. Parallel to the painted Row list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BrowserSection {
+    Setup,
+    Models,
+    Tools,
+    Operations,
+}
+
+impl BrowserSection {
+    const fn index(self) -> usize {
+        self as usize
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Leaf {
     Section,
+    Parent(BrowserSection),
     /// The Setups page row (M3.2 A): one row over the document's whole
     /// setups list, like Tool rows - target-only, never arms Del.
     Setups,
@@ -1328,156 +1370,152 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let mut leaves = Vec::new();
     let t = state.pane_target();
 
-    push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    // Setups (M3.2 A): the row appears once the document has any, and
-    // the Stock and WCS rows below resolve through the ACTIVE one - the
-    // tree shows the context you are standing in, never a global ghost.
-    let active = camcraft_app::setup::active(&state.world);
-    if !camcraft_app::setup::names(&state.world).is_empty() {
+    let setup_open = state.browser_expanded[BrowserSection::Setup.index()];
+    push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Parent(setup_open), None, false, false, 0, Leaf::Parent(BrowserSection::Setup));
+    if setup_open {
+        // As before, the manager appears only after the document has an
+        // explicit setup. Stock and WCS follow the active setup.
+        let active = camcraft_app::setup::active(&state.world);
+        if !camcraft_app::setup::names(&state.world).is_empty() {
+            push_row(
+                &mut rows,
+                &mut leaves,
+                "Setups".to_owned(),
+                active.clone().unwrap_or_default(),
+                painted::Kind::Section,
+                Some(Icon::WorkOffset),
+                matches!(t, UiTarget::Setups),
+                false,
+                1,
+                Leaf::Setups,
+            );
+        }
+        let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
+        let stock_hidden = state.hidden_stocks.contains(&stock_name);
         push_row(
             &mut rows,
             &mut leaves,
-            "Setups".to_owned(),
-            active.clone().unwrap_or_default(),
-            painted::Kind::Section,
-            Some(Icon::WorkOffset),
-            matches!(t, UiTarget::Setups),
-            false,
+            stock_name,
+            String::new(),
+            painted::Kind::Stock,
+            Some(Icon::Stock),
+            matches!(t, UiTarget::Stock),
+            stock_hidden,
             1,
-            Leaf::Setups,
+            Leaf::Stock,
         );
-    }
-    let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
-    push_row(
-        &mut rows,
-        &mut leaves,
-        stock_name,
-        String::new(),
-        painted::Kind::Stock,
-        Some(Icon::Stock),
-        matches!(t, UiTarget::Stock),
-        false,
-        1,
-        Leaf::Stock,
-    );
-    for (i, slot) in WCS_SLOTS.iter().enumerate() {
-        let placed =
-            camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
-        push_row(
-            &mut rows,
-            &mut leaves,
-            (*slot).to_owned(),
-            if placed { String::new() } else { "not placed".into() },
-            painted::Kind::Wcs,
-            Some(Icon::WorkOffset),
-            matches!(t, UiTarget::WcsSlot(j) if j == i),
-            false,
-            1,
-            Leaf::Wcs(i),
-        );
+        for (i, slot) in WCS_SLOTS.iter().enumerate() {
+            let placed =
+                camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
+            let offset_name = camcraft_app::setup::wcs_entity_name(&state.world, active.as_deref(), i)
+                .unwrap_or_else(|| (*slot).to_owned());
+            push_row(
+                &mut rows,
+                &mut leaves,
+                (*slot).to_owned(),
+                if placed { String::new() } else { "not placed".into() },
+                painted::Kind::Wcs,
+                Some(Icon::WorkOffset),
+                matches!(t, UiTarget::WcsSlot(j) if j == i),
+                state.hidden_offsets.contains(&offset_name),
+                1,
+                Leaf::Wcs(i),
+            );
+        }
     }
 
-    push_row(&mut rows, &mut leaves, "Models".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let entities = model::model_entities(&state.world);
-    if entities.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no models yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
-    }
-    for (name, entity) in entities {
-        let selected = model::is_selected(&state.world, &entity);
-        let hidden = state.hidden_models.contains(&name);
-        let (suffix, kind, icon) =
-            model_row_marks(model::is_fixture(&state.world, &entity), hidden);
-        push_row(
-            &mut rows,
-            &mut leaves,
-            name.clone(),
-            suffix,
-            kind,
-            Some(icon),
-            matches!(&t, UiTarget::Model(n) if *n == name) || selected,
-            hidden,
-            1,
-            Leaf::Model(name),
-        );
-    }
-
-    push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let tools: Vec<(String, camcraft_app::tools::Tool)> = model::named_entities(&state.world)
-        .into_iter()
-        .filter(|(_, e)| model::is_tool(&state.world, e))
-        .filter_map(|(name, e)| model::tool_of(&state.world, &e).map(|t| (name, t)))
-        .collect();
-    if tools.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no tools yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
-    }
-    for (name, tool) in tools {
-        push_row(
-            &mut rows,
-            &mut leaves,
-            name.clone(),
-            format!("Ø{} {}", tool.diameter, kind_name(tool.kind)),
-            painted::Kind::Tool,
-            Some(Icon::Tools),
-            matches!(&t, UiTarget::Tool(n) if *n == name),
-            false,
-            1,
-            Leaf::Tool(name),
-        );
+    let models_open = state.browser_expanded[BrowserSection::Models.index()];
+    push_row(&mut rows, &mut leaves, "Models".into(), String::new(), painted::Kind::Parent(models_open), None, false, false, 0, Leaf::Parent(BrowserSection::Models));
+    if models_open {
+        let entities = model::model_entities(&state.world);
+        if entities.is_empty() {
+            push_row(&mut rows, &mut leaves, "(no models yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+        }
+        for (name, entity) in entities {
+            let selected = model::is_selected(&state.world, &entity);
+            let hidden = state.hidden_models.contains(&name);
+            let (suffix, kind, icon) =
+                model_row_marks(model::is_fixture(&state.world, &entity), hidden);
+            push_row(
+                &mut rows,
+                &mut leaves,
+                name.clone(),
+                suffix,
+                kind,
+                Some(icon),
+                matches!(&t, UiTarget::Model(n) if *n == name) || selected,
+                hidden,
+                1,
+                Leaf::Model(name),
+            );
+        }
     }
 
-    push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let names: Vec<String> = model::named_entities(&state.world)
-        .into_iter()
-        .filter(|(_, e)| model::is_operation(&state.world, e))
-        .map(|(name, _)| name)
-        .collect();
-    if names.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+    let tools_open = state.browser_expanded[BrowserSection::Tools.index()];
+    push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Parent(tools_open), None, false, false, 0, Leaf::Parent(BrowserSection::Tools));
+    if tools_open {
+        let tools: Vec<(String, camcraft_app::tools::Tool)> = model::named_entities(&state.world)
+            .into_iter()
+            .filter(|(_, e)| model::is_tool(&state.world, e))
+            .filter_map(|(name, e)| model::tool_of(&state.world, &e).map(|t| (name, t)))
+            .collect();
+        if tools.is_empty() {
+            push_row(&mut rows, &mut leaves, "(no tools yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+        }
+        for (name, tool) in tools {
+            push_row(
+                &mut rows,
+                &mut leaves,
+                name.clone(),
+                format!("Ø{} {}", tool.diameter, kind_name(tool.kind)),
+                painted::Kind::Tool,
+                Some(Icon::Tools),
+                matches!(&t, UiTarget::Tool(n) if *n == name),
+                false,
+                1,
+                Leaf::Tool(name),
+            );
+        }
     }
-    for name in names {
-        let Some(entity) = model::find_by_name(&state.world, &name) else {
-            continue;
-        };
-        // imgui browser.rs's law: the op's own kind glyphs the row, and a
-        // missing operation component falls back to Generate, never blank.
-        let (kind, icon) = model::operation_of(&state.world, &entity)
-            .map(|op| {
-                let k = op.params.kind();
-                (k.to_string(), op_icon(k))
-            })
-            .unwrap_or_else(|| (String::new(), Icon::Generate));
-        let tag = match operation::status_of(&state.world, &entity) {
-            operation::OpStatus::Never => "never",
-            operation::OpStatus::Ok => "ok",
-            operation::OpStatus::Stale => "STALE",
-        };
-        let warns = model::toolpath_of(&state.world, &entity).map_or(0, |tp| tp.warnings.len());
-        let warn_text = match warns {
-            0 => String::new(),
-            1 => "  1 warning".to_owned(),
-            n => format!("  {n} warnings"),
-        };
-        // M10.1 C: a tool gone or of the wrong family outranks the
-        // stamp's word - the row reads BLOCKED and names why, in the
-        // suffix column (the row's one status channel). The app asks
-        // the question; the tree only says it.
-        let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
-            Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
-            None => format!("{kind}  {tag}{warn_text}"),
-        };
-        let hidden = state.hidden_paths.contains(&name);
-        push_row(
-            &mut rows,
-            &mut leaves,
-            name.clone(),
-            suffix,
-            painted::Kind::Op,
-            Some(icon),
-            matches!(&t, UiTarget::Operation(n) if *n == name),
-            hidden,
-            1,
-            Leaf::Op(name),
-        );
+
+    let operations_open = state.browser_expanded[BrowserSection::Operations.index()];
+    push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Parent(operations_open), None, false, false, 0, Leaf::Parent(BrowserSection::Operations));
+    if operations_open {
+        let ordered = camcraft_app::setup::operation_order(&state.world);
+        if ordered.is_empty() {
+            push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
+        }
+        for (name, entity) in ordered {
+            let (kind, icon) = model::operation_of(&state.world, &entity)
+                .map(|op| {
+                    let k = op.params.kind();
+                    (k.to_string(), op_icon(k))
+                })
+                .unwrap_or_else(|| (String::new(), Icon::Generate));
+            let tag = match operation::status_of(&state.world, &entity) {
+                operation::OpStatus::Never => "never",
+                operation::OpStatus::Ok => "ok",
+                operation::OpStatus::Stale => "STALE",
+            };
+            let warns = model::toolpath_of(&state.world, &entity).map_or(0, |tp| tp.warnings.len());
+            let warn_text = match warns {
+                0 => String::new(),
+                1 => "  1 warning".to_owned(),
+                n => format!("  {n} warnings"),
+            };
+            let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
+                Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
+                None => format!("{kind}  {tag}{warn_text}"),
+            };
+            let hidden = state.hidden_paths.contains(&name);
+            push_row(
+                &mut rows, &mut leaves,
+                model::operation_label(&state.world, &name, &entity), suffix,
+                painted::Kind::Op, Some(icon),
+                matches!(&t, UiTarget::Operation(n) if *n == name),
+                hidden, 1, Leaf::Op(name),
+            );
+        }
     }
     (rows, leaves)
 }
@@ -1491,7 +1529,14 @@ pub fn browser(
     icons: Option<&IconSet>,
 ) {
     ui.checkbox(&mut state.show_world_axes, "Show world origin axes");
-    ui.checkbox(&mut state.show_all_paths, "Show all toolpaths");
+    let mut show_all_paths = state.show_all_paths;
+    if ui.checkbox(&mut show_all_paths, "Show all toolpaths").changed() {
+        if show_all_paths {
+            state.show_all_toolpaths();
+        } else {
+            state.hide_all_toolpaths();
+        }
+    }
     // The display mode rides the same law as the checkboxes: a direct
     // field flip (view state like the camera, never a command, never on
     // the ribbon - the M-f tip table is imgui's 18-cell law untouched).
@@ -1511,9 +1556,53 @@ pub fn browser(
         Vec2::new(ui.available_width(), rows.len() as f32 * pal.row_height),
     );
     let hit = painted::tree(ui, rect, &rows, pal, icons);
+    if let Some(ix) = hit.drag_started
+        && let Some(Leaf::Op(name)) = leaves.get(ix)
+    {
+        state.dragging_op = Some(name.clone());
+    }
+    // The visual insertion line and the command use the same target row.
+    // Only operations in the same setup can be drop targets.
+    if let Some(source) = state.dragging_op.clone() {
+        let (released, pointer) = ui.input(|i| (i.pointer.any_released(), i.pointer.hover_pos()));
+        let drop = pointer.filter(|p| rect.contains(*p)).and_then(|p| {
+            let ix = ((p.y - rect.top()) / pal.row_height) as usize;
+            let Leaf::Op(target) = leaves.get(ix)? else { return None };
+            let setup_of = |name: &str| model::find_by_name(&state.world, name)
+                .and_then(|e| model::operation_of(&state.world, &e))
+                .and_then(|op| camcraft_app::setup::effective(&state.world, op.setup.as_deref()));
+            (source != *target && setup_of(&source) == setup_of(target)).then_some((ix, target.clone(), p.y > rect.top() + (ix as f32 + 0.5) * pal.row_height))
+        });
+        if let Some((ix, target, after)) = drop {
+            let y = rect.top() + (ix + usize::from(after)) as f32 * pal.row_height;
+            ui.painter().hline(rect.x_range(), y, egui::Stroke::new(2.0, pal.accent));
+            if released {
+                state.pending.push_back(CommandKind::ReorderOperation { name: source, target, after });
+            }
+        }
+        if released {
+            state.dragging_op = None;
+        }
+    }
     if let Some(ix) = hit.eye {
         match leaves[ix].clone() {
             Leaf::Model(n) => State::toggle_visibility(&mut state.hidden_models, &n),
+            Leaf::Stock => {
+                let name = camcraft_app::setup::stock_entity_name(
+                    &state.world,
+                    camcraft_app::setup::active(&state.world).as_deref(),
+                );
+                State::toggle_visibility(&mut state.hidden_stocks, &name);
+            }
+            Leaf::Wcs(i) => {
+                if let Some(name) = camcraft_app::setup::wcs_entity_name(
+                    &state.world,
+                    camcraft_app::setup::active(&state.world).as_deref(),
+                    i,
+                ) {
+                    State::toggle_visibility(&mut state.hidden_offsets, &name);
+                }
+            }
             Leaf::Op(n) => State::toggle_visibility(&mut state.hidden_paths, &n),
             _ => {}
         }
@@ -1521,6 +1610,10 @@ pub fn browser(
     if let Some(ix) = hit.row {
         match leaves[ix].clone() {
             Leaf::Section => {}
+            Leaf::Parent(section) => {
+                let expanded = &mut state.browser_expanded[section.index()];
+                *expanded = !*expanded;
+            }
             // Target-only, like the Tool rows: browsing setups never
             // arms Del, and one page lists them all.
             Leaf::Setups => actions::target(state, UiTarget::Setups),
@@ -1554,16 +1647,16 @@ pub fn browser(
             }
         }
     }
-    // The op row's right-click is the retype verb's door (M9.1): the
-    // menu belongs to the row's operation, moves to whichever row
-    // asks, closes when the same row asks twice, and retires on any
-    // row that is not an operation.
+    // Operation rows offer the operation verbs. The Operations parent
+    // offers Paste even when the list has no operation rows yet.
     if let Some(ix) = hit.menu {
-        if let Leaf::Op(n) = leaves[ix].clone() {
-            state.tree_menu = (state.tree_menu.as_deref() != Some(n.as_str())).then_some(n);
-        } else {
-            state.tree_menu = None;
-        }
+        let target = match leaves.get(ix) {
+            Some(Leaf::Op(name)) => Some(TreeMenuTarget::Operation(name.clone())),
+            Some(Leaf::Parent(BrowserSection::Operations)) => Some(TreeMenuTarget::Operations),
+            _ => None,
+        };
+        state.tree_menu = target.filter(|target| state.tree_menu.as_ref() != Some(target));
+        state.retype_confirm = None;
     }
     tree_menu(ui, state, pal, rect, &leaves);
     ui.allocate_rect(rect, Sense::hover());
@@ -1572,6 +1665,9 @@ pub fn browser(
 /// The tree menu's verb rows, keyed past every kind ordinal.
 const MENU_CLEAR: usize = usize::MAX;
 const MENU_DELETE: usize = usize::MAX - 1;
+const MENU_RENAME: usize = usize::MAX - 2;
+const MENU_COPY: usize = usize::MAX - 3;
+const MENU_PASTE: usize = usize::MAX - 4;
 
 /// The operation's retype menu (M9.1): what replaced the page's Type
 /// combo. Grouping is the retired combo's law restated once -
@@ -1580,7 +1676,7 @@ const MENU_DELETE: usize = usize::MAX - 1;
 /// header fronts the axial Drill alone, every other row of it dark),
 /// and the current kind's section staying listed even when the
 /// machine says no, so a mid-edit machine swap never erases the
-/// operation's own name. A row's click queues
+/// operation's own name. A kind row needs a second click before it queues
 /// `ChangeOperationKind` - one undo unit, the numbers carried by the
 /// one retype law below; a dark row is queued too, because the refusal
 /// belongs at the command door (`family_gate`), where it names itself
@@ -1589,21 +1685,36 @@ const MENU_DELETE: usize = usize::MAX - 1;
 /// at Foreground order, so a press on a row belongs to the row, never
 /// to the tree behind it; any other primary press closes it.
 fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[Leaf]) {
-    let Some(name) = state.tree_menu.clone() else {
+    let Some(target) = state.tree_menu.clone() else {
         return;
     };
-    // Self-heal, twice over: the named operation must still have its
-    // row and its component. A frame that proves otherwise retires the
-    // menu by dropping it - never a stale popup outliving its subject.
-    let row_ix = leaves
-        .iter()
-        .position(|l| matches!(l, Leaf::Op(n) if *n == name));
-    let op = model::find_by_name(&state.world, &name).and_then(|e| model::operation_of(&state.world, &e));
-    let (Some(ix), Some(op)) = (row_ix, op) else {
+    let row_ix = leaves.iter().position(|leaf| match (&target, leaf) {
+        (TreeMenuTarget::Operation(name), Leaf::Op(row)) => name == row,
+        (TreeMenuTarget::Operations, Leaf::Parent(BrowserSection::Operations)) => true,
+        _ => false,
+    });
+    let Some(ix) = row_ix else {
         state.tree_menu = None;
+        state.retype_confirm = None;
         return;
     };
-    let here = op.params.kind().ordinal();
+    let name = match &target {
+        TreeMenuTarget::Operation(name) => {
+            if model::find_by_name(&state.world, name)
+                .and_then(|entity| model::operation_of(&state.world, &entity))
+                .is_none()
+            {
+                state.tree_menu = None;
+                state.retype_confirm = None;
+                return;
+            }
+            Some(name.as_str())
+        }
+        TreeMenuTarget::Operations => None,
+    };
+    let here = name.and_then(|name| model::find_by_name(&state.world, name))
+        .and_then(|entity| model::operation_of(&state.world, &entity))
+        .map(|op| op.params.kind().ordinal());
     let machine = camcraft_app::machine::kind_of(&state.world);
     // The rows: section headers and kinds, in registry order, read
     // from the same taxonomy as the ribbon's cells - never a list.
@@ -1612,10 +1723,17 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     // operation) and deleting the operation are two different asks,
     // and the menu names both - each one undoable command.
     lines.push(("Operation", false, None));
-    lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
-    lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
-    let here_section = operation::KindInfo::ALL.get(here).map(|k| k.section);
-    for s in operation::Section::ORDER {
+    if name.is_some() {
+        lines.push(("Rename operation", true, Some(MENU_RENAME)));
+        lines.push(("Copy operation", true, Some(MENU_COPY)));
+    }
+    lines.push(("Paste operation", state.operation_clipboard.is_some(), Some(MENU_PASTE)));
+    if name.is_some() {
+        lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
+        lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
+    }
+    let here_section = here.and_then(|index| operation::KindInfo::ALL.get(index).map(|k| k.section));
+    for s in operation::Section::ORDER.into_iter().filter(|_| name.is_some()) {
         // The current kind's own section keeps every row (dark where
         // the machine says no); any other section lists only what the
         // door admits, and leaves the menu when that is nothing.
@@ -1643,7 +1761,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
         Vec2::new(DROP_W, lines.len() as f32 * pal.row_height),
     );
     let mut chosen: Option<usize> = None;
-    egui::Area::new(ui.id().with(("tree-menu", name.clone())))
+    egui::Area::new(ui.id().with(("tree-menu", ix)))
         .fixed_pos(anchor)
         .order(egui::Order::Foreground)
         .movable(false)
@@ -1661,7 +1779,7 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                     egui::Pos2::new(anchor.x, anchor.y + k as f32 * pal.row_height),
                     Vec2::new(DROP_W, pal.row_height),
                 );
-                let is_current = item.is_some_and(|i| i == here);
+                let is_current = item.is_some_and(|i| Some(i) == here);
                 if is_current {
                     p.rect_filled(r, 0.0, pal.selection_bg);
                 }
@@ -1674,8 +1792,13 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                 {
                     p.rect_filled(r, 0.0, pal.field_hover);
                 }
+                let armed = name.is_some_and(|name| state.retype_confirm.as_ref()
+                    .is_some_and(|(pending_name, pending_kind)|
+                        pending_name == name && *item == Some(*pending_kind)));
                 let text = if is_current {
                     format!("{label} (current)")
+                } else if armed {
+                    format!("Confirm change to {label}")
                 } else {
                     (*label).to_owned()
                 };
@@ -1692,28 +1815,51 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                 );
                 if let Some(resp) = resp
                     && resp.clicked()
+                    && (*runnable || *item != Some(MENU_PASTE))
                 {
                     chosen = *item;
                 }
             }
         });
     if let Some(i) = chosen {
-        if i == MENU_CLEAR {
-            state.pending.push_back(CommandKind::ClearToolpath(name.clone()));
-        } else if i == MENU_DELETE {
-            state.pending.push_back(CommandKind::DeleteOperation(name.clone()));
-        } else if i != here {
-            state.pending.push_back(CommandKind::ChangeOperationKind {
-                name: name.clone(),
-                kind: i,
-            });
+        if i == MENU_PASTE {
+            actions::paste_operation(state);
+        } else if let Some(name) = name {
+            if i == MENU_RENAME {
+                let label = model::find_by_name(&state.world, name)
+                    .map(|e| model::operation_label(&state.world, name, &e))
+                    .unwrap_or_else(|| name.to_owned());
+                state.rename_draft = Some((name.to_owned(), label));
+                actions::target(state, UiTarget::Operation(name.to_owned()));
+            } else if i == MENU_COPY {
+                actions::copy_operation(state, name);
+            } else if i == MENU_CLEAR {
+                state.pending.push_back(CommandKind::ClearToolpath(name.to_owned()));
+            } else if i == MENU_DELETE {
+                state.pending.push_back(CommandKind::DeleteOperation(name.to_owned()));
+            } else if Some(i) != here {
+                let choice = (name.to_owned(), i);
+                if state.retype_confirm.as_ref() == Some(&choice) {
+                    state.pending.push_back(CommandKind::ChangeOperationKind {
+                        name: name.to_owned(), kind: i,
+                    });
+                } else {
+                    state.retype_confirm = Some(choice);
+                    return;
+                }
+            }
         }
         state.tree_menu = None;
-    } else if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        state.retype_confirm = None;
+    } else if ui.input(|i| {
+        i.pointer.button_pressed(egui::PointerButton::Primary)
+            && i.pointer.hover_pos().is_none_or(|pos| !panel.contains(pos))
+    }) {
         // The dropdowns' close law: a primary press that is nobody's
         // row is the menu's - it never stacks and never stalks a
         // document the user has moved on from.
         state.tree_menu = None;
+        state.retype_confirm = None;
     }
 }
 

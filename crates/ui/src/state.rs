@@ -18,7 +18,7 @@ use camcraft_app::commands::{
     ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    MoveFixture, MoveModel, RegenerateAll, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
+    MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
@@ -47,6 +47,7 @@ pub enum CommandKind {
     OpenProjectDialog,
     OpenProjectFile(PathBuf),
     SaveProjectDialog,
+    SaveProjectAsDialog,
     SaveProjectFile(PathBuf),
     /// Post NC through the save-dialog law (M1.7b): path via rfd, gate
     /// via `posting::post_setup`.
@@ -157,6 +158,7 @@ pub enum CommandKind {
         src: SrcRef,
         params: OpParams,
     },
+    PasteOperation { name: String, operation: OperationDef },
     /// The properties page's parameter draft.
     EditOperationParams {
         name: String,
@@ -187,6 +189,8 @@ pub enum CommandKind {
         items: Vec<GeoSel>,
     },
     DeleteOperation(String),
+    RenameOperation { name: String, label: String },
+    ReorderOperation { name: String, target: String, after: bool },
     /// Throw away the operation's generated path and keep the operation
     /// (undoable: the cache comes back byte for byte).
     ClearToolpath(String),
@@ -941,10 +945,26 @@ impl PanelsOpen {
     }
 }
 
+/// Snapshot held by Copy until another operation is copied. Generated
+/// toolpaths are intentionally absent: Paste creates a fresh operation.
+#[derive(Clone)]
+pub struct OperationClipboard {
+    pub label: String,
+    pub operation: OperationDef,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TreeMenuTarget {
+    Operation(String),
+    Operations,
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
     pub status: String,
+    /// Last successfully opened or saved project in this window.
+    pub project_path: Option<PathBuf>,
     /// Bumped whenever documents changed; drives GPU re-upload of meshes.
     pub doc_version: u64,
     /// Bumped whenever selection changed; re-sends the vertex stream (the
@@ -971,9 +991,16 @@ pub struct State {
     /// computed from it keeps running - hiding geometry must never
     /// silently change what the machine does).
     pub hidden_models: Vec<String>,
+    /// Stock entities hidden from the viewport by the browser eye.
+    pub hidden_stocks: Vec<String>,
+    /// Work-offset gizmos hidden by their browser eyes.
+    pub hidden_offsets: Vec<String>,
     /// Operations whose cached path stays undrawn (eye toggle per op).
     /// Same rule: the path still exists and posts.
     pub hidden_paths: Vec<String>,
+    pub operation_clipboard: Option<OperationClipboard>,
+    /// Expanded state of Setup, Models, Tools, and Operations in the browser.
+    pub browser_expanded: [bool; 4],
 
     /// Show the dimmed world origin axes in the viewport. View state like
     /// the camera - not undoable, not saved - toggled from the Models panel;
@@ -1045,7 +1072,13 @@ pub struct State {
     /// ribbon's dropdowns - a frame fact, not a document fact; the
     /// draw retires it on any choice, outside press, or a row whose
     /// operation is gone.
-    pub tree_menu: Option<String>,
+    pub tree_menu: Option<TreeMenuTarget>,
+    /// A type change chosen once in the operation menu; a second click confirms it.
+    pub retype_confirm: Option<(String, usize)>,
+    /// Inline rename editor: stable key and current draft.
+    pub rename_draft: Option<(String, String)>,
+    /// Operation key being dragged in the browser; discarded on release.
+    pub dragging_op: Option<String>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -1229,6 +1262,7 @@ impl State {
             world: new_world(),
             history: History::default(),
             status,
+            project_path: None,
             doc_version: 0,
             selection_version: 0,
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
@@ -1241,7 +1275,11 @@ impl State {
             geo_hover: None,
             op_tab: 0,
             hidden_models: Vec::new(),
+            hidden_stocks: Vec::new(),
+            hidden_offsets: Vec::new(),
             hidden_paths: Vec::new(),
+            operation_clipboard: None,
+            browser_expanded: [true; 4],
             cam: Camera::default(),
             show_world_axes: true,
             show_all_paths: false,
@@ -1260,6 +1298,9 @@ impl State {
             panels_open: PanelsOpen { browser: true, properties: true },
             layout_request: None,
             tree_menu: None,
+            retype_confirm: None,
+            rename_draft: None,
+            dragging_op: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
@@ -1920,6 +1961,67 @@ impl State {
         })
     }
 
+    /// Dismiss the current properties page without changing the document.
+    /// Clear selection so pane_target cannot reopen a selected operation.
+    pub(crate) fn close_property_editor(&mut self) {
+        self.ui_target = UiTarget::None;
+        self.pending.push_back(CommandKind::Select(None));
+        self.op_ui.name.clear();
+        self.op_synced = (String::new(), self.doc_version);
+        self.boundary_pick = None;
+        self.boundary_view.shown = false;
+        self.rename_draft = None;
+    }
+
+    pub(crate) fn close_operation_editor(&mut self, name: &str) {
+        self.close_property_editor();
+        self.status = format!("closed operation {name}");
+    }
+
+    pub(crate) fn close_tool_editor_window(&mut self) {
+        self.tool_editor = None;
+        self.tool_synced = (String::new(), self.doc_version);
+    }
+
+    pub(crate) fn copy_operation(&mut self, name: &str) {
+        let Some(entity) = model::find_by_name(&self.world, name) else {
+            self.status = format!("copy failed: operation '{name}' was not found");
+            return;
+        };
+        let Some(operation) = model::operation_of(&self.world, &entity) else {
+            self.status = format!("copy failed: '{name}' is not an operation");
+            return;
+        };
+        let label = model::operation_label(&self.world, name, &entity);
+        self.operation_clipboard = Some(OperationClipboard { label: label.clone(), operation });
+        self.status = format!("copied operation {label}");
+    }
+
+    pub(crate) fn paste_operation(&mut self) {
+        let Some(clip) = self.operation_clipboard.clone() else {
+            self.status = String::from("nothing to paste: copy an operation first");
+            return;
+        };
+        let base = format!("{} Copy", clip.label);
+        let mut suffix = 1usize;
+        let name = loop {
+            let candidate = if suffix == 1 { base.clone() } else { format!("{base} {suffix}") };
+            let taken = model::find_by_name(&self.world, &candidate).is_some()
+                || camcraft_app::setup::operation_order(&self.world)
+                    .into_iter()
+                    .any(|(key, entity)| model::operation_label(&self.world, &key, &entity) == candidate);
+            if !taken {
+                break candidate;
+            }
+            let Some(next) = suffix.checked_add(1) else {
+                self.status = String::from("paste failed: too many copies of this operation");
+                return;
+            };
+            suffix = next;
+        };
+        self.pending.push_back(CommandKind::PasteOperation { name, operation: clip.operation });
+    }
+
     /// Names of the tool entities, in document order.
     #[must_use]
     pub fn tool_names(&self) -> Vec<String> {
@@ -1935,6 +2037,47 @@ impl State {
         match list.iter().position(|n| n == name) {
             Some(i) => drop(list.remove(i)),
             None => list.push(name.to_string()),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn hidden_in_view(&self, name: &str) -> bool {
+        self.hidden_models.iter().any(|n| n == name)
+            || self.hidden_stocks.iter().any(|n| n == name)
+    }
+
+    #[must_use]
+    pub(crate) fn active_stock_hidden(&self) -> bool {
+        let name = camcraft_app::setup::stock_entity_name(
+            &self.world,
+            camcraft_app::setup::active(&self.world).as_deref(),
+        );
+        self.hidden_stocks.iter().any(|n| n == &name)
+    }
+
+    /// Show every cached operation path, including paths hidden by their
+    /// browser eyes. This only changes viewport state.
+    pub(crate) fn show_all_toolpaths(&mut self) {
+        self.hidden_paths.clear();
+        self.show_all_paths = true;
+    }
+
+    /// Hide every operation path, including the selected operation's path.
+    /// Keeping the names in the eye list makes each row reflect the result.
+    pub(crate) fn hide_all_toolpaths(&mut self) {
+        self.hidden_paths = model::named_entities(&self.world)
+            .into_iter()
+            .filter(|(_, entity)| model::is_operation(&self.world, entity))
+            .map(|(name, _)| name)
+            .collect();
+        self.show_all_paths = false;
+    }
+
+    pub(crate) fn toggle_all_toolpaths(&mut self) {
+        if self.show_all_paths {
+            self.hide_all_toolpaths();
+        } else {
+            self.show_all_toolpaths();
         }
     }
 
@@ -1994,6 +2137,9 @@ impl State {
             CommandKind::ImportFile(path) => self.import_path(path),
             CommandKind::NewDocument => {
                 self.abandon_imports();
+                self.project_path = None;
+                self.hidden_stocks.clear();
+                self.hidden_offsets.clear();
                 model::clear_named(&self.world);
                 // Units belong to the document, and clear_named cannot
                 // reach a singleton: reset the lens so a fresh blank is
@@ -2016,6 +2162,8 @@ impl State {
                 self.field_play = None;
                 self.stock_mesh.clear();
                 self.machine_editor = None;
+                self.rename_draft = None;
+                self.dragging_op = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
             }
@@ -2026,17 +2174,16 @@ impl State {
             }
             CommandKind::OpenProjectFile(path) => self.open_project_path(path),
             CommandKind::SaveProjectDialog => {
-                if let Some(path) = save_project_dialog() {
-                    match project::save(&self.world, &path) {
-                        Ok(()) => self.status = format!("saved {}", path.display()),
-                        Err(err) => self.status = format!("save failed: {err}"),
-                    }
+                if let Some(path) = self.project_path.clone().or_else(|| save_project_dialog(None)) {
+                    self.save_project_path(path);
                 }
             }
-            CommandKind::SaveProjectFile(path) => match project::save(&self.world, &path) {
-                Ok(()) => self.status = format!("saved {}", path.display()),
-                Err(err) => self.status = format!("save failed: {err}"),
-            },
+            CommandKind::SaveProjectAsDialog => {
+                if let Some(path) = save_project_dialog(self.project_path.as_deref()) {
+                    self.save_project_path(path);
+                }
+            }
+            CommandKind::SaveProjectFile(path) => self.save_project_path(path),
             CommandKind::PostProgramDialog => {
                 if let Some(path) = post_program_dialog() {
                     self.post_program_path(path);
@@ -2345,6 +2492,19 @@ impl State {
                     );
                 }
             },
+            CommandKind::PasteOperation { name, operation } => {
+                match PasteOperation::new(&self.world, &name, operation) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        History::execute_ephemeral(&self.world, SelectEntity::new(&self.world, Some(name.as_str())));
+                        self.selection_version = self.selection_version.wrapping_add(1);
+                        self.ui_target = UiTarget::Operation(name.clone());
+                        self.doc_version += 1;
+                        self.status = format!("pasted operation {name}; generate its toolpath when ready");
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("paste failed: {err}")),
+                }
+            }
             CommandKind::EditOperationParams { name, params } => {
                 match EditOperationParams::new(&self.world, &name, params) {
                     Ok(command) => {
@@ -2427,6 +2587,22 @@ impl State {
                         format!("operation not deleted: {err}"),
                     );
                 }
+            },
+            CommandKind::RenameOperation { name, label } => match RenameOperation::new(&self.world, &name, &label) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("operation renamed to {label}");
+                }
+                Err(err) => self.refuse(ErrorScope::Operation, format!("rename failed: {err}")),
+            },
+            CommandKind::ReorderOperation { name, target, after } => match ReorderOperation::new(&self.world, &name, &target, after) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("operation {name} moved");
+                }
+                Err(err) => self.refuse(ErrorScope::Operation, format!("reorder failed: {err}")),
             },
             CommandKind::GenerateOperation(name) => {
                 // Generation happens in the constructor (a refusal writes
@@ -3104,6 +3280,9 @@ impl State {
 
     fn open_project_path(&mut self, path: PathBuf) {
         self.abandon_imports();
+        self.project_path = None;
+        self.hidden_stocks.clear();
+        self.hidden_offsets.clear();
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
@@ -3112,12 +3291,34 @@ impl State {
         self.field_play = None; // nor its playback
         self.stock_mesh.clear(); // nor the mesh extracted from it
         self.machine_editor = None; // nor a draft over its machine's numbers
+        self.rename_draft = None;
+        self.dragging_op = None;
         match project::load(&self.world, &path) {
             Ok(()) => {
+                self.project_path = Some(path.clone());
                 self.doc_version += 1;
                 self.status = format!("opened {}", path.display());
             }
             Err(err) => self.status = format!("open failed: {err}"),
+        }
+    }
+
+    fn save_project_path(&mut self, path: PathBuf) {
+        match project::save(&self.world, &path) {
+            Ok(()) => {
+                self.status = format!("saved {}", path.display());
+                self.project_path = Some(path);
+            }
+            Err(err) => self.status = format!("save failed: {err}"),
+        }
+    }
+
+    #[must_use]
+    pub fn window_title(&self) -> String {
+        let filename = self.project_path.as_ref().and_then(|path| path.file_name());
+        match filename {
+            Some(name) => format!("CamCraft - {}", name.to_string_lossy()),
+            None => String::from("CamCraft - Untitled"),
         }
     }
 
@@ -3294,11 +3495,16 @@ fn pick_theme_file() -> Option<PathBuf> {
     dialog.pick_file()
 }
 
-fn save_project_dialog() -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter("CamCraft Project", &["camproj"])
-        .set_file_name("untitled.camproj")
-        .save_file()
+fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().add_filter("CamCraft Project", &["camproj"]);
+    if let Some(parent) = current.and_then(Path::parent) {
+        dialog = dialog.set_directory(parent);
+    }
+    let filename = current
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .unwrap_or("untitled.camproj");
+    dialog.set_file_name(filename).save_file()
 }
 
 fn post_program_dialog() -> Option<PathBuf> {

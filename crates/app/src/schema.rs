@@ -173,6 +173,14 @@ pub struct Operation {
     pub area: AreaControls,
 }
 
+/// User-facing operation label and explicit position within its setup.
+/// The entity's `Name` remains a stable key for commands and undo history.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct OperationMeta {
+    pub label: Option<String>,
+    pub order: Option<u32>,
+}
+
 /// The cached result of generating an operation: the path plus the
 /// warnings `verify` attached to it. Deleting the operation entity frees
 /// both through the Rust-owned drop hooks (AGENTS.md resource invariant).
@@ -314,6 +322,7 @@ pub fn register_schema(world: &World) {
     world.component::<Wcs>();
     world.component::<ToolDef>();
     world.component::<Operation>();
+    world.component::<OperationMeta>();
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();

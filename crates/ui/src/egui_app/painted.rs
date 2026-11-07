@@ -147,6 +147,8 @@ pub struct Row {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Section,
+    /// A browser parent; true points down, false points right.
+    Parent(bool),
     Model,
     /// A model wearing the fixture marker (M3.2 B): the vise row, not
     /// the part row - same hideability, different noun.
@@ -167,10 +169,9 @@ const TREE_INK: f32 = 16.0;
 /// band plus margin (browser.rs's `eye_x = avail - INK - 6.0`).
 const EYE_RESERVE: f32 = 24.0;
 
-/// Rows whose visibility the user can toggle get the eye (browser.rs's
-/// `eye: true` rows; sections, stock, WCS and tools never do).
+/// Rows whose viewport visibility the user can toggle get the eye.
 pub(crate) fn has_eye(kind: Kind) -> bool {
-    matches!(kind, Kind::Model | Kind::Fixture | Kind::Op)
+    matches!(kind, Kind::Model | Kind::Fixture | Kind::Stock | Kind::Wcs | Kind::Op)
 }
 
 /// Hit result for one frame of the tree.
@@ -180,6 +181,7 @@ pub struct TreeHit {
     /// The row a secondary click landed on this frame (M9.1): the
     /// retype menu's channel, a hit like the others - never state.
     pub menu: Option<usize>,
+    pub drag_started: Option<usize>,
 }
 
 /// Paint the rows and collect this frame's clicks. Input first (real
@@ -197,7 +199,7 @@ pub fn tree(
     pal: &Tokens,
     icons: Option<&IconSet>,
 ) -> TreeHit {
-    let mut hit = TreeHit { row: None, eye: None, menu: None };
+    let mut hit = TreeHit { row: None, eye: None, menu: None, drag_started: None };
     let mut eye_resps: Vec<(usize, Response)> = Vec::new();
     let row_h = pal.row_height;
     for (ix, row) in rows.iter().enumerate() {
@@ -210,7 +212,7 @@ pub fn tree(
         // clicked() guard below means an eye pixel is one action, never
         // row+eye (browser.rs reaches the same law by submitting the eye's
         // invisible button before the Selectable).
-        let row_resp = ui.interact(rr, ui.id().with(("tree-row", ix)), Sense::click());
+        let row_resp = ui.interact(rr, ui.id().with(("tree-row", ix)), Sense::click_and_drag());
         let eye_rect = if has_eye(row.kind) {
             let er = Rect::from_center_size(
                 Pos2::new(rr.right() - 12.0, rr.center().y),
@@ -306,6 +308,9 @@ pub fn tree(
         if row_resp.secondary_clicked() && hit.eye != Some(ix) {
             hit.menu = Some(ix);
         }
+        if row_resp.drag_started() && hit.eye != Some(ix) {
+            hit.drag_started = Some(ix);
+        }
     }
     // The eye's tooltip (browser.rs: Hide/Show + the view-state promise),
     // after the loop so the response lives past its borrow of `ui`.
@@ -320,6 +325,14 @@ pub fn tree(
 fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Tokens) {
     let s = Stroke::new(1.0, pal.text_dim);
     match kind {
+        Kind::Parent(expanded) => {
+            let points = if expanded {
+                vec![c + Vec2::new(-4.0, -2.0), c + Vec2::new(4.0, -2.0), c + Vec2::new(0.0, 3.0)]
+            } else {
+                vec![c + Vec2::new(-2.0, -4.0), c + Vec2::new(3.0, 0.0), c + Vec2::new(-2.0, 4.0)]
+            };
+            shapes.push(Shape::convex_polygon(points, pal.text_dim, Stroke::NONE));
+        }
         Kind::Section => {
             // Open folder: a body with a back-tab.
             let body = Rect::from_min_size(c + Vec2::new(-5.0, -3.0), Vec2::new(10.0, 7.0));

@@ -64,7 +64,7 @@ pub(super) fn render_operations(world: &World, target: Option<&String>, out: &mu
         }
         out.push_str(&format!(
             "  {count:>2}  {:<12} {:<10} {:<14} {:<12} {:>8} {:>8} {:>8} {:>8}\n",
-            name,
+            model::operation_label(world, &name, &entity),
             op.params.kind(),
             op.tool,
             src,

@@ -38,7 +38,9 @@ use super::*;
 /// v49: the pure step-up (M11.4 C) - the strategy grammar grows
 /// `offset_rings`; no row moves, no pin shifts, absent words read as
 /// before (the arrival law).
-pub const PROJECT_VERSION: u32 = 49;
+/// v50: operation labels and within-setup order become persisted. An old
+/// reader must refuse the file rather than silently post in name order.
+pub const PROJECT_VERSION: u32 = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

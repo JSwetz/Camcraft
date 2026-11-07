@@ -10,7 +10,7 @@
 
 use flecs_ecs::prelude::World;
 
-use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, SetStock};
+use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, RenameOperation, SetStock};
 use camcraft_app::operation::{Height, OpParams, SrcRef};
 use camcraft_app::posting;
 use camcraft_app::project;
@@ -209,6 +209,27 @@ fn named_generate_forces_even_a_fresh_operation() {
     let out = script::run(&format!("cam.load({}); cam.generate(\"Ghost1\")", json_str(&camp)));
     assert!(!out.ok);
     assert!(out.errors[0].contains("Ghost1"), "{:?}", out.errors);
+}
+
+#[test]
+fn scripts_accept_display_names_and_report_stable_keys() {
+    let camp = tmp("renamed", "camp");
+    let world = fixture();
+    let mut history = History::default();
+    history.execute(&world, RenameOperation::new(&world, "Face1", "Finish face").expect("rename"));
+    project::save(&world, &camp).expect("save fixture");
+    let out = script::run(&format!(
+        "cam.load({}); [cam.operations()[0], cam.generate(\"Finish face\")[0], cam.verify(\"Finish face\").operations[0]]",
+        json_str(&camp)
+    ));
+    let _ = std::fs::remove_file(&camp);
+    assert!(out.ok, "{:?}", out.errors);
+    let rows = out.result.as_array().expect("three script views");
+    assert_eq!(rows.len(), 3);
+    for row in rows {
+        assert_eq!(row["name"], json!("Finish face"));
+        assert_eq!(row["key"], json!("Face1"));
+    }
 }
 
 #[test]
