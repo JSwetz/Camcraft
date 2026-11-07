@@ -221,3 +221,109 @@ fn a_lathe_cross_drill_on_a_part_that_reads_as_no_revolve_is_refused_by_name() {
     let (world, _h) = world_with("mill-turn", prism());
     operation::generate(&world, &op(hole), "").expect("a mill-turn drills a prismatic bar");
 }
+
+/// A cross hole on `prism()` moved +30 mm in X (faces at x = 20, the
+/// one nearer the spindle line, and x = 42), mouth on the face at x.
+fn block_hole(x: f64, dir_x: f64) -> Vec<CrossHole> {
+    vec![CrossHole {
+        origin: Point3::new(x, 0.0, 10.0),
+        dir: Point3::new(dir_x, 0.0, 0.0),
+        radius: 2.0,
+        entry_d: 0.0,
+        floor_d: -6.0,
+        through: false,
+    }]
+}
+
+fn moved_prism(dx: f64) -> Mesh {
+    let f = prism()
+        .facets
+        .iter()
+        .map(|t| {
+            let m = |p: Point3| Point3::new(p.x + dx, p.y, p.z);
+            Triangle::new(m(t.a), m(t.b), m(t.c))
+        })
+        .collect();
+    Mesh::from_facets(f)
+}
+
+#[test]
+fn a_mill_turn_cross_hole_plunging_away_from_the_spindle_is_refused_by_name() {
+    // The block sits 20..42 mm off an unmoved G54 in X. A hole on its
+    // near face (x = 20) plunging +X, away from the spindle line: the
+    // station law stands the tool at radius s on the mouth's side -
+    // x ~ 48, beyond the FAR face - and the rapid in to the mouth runs
+    // through the whole block at rapid feed.
+    let (world, _h) = world_with("mill-turn", moved_prism(30.0));
+    match operation::generate(&world, &op(block_hole(20.0, 1.0)), "") {
+        Ok((t, _)) => {
+            let through = t.moves.iter().any(|m| {
+                m.kind == camcraft_app::cl::MoveKind::Rapid
+                    && m.from.x.max(m.to.x) > 42.0
+                    && m.from.x.min(m.to.x) < 20.0
+                    && (m.from.z - 10.0).abs() < 1e-9
+            });
+            panic!("a hole plunging away from the spindle drilled {} moves (a rapid through the block: {through})", t.moves.len());
+        }
+        Err(e) => {
+            let e = e.to_string();
+            for s in ["away from the spindle", "(20, 0, 10)"] {
+                assert!(e.contains(s), "the refusal names '{s}': {e}");
+            }
+        }
+    }
+    // The far face's hole plunges -X, toward the spindle: it drills.
+    operation::generate(&world, &op(block_hole(42.0, -1.0)), "")
+        .expect("a hole plunging toward the spindle drills on the same block");
+}
+
+#[test]
+fn a_kernel_refusal_on_the_shifted_path_names_the_hole_in_world_coordinates() {
+    // A Z plunge is the mill-side drill's word; the kernel refuses it
+    // in the spindle frame (10, 0, 10) - the user's model has the
+    // mouth at world (20, 4, 10).
+    let (world, mut history) = world_with("mill-turn", bar(AT.0, AT.1));
+    place_g54(&world, &mut history, AT.0, AT.1);
+    let hole = vec![CrossHole {
+        origin: Point3::new(AT.0 + 10.0, AT.1, 10.0),
+        dir: Point3::new(0.0, 0.0, -1.0),
+        radius: 2.0,
+        entry_d: 0.0,
+        floor_d: -6.0,
+        through: false,
+    }];
+    match operation::generate(&world, &op(hole), "") {
+        Ok((t, _)) => panic!("a Z plunge drilled {} moves radially", t.moves.len()),
+        Err(e) => {
+            let e = e.to_string();
+            assert!(e.contains("(20, 4, 10)"), "the refusal names the world mouth: {e}");
+            assert!(!e.contains("(10, 0, 10)"), "no spindle-frame point leaks: {e}");
+        }
+    }
+}
+
+#[test]
+fn a_work_offset_moved_after_a_mill_turn_cross_drill_stales_it_and_the_post_refuses() {
+    use camcraft_app::commands::{CreateOperation, GenerateOperation};
+    use camcraft_app::operation::OpStatus;
+    let (world, mut history) = world_with("mill-turn", bar(0.0, 0.0));
+    let create = CreateOperation::new(&world, "X1", "DR-0400", SrcRef::Entity("bar".into()), params(holes(0.0, 0.0)))
+        .expect("create");
+    history.execute(&world, create);
+    history.execute(&world, GenerateOperation::new(&world, "X1").expect("the bar on G54 drills"));
+    let e = camcraft_app::model::find_by_name(&world, "X1").expect("X1");
+    assert_eq!(operation::status_of(&world, &e), OpStatus::Ok);
+
+    // G54 moved 1 mm in Y under the generated op: every standoff was
+    // measured about a line the spindle no longer turns on.
+    place_g54(&world, &mut history, 0.0, 1.0);
+    assert_eq!(operation::status_of(&world, &e), OpStatus::Stale, "the work offset is an input of the cross drill");
+    let err = camcraft_app::posting::stream_records(&world).expect_err("a moved spindle never posts");
+    for s in ["X1", "spindle", "G54"] {
+        assert!(err.contains(s), "the post's refusal names '{s}': {err}");
+    }
+
+    // Moved back, the cached path is fresh again.
+    place_g54(&world, &mut history, 0.0, 0.0);
+    assert_eq!(operation::status_of(&world, &e), OpStatus::Ok);
+}
