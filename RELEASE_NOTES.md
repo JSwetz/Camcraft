@@ -1,3 +1,29 @@
+# CamCraft 0.11.0 (clean-room implementation)
+
+A minor release, breaking first: Heidenhain NC output changes for every XY
+arc (issues #49, #17, #18).
+
+## Breaking
+- **Heidenhain DIN/ISO arcs post their true centre** (#49). The TNC reads
+  I/J as the absolute circle centre, entered in its own block before the
+  G02/G03 (TNC 640 ISO programming manual). The post wrote the centre
+  relative to the arc start, so a real control would cut around the wrong
+  centre. Every Heidenhain XY arc's output changes; an arc without a centre
+  is now refused by name.
+
+## Fixed
+- **Swarf links half as often and never tilts under level** (#17): about
+  half the air links on the blade, the lowest pose level instead of 7-9
+  degrees under, and a ball tool's re-entry into the cut it just left is no
+  longer refused as a plunge.
+
+## Decided
+- **Heidenhain vertical arcs and oblique entries stay chord fans** (#18):
+  the manuals give no rotation sense for off-plane arcs, so a native arc
+  would be a guess; the fan is exact to the output resolution.
+
+---
+
 # CamCraft 0.10.0 (clean-room implementation)
 
 A minor release: one new capability and two fixes (issues #15, #14, #16).
