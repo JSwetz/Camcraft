@@ -12146,6 +12146,12 @@ the mechanics (AGENTS.md Issue Law and "A cut goes PR review"):
    carry no behaviour and need no tag, and laws must reach main to bind
    agents.
 7. **`release.ps1 -NoTag`** commits the bump and builds on the release
-   branch; the tag is made on main's merge commit after `git diff
-   release/vX.Y.Z main` shows the trees match, so the zip is the tagged
-   tree.
+   branch (and refuses to on main); the tag is made on the release PR's
+   merge commit after `git diff <recorded tip> <merge commit>` shows the
+   trees match, so the zip is the tagged tree. Nothing else merges to main
+   from the first issue-PR merge to the tag (a reviewer of this PR found
+   the plain `release/vX.Y.Z` name is gone once `--delete-branch` runs, and
+   a mid-cut docs merge would make the trees differ).
+8. **Overlapping issues stack** on the open PR's branch (parent merges
+   first, child retargeted to main), since fixes stay unmerged until the
+   cut; an issue PR closed unmerged leaves `in-review` with a comment.

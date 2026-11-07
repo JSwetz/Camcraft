@@ -59,10 +59,14 @@ design context, never add work to them. Decisions still go to
   create a new branch to work off of"). Before the first edit:
   `git fetch origin && git switch main && git pull --ff-only origin main`,
   then `git switch -c issue/N-<slug>` (a worktree agent:
-  `git worktree add -b issue/N-<slug> <path> origin/main`). One issue, one
-  branch; every commit for it lands there, never on `main`. Work that needs
-  an unmerged branch branches off that branch and its PR says
-  "stacked on #M".
+  `git fetch origin && git worktree add --no-track -b issue/N-<slug> <path>
+  origin/main` - `--no-track`, so a bare pull/push never targets main). One
+  issue, one branch; every commit for it lands there, never on `main`.
+- **Overlapping issues stack.** Fixes wait unmerged until the cut, so an
+  issue touching code an open PR changes branches off that PR's branch
+  (not main) and its PR says "stacked on #M"; the parent merges first, then
+  the child is retargeted (`gh pr edit <child> --base main`) and takes
+  `git merge origin/main`. An overlap that can't stack waits for the cut.
 - **Claim before any code.** One command, so every agent sees it at once:
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
@@ -77,7 +81,8 @@ design context, never add work to them. Decisions still go to
   rather than burying it.
 - **Done on a branch = pushed + PR, never merged to main** (user,
   2026-11-07: "when closing an issue we should push the branch, not merge
-  to main"). The fixing commit ends its body with `Fixes #N` (`Refs #N` for
+  to main"); issue PRs merge only at a cut (docs/process/CI-only PRs are
+  the one carve-out - "Commits and Releases"). The fixing commit ends its body with `Fixes #N` (`Refs #N` for
   partial work, which never closes). When its gate is green:
   `git push -u origin issue/N-<slug>`, then
   `gh pr create --base main --head issue/N-<slug> --title "<conventional
@@ -88,7 +93,11 @@ design context, never add work to them. Decisions still go to
   · pinned by <test name(s)> · merges at the next cut`. The issue closes
   when the PR merges to `main` (GitHub closes it from the keyword). A
   review finding is fixed on the same branch and pushed (plain push, never
-  force).
+  force); whoever fixes it re-adds `claimed` with a claim comment while
+  working and swaps back to `in-review` when pushed. A PR closed unmerged
+  (dropped, or held by the user with a PR comment) swaps `in-review` for
+  `blocked` (held, say on what) or for nothing (dropped, say why), with an
+  issue comment - an issue never sits in `in-review` without an open PR.
 - **Never close by hand without a commit**, except: a duplicate (link the
   original), already done (name the commit that did it), or a decided
   won't-do (label `wontfix`, give the reason). Each needs that comment.
@@ -396,26 +405,35 @@ a tag"):
    takes `git merge origin/main` on its branch (append-only files such as
    `RECOMMENDED.md` keep both sides), is re-gated (quick), and pushed. Then
    `gh pr merge M --merge --delete-branch` - merge commits, never squash or
-   rebase, so branch commits keep the hashes the issue comments name.
+   rebase, so branch commits keep the hashes the issue comments name. A
+   worktree still holding the branch is removed first (the local delete
+   fails otherwise). From step 1 to the tag, nothing else merges to main.
 2. **Release branch.** Sync main (`git pull --ff-only`), then
    `git switch -c release/vX.Y.Z`. The version is the highest bump among
-   the merged PRs' commits (table above). Run the release gate tier on it;
-   write `RELEASE_NOTES.md` and the `CHANGELOG.md` rows (one per merged
-   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows),
-   commit as `docs: X.Y.Z release notes; changelog`; then
-   `scripts/release.ps1 -Version X.Y.Z -SkipGate -NoTag` (the version bump
-   commits, the zip and installer - no tag yet).
+   the merged PRs' commits (table above). Write `RELEASE_NOTES.md` and the
+   `CHANGELOG.md` rows (one per merged behaviour PR, from its `Changelog:`
+   line, plus any `Unreleased` rows), commit as `docs: X.Y.Z release notes;
+   changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
+   - it runs the release gate tier on that tree (pass `-SkipGate` only if
+   this exact tree already passed it), commits the version bump, builds
+   the zip and installer, and makes no tag (it refuses `-NoTag` on main).
 3. **Release PR.** `git push -u origin release/vX.Y.Z`,
    `gh pr create --base main --title "chore(release): X.Y.Z"`, reviewed like
-   any PR, then `gh pr merge --merge --delete-branch`.
-4. **Tag main.** Sync main; check `git diff release/vX.Y.Z main` is empty
-   (the zip's tree is the merged tree), then
-   `git tag -a vX.Y.Z -m "CamCraft X.Y.Z"` on main's merge commit and
-   `git push origin vX.Y.Z`. Comment `shipped in vX.Y.Z` on every issue the
-   cut closed.
+   any PR. Record the branch tip first (`tip=$(git rev-parse
+   release/vX.Y.Z)` - `--delete-branch` removes the name), then
+   `gh pr merge --merge --delete-branch`.
+4. **Tag the release merge commit.** Sync main; `m=$(git rev-parse main)`
+   is the release PR's merge commit (nothing else merged since step 1).
+   `git diff $tip $m` must be empty - the zip's tree is the tagged tree. Then
+   `git tag -a vX.Y.Z -m "CamCraft X.Y.Z" $m` and `git push origin vX.Y.Z`.
+   If the diff is not empty, do not tag: something reached main mid-cut;
+   start the cut again from step 2 on a fresh release branch. Comment
+   `shipped in vX.Y.Z` on every issue the cut closed.
 
 Docs-, process- and CI-only PRs (no behaviour, no release) merge once
-reviewed, without waiting for a cut.
+reviewed by a subagent that did not write them, without waiting for a cut;
+the main session merges them (`gh pr merge --merge --delete-branch`),
+never while a cut is between step 1 and its tag.
 
 **Every cut tag is published.** A release cut is not done until its tag is
 on GitHub: the tag is made on `main` after the release PR merges (step 4)

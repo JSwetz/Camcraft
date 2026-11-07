@@ -69,6 +69,12 @@ if ($dirty.Count -gt 0) {
     $dirty | ForEach-Object { Write-Host "  $_" }
     if ($DryRun) { Write-Host "[dry-run] would fail here" } else { Fail "working tree not clean" }
 } else { Write-Host "tree clean (ignoring release files)" }
+$branchNow = (git rev-parse --abbrev-ref HEAD)
+if ($LASTEXITCODE -ne 0) { Fail "git rev-parse failed" }
+# Branch/PR flow: the bump is committed on release/vX.Y.Z (-NoTag), never on
+# main; a tagging run is the legacy direct cut and belongs on main only.
+if ($NoTag -and $branchNow -eq "main") { Fail "-NoTag runs on a release/v$Version branch, not on main" }
+if (-not $NoTag -and $branchNow -ne "main") { Fail "a tagging cut runs on main; on $branchNow use -NoTag (tag main after the release PR merges)" }
 $existing = git tag --list $tag
 if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
 if ($existing) { Fail "tag $tag already exists" }
@@ -214,9 +220,10 @@ if ($Installer -and (Test-Path $setup)) { Write-Host "Installer: $setup" }
 if ($NoTag) {
     $branch = (git rev-parse --abbrev-ref HEAD)
     Write-Host "Next: git push -u origin $branch; gh pr create --base main --title 'chore(release): $Version'"
-    Write-Host "      after it merges: git switch main; git pull --ff-only; git tag -a $tag -m 'CamCraft $Version'; git push origin $tag"
+    Write-Host "      record tip=`$(git rev-parse $branch) before merging; after it merges: git switch main; git pull --ff-only;"
+    Write-Host "      git diff `$tip main must be empty, then git tag -a $tag -m 'CamCraft $Version' main; git push origin $tag"
 } else {
-    Write-Host "To publish: git push origin main && git push origin $tag"
+    Write-Host "Legacy direct cut (only when the user directs it): git push origin main && git push origin $tag"
 }
 Write-Host "NOTHING WAS PUSHED. Pushing is left to you."
 exit 0
