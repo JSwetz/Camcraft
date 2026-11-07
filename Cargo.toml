@@ -24,7 +24,7 @@ flecs_ecs = { version = "=0.2.2", default-features = false, features = ["flecs_b
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 # Data-parallel batch generation (M5.3 B): rayon's ordered collect keeps a
 # parallel RegenerateAll byte-identical to the serial one. MIT OR
