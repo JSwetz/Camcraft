@@ -13182,3 +13182,45 @@ revolved (follow-up material if users hit it with long keyways).
   clamps) a ring count past 1e5, and drops vertical-plane arcs from the
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
+
+## #117 - the cross drill is judged against the finished part (2026-11-07, Prime Directive)
+
+- **Chosen:** the cross arm refuses by name (a `GenError`, so nothing
+  posts) when the drill - its radius along the hole axis from the
+  station to the tip, the point cone, shank and holder - enters the
+  finished part's solid past `GOUGE_TOL` (the axial verdict's 0.01 mm).
+  The judge is the verify crate's solid law (`solid_hits`, posed along
+  each move's tool axis, `hole_walls` on), run on the finished world-
+  frame chain in `cross_spindle::cross_drill` (`cross_part.rs`). A
+  bisection of the offending plunge says how deep the tip got: less
+  than one drill radius reads "the model has no hole there", deeper
+  reads "runs past the modelled hole's floor".
+- **Dropped:** a `Warning::Gouge` in the verify tail like
+  `axial_warnings` (it names a move, not the hole, and every other
+  radial law - reach, holder, rapids - already refuses by name in the
+  arm); re-reading the holes by recognition (the radial recogniser
+  reads YZ/XZ walls only; the swept solid judges any hole, any face).
+- **Fixtures were wrong, not the law:** every cross suite drilled a
+  solid bar with no modelled hole (22 tests convicted). They now model
+  their holes (`tests/punched_bar`: a round bar with radial blind holes
+  cut in, and a flat face with one hole). Three choices ride it:
+  1. **Off the knife-edge:** the old r10 x 40 bar (L/D 2) sat exactly on
+     the lathe axis reader's isotropy door (ISO = 0.5: caps' normal
+     moment = half the face's), so any modelled hole was refused as
+     "every axis fits" - filed as #152, the reader untouched here. The
+     drilled bar runs z -80..20 (L/D 5; the top, z20, every Top-of-Part
+     and end-face number rides, is unchanged), which also keeps the
+     holes a small share of the surface the fit must find revolved.
+  2. **Half-turn images:** one-sided holes tilt the robust axis fit by
+     ~0.001 mm, past the spindle law's 0.0005 (the #116 band), so each
+     modelled hole carries its image about Z (modelled, never drilled);
+     two that meet on one line become one through hole.
+  3. **Where the r10 bar cannot carry the hole** (an off-centre hole
+     whose edge runs past the bar, y 7..11 or 6..12 - a notch, not a
+     hole), the part is a small core the hole never reaches; the raw
+     stock, wider, sets every standoff, so the chain is the same (the
+     bit-for-bit fingerprints still hold). And the box suite's lump on
+     the hole's line (a part poking out of the stock face) is split into
+     four lumps in the CORNERS of the drill's square entry band: the
+     entry still reads them, the round drill clears them - a lump in the
+     drill's own path is now (rightly) a refused gouge.
