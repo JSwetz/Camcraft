@@ -227,6 +227,9 @@ fn a_z_only_drill_file_never_writes_the_cross_key() {
         cross: vec![],
     };
     create(&world, &mut history, "D1", p);
+    // The fixture is an honest program: it generates (R under the box
+    // top would be refused, and the file would carry an Error op).
+    assert_eq!(status(&world, "D1"), OpStatus::Ok, "the Z-only drill generates with R on the stock top");
     let path = tmp_path("zonly");
     project::save(&world, &path).expect("save");
     let text = std::fs::read_to_string(&path).expect("readable");

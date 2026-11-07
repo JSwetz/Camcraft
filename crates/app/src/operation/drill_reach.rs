@@ -30,6 +30,12 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::tools::Tool;
 
+#[path = "drill_top.rs"]
+mod top;
+#[cfg(test)]
+use top::{facet_top, meets_disk};
+use top::{r_plane_clear, top_over};
+
 const TOL: f64 = 1e-6;
 
 fn finite_or_zero(v: f64) -> f64 {
@@ -92,73 +98,6 @@ pub(super) fn cross_reach(
     Ok(())
 }
 
-/// The highest material over the XY disk (`c`, `r`): the part's facets
-/// and the stock's, as they stand (issue #91: the stock above the R
-/// plane is no longer clipped away - [`r_plane_clear`] refuses it
-/// first, so the rapid laws are never asked to vouch for it). A facet
-/// counts at its highest vertex when its projection meets the disk -
-/// an over-estimate on a slope, never an under-estimate.
-fn top_over(part: &[Triangle], stock: &[Triangle], cx: f64, cy: f64, r: f64) -> Option<f64> {
-    let p = highest(part, cx, cy, r);
-    let s = highest(stock, cx, cy, r);
-    match (p, s) {
-        (Some(a), Some(b)) => Some(a.max(b)),
-        (a, b) => a.or(b),
-    }
-}
-
-/// The highest vertex of the facets whose projection meets the disk.
-fn highest(facets: &[Triangle], cx: f64, cy: f64, r: f64) -> Option<f64> {
-    facets.iter().filter(|t| meets_disk(t, cx, cy, r)).map(|t| t.a.z.max(t.b.z).max(t.c.z)).reduce(f64::max)
-}
-
-/// Issue #91: the cycle rapids straight down onto its R plane, so no
-/// stock may stand above R over the tool's body disk at the hole - the
-/// rapid would cross uncut stock (a collision no feed law sees). The
-/// stock is read raw: removal by an earlier operation (a facing pass)
-/// is not credited yet (#89), so a faced-first program is refused too
-/// until then - the message says so rather than promise a fix that
-/// cannot pass. A non-finite height is refused, never waved through.
-fn r_plane_clear(stock: &[Triangle], c: &Cycle, body: f64) -> Result<(), GenError> {
-    let Some(top) = highest(stock, c.xy.x, c.xy.y, body) else { return Ok(()) };
-    if top.is_finite() && c.r_z.is_finite() && c.r_z >= top - TOL {
-        return Ok(());
-    }
-    Err(GenError::Invalid(format!(
-        "R plane Z {:.3} is below the stock top Z {top:.3} over the hole at ({:.3}, {:.3}) - the rapid down to R \
-         would cross uncut stock (a collision); raise Top of Part Z (the R plane) to the stock top or above \
-         (stock faced by an earlier operation still counts at its raw height)",
-        c.r_z, c.xy.x, c.xy.y
-    )))
-}
-
-/// Does the facet's XY projection meet the disk? A facet with no area
-/// (collapsed to a point or a line - a bad facet) is skipped, so one
-/// sliver cannot set a false top. A wall (area in 3D, none in XY) is
-/// read by its edges alone: its projection is a segment, and the
-/// all-same-sign "inside" test would pass every disk on that
-/// segment's line.
-fn meets_disk(t: &Triangle, cx: f64, cy: f64, r: f64) -> bool {
-    let (u, w) = (t.b - t.a, t.c - t.a);
-    let n = [u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x];
-    let area = n[0].hypot(n[1]).hypot(n[2]);
-    if area.is_nan() || area <= 1e-12 {
-        return false;
-    }
-    let v = [(t.a.x - cx, t.a.y - cy), (t.b.x - cx, t.b.y - cy), (t.c.x - cx, t.c.y - cy)];
-    if v.iter().any(|(x, y)| !(x.is_finite() && y.is_finite())) {
-        return false;
-    }
-    let cross = |i: usize| {
-        let (p, q) = (v[i], v[(i + 1) % 3]);
-        p.0 * q.1 - p.1 * q.0
-    };
-    let s = [cross(0), cross(1), cross(2)];
-    let flat = n[2].abs() > 1e-12;
-    let inside = flat && (s.iter().all(|&c| c >= 0.0) || s.iter().all(|&c| c <= 0.0));
-    inside || (0..3).any(|i| seg_dist(v[i], v[(i + 1) % 3]) <= r)
-}
-
 /// Distance from the origin to the segment `p`-`q`.
 fn seg_dist(p: (f64, f64), q: (f64, f64)) -> f64 {
     let (dx, dy) = (q.0 - p.0, q.1 - p.1);
@@ -182,12 +121,14 @@ pub(super) fn axial_reach(
     tool: &Tool,
     name: &str,
 ) -> Result<(), GenError> {
+    // No stock (or the stock is the source): the part alone is the
+    // material - every law below reads the part too (#91 review).
     let stock = stock.unwrap_or(&[]);
     let flute = finite_or_zero(tool.flute_len);
     let body = 0.5 * finite_or_zero(tool.diameter).max(finite_or_zero(tool.shank_d));
     for c in &t.cycles {
         let Cycle { xy, r_z, bottom_z, .. } = *c;
-        r_plane_clear(stock, c, body)?;
+        r_plane_clear(part, stock, c, body)?;
         let top = top_over(part, stock, xy.x, xy.y, body).unwrap_or(c.entry_z).max(c.entry_z.min(r_z));
         let depth = top - bottom_z;
         if matches!(c.kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {

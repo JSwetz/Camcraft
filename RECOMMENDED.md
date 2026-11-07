@@ -12818,3 +12818,38 @@ keeps the part-only chain bit for bit.
   to 44, clearance 50.
 - *Dropped:* clamping R up to the stock top silently (a height the user
   did not set; the kernel never invents clearance).
+- *Review fixes (PR #97).* (1) The R-plane law reads the part as well as
+  the stock - its facets over the body disk and the hole's own entry
+  surface (the modelled hole is what the cycle cuts, not air yet) - so a
+  stockless op, or one whose source is the stock, no longer hands the law
+  an empty slice: R 15 under a part top Z 20 with no stock is refused,
+  naming "the part top". The message names whichever of part and stock
+  stands higher. (2) A facet counts at its plane's maximum over the disk,
+  not its highest vertex: the triangle is clipped to the octagon that
+  circumscribes the body disk and read at the clipped corners (a plane's
+  maximum over a convex region is at a corner; the octagon holds the
+  disk, so it never under-estimates - at most r(1/cos 22.5deg - 1) of
+  slope reach extra). A 1-degree drafted casting now passes R 0.3 mm over
+  the local surface and its refusal names the local height, not the far
+  vertex 0.4 mm higher. Dropped: sampling the disk boundary (can miss a
+  facet corner inside the disk), clipping to the bounding square (41 %
+  more slope reach than the octagon). The same reader serves the reach
+  and holder laws (tighter there, still conservative). (3) Seeding: the
+  drill's Top of Part Z stays seeded from the carried top (Top of Model
+  + 0 by default) - not switched to Top of Stock. The seed has no world
+  in hand (`retype_params` folds the old kind's numbers only), and Top of
+  Stock resolves to nothing without a stock, so the seed would refuse
+  every stockless document ("no stock yet") - a behaviour change for the
+  no-stock case the review asked to keep. The UX cost, recorded: a stock
+  with top allowance refuses a fresh drill's first generate, by name,
+  until R is raised (picking "stock top" in the height field is one
+  click). Revisit if seeding gains world access (a fallback reference).
+  (4) drill_rplane asserts the refusal's words in the post path too and
+  pins Spot / Tap / Bore, a hole beside the stock footprint, R from Top
+  of Stock, the stockless and drafted cases. (5) drilling_cross's Z-only
+  file fixture now asserts it generates Ok, proving the raised R. One
+  more fixture was a real refusal by the part: operations'
+  moving-the-part staleness test moved the block UP 2 mm under its fixed
+  R 10 (the rapid onto R crossed 2 mm of part); it now moves down, the
+  staleness pinned unchanged. The material-top readers moved to
+  `operation/drill_top.rs` (drill_reach stays under 400 lines).
