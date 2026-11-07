@@ -94,8 +94,19 @@ pub(super) fn body_clear(clearance_d: f64, hop_d: Option<f64>, tool: &Tool) -> (
 /// radius, or whose mouth already stands outside it, is untouched; a
 /// hole plunging away from the spindle is refused by name (moving its
 /// mouth "out" would move it in). `holes` are in the spindle frame.
-pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, d: f64) -> Result<Vec<CrossHole>, GenError> {
-    holes
+///
+/// Beside each hole, the reach the wider body adds (issue #84): a shank
+/// wider than the drill has its near edge at `|t| - shank_d/2` and so
+/// meets the raw surface further out than the drill's mouth - by that
+/// much more of the shank's length is in stock at the floor. The mouth
+/// (where cutting starts) stays the drill's; the reach law adds this.
+pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, tool: &Tool) -> Result<(Vec<CrossHole>, Vec<f64>), GenError> {
+    let (d, rim) = (tool.diameter, body_rim(tool));
+    let surf_at = |t: f64, half: f64| {
+        let edge = (t.abs() - half).max(0.0);
+        (edge < raw).then(|| (raw * raw - edge * edge).max(0.0).sqrt())
+    };
+    let mouths: Vec<CrossHole> = holes
         .iter()
         .map(|h| {
             // Axis-aligned XY plunges (the kernel refuses anything
@@ -113,9 +124,7 @@ pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, d: f64) -> Result<Vec
                     h.origin.x, h.origin.y, h.origin.z
                 )));
             }
-            let edge = (t.abs() - 0.5 * d).max(0.0);
-            let surf = (raw * raw - edge * edge).max(0.0).sqrt();
-            let shift = surf - c.abs();
+            let shift = surf_at(t, 0.5 * d).unwrap_or(0.0) - c.abs();
             if !(shift.is_finite() && shift > 0.0) {
                 return Ok(*h);
             }
@@ -129,7 +138,18 @@ pub(super) fn to_raw_mouths(holes: &[CrossHole], raw: f64, d: f64) -> Result<Vec
                 ..*h
             })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    // The mouth's plunge coordinate is where the drill starts; the
+    // body's raw meeting point beyond it is the reach the body adds.
+    let extra = mouths
+        .iter()
+        .map(|m| {
+            let (c, t) = if m.dir.x.abs() >= m.dir.y.abs() { (m.origin.x, m.origin.y) } else { (m.origin.y, m.origin.x) };
+            let added = surf_at(t, rim).map_or(0.0, |s| s - c.abs());
+            if added.is_finite() { added.max(0.0) } else { 0.0 }
+        })
+        .collect();
+    Ok((mouths, extra))
 }
 
 fn approach(a: Point3, b: Point3) -> f64 {

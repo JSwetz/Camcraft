@@ -249,7 +249,8 @@ pub fn cross_world_on(word: &str, stock: StockShape, at: Location) -> (World, Hi
     let cmd = LoadMachine::new(&world, "bench.mch".into(), Some(machine(word)));
     history.execute(&world, cmd.expect("machine"));
     // A long-series Ø4 (issue #84's reach law): the through hole is 31
-    // mm deep from the bar's face and 47 from the Ø44 raw box's - far
+    // mm deep from the bar's face and 38 from the Ø44 raw box's face
+    // (the law reads 47 today, off the box's corner radius - #85) - far
     // past the catalog jobber's 12 mm flute, a real shank collision.
     let mut drill = catalog_tool("DR-0400");
     drill.flute_len = 50.0;

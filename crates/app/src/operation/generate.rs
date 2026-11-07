@@ -1814,7 +1814,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 })
                 .and_then(|t| {
                     // Issue #84: flute reach and holder from the stock.
-                    super::drill_reach::axial_reach(&t, &material.facets, stock_facets.as_deref(), &tool, &tool_name)?;
+                    super::drill_reach::axial_reach(&t, holes, &material.facets, stock_facets.as_deref(), &tool, &tool_name)?;
                     Ok(t)
                 })?
             };

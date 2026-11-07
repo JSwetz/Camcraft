@@ -12731,7 +12731,8 @@ keeps the part-only chain bit for bit.
   #77's review (the holder over the end face).
 - *Fixtures that now refuse - real reach collisions.* The F2 cross bar
   (`cross_support`): its 30 mm through hole is 31 mm deep from the bar face
-  (47 mm from the Ø44 raw box) on DR-0400's 12 mm flute - re-ground to a
+  (38 mm from the Ø44 raw box's face; the law reads 47 off the box's corner
+  radius - #85) on DR-0400's 12 mm flute - re-ground to a
   50 mm long-series flute. `drilling_cross_stock`: mouths on the r20 raw
   bar 16-24 mm above their floors - flute 30. `blind_floor` and
   `solid_law`'s drill gouge tests drilled 14-15 mm from the z20 stock top -
@@ -12747,3 +12748,28 @@ keeps the part-only chain bit for bit.
   warned path is what it pins). Verify's cycle-reach law (e) in practice no longer
   fires on a generated drill path (this law is stricter); it stays
   as the net for paths that reach verify another way.
+- *Review fixes (PR #90).* (1) Tap, Bore and BackBore run in a hole that
+  is already there (the kernel's solid-cycle door lets them by; the bore
+  door already proves the cutting end fits), so they are no longer held to
+  the flute: within the flute nothing but the cutting end is in the hole;
+  past it the shank must fit the hole's diameter (`shank_d <= 2 r`), refused
+  by name otherwise. The holder law still applies. Dropped: holding them to
+  the flute (a 25 mm bore on BR-1000's 20 mm flute in a pre-drilled Ø12 hole
+  was falsely refused). (2) The cross holder is judged per Z band: each
+  move's holder Z extent (both move ends, both holder ends, its radius
+  across the axis) against the widest part or stock radius within that band,
+  each facet clipped to the band. A holder riding above the end face meets
+  no material - the old global `z_max` skip falls out of it - and a Ø60
+  flange 30 mm below a hole in a Ø20 section no longer refuses it. Dropped:
+  the global stock radius (false refusals on any stepped shaft). (3) An
+  off-centre cross hole's reach is the wider body's: a shank wider than the
+  drill meets the raw bar further out than the drill's edge (raw r20, offset
+  15, Ø3 on Ø6: 1.244 mm), and `to_raw_mouths` now returns that extra
+  per hole for the reach law; the mouth itself stays at the drill's edge
+  (where cutting starts). (4) A non-finite or negative `holder_d` /
+  `holder_len` is refused by name (AddTool already refuses it; this guards
+  any other path in); 0 still means no holder. (5) `meets_disk` skips
+  facets with no 3D area, and reads a wall (no XY area) by its edges only -
+  the same-sign inside test passed every disk on a wall's line. The
+  cross_support fixture note now gives the raw box's true face depth, 38 mm
+  (47 is the box corner radius, #85).
