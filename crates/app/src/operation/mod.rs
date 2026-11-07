@@ -132,6 +132,7 @@ pub use spindle_law::{spindle_reading, SpindleReading, SPINDLE_TOL};
 mod rotary_gate;
 mod air_law;
 mod turning_credit;
+mod turning_feeds;
 mod turning_outline;
 mod turning_rapids;
 pub use air_law::AIR_NOTE;
