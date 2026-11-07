@@ -54,6 +54,7 @@
 
 
 mod backend;
+mod backend_build;
 mod columns;
 mod cut;
 mod dexel;
@@ -69,6 +70,7 @@ mod field_lathe;
 mod field_ray;
 mod field_rotary;
 mod field_solid;
+mod field_sweep;
 mod gouge;
 mod kernel;
 mod march;
