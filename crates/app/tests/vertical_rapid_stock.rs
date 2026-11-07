@@ -12,17 +12,18 @@
 //! Gate map (#96): covers camcraft_app::operation (generate's verify
 //! wiring, turning_rapids, job's prior plan), camcraft_app::rest
 //! (PriorPlan), camcraft_app::posting (the gate),
-//! camcraft_sim::verify (rapids, prior).
+//! camcraft_sim::verify (rapids, prior), camcraft_app::operation::stamp
+//! (#109: the program ahead in the stamp).
 //! Lane shape: all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::MoveKind;
-use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock};
+use camcraft_app::commands::{AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel, SetStock};
 use camcraft_app::geometry::{cube, Point3};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
-use camcraft_app::operation::{Height, OpParams, SrcRef};
+use camcraft_app::operation::{Height, OpParams, OpStatus, SrcRef};
 use camcraft_app::posting;
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools::catalog;
@@ -186,6 +187,39 @@ fn a_dive_into_stock_no_earlier_op_removed_is_still_convicted() {
         Ok(()) => panic!("a dive under the face's floor posted"),
         Err(e) => assert!(e.contains("post blocked") && e.contains("rapid move"), "refused, but not by the rapid law: {e}"),
     }
+}
+
+#[test]
+fn a_face_regenerated_shallower_marks_the_acquitted_contour_stale() {
+    // #109: the contour's dive is acquitted by the face ahead of it, so
+    // the face is an input of the contour's verdict. The face re-cut to
+    // Z 8 leaves 1 mm the dive now crosses: the contour reads Stale and
+    // the post refuses it, never posting the cached acquittal.
+    let world = camcraft_app::world::new_world();
+    let mut history = History::default();
+    let cmd = SetStock::new(&world, StockShape::Box { dx: 100.0, dy: 100.0, dz: 10.0 }, Default::default());
+    history.execute(&world, cmd.expect("box stock"));
+    let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0600-4FL").map(|(_, t)| t).expect("catalog");
+    history.execute(&world, AddTool::new(&world, "EM-0600-4FL", tool).expect("tool"));
+    history.execute(&world, ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))));
+    let cmd = CreateOperation::new(&world, "Op1Face", "EM-0600-4FL", SrcRef::Stock, face(5.0));
+    history.execute(&world, cmd.expect("create face"));
+    let cmd = CreateOperation::new(&world, "Op2Contour", "EM-0600-4FL", SrcRef::Entity("part".into()), contour());
+    history.execute(&world, cmd.expect("create contour"));
+    history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("generate face"));
+    history.execute(&world, GenerateOperation::new(&world, "Op2Contour").expect("generate contour"));
+    let status = |name: &str| camcraft_app::operation::status_of(&world, &model::find_by_name(&world, name).expect("op"));
+    assert_eq!(status("Op2Contour"), OpStatus::Ok, "the faced block acquits the dive");
+    history.execute(&world, EditOperationParams::new(&world, "Op1Face", face(8.0)).expect("a legal cut"));
+    history.execute(&world, GenerateOperation::new(&world, "Op1Face").expect("regenerate face"));
+    assert_eq!(status("Op1Face"), OpStatus::Ok, "the shallower face is fresh");
+    assert_eq!(status("Op2Contour"), OpStatus::Stale, "the face ahead moved");
+    let out = tmp_nc("refaced");
+    match posting::post_setup(&world, &out) {
+        Ok(_) => panic!("a contour acquitted by a face that no longer cuts there posted"),
+        Err(e) => assert!(e.contains("Op2Contour") && e.contains("regenerate"), "refused, but not as stale: {e}"),
+    }
+    assert!(!out.exists(), "a refused post writes nothing");
 }
 
 fn tmp_nc(tag: &str) -> std::path::PathBuf {

@@ -259,11 +259,10 @@ pub fn current_stamp(
     // is written: first operations' and other kinds' stamps are
     // bit-for-bit what they were before stage D (the inert-data law).
     // Issue #89: an axial Drill's reach, R-plane and holder laws read
-    // what the program ahead removed, so its stamp carries the same
-    // digest - a drill judged against an earlier pocket goes Stale
-    // when that pocket's recorded path moves. Only Drill joins here
-    // (#109 owns the general case for every other kind).
-    if matches!(params.kind(), OpType::Pocket3D | OpType::Drill)
+    // what the program ahead removed. Issue #109: so does every
+    // unposed op's rapid law (prior acquittal, pilot and facing
+    // credits) - each carries the digest (one-time Stale, by design).
+    if super::drill_prior::reads_prior(params)
         && let Some(digest) = crate::rest::prior_digest(world, op_name, setup)
     {
         h.write_u8(b'R');
@@ -390,7 +389,7 @@ pub fn stale_reason(
     // clean while the stamp still mismatches, so a cutting
     // predecessor's recorded path is what moved - whatever its own
     // status reads.
-    if matches!(op.params.kind(), OpType::Pocket3D | OpType::Drill)
+    if super::drill_prior::reads_prior(&op.params)
         && let Some(name) = model::name_of(world, entity)
         && let Some(why) = crate::rest::prior_stale(world, &name, op.setup.as_deref())
     {

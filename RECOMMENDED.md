@@ -13289,3 +13289,37 @@ revolved (follow-up material if users hit it with long keyways).
   (a flat point credits MORE); the DrillAhead doc says so.
 - **S2** (a pilot deleted after the bore leaves it Ok) is #109's - a
   lathe pin was added there, not fixed here.
+
+### #109: a verdict that reads earlier ops digests them
+
+- **Chosen: the stamp, not a live re-check at the post.** Every op whose
+  verdict reads the program ahead now writes the existing rest digest
+  (`rest::prior_digest`, the same term Pocket3D and Drill already wrote)
+  into its generation stamp, so editing, regenerating, deleting or
+  reordering an earlier op of its setup marks it Stale, and the post
+  gate - which already refuses Stale - refuses it. Which ops: Pocket3D,
+  Drill and every op with no 3+2 frame (`drill_prior::reads_prior`) -
+  exactly the set `job::collect_job` hands `verify_prior` (the prior
+  acquittal) and the turned family's pilot/facing credits ride. The
+  stale reason names the moved predecessor, the same story as Pocket3D's.
+- **Dropped: re-running `acquit_by_prior` / `judge_axial_rapids` live at
+  the post.** It would keep stamps unchurned, but the post would cut the
+  prior grid (the costly half) for every op every post, and two
+  readings of one verdict could disagree; the stamp is the one source.
+- **Cost, accepted:** every non-first op of a saved project reads Stale
+  once on load and clears on regenerate (release notes say so). A posed
+  (3+2) op reads no prior and keeps its stamp bit-for-bit. The digest
+  reads predecessors' cached paths, so an edited-but-not-regenerated
+  predecessor is its own Stale (the post refuses it first), and the
+  dependent goes Stale when it is regenerated.
+- **RegenerateAll takes two rounds** when a later op reads an earlier
+  one being regenerated in the same batch (the batch stages every op
+  against the frozen world, so the dependent is stamped against the
+  predecessor's old path) - the M3.1 C convergence Pocket3D already had,
+  now reached by face-then-contour jobs too. Honest (the leftover reads
+  Stale, the post refuses), but a second click; a one-round batch is a
+  follow-up, not done here.
+- Pins: `a_face_regenerated_shallower_marks_the_acquitted_contour_stale`
+  (vertical_rapid_stock), `a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale`
+  (turning_bore). turning_bore's fixture moved to `tests/common/bore.rs`
+  to keep the suite under the 400-line law.

@@ -1227,13 +1227,26 @@ fn regenerate_all_fixes_the_whole_job_in_one_undo_unit() {
     assert_eq!(cmd.regenerated(), 2);
     assert!(cmd.skipped().is_empty());
     history.execute(&world, cmd);
+    // #109: program order reads names, so Contour1 runs ahead of
+    // Face1, and the face's verdict reads the contour ahead (the prior
+    // acquittal) - the batch generated it against the contour's OLD
+    // path, honestly Stale. The second round converges (M3.1 C).
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+    let cmd = RegenerateAll::new(&world);
+    assert_eq!(cmd.regenerated(), 1);
+    history.execute(&world, cmd);
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
 
-    // One undo unit - the batch trades back together, both STALE again.
+    // One undo unit per batch - each round trades back together.
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
     assert!(history.undo(&world));
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+    assert!(history.redo(&world));
     assert!(history.redo(&world));
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
