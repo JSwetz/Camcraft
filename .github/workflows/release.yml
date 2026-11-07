@@ -54,6 +54,7 @@ jobs:
           dpkg-deb --contents dist/*.deb | grep '/usr/lib/camcraft/camcraft-ui$'
           rpm -qpl dist/*.rpm | grep '/usr/lib/camcraft/camcraft-ui$'
           test -s dist/*.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/*.AppImage --headless
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
