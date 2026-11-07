@@ -113,7 +113,8 @@ fn params(bottom_z: f64, top_z: f64) -> BoreParams {
         feed: 120.0,
         plunge_feed: 40.0,
         nose_radius: D,
-        bar_radius: 0.0,
+        head_d: 0.0,
+        shank_d: 0.0,
     }
 }
 
@@ -168,7 +169,7 @@ fn the_bar_rides_the_wall() {
 fn a_stated_bar_enters_and_leaves_with_its_own_axis_on_the_spindle() {
     // #103: the insert sits at the body's edge - a Ø10 body with its
     // nose stands centred, the nose r 5 - D/2 off the spindle, both rapids.
-    let path = bore(&blind(-20.0), &BoreParams { bar_radius: 5.0, ..params(-10.0, 40.0) }).expect("bores");
+    let path = bore(&blind(-20.0), &BoreParams { head_d: 10.0, shank_d: 10.0, ..params(-10.0, 40.0) }).expect("bores");
     let r = |q: Point3| (q.x * q.x + q.y * q.y).sqrt() - (5.0 - D * 0.5) + 5.0;
     let n = path.moves.len();
     for m in [&path.moves[0], &path.moves[n - 1]] {

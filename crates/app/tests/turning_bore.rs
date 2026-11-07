@@ -268,6 +268,49 @@ fn a_ten_mm_bar_down_a_four_mm_pilot_is_convicted() {
 }
 
 #[test]
+fn a_bar_whose_shank_outgrows_its_head_is_judged_by_its_full_shank() {
+    // #103 review B4: head Ø8, shank Ø12, nose 0.4, in a Ø15 bore over a
+    // Ø13 pilot. The kernel centres the whole bar (nose r 5); the shank,
+    // read at its full size both ways a record can mean it, spans r
+    // -7..7 - past the pilot's 6.5: convicted. Read at half the
+    // diameters (generate passing d/2) it would span -1..6 and pass
+    // silently - this pins the body's size at the app level.
+    let (world, mut history) = bore_world();
+    let wide = revolve(&[(0.0, -50.0), (BLANK, -50.0), (BLANK, 50.0), (7.5, 50.0), (7.5, FLOOR), (0.0, FLOOR)]);
+    history.execute(&world, ImportModel::from_mesh("wide", wide));
+    let mut bar = catalog_tool("BR-1000");
+    bar.diameter = 8.0;
+    bar.shank_d = 12.0;
+    history.execute(&world, AddTool::new(&world, "BR-0812", bar).expect("a sane bar"));
+    let mut drill = catalog_tool("DR-0400");
+    drill.flute_len = 70.0;
+    drill.diameter = 13.0;
+    drill.shank_d = 13.0;
+    history.execute(&world, AddTool::new(&world, "DR-1300-L", drill).expect("a sane drill"));
+    let hole = Hole { xy: Point2::new(0.0, 0.0), radius: 6.55, entry_z: 50.0, floor_z: -16.0, through: false, stepped: false };
+    let drill_params = OpParams::Drill {
+        clearance_z: Height::fixed(60.0),
+        retract_z: None,
+        top_z: Height::fixed(50.0),
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 120.0,
+        plunge_feed: 80.0,
+        holes: vec![hole],
+        cross: vec![],
+    };
+    create_on(&world, &mut history, "AX0", "DR-1300-L", "wide", drill_params);
+    assert_eq!(status(&world, "AX0"), OpStatus::Ok, "the pilot drills");
+    create_on(&world, &mut history, "BR1", "BR-0812", "wide", bore_params());
+    let c = cache(&world, "BR1").expect("cached");
+    let r0 = rho(c.path.moves[0].to);
+    assert!((r0 - 5.0).abs() < 1e-6, "the kernel centres the whole bar, nose r 5: {r0}");
+    assert!(c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: 0 }), "the shank rode through the pilot wall: {:?}", c.warnings);
+}
+
+#[test]
 fn a_bore_kind_refuses_the_wrong_tool_by_name() {
     // The family door admits the KIND; the tool door is the
     // generator's, and a turning insert is not hole steel - the

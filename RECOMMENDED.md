@@ -13317,3 +13317,29 @@ revolved (follow-up material if users hit it with long keyways).
   No golden carries a bore path; none changed.
 - The law's unit pins moved to `operation/turning_rapids_tests.rs`
   (size budget).
+
+### #103 re-review B4: head and shank modelled apart
+
+- **Law and kernel share one shape**, `motion::turning::bar_spans`: the
+  insert sits at the head's edge, so the head spans [-head_d, 0]
+  outward of the nose, over `flute_len` up the axis. The shank is read
+  both ways a tool record can mean it, with its edge on the insert's or
+  its axis on the head's, and the union kept:
+  [-max(shank_d, (head_d + shank_d)/2), max(0, (shank_d - head_d)/2)],
+  over `shank_len` above the flute. A shank wider than the head reaches
+  past the nose. `centred_nose` puts the kernel's rapids where the whole
+  bar (head, shank and the nose past the head's edge) is centred on the
+  spindle. `BoreParams.bar_radius` became `head_d` / `shank_d`.
+- **Chosen:** modelling over refusing (a stepped-shank bar is an ordinary
+  tool, per the coordinator), and the union over the coaxial reading
+  alone. The union is conservative: the reviewer's Ø8/Ø12 bar centred
+  spans 14 mm, so it is refused in a Ø13 pilot even though the coaxial
+  reading (12 mm) would fit. The tool record does not say which reading
+  holds. If that false refusal bites, an explicit shank-offset field
+  joins the tool data.
+- **Pins:** `a_bar_whose_shank_outgrows_its_head_is_judged_by_its_shank`
+  (law: the reviewer's scenario convicted centred and on the old line,
+  clean in a pilot it fits), `a_bar_whose_shank_outgrows_its_head_is_judged_by_its_full_shank`
+  (app: fails when generate passes half the diameters, checked by
+  reverting the line), and `a_twelve_mm_bar_in_the_eleven_mm_pilot_is_convicted`.
+- **Filed:** #146, the bar's body during cutting feeds (P1).

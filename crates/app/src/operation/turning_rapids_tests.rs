@@ -161,7 +161,7 @@ fn a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted() {
             z_tol: 1e-6,
             drills: &drills,
             band: 0.0,
-            body: Some((10.0, 60.0)),
+            body: Some(BarBody { head_d: 10.0, shank_d: 10.0, flute_len: 20.0, shank_len: 40.0 }),
         };
         let mut warns = Vec::new();
         judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
@@ -169,6 +169,65 @@ fn a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted() {
     };
     assert_eq!(judge(0.0), vec![Warning::RapidInStock { at: 0 }], "the body on the far side of the axis went unnamed");
     assert!(judge(4.8).is_empty(), "a centred bar (nose r 5 - 0.4/2) in the Ø11 pilot is clear");
+}
+
+/// The B4 bar's one axial rapid at nose radius `r`, judged in a part
+/// with a finished bore `wall` and a pilot of radius `pilot` ahead.
+fn stepped_bar(r: f64, wall: f64, pilot: f64) -> Vec<Warning> {
+    let params = OpParams::ProfileRough {
+        tolerance: 0.05,
+        clearance_z: crate::operation::Height::fixed(60.0),
+        top_z: crate::operation::Height::fixed(40.0),
+        bottom_z: crate::operation::Height::fixed(-10.0),
+        stepdown: 0.8,
+        stock_to_leave: 0.25,
+        feed: 150.0,
+        plunge_feed: 80.0,
+    };
+    let (part, stock) = (tube(wall, 12.0, -60.0, 50.0), cylinder(12.0, -60.0, 50.0));
+    let p = Point3::new;
+    let drills = [DrillAhead {
+        radius: pilot,
+        cone: Some(0.6),
+        moves: vec![mv(MoveKind::Feed, p(0.0, 0.0, 50.0), p(0.0, 0.0, -16.0))],
+    }];
+    let path = Toolpath {
+        moves: vec![mv(MoveKind::Rapid, p(r, 0.0, 60.0), p(r, 0.0, -10.0))],
+        cycles: Vec::new(),
+        notes: Vec::new(),
+        comps: Vec::new(),
+    };
+    let cx = Meridian {
+        part: &part,
+        stock: Some(&stock),
+        nose: 0.4,
+        margin: 0.01,
+        z_tol: 1e-6,
+        drills: &drills,
+        band: 0.0,
+        body: Some(BarBody { head_d: 8.0, shank_d: 12.0, flute_len: 20.0, shank_len: 40.0 }),
+    };
+    let mut warns = Vec::new();
+    judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
+    warns
+}
+
+#[test]
+fn a_bar_whose_shank_outgrows_its_head_is_judged_by_its_shank() {
+    // Review B4: head Ø8, shank Ø12, nose 0.4; a Ø14 finished bore, a
+    // Ø13 pilot ahead. The insert sits at the head's edge; the shank,
+    // read both ways a record can mean it (edge on the insert's, or
+    // axis on the head's), spans 12 toward the axis and 2 past the
+    // nose. Centred (the kernel's line, nose r 5) the bar spans r -7..7:
+    // through the r 6.5 pilot - convicted, it cannot fit. The old line
+    // (max(d)/2 - nose/2 = 5.8) is convicted too.
+    let centred = crate::turning::centred_nose(8.0, 12.0, 0.4);
+    assert!((centred - 5.0).abs() < 1e-12, "the kernel centres the whole bar: {centred}");
+    let at0 = vec![Warning::RapidInStock { at: 0 }];
+    assert_eq!(stepped_bar(centred, 7.0, 6.5), at0, "a 14 mm bar section does not pass a 13 mm pilot");
+    assert_eq!(stepped_bar(5.8, 7.0, 6.5), at0, "the old max-diameter line drives the shank into the pilot wall");
+    // Centred in a pilot that fits the bar (Ø14.8 under a Ø15 bore) it is clear.
+    assert!(stepped_bar(centred, 7.5, 7.4).is_empty(), "the centred bar in a pilot it fits");
 }
 
 #[test]

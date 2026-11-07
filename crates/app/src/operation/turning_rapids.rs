@@ -32,13 +32,22 @@ pub(super) struct Meridian<'a> {
     /// or parting blade's move carries the band's CENTRE, a thread's
     /// its crest - the edge spans this far either side. 0 for a point.
     pub band: f64,
-    /// A boring bar's body (#103 review B1, B3): its DIAMETER and its
-    /// reach up the axis from the nose (flute and shank). The insert
-    /// sits at the body's edge and the body lies toward the axis from
-    /// it - signed radius [rho - d, rho] for a nose at rho > 0 - so a bar
-    /// with its nose on the axis reaches a whole diameter off it. The
-    /// nose disc stays the cutting tip's; the body must fit the hole too.
-    pub body: Option<(f64, f64)>,
+    /// A boring bar's body (#103 review B1, B3, B4); the nose disc
+    /// stays the cutting tip's, the body must fit the hole too.
+    pub body: Option<BarBody>,
+}
+
+/// A boring bar read about its nose: the head (flute) over `flute_len`
+/// up the axis from the nose, the shank over `shank_len` above it, each
+/// as [`crate::turning::bar_spans`] says - the insert at the head's
+/// edge, the head toward the axis, a shank wider than the head reaching
+/// past the nose (B4). The same spans centre the kernel's rapids.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BarBody {
+    pub head_d: f64,
+    pub shank_d: f64,
+    pub flute_len: f64,
+    pub shank_len: f64,
 }
 
 /// Law (d) for the turned family: the column law's word on a turned
@@ -166,14 +175,38 @@ fn enters(
     let rn = if cx.nose.is_finite() && cx.nose > 0.0 { cx.nose } else { 0.0 };
     let rd = (rn - cx.margin).max(0.0);
     let band = if cx.band.is_finite() { (cx.band - cx.margin).max(0.0) } else { 0.0 };
-    let (rb, reach) = cx
-        .body
-        .filter(|(r, l)| r.is_finite() && l.is_finite())
-        .map_or((0.0, 0.0), |(r, l)| ((r - cx.margin).max(0.0), l.max(0.0)));
-    // The body stands up the axis from the nose: the rapid's upper end
-    // carries it `reach` further (an axial rapid keeps its radius).
-    let (a, b) = if a.0 >= b.0 { ((a.0 + reach, a.1), b) } else { (a, (b.0 + reach, b.1)) };
-    let (lo, hi) = (a.0.min(b.0) - rd.max(band), a.0.max(b.0) + rd.max(band));
+    // The pieces swept, each a station segment and the offsets sampled
+    // about it: the nose disc and blade band on the rapid itself; a
+    // bar's head carried `flute_len` up the axis from it, its shank the
+    // `shank_len` above that (an axial rapid keeps its radius).
+    let toward = if a.1 < 0.0 { -1.0 } else { 1.0 };
+    let ring: Vec<(f64, f64)> = (0..8)
+        .map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4)
+        .flat_map(|t| [(rd * t.cos(), rd * t.sin()), (0.5 * rd * t.cos(), 0.5 * rd * t.sin())])
+        .chain(std::iter::once((0.0, 0.0)))
+        .chain(spread(band).map(|ds| (ds, 0.0)))
+        .collect();
+    let (s_lo, s_hi) = (a.0.min(b.0), a.0.max(b.0));
+    let mut pieces = vec![(s_lo, s_hi, ring)];
+    if let Some(bar) = cx.body.filter(|q| [q.head_d, q.shank_d, q.flute_len, q.shank_len].iter().all(|v| v.is_finite())) {
+        let (lf, ls) = (bar.flute_len.max(0.0), bar.shank_len.max(0.0));
+        let [head, shank] = crate::turning::bar_spans(bar.head_d, bar.shank_d);
+        // A span shrunk by the margin, sampled across, signed toward
+        // the nose's own side (the insert points away from the axis).
+        let across = |(lo, hi): (f64, f64)| -> Vec<(f64, f64)> {
+            let (lo, hi) = (lo + cx.margin, hi - cx.margin);
+            if hi < lo {
+                return Vec::new();
+            }
+            let mid = (lo + hi) * 0.5;
+            spread((hi - lo) * 0.5).chain(std::iter::once(0.0)).map(|k| (0.0, toward * (mid + k))).collect()
+        };
+        pieces.push((s_lo, s_hi + lf, across(head)));
+        pieces.push((s_lo + lf, s_hi + lf + ls, across(shank)));
+    }
+    let reach_s = rd.max(band);
+    let (lo, hi) = pieces.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.0), h.max(p.1)));
+    let (lo, hi) = (lo - reach_s, hi + reach_s);
     // This path's own earlier feeds that can reach the rapid's band.
     let feeds: Vec<((f64, f64), (f64, f64))> = path.moves[..i.min(path.moves.len())]
         .iter()
@@ -198,23 +231,14 @@ fn enters(
         part.solid(s, r, cx.margin)
             || (cap.is_none_or(|c| s < c - cx.margin) && stock.is_some_and(|o| o.solid(s, r, cx.margin)))
     };
-    let len = (b.0 - a.0).hypot(b.1 - a.1);
-    let step = (rn * 0.5).max(0.05).max(len / MAX_SAMPLES);
-    let n = (len / step).ceil().max(1.0) as usize;
-    let toward = if a.1 < 0.0 { -1.0 } else { 1.0 };
-    let ring: Vec<(f64, f64)> = (0..8)
-        .map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4)
-        .flat_map(|t| [(rd * t.cos(), rd * t.sin()), (0.5 * rd * t.cos(), 0.5 * rd * t.sin())])
-        .chain(std::iter::once((0.0, 0.0)))
-        .chain(spread(band).map(|ds| (ds, 0.0)))
-        // The body toward the axis from the nose (B3): never centred
-        // on it - the insert is at the bar's edge.
-        .chain(spread(rb * 0.5).map(|k| (0.0, -toward * (k + rb * 0.5))))
-        .collect();
-    (0..=n).any(|k| {
-        let t = k as f64 / n as f64;
-        let (s, rho) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-        ring.iter().any(|&(ds, dr)| solid(s + ds, rho + dr))
+    pieces.iter().any(|(p0, p1, offs)| {
+        let len = p1 - p0;
+        let step = (rn * 0.5).max(0.05).max(len / MAX_SAMPLES);
+        let n = (len / step).ceil().max(1.0) as usize;
+        (0..=n).any(|k| {
+            let s = p0 + len * k as f64 / n as f64;
+            offs.iter().any(|&(ds, dr)| solid(s + ds, a.1 + dr))
+        })
     })
 }
 
