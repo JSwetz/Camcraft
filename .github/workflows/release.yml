@@ -271,6 +271,7 @@ jobs:
         shell: pwsh
         env:
           WIN_VERSION: ${{ needs.windows.outputs.version }}
+          TAG: ${{ github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force dist | Out-Null
@@ -284,6 +285,7 @@ jobs:
           if ($env:WIN_VERSION -and $env:WIN_VERSION -ne $ver) {
             throw "post.exe says $env:WIN_VERSION but the manifest says $ver"
           }
+          if ($env:TAG -ne "v$ver") { throw "tag $env:TAG does not name version v$ver" }
           "CAMCRAFT_VERSION=$ver" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Get-ChildItem dist
       # The release page shows only this version's notes: RELEASE_NOTES.md
