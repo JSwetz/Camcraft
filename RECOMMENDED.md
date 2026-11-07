@@ -12773,3 +12773,48 @@ keeps the part-only chain bit for bit.
   the same-sign inside test passed every disk on a wall's line. The
   cross_support fixture note now gives the raw box's true face depth, 38 mm
   (47 is the box corner radius, #85).
+
+## #91: a drill's R plane below the unfaced stock top is refused at generation (2026-11-07, Prime Directive)
+
+- *Proven P0 first.* An axial DR-0400 drill on a block (part top Z 20)
+  under a box stock whose top stands at Z 25, R plane = Top of Part Z = 20,
+  clearance 35: generation was Ok with no warnings, and the program posted
+  silently through both dialects - Fanuc `G00 X0 Y0 Z20` / `G81 X0 Y0 Z12
+  R20 F80` (and `G73 ... R20 Q12` for Peck), Heidenhain's expanded chain
+  `G00 X+0 Y+0 Z+20` - a 5 mm rapid through uncut stock. Two holes let it
+  by: #84's `top_over` clipped the stock to R ("the rapid laws' business"),
+  and law (d) skips every vertical rapid as "a retract through the tool's
+  own kerf".
+- *Chosen: validate early.* `drill_reach::r_plane_clear` refuses by name,
+  per cycle (every kind), a raw stock top above the R plane over the tool's
+  body disk (the wider of drill and shank) - "R plane Z .. is below the
+  stock top Z .. over the hole at (..) - the rapid down to R would cross
+  uncut stock (a collision); raise Top of Part Z (the R plane) to the stock
+  top or above". Axial only (the cross drill's mouths already stand off the
+  raw stock, #77). With that law first, the reach and holder readings no
+  longer clip the stock to R: the depth is unchanged over the body disk,
+  and the holder is now held against the true stock top (the clip could
+  under-count it by the stock-top-to-R gap).
+- *#89 honesty.* The stock is read raw: a facing op earlier in the program
+  is not credited, so face-then-drill with R at the faced height is refused
+  too. The message therefore does not say "or face the stock first" (the
+  check could not see it); it says faced stock still counts at its raw
+  height. The refusal stands until #89 credits prior removal; the
+  workaround is an R plane at the raw stock top (an air feed of the gap).
+- *Verify layer held, filed as #96 (P0).* The net - law (d) judging a
+  vertical rapid DOWN by its column (`to.z` below `Rest::surface_before`
+  inside the stock is `RapidInStock`) - was written and green in
+  camcraft-sim, but it is not contained: it convicts existing app fixtures
+  that rapid below their declared stock top in non-drilling ops (posting's
+  Contour1, retract 8 in a 10 mm stock; operations' Pocket3D shell test) -
+  real collisions by their own stock, so the same bug class reaches every
+  op, not only drilling. Fixture-by-fixture triage over all suites is its
+  own issue; the patch and its tests ride #96.
+- *Fixtures that now refuse, all real by their declared stock:* the lathe
+  axial drill (drilling_axial, lathe_post: a 44 mm box at z 0..44 over a bar
+  z -20..20, R 20 / clearance 30 inside it) - the box now sits on the bar's
+  envelope, z -20..20, the posted golden unchanged; drilling_cross's Z-only
+  file test (R 15 / clearance 20 under the Ø44 box's Z 44 top) - R raised
+  to 44, clearance 50.
+- *Dropped:* clamping R up to the stock top silently (a height the user
+  did not set; the kernel never invents clearance).

@@ -96,12 +96,17 @@ fn lathe() -> Machine {
 
 /// Bar in box stock, the lathe mounted, the named tools on the rack.
 fn lathe_world(bar: Mesh, stock: (f64, f64, f64), tools: &[&str]) -> (World, History) {
+    lathe_world_at(bar, stock, Location::default(), tools)
+}
+
+/// [`lathe_world`] with the stock box's base at `at`.
+fn lathe_world_at(bar: Mesh, stock: (f64, f64, f64), at: Location, tools: &[&str]) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
     let cmd = SetStock::new(
         &world,
         camcraft_app::stock::StockShape::Box { dx: stock.0, dy: stock.1, dz: stock.2 },
-        Location::default(),
+        at,
     );
     history.execute(&world, cmd.expect("box stock"));
     let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(lathe()));
@@ -251,7 +256,11 @@ fn an_axial_drill_posts_through_the_document_with_the_lathe_post_chosen() {
     // (the picker's law), the gate run, the program written with the
     // face cycle vocabulary - and the same text locked as a golden.
     let bar = revolve(&[(0.0, -20.0), (10.0, -20.0), (10.0, 20.0), (2.05, 20.0), (2.05, 10.0), (0.0, 10.0)], 64);
-    let (world, mut history) = lathe_world(bar, (24.0, 24.0, 44.0), &["DR-0400"]);
+    // The bar's own envelope, z -20..20 (issue #91: the old box stood
+    // z 0..44, its top 24 mm over the R plane - the rapid down to R
+    // crossed declared stock).
+    let at = Location { pos: Point3::new(0.0, 0.0, -20.0), ..Location::default() };
+    let (world, mut history) = lathe_world_at(bar, (24.0, 24.0, 40.0), at, &["DR-0400"]);
     let hole = Hole { xy: Point2::new(0.0, 0.0), radius: 2.05, entry_z: 20.0, floor_z: 10.0, through: false, stepped: false };
     let params = OpParams::Drill {
         clearance_z: Height::fixed(30.0),

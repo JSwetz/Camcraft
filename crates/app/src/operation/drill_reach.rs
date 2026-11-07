@@ -93,19 +93,43 @@ pub(super) fn cross_reach(
 }
 
 /// The highest material over the XY disk (`c`, `r`): the part's facets
-/// as they stand, the stock's clipped to the cycle's R plane (the
-/// cycle rapids down to R, so stock above it is the rapid laws' word,
-/// not stock this cycle feeds through). A facet counts at its highest
-/// vertex when its projection meets the disk - an over-estimate on a
-/// slope, never an under-estimate.
-fn top_over(part: &[Triangle], stock: &[Triangle], cx: f64, cy: f64, r: f64, r_z: f64) -> Option<f64> {
-    let over = |t: &Triangle| meets_disk(t, cx, cy, r).then(|| t.a.z.max(t.b.z).max(t.c.z));
-    let p = part.iter().filter_map(over).reduce(f64::max);
-    let s = stock.iter().filter_map(over).reduce(f64::max).map(|z| z.min(r_z));
+/// and the stock's, as they stand (issue #91: the stock above the R
+/// plane is no longer clipped away - [`r_plane_clear`] refuses it
+/// first, so the rapid laws are never asked to vouch for it). A facet
+/// counts at its highest vertex when its projection meets the disk -
+/// an over-estimate on a slope, never an under-estimate.
+fn top_over(part: &[Triangle], stock: &[Triangle], cx: f64, cy: f64, r: f64) -> Option<f64> {
+    let p = highest(part, cx, cy, r);
+    let s = highest(stock, cx, cy, r);
     match (p, s) {
         (Some(a), Some(b)) => Some(a.max(b)),
         (a, b) => a.or(b),
     }
+}
+
+/// The highest vertex of the facets whose projection meets the disk.
+fn highest(facets: &[Triangle], cx: f64, cy: f64, r: f64) -> Option<f64> {
+    facets.iter().filter(|t| meets_disk(t, cx, cy, r)).map(|t| t.a.z.max(t.b.z).max(t.c.z)).reduce(f64::max)
+}
+
+/// Issue #91: the cycle rapids straight down onto its R plane, so no
+/// stock may stand above R over the tool's body disk at the hole - the
+/// rapid would cross uncut stock (a collision no feed law sees). The
+/// stock is read raw: removal by an earlier operation (a facing pass)
+/// is not credited yet (#89), so a faced-first program is refused too
+/// until then - the message says so rather than promise a fix that
+/// cannot pass. A non-finite height is refused, never waved through.
+fn r_plane_clear(stock: &[Triangle], c: &Cycle, body: f64) -> Result<(), GenError> {
+    let Some(top) = highest(stock, c.xy.x, c.xy.y, body) else { return Ok(()) };
+    if top.is_finite() && c.r_z.is_finite() && c.r_z >= top - TOL {
+        return Ok(());
+    }
+    Err(GenError::Invalid(format!(
+        "R plane Z {:.3} is below the stock top Z {top:.3} over the hole at ({:.3}, {:.3}) - the rapid down to R \
+         would cross uncut stock (a collision); raise Top of Part Z (the R plane) to the stock top or above \
+         (stock faced by an earlier operation still counts at its raw height)",
+        c.r_z, c.xy.x, c.xy.y
+    )))
 }
 
 /// Does the facet's XY projection meet the disk? A facet with no area
@@ -163,7 +187,8 @@ pub(super) fn axial_reach(
     let body = 0.5 * finite_or_zero(tool.diameter).max(finite_or_zero(tool.shank_d));
     for c in &t.cycles {
         let Cycle { xy, r_z, bottom_z, .. } = *c;
-        let top = top_over(part, stock, xy.x, xy.y, body, r_z).unwrap_or(c.entry_z).max(c.entry_z.min(r_z));
+        r_plane_clear(stock, c, body)?;
+        let top = top_over(part, stock, xy.x, xy.y, body).unwrap_or(c.entry_z).max(c.entry_z.min(r_z));
         let depth = top - bottom_z;
         if matches!(c.kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {
             shank_fits(c, holes, depth, flute, tool, name)?;
@@ -178,7 +203,7 @@ pub(super) fn axial_reach(
         }
         if let Some((reach, hr)) = holder(tool, name)? {
             let face = bottom_z + reach;
-            if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr, r_z).filter(|&z| face < z - TOL) {
+            if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr).filter(|&z| face < z - TOL) {
                 return Err(GenError::Invalid(format!(
                     "tool {name}'s holder (dia. {:.3}, {reach:.3} mm above the tip) sinks to Z {face:.3} at the \
                      hole at ({:.3}, {:.3}), below the material top {ht:.3} around it - the holder feeds into \

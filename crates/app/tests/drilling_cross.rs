@@ -204,10 +204,12 @@ fn a_z_only_drill_file_never_writes_the_cross_key() {
     // The v39 -> v40 step-up promises: absent means empty means
     // exactly the old document.
     let (world, mut history) = cross_world("mill");
+    // R at the raw box's top, Z 44 (issue #91: an R plane under the
+    // stock top is a rapid through it, refused at generation).
     let p = OpParams::Drill {
-        clearance_z: Height::fixed(20.0),
+        clearance_z: Height::fixed(50.0),
         retract_z: None,
-        top_z: Height::fixed(15.0),
+        top_z: Height::fixed(44.0),
         bottom_z: None,
         cycle: CycleChoice::Auto,
         peck: 0.0,
