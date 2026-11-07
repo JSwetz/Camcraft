@@ -13206,3 +13206,18 @@ revolved (follow-up material if users hit it with long keyways).
   rim bound `r (1 - cos(pi/16))` matches the radial law's promise);
   sampling only the vertical law (the issue names both, and the lateral
   law had the same gap).
+- **Review fix (PR #138, tip shape):** each footprint sample is judged
+  at `z_tip + lift(rho)`, the height the tool's own tip stands at that
+  radius - 0 for a square end or inside a bull's flat, the corner arc
+  outside it (a ball is a bull with no flat), `rho / tan(half angle)`
+  up a drill/taper point - against `surface_before`, which already
+  caps at the stock top. The lift comes from the judged `Cutter`
+  (`corner_r`, `tip_angle`; `Cutter::lift_at`), NOT
+  `ToolGeom::nose_radius` as the review suggested: that field is the
+  turning insert's nose and is 0.0 for every mill kind, so a ball mill
+  would have read as square. A context with no stated tip is judged
+  square, which can only over-report. Left as is: `surface_before`
+  still treats every earlier cut as flat to radius r (the column
+  model's own optimism near a ball pass's edge, review item 4), and
+  the overhang backstop `hidden_along` still reads a flat disc - both
+  are pre-existing and model-only.

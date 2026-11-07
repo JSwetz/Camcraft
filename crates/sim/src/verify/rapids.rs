@@ -6,7 +6,12 @@
 //! never under its centre alone: a dive whose centre stands just off
 //! the stock outline still meets the stock with its rim, and a dive
 //! whose centre an earlier cut cleared can still land its far side on
-//! uncut stock. Sampled: the centre, a ring at half the radius, and
+//! uncut stock. Each sample is judged at the height the tool's own
+//! tip stands at its radius - the tip plane plus the ball's, bull
+//! corner's or point's rise there ([`Cutter::lift_at`]), so a ball
+//! diving beside a wall whose rim is lifted clear of it is air (the
+//! judged cutter: square when the context names no tip, which can
+//! only over-report). Sampled: the centre, a ring at half the radius, and
 //! [`RIM`] rim points, so a graze shallower than `r (1 - cos(pi/RIM))`
 //! between two rim samples can pass - the same bound
 //! [`super::rapids_radial`] states.
@@ -76,7 +81,10 @@ pub(super) fn rapids_in_stock(
                 // rapid in stock. A peck's re-entry stays above its
                 // own earlier plunge, so it is acquitted by the cuts.
                 let down = m.to.z < m.from.z - cx.z_tol;
-                if down && footprint(a, d).any(|q| rest.in_stock(q) && m.to.z < rest.surface_before(q, i) - cx.z_tol) {
+                let under = |(q, rho): (Point2, f64)| {
+                    rest.in_stock(q) && m.to.z + cutter.lift_at(rho) < rest.surface_before(q, i) - cx.z_tol
+                };
+                if down && footprint(a, d).any(under) {
                     warns.push(Warning::RapidInStock { at: i });
                 }
                 continue;
@@ -95,7 +103,7 @@ pub(super) fn rapids_in_stock(
             let bad = [a, mid, b]
                 .into_iter()
                 .flat_map(|c| footprint(c, d))
-                .any(|q| rest.in_stock(q) && low < rest.surface_before(q, i))
+                .any(|(q, rho)| rest.in_stock(q) && low + cutter.lift_at(rho) < rest.surface_before(q, i))
                 || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
             if !bad {
                 continue;
@@ -112,17 +120,18 @@ pub(super) fn rapids_in_stock(
 /// Rim samples of the footprint disc (#106) - [`super::rapids_radial`]'s count.
 const RIM: usize = 16;
 
-/// The tool footprint's sample points about `c`: the centre, a ring of
-/// `RIM / 2` at half of `d`, `RIM` on the rim. A `d` that is not a
+/// The tool footprint's sample points about `c`, each with its radius
+/// from the axis: the centre, a ring of `RIM / 2` at half of `d`,
+/// `RIM` on the rim. A `d` that is not a
 /// finite positive radius (a tool no wider than the gouge tolerance)
 /// is the centre alone - the column reading the law had before #106.
-fn footprint(c: Point2, d: f64) -> impl Iterator<Item = Point2> {
+fn footprint(c: Point2, d: f64) -> impl Iterator<Item = (Point2, f64)> {
     let d = if d.is_finite() && d > 0.0 { d } else { 0.0 };
     let rings = if d > 0.0 { [(RIM / 2, 0.5 * d), (RIM, d)] } else { [(0, 0.0), (0, 0.0)] };
-    std::iter::once(c).chain(rings.into_iter().flat_map(move |(n, rad)| {
+    std::iter::once((c, 0.0)).chain(rings.into_iter().flat_map(move |(n, rad)| {
         (0..n).map(move |j| {
             let t = std::f64::consts::TAU * j as f64 / n as f64;
-            Point2::new(c.x + rad * t.cos(), c.y + rad * t.sin())
+            (Point2::new(c.x + rad * t.cos(), c.y + rad * t.sin()), rad)
         })
     }))
 }

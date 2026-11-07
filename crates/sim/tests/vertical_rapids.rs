@@ -12,12 +12,16 @@
 //! rapid whose centre stands off the stock but whose rim meets it, and
 //! a re-entry beside an earlier plunge whose far side is uncut, convict.
 //!
+//! Each footprint sample is judged at the tip's own height at its
+//! radius (#106 review): a ball or bull whose lifted rim clears the
+//! wall is air, one whose lifted rim still meets the stock is not.
+//!
 //! Gate map (#96, #106): covers camcraft_sim::verify (rapids, rest).
 
 use camcraft_sim::cl::{Move, MoveKind, Toolpath};
 use camcraft_sim::geo2d::{Loop, Point2, Region};
 use camcraft_sim::geometry::Point3;
-use camcraft_sim::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
+use camcraft_sim::verify::{Cutter, Mode, ToolGeom, VerifyContext, Warning, verify};
 
 fn rect() -> Region {
     let l = Loop::new(vec![
@@ -49,23 +53,30 @@ fn at(kind: MoveKind, a: (f64, f64, f64), b: (f64, f64, f64)) -> Move {
 
 /// `moves` on a drill over a stock box whose top is Z 25, clearance 35.
 fn judge(moves: Vec<Move>) -> Vec<Warning> {
+    judge_tip(moves, 2.0, None)
+}
+
+/// `moves` on a tool of radius `r` whose tip has corner radius
+/// `corner` (`Some(r)` a ball, between a bull, `None` no stated tip).
+fn judge_tip(moves: Vec<Move>, r: f64, corner: Option<f64>) -> Vec<Warning> {
     let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() };
     let region = rect();
     let tool = ToolGeom {
-        radius: 2.0,
+        radius: r,
         nose_radius: 0.0,
         flute_len: 30.0,
-        shank_radius: 2.0,
+        shank_radius: r,
         shank_len: 20.0,
-        holder_radius: 2.0,
+        holder_radius: r,
         holder_len: 1.0,
     };
+    let cutter = corner.map(|c| Cutter { corner_r: c, ..Cutter::flat(&tool) });
     let cx = VerifyContext {
         region: &region,
         stock: Some(&region),
         model: None,
         tool: &tool,
-        cutter: None,
+        cutter,
         mode: Mode::Area,
         stock_top_z: 25.0,
         clearance_z: 35.0,
@@ -195,4 +206,46 @@ fn a_lateral_rapid_whose_whole_disc_clears_the_stock_wall_is_clean() {
         at(MoveKind::Rapid, (42.5, 10.0, 20.0), (42.5, 10.0, 35.0)),
     ]);
     assert!(w.is_empty(), "{w:?}");
+}
+
+fn dive_at(x: f64, z: f64) -> Vec<Move> {
+    vec![at(MoveKind::Rapid, (x, 0.0, 35.0), (x, 0.0, z))]
+}
+
+fn convicted(w: &[Warning]) -> bool {
+    w.contains(&Warning::RapidInStock { at: 0 })
+}
+
+#[test]
+fn a_ball_dive_beside_the_wall_with_its_rim_lifted_clear_is_clean() {
+    // Ball r 3 at x 42.9 to Z 24.5: the rim over the wall (rho 2.9)
+    // stands at 24.5 + 3 - sqrt(9 - 8.41) = 26.7, above the Z 25 top.
+    let w = judge_tip(dive_at(42.9, 24.5), 3.0, Some(3.0));
+    assert!(!convicted(&w), "{w:?}");
+    // The same dive read as a square end meets the stock with its rim.
+    assert!(convicted(&judge_tip(dive_at(42.9, 24.5), 3.0, None)));
+}
+
+#[test]
+fn a_ball_dive_whose_lifted_footprint_still_meets_the_stock_is_a_rapid_in_stock() {
+    // Ball r 3 at x 41 to Z 24: at rho 1.5 (x 39.5, in stock) the ball
+    // stands at 24 + 3 - sqrt(9 - 2.25) = 24.4, under the Z 25 top.
+    let w = judge_tip(dive_at(41.0, 24.0), 3.0, Some(3.0));
+    assert!(convicted(&w), "{w:?}");
+}
+
+#[test]
+fn a_bull_dive_whose_corner_lifts_clear_of_the_wall_is_clean() {
+    // Bull r 3, corner 1 (flat to rho 2) at x 41.6: only the rim
+    // (rho 2.99) reaches over the wall, lifted 1 - sqrt(1 - 0.98) = 0.86
+    // to Z 25.36 - air.
+    let w = judge_tip(dive_at(41.6, 24.5), 3.0, Some(1.0));
+    assert!(!convicted(&w), "{w:?}");
+}
+
+#[test]
+fn a_bull_dive_deeper_than_its_corner_lift_is_a_rapid_in_stock() {
+    // The same bull to Z 23.5: its rim stands at Z 24.36, in the stock.
+    let w = judge_tip(dive_at(41.6, 23.5), 3.0, Some(1.0));
+    assert!(convicted(&w), "{w:?}");
 }
