@@ -40,7 +40,7 @@ for binary in camcraft-ui camcraft-cli post; do
         exit 1
     fi
     lipo -create "$arm" "$intel" -output "$macos/$binary"
-    lipo -verify_arch arm64 x86_64 "$macos/$binary"
+    lipo "$macos/$binary" -verify_arch arm64 x86_64
     chmod 755 "$macos/$binary"
 done
 for asset in posts machines ui scripts themes; do
