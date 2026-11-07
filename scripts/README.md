@@ -1,5 +1,60 @@
 # scripts
 
+## Gate tiers (`gate.ps1`)
+
+`gate.ps1` runs the test gate in three tiers so a change never costs hours.
+Every step is one cargo command (`-j 6`, `--test-threads=6`), logged to
+`gate-logs/<tier>-<timestamp>/`; the run ends with a per-step pass/fail
+summary (failing binaries named) and a non-zero exit on any failure.
+`-DryRun` prints the plan without running anything.
+
+| Tier | When | What |
+|---|---|---|
+| `quick` | every patch (agent / gate-runner), ~minutes | what the diff touches, in debug |
+| `batch` | before committing a batch; push/PR CI | every debug suite minus `SLOW_BINARIES`, ui (CWD `crates/ui`), clippy `-D warnings` |
+| `release` | at a cut; nightly CI (`nightly.yml`) | everything: all debug suites incl. slow and kernel, ui, clippy, then `--release -- --ignored` for motion and app |
+
+    powershell -File scripts/gate.ps1 -Tier quick [-Base main] [-Heavy]
+    powershell -File scripts/gate.ps1 -Tier batch
+    powershell -File scripts/gate.ps1 -Tier release
+
+**quick** diffs the working tree against `merge-base(<Base>, HEAD)`
+(committed + uncommitted + untracked) and prints what it chose before
+running it:
+
+- a changed suite file (`crates/<c>/tests/<b>.rs`) runs only the `#[test]`
+  fns whose lines the diff hunks touch (`--exact`); a change outside any test
+  fn (header, helpers, `use`) or a new suite runs the whole binary. Changed
+  `#[ignore]`d fns are heavy-lane: skipped (the binary is still compiled)
+  unless `-Heavy`, which runs them `--release -- --ignored`.
+- a changed source file (`crates/<c>/src/<mod>/<sub>.rs`) runs the crate's
+  lib tests plus the suites whose `Gate map` header names the module -
+  narrowed to the suites naming `mod::sub` / `mod (.., sub, ..)` when any
+  do. Suites of other crates match when they name `<c>::<mod>`.
+- `tests/common`, `tests/golden`, snapshots or a crate `Cargo.toml` run the
+  crate's lib and all of its suites.
+- a touch to a shared crate (`geometry`, `cl`) or the workspace manifest /
+  lock falls back to `batch`.
+
+`SLOW_BINARIES` (top of the script) lists the debug binaries over ~40 s;
+batch skips them, release runs them. A test that takes more than ~60 s in
+debug belongs in the heavy lane (`#[ignore = "heavy lane: ..."]`), not here.
+
+### Single tests
+
+    powershell -File scripts/gate.ps1 -Test <filter> [-Crate app] [-Binary operations] [-Exact]
+
+Runs exactly the matching `#[test]` fn(s) and nothing else. Without
+`-Binary` the binary is found by searching `fn <filter>` under
+`crates/*/tests` and `crates/*/src` (`-Crate` narrows it); a substring
+filter by default, the exact fn name with `-Exact`. A match that is
+`#[ignore]`d runs in release with `--ignored`; lib unit tests run via
+`--lib`; ui tests run from `crates/ui`. Example:
+
+    powershell -File scripts/gate.ps1 -Test an_open_level_holds_the_planner_laws -Exact
+
+## Release
+
 `release.ps1` cuts a release: preflight, gate, version bump, commits and tag,
 release build, signing (if configured), the portable zip (same layout as
 `.github/workflows/release.yml`) and, on request, the installer.

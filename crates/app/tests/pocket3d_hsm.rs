@@ -74,6 +74,7 @@ fn user_job(params: OpParams) -> (World, Toolpath, Vec<String>) {
 }
 
 #[test]
+#[ignore = "heavy lane: HSM Adaptive over every level of the user's STEP bore, verified against the part solid, ~220 s debug (release tier); the planner laws' debug twin is motion pocket3d_hsm::an_open_level_holds_the_planner_laws"]
 fn the_users_bore_roughs_adaptive_level_by_level_and_verifies_clean() {
     let (_, path, warns) = user_job(pocket_op(PocketStrategy::Adaptive));
     assert!(warns.is_empty(), "every level verifies clean: {warns:?}\nnotes {:?}", path.notes);
