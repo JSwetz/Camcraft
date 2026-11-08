@@ -814,6 +814,7 @@ dependencies = [
  "egui_kittest",
  "flecs_ecs",
  "image",
+ "objc2 0.5.3",
  "pollster 0.4.0",
  "rfd",
  "serde_json",

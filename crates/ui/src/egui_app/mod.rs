@@ -75,6 +75,8 @@ mod turning_more_page;
 mod turning_page;
 // #107: Save / Don't Save / Cancel over unsaved changes.
 mod unsaved_prompt;
+// #144: macOS Cmd+Q / app-menu Quit routed through the guarded Quit.
+pub(crate) mod os_quit;
 mod panes;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
