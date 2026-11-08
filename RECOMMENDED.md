@@ -13183,6 +13183,39 @@ revolved (follow-up material if users hit it with long keyways).
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
 
+## #107 - unsaved changes: a dirty flag and a save prompt on exit (2026-11-07)
+
+- **Chosen:** the document is dirty when the command history's undo
+  depth differs from the depth recorded at the last save or load
+  (`History::is_dirty` / `History::mark_clean` in `camcraft_app::commands`).
+  Undo back to the saved point is clean again; a redo past it is dirty
+  again; a fresh command while the saved state sits on the redo stack
+  makes the saved point unreachable (`None`), so the same depth on a new
+  branch stays dirty. `History::clear` (New, Open) starts clean. Ephemeral
+  state (selection via `execute_ephemeral`, camera, hover, layout) never
+  touches the history, so it never dirties.
+- **Why on `History`, not `project::is_dirty(world)`:** the history lives
+  in the UI's `State`, not in the world, and the flag is a property of the
+  history position; putting it next to `undo`/`redo` keeps it exact by
+  construction and still in the app layer. Cost to move: a thin
+  `project::is_dirty(&History)` wrapper if a non-UI caller wants one.
+- **UI:** the window title leads with `*` while dirty. New, Open (the
+  dialog arm) and Quit over a dirty document are held in
+  `State::unsaved_prompt` and an egui `Modal` asks Save / Don't Save /
+  Cancel (Escape or the backdrop = Cancel); the answer is a queued
+  `CommandKind::ResolveUnsaved`. Save without a path asks for one; a
+  cancelled or failed save keeps the document and the app open. The
+  window X now queues a Quit like Ctrl+Q (a shell whose GPU failed still
+  closes at once, since it never drains the queue).
+- **The shell is winit, not eframe:** the brief's
+  `viewport().close_requested()` + `CancelClose` does not apply - the
+  shell owns `WindowEvent::CloseRequested`, so it simply does not exit
+  there.
+- **Dropped:** guarding the headless `OpenProjectFile` / `SaveProjectFile`
+  arms (scripts and tests drive them; a prompt there would hang a
+  headless run); a dirty counter bumped per command (cannot know when an
+  undo returns to the saved state); hashing the document (costly, and
+  derived caches such as toolpaths would make it noisy).
 ## #103: a turned path's axial rapids judged in the meridian plane (partial)
 
 - **Law.** `operation/turning_rapids.rs` no longer drops the column law's
@@ -13579,31 +13612,362 @@ revolved (follow-up material if users hit it with long keyways).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
 
-## #191 - a refused Create click takes you to the fix (2026-11-07)
+## #38: G41/G42 wear compensation - the centre path under the register's wear delta (2026-11-08)
 
-- **Chosen:** a dark Create cell or dropdown row that is clicked anyway
-  keeps its reason on the status line and then routes (view state only,
-  nothing queued): no tool / no fitting tool → the Tool library page
-  (`UiTarget::Tool("")`, " - opened the tool library"); a kind the mounted
-  machine cannot run → the machine door opens on its workspace list
-  (" - pick a workspace"). `gate_route` mirrors `gate_note`'s cases in its
-  order, so the words and the destination cannot disagree.
-- **Why:** the reporter read the status line as an error to hunt for;
-  the click now lands where the fix is.
-- **Not done:** a WCS route - creating an operation has no WCS gate (an
-  unplaced slot means G54 at the origin), so there is nowhere to send
-  the user yet. Opening the tool *editor* on a catalog draft instead of
-  the library page was dropped: the library shows what is racked and the
-  catalog suggestion the reason already names.
+**`Compensation::Wear` joins Computer and Control on the contour's
+`Approach`** (default Computer: every golden byte-identical; the project
+file gains an additive `wear_comp` key, the digest a byte only when on).
+Wear walks the SAME centre path Control does - same mid-run seam, same
+straight leads at least a radius long, same doors (tabs, blends, overlap,
+keep-down links, open contours and runs, 3+2 tilt), refused under the name
+"wear compensation" - and its `CompSpan` (flag `wear`) programs those
+centre moves verbatim under G41/G42 Dn / G40: the machine-tool handbooks'
+wear-offset practice, where the register holds only the wear delta (zero
+on a new cutter). The stream marks it `COMP LEFT|RIGHT <µm> WEAR`, the
+engine publishes `CompensationType` ("wear" / "control"), and Fanuc writes
+the same words plus one comment per section saying the D register holds
+the wear delta only - a full radius there would cut the part a radius
+undersize, and that is the one wrong set-up wear invites. Haas/Mazak/
+Sinumerik/Heidenhain and the lathe keep refusing any COMP by name.
+Considered and dropped: keeping the lead law only for Control (a wear
+delta is small, but the control still builds the vector over the engage
+block - a zero-length or arc engage is still a misread program), skipping
+the room law for wear (the centre path is already proved; the room law
+judges the part offset by a full radius, which wear never asks - so it is
+skipped, not reused), and a separate wear register number (the library
+carries none; D = tool number, as Control).
 
-## #216 - no stock darkens the Create cells (2026-11-07)
+## #20 - the rotary sweep's flute-rotation bound: stated always, enforced on request (2026-11-08, M13.1)
 
-- **Chosen:** every ribbon-made operation machines the active setup's
-  stock (`SrcRef::Stock`), so without one the Create cells darken - tip
-  "No stock yet - set up stock first (Setup > Stock)" - and a click names
-  the same and opens the Stock page (the #191 route). The predicate is the
-  command door's own resolution (`setup::stock_entity_name` + `is_stock`).
-  Gate order: no tool → wrong machine family → no stock → tool law (stock
-  cannot fix a family mismatch, so that is said first).
-- **Dropped:** creating the op against "the models" when stock is missing
-  (it would silently machine a different source than the one shown).
+**What "flute rotation" is here.** Not the helical flutes spinning (the
+sim's tool is already its body of revolution, which bounds any flute
+geometry): it is the rotary chord pre-pass (`stock_sim/field_rotary.rs`)
+standing each sub-chord's whole tool on the sub-chord's MID pose while
+the true pose turns through it. A tool point at distance `w` from the
+tool's reference (ball center, flat tip) is off its true-pose place by
+at most `w·2·sin(β/2)`, `β ≤ half_angle` (Craig, "Introduction to
+Robotics", ch. 2 - the chord of a rigid turn). The old chord count only
+bounded the SAG at the farthest reach (second order), so the flank's
+error (first order, `L·α`) was unstated - the "7.9e-4 at tol 1e-4"
+reading of the M13.1 parity.
+
+**The bound.** `RotaryChordStats::flute_shift = L·2·sin(half_angle/2)`,
+`L` = the farthest corner of the field's bounds from the tip at either
+station (plus `r` for a ball), capped at shank + `r` - only points inside
+the field cut, so nothing farther counts. With `center_sag` it is a
+two-sided Hausdorff bound: every point of the true sweep has a chorded
+point within `center_sag + flute_shift`, and back, so any point farther
+than that from the true skin reads the right steel/air. It is two-sided
+by nature, not one-signed: the chorded solid is neither a superset nor a
+subset of the true one (the brief's "never smaller" is not a property of
+this law, and neither direction would be conservative for every consumer:
+over-removal hides rest material, under-removal invents gouges).
+
+**Enforced on request.** `Stock::simulate_rotary_bounded(.., Some(t))`
+(and `ChordLaw::flute_tol`) also counts sub-chords until
+`L·2·sin(half/2) ≤ t`; refused by name past `MAX_SUBCHORDS`, never
+coarsened. `simulate_rotary` keeps today's count (flute tolerance
+`None`): the eye and the slices are unchanged in cost and output. On the
+pinning fixture (flat d6, 30 degrees on a d20 bar, pose_tol 1e-3) the
+unenforced stat reads 0.147 mm at 44 sub-chords; enforcing 0.05 takes
+130.
+
+**Agreement tests** (`crates/sim/tests/stock_rotary_flute.rs`): the field
+against a brute-force reference (the flat tool at 4,001 samples of the
+controller's lerp, its own sampling error added to the margin) at every
+field cell center in the band: 0 sign misses past `center_sag +
+flute_shift` (17,144 points) and 0 past an enforced 0.05 (17,280); and at
+the sag class alone the worst miss is 9.5e-3 > 5.5e-3 - the flute error
+is real and the bound is what covers it.
+
+**Dropped:** (1) enforcing `α ≤ tol/L` at the eye's or verdict's pose
+tolerance by default - 3x-1000x the sub-chords (the eye 2.5 s would go
+to minutes) for a flank class no current consumer reads (the column
+verdict refuses rotary by name); a caller that needs it asks for it.
+(2) a one-signed inflation (cut with `r + flute_shift`) - no consumer is
+conservative in a single direction. (3) a second-order "scallop" law for
+radial poses - true only when the pose's turn is parallel to the tip
+chord, which the straight tip chord itself breaks by up to half a move's
+turn. (4) sampling the reference between field cell centers - the field's
+`distance` reads its cell's value, and that quantization (up to ~0.26 mm
+at cell 0.5) would be charged to the flute.
+
+## #152 - a short turned bar's axis is read off its facing flats (2026-11-08)
+
+- **Chosen:** when the area-weighted normal moment is isotropic (both
+  smaller eigenvalues past ISO = 0.5 of the largest), the fit no longer
+  refuses outright. It offers the part's flat POLES as candidate axes:
+  normals (sign-folded) that one cluster of facets shares, carrying at
+  least 5 % of the area, at most 3, largest first
+  (`multiaxis/axis_poles.rs`). The same concurrency and coarseness
+  judgement of `axis.rs` decides; an isotropic part no pole earns is
+  refused by the old name ("every axis fits this model equally"). The
+  poles are also offered next to the two eigen candidates when the
+  moment is not isotropic, since near isotropy the eigenvectors are
+  ill-conditioned; the residual ranks them and the eigen candidate
+  wins ties, so an even revolve keeps its bits.
+- **Re-centred pole line:** on the short bar one radial hole drags the
+  plain least-squares line 0.4 mm toward it, past the 3 % sagitta band,
+  and half the wall misses it. A pole candidate whose plain line fails
+  is re-centred by least trimmed squares (refit on the half of the
+  normal lines that miss least, until that half settles), then judged
+  on every facet as before; `axis_robust` then trims and tightens as
+  for any fit. Only pole candidates get this, so no eigen-path fit
+  changes.
+- **Review of PR #204 (re-centring guards, all three kept):** a
+  100 x 100 x 10 plate with an r5 boss at (20, 20) read as a trusted
+  (0.667, 0.667, 0.333) axis: the trimmed half was taken by facet count
+  (the boss is 792 of 804 facets, 1.3 % of the area), and the plate's
+  two-triangle faces put every normal line through its centre, which
+  any line through it meets - `judge` is necessary, not sufficient.
+  Now (1) the median is AREA-weighted, (2) the kept half must carry
+  `MIN_KEPT_SHARE` of the answering area on `MIN_KEPT` facets (shared
+  with `axis_robust::reweigh`), and (3) re-centring runs only when the
+  moment is isotropic - elsewhere the plain line's drag stays the
+  evidence it was on main. (3) is what refuses the plate (its moment
+  is not isotropic); (1) and (2) guard an isotropic part the same way.
+  Pinned: `a_plate_with_an_off_centre_boss_is_refused_by_name`. The
+  wrong axes the review found on main (boss at (10, 0); single-band
+  shaft with a D-flat) are left to their own issue.
+- **`punched_bar` stays at z -80..20:** back at r10 x 40 the
+  three-hole box fixtures (`drilling_cross_box`) still refuse - three
+  holes plus their images are past the 10 % concurrency share on the
+  short bar. Not a fixture-length tweak, so left.
+- **Why:** a revolve's facing cut is a flat whose normal is the axis
+  (on the Gauss map, a flat is one point; the lateral zone a circle
+  about it). A bar at 0.5 < L/D < 2 balances caps against walls and
+  the moment names no direction, but its caps still do. A sphere has
+  no flat of any share; a cube's faces are flats, but four bearings
+  about any of them fail the coarseness gate, so both are still
+  refused by name.
+- **Dropped:** testing isotropy on the lateral facets alone (needs a
+  candidate axis to sort lateral from axial first - the same
+  chicken-and-egg the poles break); an exhaustive direction search
+  over normal-pair cross products (O(n^2), and a sphere passes the
+  concurrency law about every direction through its centre, so a
+  search finds a false axis); lowering ISO (moves the knife-edge, does
+  not remove it). A revolve with no flat end (domed or pointed both
+  ends) near L/D 1..2 is still refused; none is known to be needed.
+
+## #208 - normal lines through one point cannot certify an axis (2026-11-08)
+
+- **Decided:** a point-concurrency guard in the axis judgement
+  (`crates/motion/src/multiaxis/axis_point.rs`). Find the point the
+  candidate's inlier normal lines meet best (area-weighted
+  least-squares point of nearest approach, refitted on the area half
+  that misses it least). When the lines through that point (within the
+  sagitta tolerance) carry half the inlier area or more, the coarseness
+  gate is applied to those facets alone: their own bearings about the
+  axis must leave no skip past the sagitta budget. Otherwise the
+  candidate fails and the fit refuses by name as before ("share no
+  rotation axis" / "every axis fits ... equally"). Plus, on an
+  isotropic part a pole (facing-flat) axis is no longer tilted by the
+  direction refinement. The guard alone already refuses the cube; this
+  is a second safeguard asked for in the re-review of PR #204.
+- **Why:** two-triangle faces anchor their normal lines at the face
+  centre, so a box's faces all meet at its centre; a single-band wall's
+  lines all meet at the bar's mid point. Lines through one point meet
+  every line through it, so the concurrency share passed for any
+  direction through the point, and a small finely meshed boss or cross
+  hole supplied the bearings. A pencil of lines has no direction of its
+  own; it can only stand for a revolve when it is itself rotationally
+  symmetric about the axis (the Gauss map of a revolve is circles about
+  the axis). A box's faces bear 2-4 azimuths about any axis; a
+  single-band shaft's wall bears all of them about its own axis and two
+  about a cross one. So the common single-band CAD cylinder still fits
+  (pinned: `a_single_band_bar_still_fits_its_true_axis`), and plates,
+  cubes and cross readings are refused.
+- **Considered and dropped:** (b) sub-sampling big facets into many
+  lines: the circumcenter anchor is what makes a turned facet's line
+  meet the axis exactly; samples elsewhere on a wall facet miss it by
+  up to half a chord, so every coarse revolve would lose concurrency.
+  (a) requiring the contact points to spread along the axis: it refuses
+  the single-band cylinder, the most common real STL, whose direction
+  the Gauss map does fix. (c) refusing whenever the inliers are mostly
+  point-concurrent: same single-band loss. An EGI second-moment
+  symmetry test: a square plate is second-moment symmetric about its
+  normal, so it would pass a plate-with-boss about the plate centre.
+- **Cost / caveat:** the guard can only refuse. A single-band shaft
+  with a keyway or D-flat wider than the sagitta skip (about 28 degrees
+  of bearing on each side of the feature's own facets) in its
+  point-concurrent wall is refused rather than read (the issue's
+  shaft-with-D-flat fixture is refused this way, which the issue
+  allows). Five-band and banded shafts are untouched: their lines meet
+  the axis at several points, so no point carries half the area.
+
+### #208, review of PR #223: pencils judged one by one; only inliers vouch for roundness
+
+- **Decided:** (1) the coarseness gate reads only the facets whose
+  normal lines MEET the candidate axis; outliers (an off-centre boss)
+  no longer supply bearings. (2) The inliers are peeled into pencils
+  (lines through one point, one after another, up to 12, each of at
+  least 5 % of the inlier area), and each pencil is judged by itself:
+  its area-weighted low trigonometric moments about the axis (k = 1..4)
+  must vanish. The moments times the pencil's area, summed, may total
+  at most 10 % of the inlier area (the same 10 % the concurrency share
+  allows to miss). A pencil holding half the inliers must still pass
+  the coarseness gate alone.
+- **Why:** with sides split into three or more rectangles, no one
+  point held half the area, so the first guard never fired; and two
+  crossed single-band rods are two pencils at ONE point, whose union
+  looked round about the cross axis. A revolve's ring spreads its area
+  evenly over the bearings (all moments below its segment count
+  vanish); a crossing rod's wall puts its share s on two opposite
+  bearings (k = 2 moment s), a box's faces on four (k = 4).
+- **Dropped:** Kuiper's statistic against the uniform circle (tried
+  first): it reads two opposite lumps at only half their share (0.19
+  for a crossing rod holding 37 %), the same as a D-flat's single lump
+  that a real part needs to pass, so no threshold separated them. The
+  moments do: a flat that lumps a cut arc's area on one bearing keeps
+  the low moments nearly whole (about 0.015 at k = 2 for a 1 mm flat
+  on r10).
+- **Cost:** crossed rods of any proportion are refused (fail closed),
+  including a short cross pin holding more than about 10 % of the
+  inlier area. A single-band shaft whose keyway or flat is wide enough
+  to move the first moment past 10 % is refused.
+
+### #208, second re-review of PR #223: rings by latitude class, latitude must not run with bearing
+
+- **Decided:** the per-pencil moment test (e883ae6) is replaced by two
+  tests on each pencil. (1) **Latitude classes:** the pencil's facets
+  are sorted by latitude `n . u` and split where it jumps by more than
+  0.01. Each narrow class (range at most 0.05) must hold a ring, with
+  its widest bearing skip within twice the sagitta budget; a class
+  that holds none counts its area as off the axis. Flats at a ring's
+  latitude ride with it (a D-flat; a square plate's sides round a
+  centred bore; a keyway floor in its band). (2) **Off-cone share:**
+  the share of the latitude's variance (and of its squared deviation)
+  that the first two bearing harmonics explain (trigonometric
+  regression, Mardia & Jupp). It counts only when the explained swing
+  exceeds 2e-3 (about 0.1 degrees; the jittered-mesh pins explain at
+  most 3.3e-4). Both are summed, weighted by area, and capped at 10 %
+  of the inliers, as before.
+- **Why:** a skewed cross's shaft wall, seen from the rod's axis (or
+  from a line between the two), is a squashed ring: its bearings stay
+  spread, so the moments read it at only (1 - cos ang)/2, but its
+  latitude swings once per turn. A revolve's ring keeps one latitude.
+  The moment test also refused a square plate with a centred bore,
+  because the plate's four sides sit in the bore's pencil; by latitude
+  class they ride with the bore's ring, as a D-flat does. A 90-degree
+  cross folds the crossing wall onto two bearings at many latitudes,
+  so each of those classes holds no ring.
+- **Dropped:** the bearing moments of the whole pencil (they refused
+  plate-with-bore and missed skewed crosses); R^2 with no absolute
+  floor (a jittered shaft's correlated rounding explained up to 19 %
+  of its tiny latitude variance); a strict sagitta budget per class (a
+  keyway confined to one band leaves 30-degree skips beside its floor).
+- **Cost:** a skewed cross under about 0.1 degrees passes as one axis,
+  which is harmless at that angle. A finely meshed dome whose latitude
+  steps are under 0.01 is one wide class, judged by the off-cone share
+  alone.
+
+## Issue #130 - turning kinds approach from the stock
+
+- **Envelope = one radius.** The kernels get `StockEnv { r_out, clearance }`:
+  the stock's widest radius about the part's fitted axis (vertex max, the
+  same reading the meridian law's outline starts from). Chosen over a
+  per-station outline: a scalar is conservative for every rapid, and the
+  extra rungs it adds over a pre-turned blank are air cuts, never gouges.
+- **Only a bar wider than the part counts** (`r_out > part r_max + 1e-6`).
+  A bar-sized stock keeps today's part-based program bit for bit, so the
+  lathe goldens did not move. Dropped: always adding the clearance, which
+  would have moved every snug-bar program by a millimetre for no safety.
+- **Retract clearance = 1.0 mm on radius** (`turning_stock::STOCK_CLEARANCE`),
+  a constant for now. It belongs as a per-op parameter with that default
+  (CAM choices are user parameters); a follow-up issue should expose it.
+- **Profile rough** counts its rungs from the bar's OD down to the part
+  plus leave, and drops a rung whose nose never reaches under the OD
+  (pure air). Groove rough and parting peck from the OD. Profile finish,
+  groove finish, threading and form only move their rapids out.
+- **Not touched:** Facing (#122, claimed by an outside contributor), the
+  contour rides (chamfer, taper, multi-pass - not in the issue), and the
+  boring bar, whose approach is already centred on the spindle - the most
+  room any stock ID allows; a stock hole too small for the bar stays the
+  meridian law's refusal.
+- **No stock readable** (no setup stock, an empty mesh, an axis fit that
+  fails): the part-based path stands and carries the note "no setup stock
+  could be read about the spindle ...".
+- **Fixture:** `turning_profile.rs` moved from a 40 mm box to bar-sized
+  stock (as #103 did for the other lathe fixtures): with #130 the box's
+  28 mm revolved corner made its ladder-count pins a 30-rung job.
+
+
+## #54: the rotary wrap closes a flatted bar's seam with curtains, and refuses an open mesh up front (2026-11-08)
+
+**Chosen:** the developed sheet's two free seam ends are closed by a CURTAIN per free
+seam edge (`multiaxis::rotary_seam`): the vertical quad from the developed edge down to
+the floor radius. A seam edge is an edge the two facets sharing it develop one period
+apart; its lower version (first copy) and its upper version (second copy) are the
+cover's ends. This replaces the meridian wall that stood in the plane of the cover's
+extreme column. On a revolve the curtain is that wall, split on the same diagonal (the
+OffsetRings digest is unchanged). On a D-flat across the seam the seam column is ragged
+(the flat's vertices sit at their own azimuths), and the plane wall met none of its
+edges: the "mesh is open, 4/8/16 dangling chord ends" of #9 round 2.
+
+**Also chosen:** the wrap refuses an open mesh by name before it develops it ("the
+rotary wrap needs a closed solid, but the mesh is open: N edges bound one facet only").
+On main a hole in the skin that no ladder level slices through wrapped silently.
+
+**Dropped:**
+- Widening the plane wall to the ragged column (a skirt from each seam edge to the
+  s_lo plane): two surfaces where one does, and the wall's profile had to stay a single
+  valued function of the station.
+- Curtaining every free edge: it would close a real hole silently.
+- Putting the seam end-to-end test in `rotary_adaptive.rs` (the issue's "Done means"):
+  that file sits at the 400-line budget, so the D-flat suite `rotary_dflat.rs` carries it.
+
+
+### PR #210 review: a flat across the seam is refused by name, not wrapped
+
+**Chosen:** the wrap refuses by name any work whose seam is not turned
+(`rotary_seam::refuse_feature_on_seam`). The off-axis vertices of the facets that
+straddle the ±π branch must stand on exactly two meridian columns with one profile. A
+flat, keyway or cross hole across the seam breaks that, and the refusal says to rotate
+the work clear of it.
+
+**Why:** the review probe (a 3.5 deep flat off its centre across the seam) wrapped and
+put 12 to 1606 cut tips inside the part, down to the axis. Clipping the cover to the
+ragged seam chains' inner columns removed the reviewer's strip gouge. A second gouge
+was left, though: a whole-lap band at the flat's end stations, at the shoulder plus the
+pad. It showed even with the flat centred on the seam (n=64, D2: 245 tips), so a
+cover-shape fix was not enough. Gouge-free beats coverage. The placements clear of the
+seam were checked against the true cross-section polygon (n 16/64, D2/D0.8) with 0 tips
+inside, and they wrap as before.
+
+**Dropped:**
+- The ragged-cover clip (it only removed the strip gouge).
+- The #9 seam-law end-to-end pin under Adaptive: its fixture is a flat across the seam,
+  which is now refused. The seam law stays unit-pinned. The pin now asserts the named
+  refusal under Adaptive and Offset rings.
+- Not done (follow-up worth an issue): rotate the development's branch to an azimuth
+  where the work is turned, so a D-flat bar wraps whatever its placement.
+
+## #197 - the Stock page shows the models' size (2026-11-07)
+
+- **Chosen:** a two-line readout above the stock fields - "Models: X x Y x
+  Z <unit>" and the X/Y/Z extents - from `model::solid_world_aabb`, the
+  very box Fit to Models wraps (its hover says so), in the document's
+  units; with no models, a dim "No models yet" line.
+- **Why:** the reporter wanted the primitive's dimensions in view while
+  typing stock numbers.
+- **Dropped:** the *selected* model's box only (the stock wraps the whole
+  job, and Fit already reads all models); copying the size into the
+  fields on a click (Fit to Models already does it with a margin; the
+  per-side allowance is #198).
+
+## #198 - box stock fitted per side (2026-11-07)
+
+- **Chosen:** for box stock the Stock page offers "Per side": six
+  allowances (-X, +X, -Y, +Y, bottom, top) replace the single fit margin,
+  and Fit to Models sends `StockFitSides`, which wraps the models' box by
+  each side's own amount (`stock::fit_box_sides`: each face its own
+  allowance off the models; refused by name for a negative or
+  non-finite allowance) through the same undoable `SetStock` as the
+  single-margin fit (both now share `State::apply_stock_fit`). Equal
+  sides read exactly as the single-margin fit.
+- **Why:** a blank is rarely padded evenly - a facing allowance on top,
+  nothing under a flat bottom, more on the side a vise jaw grips.
+- **Dropped:** per-side for cylinders (a radial allowance is one number;
+  bottom/top could follow if asked); storing the allowances in the
+  document (they are a fit recipe, not stock - the stock stays the
+  explicit box the fit produced).

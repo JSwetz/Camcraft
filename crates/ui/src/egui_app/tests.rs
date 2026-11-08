@@ -76,7 +76,10 @@ fn empty_egui_meshes_are_filtered_before_gpu_submission() {
 }
 
 mod face_origin;
+mod stock_size;
+mod stock_fit_sides;
 mod layout;
+mod unsaved;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -368,7 +371,8 @@ fn file_ops_round_trip_through_commands() {
     let path = std::env::temp_dir().join(format!("camcraft-egui-md-{}.camproj", std::process::id()));
     let saved_title = format!("CamCraft - {}", path.file_name().unwrap().to_string_lossy());
     assert_eq!(harness.state().state.project_path, None);
-    assert_eq!(harness.state().state.window_title(), "CamCraft - Untitled");
+    // The seed is unsaved work: the title carries the '*' (#107).
+    assert_eq!(harness.state().state.window_title(), "*CamCraft - Untitled");
 
     harness
         .state_mut().state.pending
@@ -4246,6 +4250,10 @@ fn a_successful_post_opens_the_viewer_and_new_document_retires_it() {
     }
     let _ = std::fs::remove_file(&path);
     harness.state_mut().state.pending.push_back(CommandKind::NewDocument);
+    // The document is unsaved: New waits for the prompt's answer (#107).
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::ResolveUnsaved(crate::unsaved::UnsavedChoice::DontSave));
     harness.run();
     assert!(
         harness.state().state.post_view.is_none(),
