@@ -68,6 +68,7 @@ function wo(letter, v, o) { return has(v) ? letter + fu(v - o) : ""; }  // axis 
 function msg(s) {  // counted warning where the host offers message()
   if (typeof message === "function") message(s); else writeln("(" + s + ")");
 }
+var tapRefused = false;   // the rigid-tap refusal, once per program
 var tiltRefused = false;  // one named refusal per program, not per line
 function tiltOk(p) {  // this post is 3-axis: a tilted record is refused
   if (!has(p.A)) return true;
@@ -165,15 +166,30 @@ function onToolChange(number, name) {
   }
 }
 
-// The belt range (770-family: low 175-3250 rpm, high 525-10000 rpm) is a
-// physical belt move that no G or M code can make, and PathPilot's
-// Spindle Range setting must match it. When a speed fits only one range
-// the program says which, as a comment the operator sees before the
-// spindle starts; a speed both ranges serve says nothing.
+// The belt range is a physical belt move that no G or M code can make,
+// and PathPilot's Spindle Range setting must match it. The ranges are
+// the machine's own (`.mch` spindle.ranges, #170 - e.g. the 770MX's
+// low 175-3250 rpm and high 525-10000 rpm). When a speed fits only one
+// range the program says which, as a comment the operator sees before
+// the spindle starts; a speed several ranges serve says nothing, and a
+// machine stating fewer than two ranges has no belt to name. A speed
+// past every range names the nearest one (the rpm check refuses it).
 function beltNote(rpm) {
-  if (rpm > 3250) return "(SPINDLE " + ni(rpm) + " RPM NEEDS THE HIGH BELT RANGE)";
-  if (rpm > 0 && rpm < 525) return "(SPINDLE " + ni(rpm) + " RPM NEEDS THE LOW BELT RANGE)";
-  return "";
+  var rs = (typeof machine !== "undefined" && machine.spindleRanges) || [];
+  if (rs.length < 2 || !(rpm > 0)) return "";
+  var lo = 0, hi = 0, serving = [];
+  for (var i = 0; i < rs.length; i++) {
+    if (rs[i][0] < rs[lo][0]) lo = i;
+    if (rs[i][1] > rs[hi][1]) hi = i;
+    if (rpm >= rs[i][0] && rpm <= rs[i][1]) serving.push(i);
+  }
+  var pick = -1;
+  if (serving.length === 1) pick = serving[0];
+  else if (serving.length === 0) pick = rpm > rs[hi][1] ? hi : (rpm < rs[lo][0] ? lo : -1);
+  if (pick < 0) return "";
+  var name = rs.length === 2 ? (pick === lo ? "LOW" : "HIGH")
+    : ni(rs[pick][0]) + "-" + ni(rs[pick][1]) + " RPM";
+  return "(SPINDLE " + ni(rpm) + " RPM NEEDS THE " + name + " BELT RANGE)";
 }
 
 // The preamble closes over everything a raw motion line needs to be a
@@ -297,7 +313,17 @@ function onCycle() {
   // Tormach documents G84 for PathPilot: F is the pitch times the rpm
   // (the stream's synthesized tap feed), no P - PathPilot sizes the
   // bottom dwell itself, and the MX mills tap from the spindle encoder.
-  else if (p.CycleType === "TAP") g = "G84";
+  else if (p.CycleType === "TAP") {
+    // A machine that says it cannot rigid-tap (the R8 770M and PCNC 440:
+    // tension/compression holders and thread milling only) refuses the
+    // cycle by name rather than posting a G84 its spindle cannot follow.
+    if (typeof machine !== "undefined" && machine.rigidTapping === false) {
+      if (!tapRefused) tapRefused = true; else return;
+      msg("rigid tapping (G84) is not available on " + (machine.name || "this machine") + " - use a tapping head or thread milling");
+      return;
+    }
+    g = "G84";
+  }
   xyFirst(p.X, p.Y);         // a cycle as the first move: its first hole
   var sig = g + "|" + p.Z + "|" + p.R + "|" + p.Q;
   if (inCycle && sig === cycleSig) {

@@ -12,10 +12,10 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     AddTool, ChangeOperationKind, ClearToolpath, CommandError, CreateOperation, DeleteOperation,
-    EditOperationLinks, GenerateOperation, History, ImportModel, SetOperationGeometry, SetStock,
+    EditOperationLinks, GenerateOperation, History, ImportModel, MoveModel, SetOperationGeometry, SetStock,
 };
 use camcraft_app::geometry::feature::FaceKind;
-use camcraft_app::geometry::{Point3, cube};
+use camcraft_app::geometry::{Point3, cube, quat_from_euler};
 use camcraft_app::model;
 use camcraft_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
 use camcraft_app::schema::{Location, Toolpath};
@@ -83,6 +83,22 @@ fn pocket() -> OpParams {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
+        blend_turns: false,
+    }
+}
+
+fn facing() -> OpParams {
+    OpParams::Face {
+        holes: Default::default(),
+        tilt: None,
+        stepover: 3.0,
+        clearance_z: Height::fixed(15.0),
+        cut_z: Height::fixed(5.0),
+        top_z: None,
+        stepdown: None,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
         blend_turns: false,
     }
 }
@@ -172,6 +188,31 @@ fn a_wall_pick_for_a_pocket_is_refused_at_every_door() {
     // Nothing was written by any refusal.
     assert_eq!(cache(&world, "P1"), path);
     assert_eq!(status(&world, "P1"), OpStatus::Ok);
+}
+
+#[test]
+fn a_rotated_face_pick_for_facing_is_refused_before_generation() {
+    let (world, mut history) = world_with_part();
+    let top = pick(face_id(&world, false));
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "F1", TOOL, SrcRef::Stock, facing()).expect("facing op"),
+    );
+    history.execute(
+        &world,
+        MoveModel::new(
+            &world,
+            "part",
+            Location { rot: quat_from_euler(std::f64::consts::FRAC_PI_2, 0.0, 0.0), ..Location::default() },
+        )
+        .expect("turn part"),
+    );
+    let err = SetOperationGeometry::new(&world, "F1", vec![top.clone()])
+        .err()
+        .expect("vertical face is refused at the pick");
+    assert!(err.to_string().contains("not horizontal"), "{err}");
+    let (_, refusal) = operation::selection_account(&world, None, &[top], &facing());
+    assert!(refusal.is_some_and(|msg| msg.contains("not horizontal")));
 }
 
 #[test]

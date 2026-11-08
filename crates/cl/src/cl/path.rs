@@ -7,6 +7,7 @@ use crate::geometry::units::Unit;
 
 use super::comp::CompSpan;
 use super::thread::ThreadCycle;
+use super::touch::ProbeTouch;
 use super::moves::{lattice, Move, MoveKind};
 use super::plane::{z_extrema, ArcPlane};
 use super::cycle::Cycle;
@@ -36,6 +37,10 @@ pub struct Toolpath {
     /// every non-threading path. The passes stay the truth; a post
     /// with a threading cycle writes the record in their place.
     pub threads: Vec<ThreadCycle>,
+    /// The probing touches (#108, [`ProbeTouch`]): empty for
+    /// every cutting path. A post that cannot write a probing block
+    /// refuses the path rather than posting the touch as a feed.
+    pub probes: Vec<ProbeTouch>,
 }
 
 impl Toolpath {
@@ -46,6 +51,7 @@ impl Toolpath {
             notes: Vec::new(),
             comps: Vec::new(),
             threads: Vec::new(),
+            probes: Vec::new(),
         }
     }
 
@@ -372,6 +378,7 @@ impl PathBuilder {
             notes: self.notes,
             comps: self.comps,
             threads: Vec::new(),
+            probes: Vec::new(),
         }
     }
 }

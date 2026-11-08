@@ -180,7 +180,12 @@ impl TiltedFrame {
     pub fn world_path(&self, local: &Toolpath, chord_tol: f64) -> Toolpath {
         let stamp = if self.is_upright() { None } else { Some(self.axis) };
         let mut moves = Vec::with_capacity(local.moves.len());
+        // Where each local move starts in the world list: a flattened
+        // arc becomes several chords, so a probe touch's index (#108)
+        // is re-pointed through this, never copied.
+        let mut starts = Vec::with_capacity(local.moves.len());
         for m in &local.moves {
+            starts.push(moves.len());
             match &m.arc {
                 // Upright, vertical plane (M11.2 A): the identity
                 // basis keeps the plane, the center rides the
@@ -327,7 +332,20 @@ impl TiltedFrame {
         if !local.threads.is_empty() {
             notes.push("threading: a thread cycle does not ride a tilted frame - this path posts its explicit passes".into());
         }
-        Toolpath { moves, cycles: local.cycles.clone(), notes, comps, threads: Vec::new() }
+        // Probe touches (#108) ride the map: a touch names a straight
+        // feed, which maps to one world move, and its target maps with it.
+        let probes = local
+            .probes
+            .iter()
+            .map(|t| {
+                // A touch naming no local move keeps an index naming
+                // no world move: `is_sane` then refuses it at the post,
+                // rather than the touch vanishing into a plain feed.
+                let index = starts.get(t.index).copied().unwrap_or(usize::MAX);
+                super::ProbeTouch { index, target: self.to_world(t.target), ..*t }
+            })
+            .collect();
+        Toolpath { moves, cycles: local.cycles.clone(), notes, comps, threads: Vec::new(), probes }
     }
 
     /// A local planar region (the cut's footprint at local height

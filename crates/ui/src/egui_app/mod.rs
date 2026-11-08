@@ -59,6 +59,7 @@ mod fields;
 mod geo_page;
 mod heights_page;
 mod holes_page;
+mod probe_page;
 mod kind_editors;
 mod mill2d_more_page;
 mod mill2d_page;
@@ -103,6 +104,8 @@ mod coolant_tests;
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
+#[cfg(test)]
+mod fresh_op_tests;
 #[cfg(test)]
 mod tool_number_tests;
 #[cfg(test)]

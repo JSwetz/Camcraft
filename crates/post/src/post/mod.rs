@@ -32,6 +32,7 @@ mod coolant;
 pub mod engine;
 pub mod js;
 pub mod machine;
+pub mod probe_rec;
 mod program;
 
 pub use coolant::CoolantMode;
@@ -110,6 +111,10 @@ pub struct Dump<'a> {
     /// The cutting fluid the op asks for (#112). Flood is the stream's
     /// silent default; any other ask rides a `PARAM Coolant`.
     pub coolant: CoolantMode,
+    /// The probing result (#108): `Some` for a Probe op, whose path
+    /// carries touches - the stream then closes the section with a
+    /// `FOUND` record built from the touches. None for every cutting op.
+    pub probe_result: Option<probe_rec::ProbeResult>,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -133,6 +138,7 @@ impl<'a> Default for Dump<'a> {
             part_transfer: false,
             probe_tol: None,
             coolant: CoolantMode::Flood,
+            probe_result: None,
         }
     }
 }
@@ -230,6 +236,20 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     threads.sort_by_key(|c| c.first);
     let mut ti = 0usize;
     let mut open_thread: Option<usize> = None;
+    // Probing touches (#108): a touch that does not sit on its move is
+    // refused by name - its move would post as a plain feed.
+    for p in &t.probes {
+        if !p.is_sane(&t.moves) {
+            out.push(Record::Warn {
+                text: format!("probing: touch at move {} does not run toward its target - refused", p.index),
+            });
+        }
+    }
+    let touches: std::collections::BTreeMap<usize, &crate::cl::ProbeTouch> =
+        t.probes.iter().filter(|p| p.is_sane(&t.moves)).map(|p| (p.index, p)).collect();
+    if d.probe_result.is_some() && touches.is_empty() {
+        out.push(Record::Warn { text: "probing: the probe path carries no touch - refused".into() });
+    }
     for (mi, m, pre) in program::program_order(t, &mut out) {
         while ci < cycles.len() && cycles[ci].first_move <= mi {
             out.push(Record::Cycle(cycles[ci].clone()));
@@ -244,6 +264,34 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
         }
         if let Some(r) = pre {
             out.push(r);
+        }
+        // The move straight back off a trip posts incrementally: a part
+        // nearer than the model would otherwise be driven into by an
+        // absolute back-off to the nominal point.
+        if mi > 0
+            && let (Some(prev), Some(f)) = (touches.get(&(mi - 1)), m.feed)
+            && m.arc.is_none()
+            && prev.direction(&t.moves).is_some_and(|d| {
+                let v = m.to - m.from;
+                let len = v.dot(v).sqrt();
+                len > 1e-9 && (v.dot(d) / len + 1.0).abs() < 1e-6
+            })
+        {
+            out.push(Record::Retreat(probe_rec::RetreatRec {
+                delta: [m.to.x - m.from.x, m.to.y - m.from.y, m.to.z - m.from.z],
+                expect: [m.to.x, m.to.y, m.to.z],
+                feed: f,
+            }));
+            continue;
+        }
+        if let (Some(p), Some(f)) = (touches.get(&mi), m.feed) {
+            out.push(Record::Touch(probe_rec::TouchRec {
+                target: [p.target.x, p.target.y, p.target.z],
+                expect: [m.to.x, m.to.y, m.to.z],
+                feed: f,
+                measure: p.measure,
+            }));
+            continue;
         }
         let abc = match m.axis {
             Some(a) if !crate::cl::is_vertical(&a) => {
@@ -296,6 +344,14 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // story is only the handoff. The probe (M5.3 D) sits in front of
     // the handoff: the part is measured where it was last machined,
     // before it changes hands - LOAD, cut, PROBE, TRANSFER, UNLOAD.
+    if let Some(r) = d.probe_result {
+        let axes = probe_rec::found_axes(t);
+        if axes.is_empty() {
+            out.push(Record::Warn { text: "probing: no measuring touch finds an axis - refused".into() });
+        } else {
+            out.push(Record::Found(probe_rec::FoundRec { set_wcs: r.set_wcs, tol_mm: r.tol_mm, axes }));
+        }
+    }
     if let Some(t) = d.probe_tol {
         out.push(Record::Probe { tol_mm: t });
     }

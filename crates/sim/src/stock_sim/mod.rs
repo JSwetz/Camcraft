@@ -54,6 +54,7 @@
 
 
 mod backend;
+mod backend_build;
 mod columns;
 mod cut;
 mod dexel;
@@ -62,6 +63,7 @@ mod deviate;
 mod display;
 mod field;
 mod field_batch;
+mod field_blade;
 mod field_bull;
 mod field_cut;
 mod field_gen;
@@ -69,6 +71,7 @@ mod field_lathe;
 mod field_ray;
 mod field_rotary;
 mod field_solid;
+mod field_sweep;
 mod gouge;
 mod kernel;
 mod march;
@@ -87,6 +90,7 @@ pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSur
 pub use dexel::{reach, Dexel};
 pub use field::SdfField;
 pub use field_batch::CutStats;
+pub use field_blade::{LatheProfile, CROWN_SAG_TOL};
 pub use field_cut::SdfTool;
 pub use field_lathe::{LatheAxis, MERIDIAN_TOL};
 pub use field_rotary::{rotary_chords, rotary_chords_law, ChordLaw, RotaryChordStats, MAX_SUBCHORDS, ROTARY_COLUMN_REFUSAL};

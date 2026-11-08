@@ -126,6 +126,12 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Lathe", include_str!("../../../assets/machines/lathe.mch")),
     // #131: an inch machine; pairs with the "Tormach PathPilot" post.
     ("Tormach 770MX", include_str!("../../../assets/machines/tormach-770mx.mch")),
+    // #170: the other Tormach mills, each from its own operator's manual.
+    ("Tormach 770MX (ML)", include_str!("../../../assets/machines/tormach-770mx-ml.mch")),
+    ("Tormach 770M", include_str!("../../../assets/machines/tormach-770m.mch")),
+    ("Tormach 1100MX", include_str!("../../../assets/machines/tormach-1100mx.mch")),
+    ("Tormach 1500MX", include_str!("../../../assets/machines/tormach-1500mx.mch")),
+    ("Tormach PCNC 440", include_str!("../../../assets/machines/tormach-pcnc440.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
@@ -346,6 +352,9 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
         .iter()
         .filter_map(|r| match r {
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
+            // Probing (#108): each touch and retreat stands for one move.
+            cnc::Record::Touch(t) => Some(t.expect),
+            cnc::Record::Retreat(t) => Some(t.expect),
             _ => None,
         })
         .collect();
@@ -356,6 +365,8 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
         };
         let pos = match &records[rec] {
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
+            cnc::Record::Touch(t) => Some(t.expect),
+            cnc::Record::Retreat(t) => Some(t.expect),
             cnc::Record::Cycle(c) => moves.get(c.first_move).copied(),
             _ => None,
         };
@@ -624,7 +635,18 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             _ => (None, false, false, None),
         };
         let display_name = model::operation_label(world, name, e);
+        // The probe (#108): its result rides the section, and a touch
+        // probe states no spindle (the preamble writes none for 0).
+        let probe_result = match &op.params {
+            OpParams::Probe { set_wcs, tolerance, .. } => Some(post::probe_rec::ProbeResult {
+                set_wcs: *set_wcs,
+                tol_mm: *tolerance,
+            }),
+            _ => None,
+        };
+        let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
         let d = Dump {
+            probe_result,
             op_name: &display_name,
             part_load,
             part_unload,
@@ -634,7 +656,7 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,
-            rpm: tool.rpm,
+            rpm,
             clearance_z: hs.clearance,
             retract_z: hs.retract.unwrap_or(hs.clearance),
             top_z: stock_top_z, // the TopOfStock PARAM: the stock, not the cut
@@ -663,7 +685,10 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         // The emitted motion records, not the path's moves: a
         // control-compensated span (M13.11) writes its programmed
         // contour in place of its centre moves.
-        moved += recs.iter().filter(|r| matches!(r, cnc::Record::Move(_))).count();
+        moved += recs
+            .iter()
+            .filter(|r| matches!(r, cnc::Record::Move(_) | cnc::Record::Touch(_) | cnc::Record::Retreat(_)))
+            .count();
         records.extend(recs);
     }
     Ok(records)
@@ -708,6 +733,7 @@ pub trait HeightRefs {
 impl HeightRefs for OpParams {
     fn heights(&self) -> Vec<&Height> {
         match self {
+            OpParams::Probe { clearance_z, .. } => vec![clearance_z],
             OpParams::Face {
                 clearance_z,
                 cut_z,

@@ -67,7 +67,7 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
             return 1;
         }
     };
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait);
     let mut shell = Shell::new(pick, want);
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
@@ -126,6 +126,16 @@ struct Shell {
     gpu_want: Option<String>,
     /// #74: per-frame phase timing; a frame over budget is logged by phase.
     frame_watch: FrameWatch,
+    /// Next redraw requested by egui or an active background task.
+    next_repaint: Option<std::time::Instant>,
+    /// One extra frame lets input-driven viewport changes reach the scene.
+    followup_redraw: bool,
+    /// A hidden surface has no useful frame timer.
+    occluded: bool,
+    /// Resize events can arrive faster than a GPU frame. Configure only for
+    /// the newest size when the next resize frame is due.
+    pending_resize: Option<PhysicalSize<u32>>,
+    last_resize_frame: Option<std::time::Instant>,
     state: State,
 }
 
@@ -184,6 +194,11 @@ impl Shell {
             gpu_pick: pick,
             gpu_want: want,
             frame_watch: FrameWatch::new(std::time::Instant::now()),
+            next_repaint: None,
+            followup_redraw: false,
+            occluded: false,
+            pending_resize: None,
+            last_resize_frame: None,
             state,
         }
     }
@@ -282,14 +297,20 @@ impl Shell {
         }
         config.width = w;
         config.height = h;
+        let started = std::time::Instant::now();
         surface.configure(device, config);
+        let elapsed = started.elapsed();
+        if elapsed > super::frame_watch::BUDGET {
+            eprintln!("gpu: slow resize configure {} ms", elapsed.as_millis());
+        }
     }
 
     fn draw(&mut self) {
-        if self.failed {
+        if self.failed || self.occluded {
             return;
         }
         let now = std::time::Instant::now;
+        let followup_redraw = std::mem::take(&mut self.followup_redraw);
         self.frame_watch.begin(now());
         // Commands the panels queued last frame land before the scene is
         // collected, so this frame draws what the user's click did.
@@ -301,6 +322,7 @@ impl Shell {
             }
             self.window_title = title;
         }
+        self.frame_watch.mark("commands", now());
         let scene = world::collect(&self.state);
 
         let Self {
@@ -322,10 +344,11 @@ impl Shell {
             scene_digest,
             exit_requested,
             frame_watch,
+            next_repaint,
             state,
             ..
         } = self;
-        frame_watch.mark("commands+scene", now());
+        frame_watch.mark("scene", now());
         let (
             Some(window),
             Some(device),
@@ -399,6 +422,18 @@ impl Shell {
                 left_press,
             );
         });
+        let egui_delay = full_output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(std::time::Duration::MAX, |v| v.repaint_delay);
+        let delay = redraw_delay(
+            egui_delay,
+            followup_redraw || !state.pending.is_empty() || state.layout_request.is_some(),
+            state.import_in_progress(),
+            state.sim.is_some_and(|sim| sim.playing),
+            state.field_play.as_ref().is_some_and(|play| play.needs_poll()),
+        );
+        *next_repaint = delay.and_then(|d| now().checked_add(d));
         drain_textures(renderer, device, queue, &mut full_output);
         winit_state.handle_platform_output(window, full_output.platform_output);
 
@@ -413,10 +448,19 @@ impl Shell {
             wgpu::CurrentSurfaceTexture::Success(st)
             | wgpu::CurrentSurfaceTexture::Suboptimal(st) => st,
             wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => return,
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                *next_repaint = now().checked_add(std::time::Duration::from_millis(16));
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Occluded => {
+                // Some platforms report this through wgpu without sending
+                // WindowEvent::Occluded. Wait for the next window event.
+                *next_repaint = None;
+                return;
+            }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 surface.configure(device, conf);
+                *next_repaint = now().checked_add(std::time::Duration::from_millis(16));
                 return;
             }
         };
@@ -639,26 +683,77 @@ impl winit::application::ApplicationHandler for Shell {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_none() && !self.failed {
             self.init_gpu(el);
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if let WindowEvent::Occluded(occluded) = &event {
+            self.occluded = *occluded;
+        }
         // Feed egui first (pointer/keyboard/text/scale), like the imgui
         // shell's platform.prepare_frame; the EventResponse (child-viewport
         // control flow) is inert for our single root viewport.
-        if let (Some(winit_state), Some(window)) = (self.winit_state.as_mut(), self.window.as_ref())
+        let repaint = match (self.winit_state.as_mut(), self.window.as_ref()) {
+            (Some(winit_state), Some(window)) => winit_state.on_window_event(window, &event).repaint,
+            _ => false,
+        };
+        if repaint && !self.occluded
+            && !matches!(event, WindowEvent::RedrawRequested | WindowEvent::Resized(_))
+            && let Some(window) = &self.window
         {
-            let _response = winit_state.on_window_event(window, &event);
+            self.followup_redraw = true;
+            window.request_redraw();
         }
         match &event {
             // #107: the window X is a Quit like Ctrl+Q, so unsaved changes
             // ask first. A shell whose GPU failed draws (and drains)
             // nothing, so it closes at once.
             WindowEvent::CloseRequested if self.failed => el.exit(),
-            WindowEvent::CloseRequested => crate::actions::quit(&mut self.state),
-            WindowEvent::Resized(size) => self.on_resize(*size),
+            WindowEvent::CloseRequested => {
+                crate::actions::quit(&mut self.state);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::Resized(size) => {
+                self.pending_resize = Some(*size);
+            }
+            WindowEvent::Occluded(false) | WindowEvent::Focused(true) => {
+                if let Some(window) = &self.window && !self.occluded {
+                    self.followup_redraw = true;
+                    window.request_redraw();
+                }
+            }
             WindowEvent::RedrawRequested => {
+                let resized = if let Some(size) = self.pending_resize {
+                    let deadline = resize_frame_deadline(self.last_resize_frame);
+                    if std::time::Instant::now() < deadline {
+                        return;
+                    }
+                    self.pending_resize = None;
+                    self.on_resize(size);
+                    self.followup_redraw = true;
+                    true
+                } else {
+                    false
+                };
                 self.draw();
+                if resized {
+                    let done = std::time::Instant::now();
+                    self.last_resize_frame = Some(done);
+                    // The layout's View3D size lands on a follow-up frame.
+                    // Keep that frame from immediately blocking the next
+                    // batch of pointer and resize events.
+                    if let (Some(next), Some(earliest)) = (
+                        self.next_repaint.as_mut(),
+                        done.checked_add(std::time::Duration::from_millis(16)),
+                    ) {
+                        *next = (*next).max(earliest);
+                    }
+                }
                 if self.exit_requested || self.state.request_quit {
                     el.exit();
                 }
@@ -667,10 +762,88 @@ impl winit::application::ApplicationHandler for Shell {
         }
     }
 
-    fn about_to_wait(&mut self, _el: &ActiveEventLoop) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if self.occluded {
+            el.set_control_flow(ControlFlow::Wait);
+            return;
         }
+        let resize_due = self.pending_resize.map(|_| resize_frame_deadline(self.last_resize_frame));
+        // A pending resize carries the repaint too. Its frame deadline
+        // supersedes older egui timers, including an immediate follow-up.
+        let next = resize_due.or(self.next_repaint);
+        match (next, self.window.as_ref()) {
+            (Some(deadline), Some(window)) if deadline <= std::time::Instant::now() => {
+                self.next_repaint = None;
+                window.request_redraw();
+                el.set_control_flow(ControlFlow::Wait);
+            }
+            (Some(deadline), Some(_)) => el.set_control_flow(ControlFlow::WaitUntil(deadline)),
+            _ => el.set_control_flow(ControlFlow::Wait),
+        }
+    }
+}
+
+/// A resize frame is enough to update the window promptly without making
+/// GPU reconfiguration and rendering block every pointer event in the drag.
+fn resize_frame_deadline(last: Option<std::time::Instant>) -> std::time::Instant {
+    last.and_then(|t| t.checked_add(std::time::Duration::from_millis(16)))
+        .unwrap_or_else(std::time::Instant::now)
+}
+
+/// Idle documents need no redraw. Active egui animation, queued commands,
+/// imports and simulation each name the next useful frame.
+fn redraw_delay(
+    egui_delay: std::time::Duration,
+    pending: bool,
+    importing: bool,
+    sim_playing: bool,
+    field_play_pending: bool,
+) -> Option<std::time::Duration> {
+    use std::time::Duration;
+    let mut delay = egui_delay;
+    if pending {
+        delay = Duration::ZERO;
+    }
+    if importing || field_play_pending {
+        delay = delay.min(Duration::from_millis(50));
+    }
+    if sim_playing {
+        delay = delay.min(Duration::from_millis(16));
+    }
+    (delay != Duration::MAX).then_some(delay)
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    use super::redraw_delay;
+    use std::time::Duration;
+
+    #[test]
+    fn idle_document_needs_no_frame_timer() {
+        assert_eq!(
+            redraw_delay(Duration::MAX, false, false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn queued_and_live_work_keep_the_window_moving() {
+        assert_eq!(
+            redraw_delay(Duration::MAX, true, false, false, false),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(
+            redraw_delay(Duration::MAX, false, true, false, false),
+            Some(Duration::from_millis(50))
+        );
+        assert_eq!(
+            redraw_delay(Duration::MAX, false, false, true, false),
+            Some(Duration::from_millis(16))
+        );
+        assert_eq!(
+            redraw_delay(Duration::from_millis(10), false, true, false, false),
+            Some(Duration::from_millis(10))
+        );
     }
 }
 

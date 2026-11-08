@@ -17,7 +17,6 @@ mod punched_bar;
 
 use flecs_ecs::prelude::World;
 
-use camcraft_app::cl::Toolpath;
 use camcraft_app::commands::{AddTool, History, ImportModel, LoadMachine, SetStock, SetWcsOrigin};
 use camcraft_app::drilling::{CrossHole, CycleChoice};
 use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, Triangle};
@@ -135,43 +134,34 @@ fn place_g54(world: &World, history: &mut History, x: f64, y: f64) {
     history.execute(world, SetWcsOrigin::new(world, "G54", at).expect("set G54"));
 }
 
-/// The chain's moves read from G54: every point minus the offset.
-fn about(t: &Toolpath, ox: f64, oy: f64) -> Vec<(Point3, Point3, Option<[f64; 3]>)> {
-    let rel = |p: Point3| Point3::new(p.x - ox, p.y - oy, p.z);
-    t.moves.iter().map(|m| (rel(m.from), rel(m.to), m.axis)).collect()
-}
-
 #[test]
 fn a_cross_drill_off_the_world_origin_under_a_moved_g54_drills_the_on_origin_chain() {
     for word in ["lathe", "mill-turn"] {
         let (world, _h) = world_with(word, bar(0.0, 0.0));
         let (plain, pw) = operation::generate(&world, &op(holes(0.0, 0.0)), "")
             .unwrap_or_else(|e| panic!("{word}: the on-origin bar drills: {e}"));
-
-        let (world, mut history) = world_with(word, bar(AT.0, AT.1));
-        place_g54(&world, &mut history, AT.0, AT.1);
-        let (moved, mw) = operation::generate(&world, &op(holes(AT.0, AT.1)), "")
-            .unwrap_or_else(|e| panic!("{word}: the bar on its work offset drills: {e}"));
-        // Issue #80: the clear chain is not convicted - on a lathe the
-        // axial-hole verdict once judged the radial path and blocked it.
-        for w in [&pw, &mw] {
-            assert!(!w.iter().any(|w| w.blocks_post()), "{word}: a clear cross drill is convicted: {w:?}");
+        assert!(!pw.iter().any(|w| w.blocks_post()), "{word}: a clear cross drill is convicted: {pw:?}");
+        // Non-integral offsets exercise subtraction residue as well as
+        // the original G54 report. Topology, feed and pose stay exact;
+        // only geometric coordinates get a tolerance (#151).
+        for (ox, oy) in [AT, (0.1, -0.3), (-73.125, 28.375)] {
+            let (world, mut history) = world_with(word, bar(ox, oy));
+            place_g54(&world, &mut history, ox, oy);
+            let (moved, mw) = operation::generate(&world, &op(holes(ox, oy)), "")
+                .unwrap_or_else(|e| panic!("{word}: the bar on its work offset drills: {e}"));
+            assert!(!mw.iter().any(|w| w.blocks_post()), "{word}: a clear cross drill is convicted: {mw:?}");
+            assert_eq!(plain.moves.len(), moved.moves.len(), "{word} G54 ({ox}, {oy}): same ordered chain");
+            let relative = |p: Point3| Point3::new(p.x - ox, p.y - oy, p.z);
+            let near = |a: Point3, b: Point3| { let d = a - b; d.dot(d).sqrt() <= 1e-9 };
+            for (i, (a, b)) in plain.moves.iter().zip(&moved.moves).enumerate() {
+                assert_eq!((a.kind, a.feed, a.axis, a.arc), (b.kind, b.feed, b.axis, b.arc), "{word}: move {i} vocabulary");
+                assert!(near(a.from, relative(b.from)) && near(a.to, relative(b.to)), "{word} G54 ({ox}, {oy}): move {i}: {a:?} != {b:?}");
+            }
+            assert!(moved.is_chained() && moved.all_finite());
+            let first = moved.moves.first().expect("initial station").from;
+            let radius = (first.x - ox).hypot(first.y - oy);
+            assert!((radius - 15.0).abs() <= 1e-9, "{word}: clearance stands r10 + 5 off the spindle, read {radius}");
         }
-
-        let (a, b) = (about(&plain, 0.0, 0.0), about(&moved, AT.0, AT.1));
-        assert_eq!(a.len(), b.len(), "{word}: the same chain, move for move");
-        for (i, (p, q)) in a.iter().zip(&b).enumerate() {
-            let near = |u: Point3, v: Point3| (u - v).dot(u - v).sqrt() <= 1e-9;
-            assert!(
-                near(p.0, q.0) && near(p.1, q.1) && p.2 == q.2,
-                "{word}: move {i} from G54 reads {q:?}, the on-origin chain {p:?}"
-            );
-        }
-        // And every rapid off a hole's own kerf stands outside the bar
-        // as measured about ITS axis - the standoff law, about the spindle.
-        let r_about = |p: Point3| ((p.x - AT.0).powi(2) + (p.y - AT.1).powi(2)).sqrt();
-        let first = moved.moves.first().map(|m| r_about(m.from)).unwrap_or(0.0);
-        assert!((first - 15.0).abs() < 1e-9, "{word}: the clearance stands r10 + 5 off the axis, read {first}");
     }
 }
 
