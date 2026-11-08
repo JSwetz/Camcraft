@@ -288,7 +288,7 @@ function startPreamble() {
     block(["G43", "H" + ni(tNo)]);
     toolWait = false;
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#173) states no spindle
     block(["MOTON", "S" + ff(sRpm)]);
     spindleWait = false;
   }
@@ -402,6 +402,84 @@ function onCycle() {
     cycleSig = sig;
   }
   inCycle = true;
+}
+
+// ------------------------------------------------------------ probing
+// #173. Words from Mazak's published EIA/ISO programming manual (the
+// Fanuc-compatible G-code mode): G31 skip function, the user-macro
+// system variables #5061-#5063 (skip position X Y Z, work coordinates),
+// #3000 (alarm with message), #5221 + 20 x slot + axis (the G54..G59
+// work offsets) and G10 L2 P1..P6 (programmed work-offset input). The
+// branch is the macro's IF[..]GOTOn form with a unique label per test,
+// not IF..THEN (not every Mazak EIA generation documents THEN). A G31
+// that never trips ends at its target, so that alarms at once - a probe
+// that never touched must not back off and measure air. A measured
+// trip k is kept in #(100+3k)..#(102+3k); the back-off is incremental
+// (G91). Without a work offset to set, the program stops (M00) for the
+// operator to read #190... Arming the probe is the machine's own.
+var probeBase = 100;
+var probeLabel = 9000;   // N labels the IF..GOTO tests jump past
+function axisIx(a) { return a === "X" ? 0 : (a === "Y" ? 1 : 2); }
+function travelAxis(p) {  // where the target and the nominal trip differ most
+  var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
+  return d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
+}
+function alarmUnless(cond, n, text) {  // alarm #3000=n unless cond holds
+  probeLabel += 1;
+  block(["IF[" + cond + "]GOTO" + probeLabel]);
+  block(["#3000=" + n + "(" + text + ")"]);
+  block(["N" + probeLabel]);
+}
+function onProbeMove() {
+  startPreamble();
+  compRefuse("a probing move");
+  var p = properties;
+  block(["G31", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  var ai = travelAxis(p);
+  var tgt = [p.X - orgX, p.Y - orgY, p.Z - orgZ][ai];
+  alarmUnless("ABS[#" + (5061 + ai) + "-" + fu(tgt) + "]GE0.001", 2, "PROBE NO CONTACT");
+  if (has(p.Measure) && p.Measure >= 0) {
+    var b = probeBase + 3 * p.Measure;
+    block(["#" + b + "=#5061"]);
+    block(["#" + (b + 1) + "=#5062"]);
+    block(["#" + (b + 2) + "=#5063"]);
+  }
+}
+function onProbeRetreat() {
+  var p = properties;
+  block(["G91", "G01", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
+  block(["G90"]);
+}
+function slotOf(word) {  // "G55" -> 1
+  var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
+  return n >= 0 && n <= 5 ? n : 0;
+}
+function onProbeResult() {
+  var p = properties;
+  var org = [orgX, orgY, orgZ];
+  var axes = p.Axes || [];
+  var dev = 190;  // #190.. hold each axis's deviation, found - expected
+  for (var i = 0; i < axes.length; i++) {
+    var a = axes[i];
+    var ai = axisIx(a.Axis);
+    var sum = [];
+    for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
+    var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
+    block(["#" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    alarmUnless("ABS[#" + (dev + i) + "]LE" + fu(p.Tolerance), 1, "PROBE " + a.Axis + " OUT OF TOLERANCE");
+  }
+  if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
+    var act = 5221 + 20 * slotOf(wcsWord);
+    var words = ["G10", "L2", "P" + (Number(p.SetWorkOffset) + 1)];
+    for (var j = 0; j < axes.length; j++) {
+      var aj = axisIx(axes[j].Axis);
+      words.push(axes[j].Axis + "[#" + (act + aj) + "+#" + (dev + j) + "]");
+    }
+    block(words);
+  } else {
+    block(["(CHECK PROBE RESULT #" + dev + "..)"]);
+    block(["M00"]);
+  }
 }
 
 // ------------------------------------------------------------ footer
