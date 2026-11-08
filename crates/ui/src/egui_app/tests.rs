@@ -76,6 +76,7 @@ fn empty_egui_meshes_are_filtered_before_gpu_submission() {
 }
 
 mod face_origin;
+mod stock_size;
 mod layout;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields

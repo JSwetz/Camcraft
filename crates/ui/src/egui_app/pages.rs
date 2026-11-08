@@ -50,7 +50,7 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
     Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
@@ -188,6 +188,17 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             {}
         }
     });
+    // #197: the models' size, right above the numbers it informs.
+    match super::stock_info::part_size_lines(&state.world, u) {
+        Some([size, extents]) => {
+            ui.label(size).on_hover_text("The models' bounding box - what Fit to Models wraps, plus the fit margin");
+            ui.label(RichText::new(extents).weak());
+        }
+        None => {
+            ui.label(RichText::new("No models yet - load one to see its size.").weak());
+        }
+    }
+    ui.add_space(3.0);
     let shape = state.stock_ui.shape;
     if shape == 1 {
         field(ui, "Diameter");
