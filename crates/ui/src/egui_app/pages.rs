@@ -1010,7 +1010,7 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
                 "{}  Ø{}  corner r {}",
                 kind_name(t.kind),
                 units::len(t.diameter, u, 2),
-                units::len(t.corner_r, u, 2)
+                units::len(t.tip_corner_r(), u, 2)
             ));
             ui.label(format!(
                 "cut {}  shank Ø{}×{}  holder Ø{}×{}",
@@ -1451,7 +1451,14 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         num_plain(ui, &mut state.tool_ui.tip_angle);
                         ui.label("the included angle of the taper - 180 minus twice the chamfer's slope, so 90 cuts a 45-degree face");
                     }
-                    if state.tool_ui.kind != 4 {
+                    if state.tool_ui.tool_kind() == tools::ToolKind::BallNose {
+                        // #263: a ball's corner IS its ball, half the
+                        // diameter (`Tool::tip_corner_r`) - shown, never
+                        // edited, since no reader takes any other number.
+                        field(ui, "Corner radius");
+                        ui.label(format!("{} {}", units::len(state.tool_ui.diameter * 0.5, u, 3), u.suffix()));
+                        ui.label("half the diameter - a ball nose's whole tip is its ball");
+                    } else if state.tool_ui.kind != 4 {
                         field(ui, "Corner radius");
                         num(ui, u, &mut state.tool_ui.corner_r);
                     }
