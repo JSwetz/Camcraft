@@ -968,6 +968,9 @@ pub struct State {
     pub status: String,
     /// Last successfully opened or saved project in this window.
     pub project_path: Option<PathBuf>,
+    /// #225: the Feeds tab shows the spindle speed as surface (cutting)
+    /// speed instead of rpm. View state - never a command, never saved.
+    pub spindle_as_vc: bool,
     /// Bumped whenever documents changed; drives GPU re-upload of meshes.
     pub doc_version: u64,
     /// Bumped whenever selection changed; re-sends the vertex stream (the
@@ -1273,6 +1276,7 @@ impl State {
             history: History::default(),
             status,
             project_path: None,
+            spindle_as_vc: false,
             doc_version: 0,
             selection_version: 0,
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
