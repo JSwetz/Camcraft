@@ -67,6 +67,7 @@ cargo test -p camcraft-app --test tormach_machines every_tormach_machine_states_
 cargo test -p camcraft-app --test tormach_machines a_tap_job_posts_on_the_1100mx_and_is_refused_on_the_770m -- --exact
 cargo test -p camcraft-app --test lathe_post an_axial_drill_posts_through_the_document_with_the_lathe_post_chosen -- --exact
 cargo test -p camcraft-app --test lathe_post_g76 a_g76_thread_posts_to_the_lathe_golden -- --exact
+cargo test -p camcraft-app --test lead_approach every_lead_option_on_the_users_part_verifies_silent -- --exact
 ```
 
 For generator-level examples, see the motion test binaries [`machining2d`](../crates/motion/tests/machining2d.rs), [`chamfer_circular`](../crates/motion/tests/chamfer_circular.rs), and the turning suites linked above. These tests validate software fixtures and translations, not the correctness of an OEM's machine facts or an actual machine's behavior.
@@ -75,6 +76,6 @@ For generator-level examples, see the motion test binaries [`machining2d`](../cr
 
 The standalone [`post` binary](../crates/post/src/bin/post.rs#L15) consumes a `.cps`, `.cnc`/`.cl` stream, output path, and optional `--machine <mch>`. It runs the post engine on that stream; it does **not** call the app's `.mch` parser/checker or prove that a generated job, fixture, machine limits, or physical setup is valid. Its warnings can accompany a written output, so output existence is not a pass.
 
-The stdio MCP server can import models, set stock, add/generate/verify/post operations, but its current tool table has no machine-load/set-machine tool; `get_job` also omits the machine and `post` accepts only output/post arguments ([`mcp/tools.rs`](../crates/app/src/mcp/tools.rs#L23), [`mcp/job.rs`](../crates/app/src/mcp/job.rs#L89)). It cannot currently validate a new `.mch` through the machine gate. Use existing Rust tests for the software seams until that interface changes.
+The stdio MCP server can import models, set stock, add/generate/verify/post operations, but its current tool table has no direct `.mch` load/set-machine tool; `get_job` also omits the machine and `post` accepts only output/post arguments ([`mcp/tools.rs`](../crates/app/src/mcp/tools.rs#L23), [`mcp/job.rs`](../crates/app/src/mcp/job.rs#L89)). `open_project` can load machine data already serialized in a `.camproj` ([project application](../crates/app/src/project/apply.rs#L566)), and `verify`/`post` can judge that job through the program gate. This is not direct validation of the `.mch` parser/registration path; use the Rust examples above for that seam.
 
 No physical-machine procedure is part of this guide or issue. A qualified machine owner must separately review the program and perform acceptance under the manufacturer's instructions and the shop's controls. Passing a software test, generating a synthetic posted fixture, or seeing no software warning is not machine certification.
