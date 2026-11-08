@@ -1326,8 +1326,20 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 && operation::status_of(&state.world, e) == operation::OpStatus::Stale
         })
         .count();
+    // #192: a refusal on the status line must not read like any other
+    // status - error ink, bold, a "!" marker, on an error-tinted band.
+    let alert = super::status_alert::is_alert(state);
+    let line = if alert {
+        let ink = super::colorvision::text_inks(ui, &state.world).error;
+        ui.painter().rect_filled(rect, 0.0, ink.gamma_multiply(0.16));
+        RichText::new(format!("! {text}")).color(ink).strong()
+    } else {
+        // #215: routine status in the body text ink, not egui's "weak"
+        // grey - that read as near-invisible on the dark strip.
+        RichText::new(text.as_str()).color(ui.visuals().text_color())
+    };
     ui.horizontal(|ui| {
-        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(true))
+        ui.add(Label::new(line).selectable(true))
             .on_hover_text(text.as_str())
             .context_menu(|ui| {
                 if ui.button("Copy message").clicked() {
