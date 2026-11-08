@@ -214,7 +214,7 @@ fn heights_resolve_through_the_operations_setup_not_the_cursor() {
         SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 5.0)),
         "place G54 in Setup2",
     );
-    let h = Height::of(HeightReference::WorkOffset(0), 0.0);
+    let h = Height::of(HeightReference::WorkOffset, 0.0);
     assert_eq!(h.z_for(&world, Some("Setup2")), Some(5.0));
     assert_eq!(h.z_for(&world, None), None, "Setup1's G54 was never placed");
     // Switching the cursor cannot switch the reading: the lookup takes

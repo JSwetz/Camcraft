@@ -250,3 +250,55 @@ fn arcs_carry_the_pose_they_were_walked_with() {
     assert_eq!(t.moves[1].axis, Some(tilt), "the pose is modal until said otherwise");
     assert!(!t.is_prismatic());
 }
+
+/// A C-live run (issue #33): the part a quarter turn and then one and a
+/// quarter turns round (unwrapped, so the second reads past -360), with
+/// fractions so the dump's millidegrees show.
+fn c_live() -> Toolpath {
+    Toolpath::new(vec![
+        Move::new(MoveKind::Feed, p(10.0, 0.0, 0.0), p(10.0, 0.0, -1.0), Some(300.0)).with_rotary(-90.5),
+        Move::new(MoveKind::Feed, p(10.0, 0.0, -1.0), p(10.0, 0.0, -2.0), Some(300.0)).with_rotary(-450.25),
+    ])
+}
+
+/// The stated C angles of `t`'s moves, each within `1e-9` deg of `want`.
+fn assert_spindle_c(t: &Toolpath, want: &[f64]) {
+    let got: Vec<Option<f64>> = t.moves.iter().map(|m| m.rotary).collect();
+    assert_eq!(got.len(), want.len(), "moves: {got:?}");
+    for (g, w) in got.iter().zip(want) {
+        assert!(g.is_some_and(|c| (c - w).abs() < 1e-9), "C {g:?}, want {w}");
+    }
+}
+
+#[test]
+fn a_stated_spindle_c_is_not_a_prismatic_path() {
+    // #295: a C-live cut turns the part, so it is no 3-axis program
+    // even though its moves state no lean.
+    assert!(!c_live().is_prismatic());
+    let plain = Toolpath::new(vec![Move::new(MoveKind::Feed, p(10.0, 0.0, 0.0), p(10.0, 0.0, -1.0), Some(300.0))]);
+    assert!(plain.is_prismatic(), "no C, no lean: prismatic as before");
+}
+
+#[test]
+fn the_text_dump_round_trips_a_stated_spindle_c() {
+    let t = c_live();
+    let s = text::to_text(&t).expect("a finite path dumps");
+    assert!(s.starts_with("; HSMW-CL v4"), "a C-live path is not prismatic, so v4: {s}");
+    assert!(s.contains(" SC-90500\n") && s.contains(" SC-450250\n"), "every move carries its C word: {s}");
+    let back = text::from_text(&s).expect("the dump reads back");
+    assert_spindle_c(&back, &[-90.5, -450.25]);
+    for (a, b) in t.moves.iter().zip(&back.moves) {
+        assert_eq!((a.kind, a.to, a.feed), (b.kind, b.to, b.feed), "the C word moved nothing else");
+    }
+    let plain = Toolpath::new(vec![Move::new(MoveKind::Feed, p(10.0, 0.0, 0.0), p(10.0, 0.0, -1.0), Some(300.0))]);
+    assert!(!text::to_text(&plain).expect("dumps").contains("SC"), "a path with no C dumps as before");
+}
+
+#[test]
+fn a_frame_keeps_a_stated_spindle_c_on_every_move_it_maps() {
+    let upright = TiltedFrame::new(p(10.0, 0.0, 1.0), [0.0, 0.0, 1.0]).expect("upright frame");
+    let tilted = TiltedFrame::from_angles(p(1.0, 0.0, 5.0), 30.0, 0.0).expect("tilted frame");
+    for f in [upright, tilted] {
+        assert_spindle_c(&f.world_path(&c_live(), 0.001), &[-90.5, -450.25]);
+    }
+}

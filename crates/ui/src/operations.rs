@@ -303,7 +303,7 @@ mod height_row_tests {
             HeightReference::BottomOfStock,
             HeightReference::TopOfModel,
             HeightReference::BottomOfModel,
-            HeightReference::WorkOffset(0),
+            HeightReference::WorkOffset,
         ] {
             assert_eq!(offset_label(r), "Offset", "{r:?} is a source");
         }
@@ -321,7 +321,7 @@ mod height_row_tests {
             "(unresolved: no model loaded)"
         );
         assert_eq!(
-            height_echo(&world, None, None, &Height::of(HeightReference::WorkOffset(0), 0.0)),
+            height_echo(&world, None, None, &Height::of(HeightReference::WorkOffset, 0.0)),
             "(unresolved: that work offset has no origin yet - place it in Setup)"
         );
         // From: Selection with an empty pick list names the fix (M11.3 A).

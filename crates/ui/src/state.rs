@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
-    ActivateSetup, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
+    ActivateSetup, AlignPartToSetup, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
@@ -255,11 +255,18 @@ pub enum CommandKind {
     /// where NEW things join, never what already cuts.
     ActivateSetup(Option<String>),
     /// Pick the program offset a setup posts at (#196): `Some(i)` is
-    /// `WCS_SLOTS[i]`, `None` clears the pick back to the per-operation
-    /// law. Undoable (`SetSetupWorkOffset`).
+    /// `WCS_SLOTS[i]`, `None` clears the pick - an unset setup is `G54`.
+    /// Undoable (`SetSetupWorkOffset`).
     SetSetupWorkOffset {
         setup: String,
         slot: Option<usize>,
+    },
+    /// Turn the part in a setup (#326): about X, then Y, then Z, degrees,
+    /// about the centre of the parts' bounds. All zero is "As modelled".
+    /// Undoable (`AlignPartToSetup`). Never touches the work offset.
+    AlignPart {
+        setup: String,
+        angles: [f64; 3],
     },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
@@ -2508,7 +2515,10 @@ impl State {
                     );
                     return;
                 }
-                let Some(bounds) = model::solid_world_aabb(&self.world) else {
+                // #326: the parts as the active setup holds them - the
+                // stock is square to the setup frame.
+                let fit_setup = camcraft_app::setup::active(&self.world);
+                let Some(bounds) = camcraft_app::setup_align::solid_aabb_in(&self.world, fit_setup.as_deref()) else {
                     self.refuse(
                         ErrorScope::Setup,
                         String::from("nothing to fit: no models in the document"),
@@ -2520,7 +2530,7 @@ impl State {
                     // radius from the fit's axis plus the margin, not the
                     // footprint's diagonal (1.41 R for a round part).
                     let c = [(bounds.min.x + bounds.max.x) * 0.5, (bounds.min.y + bounds.max.y) * 0.5];
-                    model::solid_world_radius_about(&self.world, c)
+                    camcraft_app::setup_align::solid_radius_about_in(&self.world, fit_setup.as_deref(), c)
                         .and_then(|r| stock::fit_cylinder_about(&bounds, r, margin))
                 } else {
                     stock::fit_box(&bounds, margin)
@@ -2535,7 +2545,10 @@ impl State {
                     );
                     return;
                 }
-                let Some(bounds) = model::solid_world_aabb(&self.world) else {
+                // #326: the parts as the active setup holds them - the
+                // stock is square to the setup frame.
+                let fit_setup = camcraft_app::setup::active(&self.world);
+                let Some(bounds) = camcraft_app::setup_align::solid_aabb_in(&self.world, fit_setup.as_deref()) else {
                     self.refuse(
                         ErrorScope::Setup,
                         String::from("nothing to fit: no models in the document"),
@@ -2922,13 +2935,26 @@ impl State {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
-                        self.status = match slot.and_then(|i| WCS_SLOTS.get(i)) {
-                            Some(w) => format!("setup {setup} posts at {w}"),
-                            None => format!("setup {setup} posts at each operation's inferred offset"),
-                        };
+                        let word = WCS_SLOTS.get(slot.unwrap_or(0)).copied().unwrap_or("G54");
+                        self.status = format!("{setup} work offset: {word}");
                     }
                     Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("work offset not picked: {err}"));
+                        self.refuse(ErrorScope::Setup, format!("work offset not changed: {err}"));
+                    }
+                }
+            }
+            CommandKind::AlignPart { setup, angles } => {
+                match AlignPartToSetup::angles(&self.world, &setup, angles) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!(
+                            "{setup} part alignment: {}",
+                            crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("part alignment not changed: {err}"));
                     }
                 }
             }
@@ -3125,7 +3151,7 @@ impl State {
             let Some(tris) = model::facets_of(&self.world, &entity) else {
                 continue;
             };
-            let loc = model::transform_of(&self.world, &entity).unwrap_or_default();
+            let loc = camcraft_app::setup_align::view_pose(&self.world, &entity).unwrap_or_default(); // #326
             for t in tris.iter() {
                 for p in [t.a, t.b, t.c] {
                     let p = transform_point(p, loc.pos, loc.rot);
