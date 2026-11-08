@@ -36,6 +36,7 @@ use crate::viewport::View3D;
 use super::icons;
 use super::layout;
 use super::machine_editor;
+use super::unsaved_prompt;
 use super::frame_watch::FrameWatch;
 use super::gpu;
 use super::gpu_init;
@@ -601,6 +602,8 @@ pub(crate) fn shell_layout(
     // (in-app egui::Window over the dock, None on a fresh State, so
     // snapshots never move until the Setup pane opens it).
     machine_editor::window(ui.ctx(), state);
+    // #107: the unsaved-changes prompt, last so it sits over everything.
+    unsaved_prompt::window(ui.ctx(), state);
 }
 
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
@@ -648,11 +651,15 @@ impl winit::application::ApplicationHandler for Shell {
             let _response = winit_state.on_window_event(window, &event);
         }
         match &event {
-            WindowEvent::CloseRequested => el.exit(),
+            // #107: the window X is a Quit like Ctrl+Q, so unsaved changes
+            // ask first. A shell whose GPU failed draws (and drains)
+            // nothing, so it closes at once.
+            WindowEvent::CloseRequested if self.failed => el.exit(),
+            WindowEvent::CloseRequested => crate::actions::quit(&mut self.state),
             WindowEvent::Resized(size) => self.on_resize(*size),
             WindowEvent::RedrawRequested => {
                 self.draw();
-                if self.exit_requested {
+                if self.exit_requested || self.state.request_quit {
                     el.exit();
                 }
             }

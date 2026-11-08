@@ -1433,6 +1433,11 @@ impl OpParams {
                 if a.compensation == crate::links::Compensation::Control {
                     h.write_u8(0xC5);
                 }
+                // #38: the wear variant posts the centre path under
+                // G41/G42 - its own byte, again only when on.
+                if a.compensation == crate::links::Compensation::Wear {
+                    h.write_u8(0xC6);
+                }
                 match a.lead_out {
                     None => h.write_u8(0xFF),
                     Some(Lead::None) => h.write_u8(0),
