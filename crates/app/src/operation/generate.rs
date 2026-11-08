@@ -2741,51 +2741,49 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // A turned path's axial rapids are judged in the meridian
             // plane, not by the column (#96, #103): the revolved stock
             // less what the program ahead faced and this path cut.
-            super::turning_rapids::judge_axial_rapids(
-                &params,
-                &path,
-                &super::turning_rapids::Meridian {
-                    part: &material.facets,
-                    stock: stock_facets.as_deref(),
-                    // Only an insert's moves carry a nose CENTRE; a
-                    // blade, thread or form gauge's carry its tip, the
-                    // body standing outward (a form's `nose_radius` is
-                    // its crown arc, not a ball round the tip).
-                    nose: if matches!(tool.kind, crate::tools::ToolKind::Turning | crate::tools::ToolKind::Bore) {
-                        tool.nose_radius
-                    } else {
-                        0.0
-                    },
-                    margin: GOUGE_TOL,
-                    z_tol: Z_TOL,
-                    drills: &drills_ahead,
-                    ahead: &turned_ahead,
-                    outward: match tool.kind {
-                        crate::tools::ToolKind::Groove => Some(f64::INFINITY),
-                        crate::tools::ToolKind::Thread => Some((tool.tip_angle.to_radians() * 0.5).tan()).filter(|k| k.is_finite() && *k > 0.0),
-                        _ => None,
-                    },
-                    // A blade's move is its band's centre (a thread's,
-                    // its crest's): the edge spans half the width.
-                    band: if matches!(
-                        tool.kind,
-                        crate::tools::ToolKind::Groove | crate::tools::ToolKind::Thread | crate::tools::ToolKind::Form
-                    ) {
-                        tool.width * 0.5
-                    } else {
-                        0.0
-                    },
-                    // A boring bar's body round its nose, up its reach.
-                    body: (tool.kind == crate::tools::ToolKind::Bore).then_some(super::turning_rapids::BarBody {
-                        head_d: tool.diameter,
-                        shank_d: tool.shank_d,
-                        flute_len: tool.flute_len,
-                        shank_len: tool.shank_len,
-                    }),
+            let meridian = super::turning_rapids::Meridian {
+                part: &material.facets,
+                stock: stock_facets.as_deref(),
+                // Only an insert's moves carry a nose CENTRE; a
+                // blade, thread or form gauge's carry its tip, the
+                // body standing outward (a form's `nose_radius` is
+                // its crown arc, not a ball round the tip).
+                nose: if matches!(tool.kind, crate::tools::ToolKind::Turning | crate::tools::ToolKind::Bore) {
+                    tool.nose_radius
+                } else {
+                    0.0
                 },
-                &mut verify_prior,
-                &mut warns,
-            );
+                margin: GOUGE_TOL,
+                z_tol: Z_TOL,
+                drills: &drills_ahead,
+                ahead: &turned_ahead,
+                outward: match tool.kind {
+                    crate::tools::ToolKind::Groove => Some(f64::INFINITY),
+                    crate::tools::ToolKind::Thread => Some((tool.tip_angle.to_radians() * 0.5).tan()).filter(|k| k.is_finite() && *k > 0.0),
+                    _ => None,
+                },
+                // A blade's move is its band's centre (a thread's,
+                // its crest's): the edge spans half the width.
+                band: if matches!(
+                    tool.kind,
+                    crate::tools::ToolKind::Groove | crate::tools::ToolKind::Thread | crate::tools::ToolKind::Form
+                ) {
+                    tool.width * 0.5
+                } else {
+                    0.0
+                },
+                // A boring bar's body round its nose, up its reach.
+                body: (tool.kind == crate::tools::ToolKind::Bore).then_some(super::turning_rapids::BarBody {
+                    head_d: tool.diameter,
+                    shank_d: tool.shank_d,
+                    flute_len: tool.flute_len,
+                    shank_len: tool.shank_len,
+                }),
+            };
+            super::turning_rapids::judge_axial_rapids(&params, &path, &meridian, &mut verify_prior, &mut warns);
+            // ...and a boring bar's head and shank on its FEEDS (#146),
+            // against the same revolved material at each instant.
+            super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
