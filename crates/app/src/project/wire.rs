@@ -107,6 +107,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 stamp: op.stamp.map(|g| g.0),
                 cache: model::toolpath_of(world, &entity).map(|c| PathDto::from_cache(&c)),
                 area: AreaDto::from_controls(&op.area),
+                coolant: op.coolant,
                 setup: op.setup,
             });
             // Parametric stock regenerates its facets on load; offsets, tools,
@@ -167,6 +168,16 @@ pub fn collect(world: &World) -> ProjectFile {
         active_setup: crate::setup::stored_active(world),
         // The default post matches every pre-v23 document, so it
         // writes no key (the mute-machine law, worn in the post's clothes).
+        // The default options write no key (issue #34, the post's law).
+        post_options: {
+            let o = crate::posting::post_options(world);
+            (o != crate::schema::PostOptions::default()).then(|| PostOptionsDto {
+                threading: match o.threading {
+                    crate::schema::ThreadingOutput::G32Passes => None,
+                    crate::schema::ThreadingOutput::G76Cycle => Some("g76".into()),
+                },
+            })
+        },
         post: match crate::posting::post_of(world) {
             crate::schema::PostRef::Builtin => None,
             crate::schema::PostRef::Named(name) => Some(PostDto::Named(name)),

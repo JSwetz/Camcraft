@@ -223,7 +223,7 @@ fn envelope_scan_lift(
     // reach - is one pass's graze, not a cusp: the feet must come
     // from two distinct passes (`ridge::closed_ring_ids`, M13.9).
     // The `4·tol` ceiling and the far foot's lattice slack stay the
-    // named owed item.
+    // named owed item (#37: the validity range is in `ridge::reach`).
     let window = reach;
     // A far segment's 3D distance cannot stand inside the window, so
     // its XY window rejects it before the distance is paid. A

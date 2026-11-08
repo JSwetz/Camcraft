@@ -19,8 +19,14 @@ afterwards - the work must not bother them.
   a choice appears, take the recommended option and keep moving; occasional
   one-line status feedback is fine, a blocking question is not.
 - **Every recommendation is recorded.** Each decision taken unattended gets
-  an entry in `RECOMMENDED.md` - what was chosen, why, what was considered
-  and dropped - as the discussion ledger for after the roadmap is cleared.
+  an entry - what was chosen, why, what was considered and dropped - as the
+  discussion ledger for after the roadmap is cleared. On an issue branch it
+  goes in that PR's own file, `docs/decisions/<issue>-<slug>.md`, never in
+  `RECOMMENDED.md` itself: every branch appending to one shared file made
+  each merge re-conflict every other open PR (user, 2026-11-08: "this is
+  getting annoying"). The cut gathers the files into `RECOMMENDED.md`
+  (`scripts/collect-decisions.ps1`, release step 2); `docs/decisions/README.md`
+  has the format.
 - **Never stop, never recap mid-roadmap.** There is no "wrap up and check
   in" state: the next issue is claimed when the current gate is green.
   Session summaries are for compaction, not for the user.
@@ -41,8 +47,9 @@ Since 2026-11-07 (user: "move off the roadmap and track work as ISSUES") the
 work list is the repo's open GitHub issues, read and written with `gh`.
 `ROADMAP.md` is a frozen archive (`DONE.md` was retired - it lives in git
 history and in every tag up to v0.8.1): read it for history and
-design context, never add work to them. Decisions still go to
-`RECOMMENDED.md`; shipped changes go to `CHANGELOG.md`.
+design context, never add work to them. Decisions go to a per-PR file in
+`docs/decisions/` (gathered into `RECOMMENDED.md` at the cut); shipped changes
+go to `CHANGELOG.md`.
 
 - **Use the gh-issues skill.** Any work that reads, files, comments on,
   labels, claims, closes or reopens an issue loads the `gh-issues` skill
@@ -122,8 +129,8 @@ design context, never add work to them. Decisions still go to
   minor/major cut; docs/process/CI-only PRs merge once reviewed. The fixing commit ends its body with `Fixes #N` (`Refs #N` for
   partial work, which never closes). When its gate is green:
   `git push -u origin issue/N-<slug>`, then
-  `gh pr create --base main --head issue/N-<slug> --title "<conventional
-  subject>" --body-file <file>` - the body says what changed, the readings,
+  `gh pr create --draft --base main --head issue/N-<slug> --title
+  "<conventional subject>" --body-file <file>` - the body says what changed, the readings,
   the pinning test(s), a `Changelog:` line (the one-line row text, or
   `none` for docs/test-only) and ends `Fixes #N`. Then, in the same step:
   swap `claimed` for `in-review`, and comment `fix on issue/N-<slug> · PR #M
@@ -136,6 +143,19 @@ design context, never add work to them. Decisions still go to
   (dropped, or held by the user with a PR comment) swaps `in-review` for
   `blocked` (held, say on what) or for nothing (dropped, say why), with an
   issue comment - an issue never sits in `in-review` without an open PR.
+- **Every PR opens as a draft** (user, 2026-11-08: "All PR's should be done
+  as drafts to start with. And not flagged ready to review until either
+  user saids its ok or the tests are done. Once its been flagged ready to
+  review no more pushes should be performed"). A PR is created with
+  `--draft` and stays a draft while work, gating and review fixes land on
+  it. It is flagged ready (`gh pr ready <M>`) only when the user says so,
+  or when its gate tier is green on its final head and its independent
+  review is clean. Once ready, its branch takes **no more pushes**: a late
+  finding, a needed `git merge origin/main` or any other change first turns
+  it back into a draft (`gh pr ready <M> --undo`), says why in a PR
+  comment, is pushed and re-gated, and only then is flagged ready again.
+  Merging (by the main session for fix/docs PRs, at the cut for `feat`)
+  takes only a ready PR, never a draft.
 - **Never close by hand without a commit**, except: a duplicate (link the
   original), already done (name the commit that did it), or a decided
   won't-do (label `wontfix`, give the reason). Each needs that comment.
@@ -464,8 +484,9 @@ a tag"):
    review by a subagent that did not write it (`/code-review` on the PR, or
    a reviewer briefed with the diff, not the author's conclusion); findings
    are fixed on that branch and pushed. A PR that no longer merges cleanly
-   takes `git merge origin/main` on its branch (append-only files such as
-   `RECOMMENDED.md` keep both sides), is re-gated (quick), and pushed. Then
+   takes `git merge origin/main` on its branch (an older branch that still
+   appends to `RECOMMENDED.md` keeps both sides), is re-gated (quick), and
+   pushed. Then
    `gh pr merge M --merge --delete-branch` - merge commits, never squash or
    rebase, so branch commits keep the hashes the issue comments name. A
    worktree still holding the branch is removed first (the local delete
@@ -474,7 +495,10 @@ a tag"):
    merge parent-first.
 2. **Release branch.** Sync main (`git pull --ff-only`), then
    `git switch -c release/vX.Y.Z`. The version is the highest bump among
-   the commits since the last tag (table above). Write `RELEASE_NOTES.md`
+   the commits since the last tag (table above). Run
+   `scripts/collect-decisions.ps1 -Version X.Y.Z` (appends every
+   `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
+   removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per
    behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows), commit as `docs: X.Y.Z release notes;
    changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
