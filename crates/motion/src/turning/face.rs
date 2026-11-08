@@ -56,7 +56,17 @@ const MAX_RUNGS: f64 = 100_000.0;
 /// Face the work: fit the axis, ladder the stations, walk them top
 /// down. Refusals are by name; a clean pass-set is a Toolpath in
 /// world coordinates, ready for the envelope verdict.
-pub fn facing(facets: &[Triangle], p: &FacingParams) -> Result<Toolpath, GenError> {
+///
+/// `stock` is the setup's raw stock (#122): the axis is still fitted
+/// to the part alone, but the ladder climbs to whichever end stands
+/// higher and every rung's band and the rapids radius read the stock
+/// too - so a facing allowance declared in the stock, above a part at
+/// its finished length, is faced off rather than reported as nothing.
+pub fn facing(
+    facets: &[Triangle],
+    stock: Option<&[Triangle]>,
+    p: &FacingParams,
+) -> Result<Toolpath, GenError> {
     if facets.is_empty() {
         return Err(GenError::Invalid("no facets to face".into()));
     }
@@ -102,7 +112,15 @@ pub fn facing(facets: &[Triangle], p: &FacingParams) -> Result<Toolpath, GenErro
     // sound HERE (the body is the hull of all of them; profile.rs's
     // note says where that promise ends).
     let prof = profile::profile_of(facets, &f)?;
-    let (r_max, z_top) = (prof.r_max, prof.z_top);
+    let (mut r_max, mut z_top) = (prof.r_max, prof.z_top);
+    let stock = stock.filter(|s| !s.is_empty()).unwrap_or(&[]);
+    if !stock.is_empty() {
+        // Read in the PART's frame: the stock's extents about the
+        // spindle the part was fitted to, never an axis of its own.
+        let sp = profile::profile_of(stock, &f)?;
+        r_max = r_max.max(sp.r_max);
+        z_top = z_top.max(sp.z_top);
+    }
     if r_max <= 0.0 {
         return Err(GenError::Invalid(
             "the work has no radius to face - every facet sits on the axis".into(),
@@ -115,7 +133,9 @@ pub fn facing(facets: &[Triangle], p: &FacingParams) -> Result<Toolpath, GenErro
     let hi = f.station_of(p.top_z).min(z_top);
     if hi <= s_face {
         return Err(GenError::Empty(
-            "nothing to face - the facing plane stands at or above the work's top".into(),
+            "nothing to face - the facing plane stands at or above the top of both the part \
+             and its stock"
+                .into(),
         ));
     }
     let rungs = ((hi - s_face) / p.stepdown).floor() + 1.0;
@@ -149,8 +169,8 @@ pub fn facing(facets: &[Triangle], p: &FacingParams) -> Result<Toolpath, GenErro
     // given.
     let mut bands = vec![0.0f64; n];
     {
-        let mut events: Vec<(usize, Reach)> = Vec::with_capacity(facets.len());
-        for t in facets {
+        let mut events: Vec<(usize, Reach)> = Vec::with_capacity(facets.len() + stock.len());
+        for t in facets.iter().chain(stock) {
             let (a, b, c) = (f.sr(t.a), f.sr(t.b), f.sr(t.c));
             let lo = a.0.min(b.0).min(c.0);
             let top = a.0.max(b.0).max(c.0);

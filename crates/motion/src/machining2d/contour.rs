@@ -378,7 +378,7 @@ fn contour_impl(
             // too, by name - never a centre path under a Control op.
             if let Some(prog) = &prog {
                 if walk_at == lead_at || b.moves_len() == out_at {
-                    return Err(contour_comp::refused(format!(
+                    return Err(contour_comp::refused_as(p, format!(
                         "needs a lead-in and a lead-out at ({:.3}, {:.3}) - the room law refused one ({})",
                         e2.x,
                         e2.y,
