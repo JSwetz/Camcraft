@@ -19,8 +19,12 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`. All are text; the engine reads none of them, but the
-file-viewer's about box does, and every shipped post carries them.
+`capabilities`, `coolantModes`. All but the last are text the engine
+reads none of; `coolantModes = true` says the script reads `PARAM
+Coolant` (#150) - without it the engine refuses a section asking Off,
+Mist or Through tool by name, since the script would post its own
+flood. Every shipped post sets it. The file-viewer's about box reads
+the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
 
@@ -59,7 +63,10 @@ write (the gate), so the released program never carries one.
   `through-tool`, flood when unstated (#112) - picks the machine's
   entry of that family instead, refused by `message()` when the
   machine states no code for it; the ask resets to flood at section
-  end), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  end; a flood ask on a machine whose list states only other kinds is
+  refused the same way, and every coolant refusal names the section's
+  `OperationName` (#150); names compare case-blind, spaces and
+  underscores read as hyphens), `machine.rtcp` and `machine.rotaries` (RTCP may be
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.
