@@ -272,7 +272,7 @@ pub(super) fn run_level_walks(
                 st.begin_level(dove);
             } else if last_cut_z == Some(z) {
                 if let Some(Some(ret)) = m.micro.get(pi) {
-                    super::microlift::link(b, ret, z, m);
+                    super::microlift::link(b, ret, (z, mat_top), m);
                 } else {
                     pass_link(b, &lv, m, links_cert, &mut st);
                 }

@@ -101,13 +101,28 @@ pub(super) fn profile(a: Point2, ret: &Return) -> Vec<(Point2, f64)> {
 
 /// Feed from where the tool stands on plane `z` along [`profile`] onto
 /// the next pass's start on plane `z`.
-pub(super) fn link(b: &mut PathBuilder, ret: &Return, z: f64, m: &Motion) {
-    link_at(b, ret, z, m.hop_z, m.feed);
+/// `mat_top`: the material's top over this level - a `high` return's
+/// rapid stops the plunge height over it and feeds the rest of its
+/// column down (issue #7: the planner's raster reads the column clear
+/// to a cell, a sliver of the walls' margin under a cell is the
+/// verifier's stock), the ladder's own hop descent (`feed_down`).
+pub(super) fn link(b: &mut PathBuilder, ret: &Return, (z, mat_top): (f64, f64), m: &Motion) {
+    let h = m.links.approach.plunge_height;
+    // No plunge height: fed down from the hop plane, as `feed_down`.
+    let sz = if h > 0.0 { (mat_top + h).min(m.hop_z.max(mat_top)) } else { m.hop_z };
+    let stop = sz.is_finite().then_some((sz, m.plunge_feed));
+    link_over(b, ret, z, (m.hop_z, m.feed), stop);
 }
 
 /// [`link`] on bare numbers: the hop plane a `high` return rides and
 /// the cutting feed (the 3-D ladder's per-level port, `machining3d::hsm`).
 pub(crate) fn link_at(b: &mut PathBuilder, ret: &Return, z: f64, hop_z: f64, feed: f64) {
+    link_over(b, ret, z, (hop_z, feed), None);
+}
+
+/// [`link_at`], a `high` return's rapid down stopping at `stop`'s height
+/// (when over the lift) and fed from there at `stop`'s feed.
+fn link_over(b: &mut PathBuilder, ret: &Return, z: f64, (hop_z, feed): (f64, f64), stop: Option<(f64, f64)>) {
     let at = b.at();
     let prof = profile(Point2::new(at.x, at.y), ret);
     if ret.high {
@@ -118,7 +133,16 @@ pub(crate) fn link_at(b: &mut PathBuilder, ret: &Return, z: f64, hop_z: f64, fee
         let hop = hop_z.max(z + hz);
         b.push(MoveKind::Rapid, Point3::new(at.x, at.y, hop), None);
         b.push(MoveKind::Rapid, Point3::new(top.x, top.y, hop), None);
-        b.push(MoveKind::Rapid, Point3::new(top.x, top.y, lattice(z + hz)), None);
+        let lift_z = lattice(z + hz);
+        match stop {
+            Some((sz, pf)) if lattice(sz) > lift_z && lattice(sz) <= hop => {
+                if lattice(sz) < hop {
+                    b.push(MoveKind::Rapid, Point3::new(top.x, top.y, lattice(sz)), None);
+                }
+                b.push(MoveKind::Plunge, Point3::new(top.x, top.y, lift_z), Some(pf));
+            }
+            _ => b.push(MoveKind::Rapid, Point3::new(top.x, top.y, lift_z), None),
+        }
         for (p, dz) in prof.into_iter().skip(1) {
             let zz = if dz > 0.0 { lattice(z + dz) } else { z };
             b.push(MoveKind::Feed, Point3::new(p.x, p.y, zz), Some(feed));
