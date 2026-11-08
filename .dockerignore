@@ -1,0 +1,10 @@
+# Build context for docker/*.Dockerfile: the sources only. target/ trees
+# are 10-20 GB each and would be sent to the daemon on every build.
+.git
+target
+target-*
+dist
+tmp
+.claude
+graphify-out
+**/*.rs.bk

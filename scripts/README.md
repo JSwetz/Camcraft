@@ -68,6 +68,11 @@ command, changes nothing).
 Update RELEASE_NOTES.md / TESTING.md first; the script commits them.
 It never pushes; it prints the push command for you to run.
 
+The Linux packages (`package-linux.sh`, `package-appimage.sh`) can also be
+built in a container, with no Linux box or runner: `docker/build.sh`
+(`docker/README.md` lists which targets build in Docker and why the rest
+stay on their runners).
+
 ## Installer (M13.3)
 
 The portable zip stays the release and the primary test vehicle. The
