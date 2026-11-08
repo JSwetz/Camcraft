@@ -51,13 +51,16 @@ fn add_tool(world: &World, history: &mut History, name: &str) {
     history.execute(world, cmd.expect("catalog tool"));
 }
 
-fn box_stock(world: &World, history: &mut History, d: f64) {
+/// Bar-sized stock (#130): both fixture bars' own r 6 over their Z
+/// span - the kernels rough from the stock, so a 40 mm box would turn
+/// these part-based ladder counts into a 28 mm-radius roughing job.
+fn bar_stock(world: &World, history: &mut History) {
     let cmd = SetStock::new(
         world,
-        camcraft_app::stock::StockShape::Box { dx: d, dy: d, dz: d },
-        Location::default(),
+        camcraft_app::stock::StockShape::Cylinder { diameter: 12.0, height: 32.0 },
+        Location { pos: Point3::new(0.0, 0.0, -16.0), ..Location::default() },
     );
-    history.execute(world, cmd.expect("box stock"));
+    history.execute(world, cmd.expect("bar stock"));
 }
 
 fn status(world: &World, name: &str) -> OpStatus {
@@ -124,7 +127,7 @@ fn mount(world: &World, history: &mut History, word: &str) {
 fn bar_world_with(mesh: Mesh) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 40.0);
+    bar_stock(&world, &mut history);
     add_tool(&world, &mut history, "TN-1600-0R8");
     history.execute(&world, ImportModel::from_mesh("bar", mesh));
     (world, history)

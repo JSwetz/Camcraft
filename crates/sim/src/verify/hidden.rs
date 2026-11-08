@@ -2,7 +2,10 @@
 //!
 //! The plane-section laws ask "is the part's section at height h over
 //! this column, or was the column never cut down to h?" - and they only
-//! ask it at the section walls and the rapid's three points. Stock under
+//! ask it at the section walls and along the rapid (#140 marches its
+//! whole length; for a flat-bottomed tool on a straight lateral rapid the
+//! march already sees what this module would - it still matters for
+//! shanks and for ball/bull tips near the rim). Stock under
 //! a ledge stands OUTSIDE the section at h (the ledge is higher), so its
 //! columns are never sampled: a shank or a rapid sliding under the ledge
 //! through that stock was silent. This module reads it as a solid:

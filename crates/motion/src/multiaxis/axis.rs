@@ -137,33 +137,41 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
             "rotary found no normals to turn about - this model has no surface".into(),
         ));
     }
-    if vals[0] > ISO * vals[2] && vals[1] > ISO * vals[2] {
-        return Err(GenError::Invalid(
-            "every axis fits this model equally - it curves the same the world around; domed ground is 5-Axis Contour or Parallel work".into(),
-        ));
-    }
     // Two candidates: a surface of revolution's normals concentrate
     // their second moment in the plane perpendicular to the axis
     // (cylindrical zones: the axis is the LEAST eigendirection), while
     // steeply-sloped revolves (cones past 45 degrees) can tip past it -
     // so both extremes are tried and the concurrency residual decides.
-    let cands = [
-        Point3::new(vecs[0][0], vecs[1][0], vecs[2][0]),
-        Point3::new(vecs[0][2], vecs[1][2], vecs[2][2]),
-    ];
-    let mut best: Option<(f64, Axis)> = None;
-    for c in cands {
-        if let Some(sol) = try_axis(&data, c, a_total)
-            .filter(|s| best.as_ref().is_none_or(|(r, _)| s.0 < *r))
-        {
+    // Near isotropy the eigenvectors are ill-conditioned, and fully
+    // isotropic they name nothing (a sphere's, but also a bar near
+    // L/D 1..2 whose caps balance its walls): the part's flat poles
+    // are offered too (axis_poles.rs), and an isotropic part that no
+    // pole earns is refused as answering every axis alike.
+    let iso = vals[0] > ISO * vals[2] && vals[1] > ISO * vals[2];
+    let mut cands = Vec::with_capacity(2);
+    if !iso {
+        cands.push(Point3::new(vecs[0][0], vecs[1][0], vecs[2][0]));
+        cands.push(Point3::new(vecs[0][2], vecs[1][2], vecs[2][2]));
+    }
+    let poles = super::axis_poles::candidates(&data, a_total);
+    let tries = cands.into_iter().map(|c| try_axis(&data, c, a_total).map(|s| (s, false)));
+    let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total, iso).map(|s| (s, true))));
+    let mut best: Option<((f64, Axis), bool)> = None;
+    for sol in tries.flatten() {
+        if best.as_ref().is_none_or(|((r, _), _)| sol.0 .0 < *r) {
             best = Some(sol);
         }
     }
     // The eigen direction is exact only on an even tessellation; the
     // concurrency rows refine it (axis_refine.rs) and the refined line
     // replaces it only past the noise floor and when the fit's own
-    // residual does not grow - an even revolve keeps its bits.
-    let best = best.map(|(r, ax)| {
+    // residual does not grow - an even revolve keeps its bits. On an
+    // isotropic part a pole axis IS its face normal (the moment names
+    // no direction to refine toward), and is never tilted off it (#208).
+    let best = best.map(|((r, ax), pole)| {
+        if pole && iso {
+            return (r, ax);
+        }
         let Some(v) = super::axis_refine::refine_dir(&data, ax.dir, ax.origin) else {
             return (r, ax);
         };
@@ -178,6 +186,9 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
     });
     match best {
         Some((_, ax)) => Ok(super::axis_robust::reweigh(&data, ax, a_total)),
+        None if iso => Err(GenError::Invalid(
+            "every axis fits this model equally - it curves the same the world around; domed ground is 5-Axis Contour or Parallel work".into(),
+        )),
         None => Err(GenError::Invalid(
             "the model's normals share no rotation axis - a turned workpiece is rotary work; finish a freeform with the 5-Axis kinds".into(),
         )),
@@ -190,7 +201,7 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
 /// this is not a surface of revolution about any line in this
 /// direction, or a bearing skip too wide to call the walls round).
 /// Returns (root-mean-square residual, the axis) for ranking.
-fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
+pub(super) fn try_axis(data: &[Datum], u0: Point3, a_total: f64) -> Option<(f64, Axis)> {
     let (ax, rho) = line(data, u0, a_total)?;
     judge(data, ax, rho, a_total).map(|r| (r, ax))
 }
@@ -303,35 +314,19 @@ pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<
         return None;
     }
     // The coarseness gate: the widest empty skip between facet
-    // bearings about u. sqrt(8 * REL_TOL) radians is exactly the
-    // chord-sagitta budget written in angle - a turn coarse enough
-    // to skip further is a polygon pretending to be a wall.
-    let any = if u.z.abs() < 0.9 {
-        Point3::new(0.0, 0.0, 1.0)
-    } else {
-        Point3::new(1.0, 0.0, 0.0)
-    };
-    let e1 = unit(u.cross(any))?;
-    let e2 = u.cross(e1);
-    let mut angs: Vec<f64> = Vec::new();
-    for d in data {
-        let s = d.n.dot(u);
-        let p = Point3::new(d.n.x - u.x * s, d.n.y - u.y * s, d.n.z - u.z * s);
-        if p.dot(p) <= 1e-4 {
-            continue; // pole facet: bears no azimuth
-        }
-        angs.push(p.dot(e2).atan2(p.dot(e1)).rem_euclid(std::f64::consts::TAU));
+    // bearings about u, inside the chord-sagitta budget written in
+    // angle - a turn coarse enough to skip further is a polygon
+    // pretending to be a wall (axis_point.rs).
+    use super::axis_point::{borne_out, skip_budget, widest_skip};
+    // Only the facets that MEET the axis may vouch for its roundness:
+    // an outlier boss lent its bearings to a prism (review of PR #223).
+    let meets = data.iter().filter(|d| super::axis_robust::dist(d, ax).is_some_and(|e| e <= tol));
+    if widest_skip(meets.map(|d| d.n), u)? > skip_budget() {
+        return None;
     }
-    if angs.len() <= 2 {
-        return None; // too few bearings to call anything round
-    }
-    angs.sort_by(|x, y| x.total_cmp(y));
-    let mut gap = angs[1] - angs[0];
-    for w in angs.windows(2).skip(1) {
-        gap = gap.max(w[1] - w[0]);
-    }
-    gap = gap.max(std::f64::consts::TAU - angs[angs.len() - 1] + angs[0]);
-    if gap > (8.0 * REL_TOL).sqrt() {
+    // Lines through ONE point meet every line through it: a pencil
+    // certifies an axis only by its own bearings (issue #208).
+    if !borne_out(data, ax, tol) {
         return None;
     }
     Some((sq / a_total).sqrt())
