@@ -260,6 +260,11 @@ pub struct SetupDto {
     pub wcs: Vec<String>,
     #[serde(default)]
     pub datum_from: String,
+    /// v51 (#196): the setup's picked program offset as its G-word
+    /// (`"G55"`). Absent - every older file, and a setup never picked -
+    /// is the inferred per-operation law, so the key is the migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_offset: Option<String>,
 }
 
 /// The fixture marker as files hold it (M3.2 stage B): a tag on a model

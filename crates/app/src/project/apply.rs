@@ -479,6 +479,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // default to name order and the stable entity name respectively.
         file.version = 50;
     }
+    if file.version == 50 {
+        // v50 setups pick no program offset; the absent key reads as
+        // the inferred per-operation law they posted with (#196).
+        file.version = 51;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -696,10 +701,19 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                 let sdto = dto
                     .setup
                     .ok_or_else(|| corrupt("setup entity without a definition"))?;
+                // #196: the picked program offset is a G-word in the file;
+                // an unspellable one is a corrupt file, never a guess.
+                let work_offset = match sdto.work_offset.as_deref() {
+                    None => None,
+                    Some(w) => Some(crate::schema::WCS_SLOTS.iter().position(|s| *s == w).ok_or_else(|| {
+                        corrupt(format!("setup '{}' picks unknown work offset {w:?}", dto.name))
+                    })?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     wcs: sdto.wcs,
                     datum_from: sdto.datum_from,
+                    work_offset,
                 });
             }
         }

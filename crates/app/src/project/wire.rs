@@ -68,6 +68,10 @@ pub fn collect(world: &World) -> ProjectFile {
                         stock: d.stock.clone(),
                         wcs: d.wcs.clone(),
                         datum_from: d.datum_from.clone(),
+                        work_offset: d
+                            .work_offset
+                            .and_then(|i| crate::schema::WCS_SLOTS.get(i))
+                            .map(|w| (*w).to_string()),
                     })
             } else {
                 None

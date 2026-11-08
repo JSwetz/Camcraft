@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
-    ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
+    ActivateSetup, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
@@ -254,6 +254,13 @@ pub enum CommandKind {
     /// Move the active-setup cursor. Inert for every stamp - it decides
     /// where NEW things join, never what already cuts.
     ActivateSetup(Option<String>),
+    /// Pick the program offset a setup posts at (#196): `Some(i)` is
+    /// `WCS_SLOTS[i]`, `None` clears the pick back to the per-operation
+    /// law. Undoable (`SetSetupWorkOffset`).
+    SetSetupWorkOffset {
+        setup: String,
+        slot: Option<usize>,
+    },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
     /// Ok-or-Stale from the two setups' placements.
@@ -2907,6 +2914,21 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("setup not activated: {err}"));
+                    }
+                }
+            }
+            CommandKind::SetSetupWorkOffset { setup, slot } => {
+                match SetSetupWorkOffset::new(&self.world, &setup, slot) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = match slot.and_then(|i| WCS_SLOTS.get(i)) {
+                            Some(w) => format!("setup {setup} posts at {w}"),
+                            None => format!("setup {setup} posts at each operation's inferred offset"),
+                        };
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("work offset not picked: {err}"));
                     }
                 }
             }

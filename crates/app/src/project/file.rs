@@ -40,7 +40,11 @@ use super::*;
 /// before (the arrival law).
 /// v50: operation labels and within-setup order become persisted. An old
 /// reader must refuse the file rather than silently post in name order.
-pub const PROJECT_VERSION: u32 = 50;
+/// v51 (#196): a setup may carry its picked program offset
+/// (`work_offset`, a G-word). Absent reads as the inferred law every v50
+/// file posted with; an old reader must refuse the file rather than
+/// silently post a picked G55 setup at G54.
+pub const PROJECT_VERSION: u32 = 51;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
