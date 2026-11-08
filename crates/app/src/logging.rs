@@ -8,7 +8,26 @@
 //! Provenance: the `tracing` / `tracing-subscriber` crates' documented
 //! fmt + EnvFilter setup. Our own wiring, no vendor material.
 
+use std::path::Path;
+use std::time::Instant;
+
 use tracing_subscriber::EnvFilter;
+
+/// Milliseconds since `started`, saturating at `u64::MAX` rather than
+/// truncating the `u128` `as_millis` returns (safe numeric conversion).
+#[must_use]
+pub fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The file name a log line shows for `path`: the name only, never the
+/// folder, so a log pasted into a bug report does not expose the user's
+/// directory layout. A path with no final name shows as given.
+#[must_use]
+pub fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+}
 
 /// Quiet by default: the app's own info lines, the GPU stack's warnings.
 /// `CAMCRAFT_LOG=debug` (or `RUST_LOG=camcraft_app=debug`) opens it up.

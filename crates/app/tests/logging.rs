@@ -1,6 +1,6 @@
 //! #163: the app's seams speak to the terminal. A project save names its
-//! path and size, a failed open says why, a generation names its kind,
-//! move count and time, a written NC program names its path and size, a
+//! file name (never its folder) and size, a failed open says why, a generation names its kind,
+//! move count and time, a written NC program names its file and size, a
 //! refused post says why, and commands are logged at debug.
 //! Provenance: our own fixtures over our own log lines.
 //!
@@ -79,6 +79,11 @@ fn face_params() -> OpParams {
     }
 }
 
+/// The file name alone: what the log shows for a path (#163 review).
+fn file_of(path: &std::path::Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
 fn tmp(tag: &str, ext: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("camcraft-logging-{tag}-{}.{ext}", std::process::id()))
 }
@@ -106,16 +111,20 @@ fn save_generate_and_post_each_name_what_they_did() {
     let _ = std::fs::remove_file(&nc_path);
     for want in [
         "project saved".to_owned(),
-        project_path.display().to_string(),
+        file_of(&project_path),
         "generated".to_owned(),
         "op=Face1".to_owned(),
         "moves=".to_owned(),
         "NC program written".to_owned(),
-        nc_path.display().to_string(),
+        file_of(&nc_path),
         "bytes=".to_owned(),
         "command=\"SetStock\"".to_owned(),
     ] {
         assert!(text.contains(&want), "missing {want:?} in the log:\n{text}");
+    }
+    for full in [&project_path, &nc_path] {
+        let full = full.display().to_string();
+        assert!(!text.contains(&full), "the log names the folder {full:?}:\n{text}");
     }
 }
 
@@ -129,7 +138,7 @@ fn a_failed_open_and_a_refused_post_say_why() {
         assert!(posting::post_setup(&world, &nc_path).is_err(), "an empty document does not post");
     });
     assert!(!nc_path.exists(), "nothing written");
-    assert!(text.contains("project not opened") && text.contains(&missing.display().to_string()), "{text}");
+    assert!(text.contains("project not opened") && text.contains(&file_of(&missing)), "{text}");
     assert!(text.contains("NC program not written"), "{text}");
 }
 

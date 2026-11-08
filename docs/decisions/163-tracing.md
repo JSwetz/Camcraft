@@ -16,3 +16,10 @@
 - **Dropped:** `log` + `env_logger` (no spans, so batch generations
   could not carry their op name); a log file (the issue asks for the
   launching terminal).
+- **Review fixes (PR #222, 2026-11-08):** log lines name the file only
+  (`file=part.camproj`), never its folder, so a log pasted into a bug
+  report does not expose the user's directory layout
+  (`logging::file_name`); durations go through `logging::elapsed_ms`,
+  which saturates at `u64::MAX` instead of an `as` cast. Dropped: keeping
+  absolute paths with a docs note (the terminal is local, but logs get
+  pasted).

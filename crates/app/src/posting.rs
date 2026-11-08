@@ -303,14 +303,14 @@ pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, 
     let posted = post_script_body(world, out_path, cps);
     match &posted {
         Ok(p) => tracing::info!(
-            path = %out_path.display(),
+            file = %crate::logging::file_name(out_path),
             bytes = p.program.len(),
             ops = p.ops,
             lines = p.lines,
-            ms = started.elapsed().as_millis() as u64,
+            ms = crate::logging::elapsed_ms(started),
             "NC program written"
         ),
-        Err(why) => tracing::warn!(path = %out_path.display(), "NC program not written: {why}"),
+        Err(why) => tracing::warn!(file = %crate::logging::file_name(out_path), "NC program not written: {why}"),
     }
     posted
 }

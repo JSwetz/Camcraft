@@ -36,13 +36,13 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let started = std::time::Instant::now();
     tracing::debug!(kind = %kind, "generation started");
     let (mut path, warns) = run_job_arms(job).inspect_err(|e| {
-        tracing::warn!(kind = %kind, ms = started.elapsed().as_millis() as u64, "generation refused: {e}");
+        tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
     })?;
     tracing::info!(
         kind = %kind,
         moves = path.moves.len(),
         warnings = warns.len(),
-        ms = started.elapsed().as_millis() as u64,
+        ms = crate::logging::elapsed_ms(started),
         "generated"
     );
     if let Some(n) = note
