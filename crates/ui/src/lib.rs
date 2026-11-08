@@ -6,6 +6,7 @@
 //! is the shell, `interact` and `state` the shared law underneath it.
 
 pub mod actions;
+mod build_info;
 pub mod boundary_draft;
 pub mod boundary_viz;
 pub mod boundary_summary;
@@ -15,6 +16,7 @@ pub mod feedback;
 pub mod interact;
 pub mod machined;
 pub mod operations;
+pub mod plane_pick;
 pub mod state;
 pub mod theme_dir;
 pub mod trace;

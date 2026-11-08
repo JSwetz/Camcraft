@@ -2351,6 +2351,33 @@ fn v19_file_steps_to_v20_and_the_rev_counter_round_trips() {
 }
 
 #[test]
+fn stock_set_twice_keeps_its_rev_across_save_load_save() {
+    // #340: SetStock lands facets and moves the geometry counter like any
+    // landing; the loader re-lands the stock mesh, so without the Model
+    // arm's pin a twice-set stock saved "rev": 2, loaded as 1 and the
+    // re-save differed from the file it was opened from.
+    let world = new_world();
+    let mut history = History::default();
+    for dz in [10.0, 12.0] {
+        history.execute(
+            &world,
+            SetStock::new(&world, StockShape::Box { dx: 40.0, dy: 30.0, dz }, Location::default())
+                .expect("box stock"),
+        );
+    }
+    let p = tmp_path("stockrev");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    assert!(first.contains("\"rev\": 2"), "a twice-set stock saves its count: {first}");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "save -> load -> save of a stock is byte-identical");
+}
+
+#[test]
 fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     // v20 -> v21 (M3.2 A): setups. No v20 file can carry a setup row (the
     // kind tag did not exist), an operation membership, or an active-setup

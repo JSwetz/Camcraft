@@ -28,6 +28,7 @@ use camcraft_app::schema::WCS_SLOTS;
 use camcraft_app::tools::ToolKind;
 
 use crate::actions;
+use crate::build_info;
 use crate::state::{CommandKind, DisplayMode, Sim, State, TreeMenuTarget, UiTarget};
 
 use super::icons::{Icon, IconSet};
@@ -912,6 +913,7 @@ pub(super) const DROP_GAP: f32 = 2.0;
 /// the door where the run of cells would have stood.
 pub(super) fn ribbon_cells(strip: Rect, pal: &Tokens, plan: &[Group]) -> RibbonGeom {
     const FLOOR_W: f32 = 40.0;
+    const BUILD_BADGE_W: f32 = 310.0;
     // Each group's inline run and folded tail: sections start fully
     // folded, anchors fully inline - the split IS the law, no loop
     // decides it.
@@ -930,7 +932,15 @@ pub(super) fn ribbon_cells(strip: Rect, pal: &Tokens, plan: &[Group]) -> RibbonG
     let overhead = 2.0 * PAD_H
         + (n_cells - n_groups) as f32 * GAP
         + (n_groups - 1) as f32 * (GAP + 2.0);
-    let cell_w = ((strip.width() - overhead) / n_cells.max(1) as f32).clamp(FLOOR_W, pal.cell_w);
+    // Reserve the largest build label that fits after the minimum cell row.
+    // The three sizes carry full details, version plus source, or version.
+    let minimum = overhead + n_cells as f32 * FLOOR_W;
+    let badge_w = [BUILD_BADGE_W, 165.0, 75.0]
+        .into_iter()
+        .find(|w| strip.width() >= minimum + *w)
+        .unwrap_or(0.0);
+    let cell_w = ((strip.width() - overhead - badge_w) / n_cells.max(1) as f32)
+        .clamp(FLOOR_W, pal.cell_w);
     // PAD_V (ribbon.rs): cells start 4 below the strip top.
     let cell_top = strip.top() + 4.0;
     let mut cells = Vec::new();
@@ -1305,6 +1315,46 @@ pub fn ribbon(
                 let rows = view_rows_of(cell.rect, rect, pal);
                 layout::view_drop(ui, state, pal, base.with("view-drop"), cell.rect, &rows);
             }
+        }
+    }
+    // The source/build label is the rightmost toolbar item. At small window
+    // widths it contracts to version plus source, then version alone; the
+    // full text remains available on hover.
+    let badge_left = cells.last().map_or(rect.left(), |cell| cell.rect.right()) + 8.0;
+    let badge_rect = Rect::from_min_max(
+        egui::Pos2::new(badge_left, rect.top()),
+        egui::Pos2::new(rect.right() - 8.0, rect.bottom()),
+    );
+    let lines = if badge_rect.width() >= 285.0 {
+        Some(build_info::toolbar_lines(false))
+    } else if badge_rect.width() >= 145.0 {
+        Some(build_info::toolbar_lines(true))
+    } else if badge_rect.width() >= 50.0 {
+        Some((format!("v{}", build_info::VERSION), String::new()))
+    } else {
+        None
+    };
+    if let Some((top, bottom)) = lines {
+        let (full_top, full_bottom) = build_info::toolbar_lines(false);
+        ui.interact(badge_rect, base.with("build-info"), Sense::hover())
+            .on_hover_text(format!("{full_top}\n{full_bottom}"));
+        let painter = ui.painter().with_clip_rect(badge_rect);
+        let y = badge_rect.center().y;
+        painter.text(
+            egui::Pos2::new(badge_rect.right(), y - 8.0),
+            egui::Align2::RIGHT_CENTER,
+            top,
+            egui::FontId::proportional(pal.font_row),
+            pal.text_faint,
+        );
+        if !bottom.is_empty() {
+            painter.text(
+                egui::Pos2::new(badge_rect.right(), y + 8.0),
+                egui::Align2::RIGHT_CENTER,
+                bottom,
+                egui::FontId::proportional(pal.font_row),
+                pal.text_faint,
+            );
         }
     }
     ui.allocate_rect(rect, Sense::hover());

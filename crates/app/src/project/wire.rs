@@ -140,8 +140,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 translation: [loc.pos.x, loc.pos.y, loc.pos.z],
                 rotation: loc.rot,
                 facets,
-                // The counter is only ever set on models (import/update
-                // commands); everywhere else it reads 0 and omits itself.
+                // The counter moves on models and stocks (every facet
+                // landing); everywhere else it reads 0 and omits itself.
                 rev: model::rev_of(world, &entity),
                 kind,
                 stock,
