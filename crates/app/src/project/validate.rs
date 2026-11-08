@@ -101,6 +101,18 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             {
                 return Err(corrupt(format!("'{}' is an offset, not a solid", dto.name)));
             }
+            // #327: the loader's transform write turns a zero-norm
+            // rotation into the identity, which for an offset would post
+            // a rotated frame as unrotated - refuse it by name instead.
+            if !dto.translation.iter().all(|v| v.is_finite())
+                || !dto.rotation.iter().all(|v| v.is_finite())
+                || crate::geometry::normalize_quat(dto.rotation).is_none()
+            {
+                return Err(corrupt(format!(
+                    "WCS '{}' has a non-finite or degenerate placement (origin or rotation)",
+                    dto.name
+                )));
+            }
         }
         EntityKind::Tool => {
             if is_furniture_name(&dto.name) {

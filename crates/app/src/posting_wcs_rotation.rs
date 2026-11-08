@@ -15,7 +15,7 @@
 use flecs_ecs::prelude::World;
 
 use crate::model;
-use crate::schema::WCS_SLOTS;
+use crate::schema::{Location, WCS_SLOTS};
 
 use super::wcs_slot::wcs_slot;
 
@@ -47,9 +47,38 @@ fn axis_word(a: [f64; 3]) -> String {
     format!("({:.4}, {:.4}, {:.4})", a[0], a[1], a[2])
 }
 
-/// One line per rotated work-offset entity a posted operation uses,
-/// naming the setup, the G-word, the rotation and the operations.
-/// Empty when every offset in the program is unrotated.
+/// What an offset's placement says beyond its translation (#327).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum OffsetFrame {
+    /// Finite, and within [`ROT_TOL_RAD`] of the identity.
+    Square,
+    /// Finite and turned: the angle (deg) and the axis as the user reads it.
+    Rotated { deg: f64, axis: String },
+    /// A NaN / infinite origin or rotation, or a zero-norm quaternion:
+    /// no frame at all. Never "unrotated" - refused by name.
+    NonFinite,
+}
+
+/// Classify a work-offset placement. A non-finite or degenerate value is
+/// its own verdict, never folded into "unrotated" (#327).
+#[must_use]
+pub(crate) fn offset_frame(loc: &Location) -> OffsetFrame {
+    let q = loc.rot;
+    let norm2 = q.iter().map(|v| v * v).sum::<f64>();
+    if !loc.pos.is_finite() || !q.iter().all(|v| v.is_finite()) || !norm2.is_finite() || norm2 <= 0.0 {
+        return OffsetFrame::NonFinite;
+    }
+    let (angle, axis) = angle_axis(q);
+    if angle <= ROT_TOL_RAD {
+        OffsetFrame::Square
+    } else {
+        OffsetFrame::Rotated { deg: angle.to_degrees(), axis: axis_word(axis) }
+    }
+}
+
+/// One line per rotated (or non-finite, #327) work-offset entity a
+/// posted operation uses, naming the setup, the G-word, the rotation and
+/// the operations. Empty when every offset in the program is unrotated.
 #[must_use]
 pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
     // (entity name, line prefix, ops), in first-use program order.
@@ -69,8 +98,8 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
         let Some(loc) = model::transform_of(world, &wcs) else {
             continue;
         };
-        let (angle, axis) = angle_axis(loc.rot);
-        if angle <= ROT_TOL_RAD {
+        let frame = offset_frame(&loc);
+        if frame == OffsetFrame::Square {
             continue;
         }
         let entity = crate::setup::wcs_entity_name(world, setup);
@@ -84,12 +113,18 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
             Some(s) => format!("setup {s}: its WCS ({word})"),
             None => format!("the WCS ({word})"),
         };
-        let prefix = format!(
-            "{owner} is rotated {:.3} deg about {}; posting a rotated work offset is not \
-             supported yet - re-align it without rotation or post from an unrotated setup",
-            angle.to_degrees(),
-            axis_word(axis)
-        );
+        let prefix = match frame {
+            OffsetFrame::Rotated { deg, axis } => format!(
+                "{owner} is rotated {deg:.3} deg about {axis}; posting a rotated work offset is not \
+                 supported yet - re-align it without rotation or post from an unrotated setup"
+            ),
+            // #327: a NaN / infinite / zero-norm placement is no frame at
+            // all - refused by name, never posted as unrotated.
+            _ => format!(
+                "{owner} has a non-finite placement (origin or rotation) - re-place the \
+                 offset before posting"
+            ),
+        };
         hits.push((entity, prefix, vec![label]));
     }
     hits.into_iter()

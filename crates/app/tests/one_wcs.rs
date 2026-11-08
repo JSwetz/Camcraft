@@ -3,7 +3,8 @@
 //! A v53 file migrates each setup onto the origin of the slot it posted
 //! (posting byte-identical), drops the slots nobody posted with a load
 //! note, keeps an orphaned operation's zero, and a v54 file still
-//! listing slots is refused as corrupt. WCS edits undo inside their own
+//! listing slots is refused as corrupt; the posted slot keeps its #327
+//! placement check through the rung. WCS edits undo inside their own
 //! setup; a relabel never reaches another origin.
 //! Provenance: our own fixtures over RS-274 work-offset semantics.
 //!
@@ -252,4 +253,26 @@ fn a_wcs_edit_undoes_inside_its_own_setup_and_a_relabel_reaches_no_other_origin(
         assert_eq!(setup::wcs_label(&world, Some("Setup2")), format!("WCS ({word})"));
     }
     assert_eq!(wcs_count(&world), before, "a relabel spawns no origin");
+}
+
+#[test]
+fn a_v53_posted_slot_with_a_degenerate_rotation_is_refused_after_the_rung() {
+    // #327 on the #342 migration path: the slot the v53 setup posted
+    // becomes its one WCS, and the load's placement check still runs
+    // on it - a zero-norm rotation is refused by name, never loaded as
+    // the identity.
+    let (world, _) = block(true, Some(1));
+    let mut v: Value = serde_json::from_str(&as_v53(&saved(&world, "degen"), &[])).expect("json");
+    let g55 = v["entities"]
+        .as_array_mut()
+        .expect("entities")
+        .iter_mut()
+        .find(|e| e["name"] == json!("G55"))
+        .expect("the posted slot's row");
+    g55["rotation"] = json!([0.0, 0.0, 0.0, 0.0]);
+    let err = project::open(&new_world(), &v.to_string()).expect_err("a zero-norm WCS must not load");
+    assert!(
+        err.to_string().contains("WCS 'G55' has a non-finite or degenerate placement"),
+        "named refusal, got: {err}"
+    );
 }
