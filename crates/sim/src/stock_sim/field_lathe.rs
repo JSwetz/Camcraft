@@ -33,11 +33,21 @@
 //!   [`MERIDIAN_TOL`], so a chord through or near the axis (parting
 //!   past centre) passes - its radial vectors are (anti)parallel or
 //!   vanish.
+//! - **The footprint is the tool's (#21).** The nose disc sweeps its
+//!   bare chord dilated by the nose (the stadium above); a grooving or
+//!   parting blade, a threading V and a form crown sweep their own
+//!   convex meridian polygon (`field_blade`): the hull of the polygon
+//!   at both chord ends, read in the query's meridian both signs, the
+//!   same exact half-plane reading.
 //! - **Total input.** A non-finite or zero axis refuses by name before
 //!   a cell is written (`LatheAxis::new`).
 
 use super::field::cell_of;
+use super::field_blade::{sd_convex, Footprint};
 use super::field_solid::dist_pt_seg2;
+use super::backend::{Stock, LATHE_COLUMN_REFUSAL};
+use super::field_blade::LatheProfile;
+use super::field_cut::SdfTool;
 use super::kernel::StockError;
 
 use crate::geometry::Point3;
@@ -123,15 +133,22 @@ pub(crate) struct LatheSweep {
     z0: f64,
     r1: f64,
     z1: f64,
-    nose: f64,
+    /// The footprint's dilation: the nose radius, a blade's corner.
+    round: f64,
+    /// The swept blade polygon in (radius, station) (#21,
+    /// `field_blade`); `None` for the nose disc's bare chord.
+    hull: Option<Vec<[f64; 2]>>,
+    /// The footprint's farthest reach from the move's point.
+    reach: f64,
     axis: LatheAxis,
 }
 
 impl LatheSweep {
-    /// The chord `a -> b` about `axis`: `b`'s radius signed against
-    /// `a`'s radial direction (the side law above); a chord skewed
-    /// off one meridian refuses by name (the meridian law above).
-    pub(crate) fn of(axis: LatheAxis, a: Point3, b: Point3, nose: f64) -> Result<Self, StockError> {
+    /// The chord `a -> b` about `axis`, cutting with `foot`: `b`'s
+    /// radius signed against `a`'s radial direction (the side law
+    /// above); a chord skewed off one meridian refuses by name (the
+    /// meridian law above).
+    pub(crate) fn of(axis: LatheAxis, a: Point3, b: Point3, foot: &Footprint) -> Result<Self, StockError> {
         axis.chord_in_meridian(a, b)?;
         let (ra, z0) = axis.split(a);
         let (rb, z1) = axis.split(b);
@@ -140,12 +157,17 @@ impl LatheSweep {
         if ra[0] * rb[0] + ra[1] * rb[1] + ra[2] * rb[2] < 0.0 {
             r1 = -r1;
         }
-        Ok(LatheSweep { r0, z0, r1, z1, nose, axis })
+        // The nose disc keeps its bare chord (the closed form every
+        // nose golden was cut with); a blade sweeps its polygon.
+        let bare = foot.poly.len() == 1 && foot.poly[0] == [0.0, 0.0];
+        let hull = (!bare).then(|| foot.swept(r0, z0, r1, z1));
+        Ok(LatheSweep { r0, z0, r1, z1, round: foot.round, hull, reach: foot.reach(), axis })
     }
 
-    /// The nose radius: the solid's dilation of its chord.
-    pub(crate) fn nose(&self) -> f64 {
-        self.nose
+    /// The radius of a ball about the move's point holding the
+    /// footprint: the nose for the disc, the blade's far corner else.
+    pub(crate) fn bound(&self) -> f64 {
+        self.reach
     }
 
     /// The chord's first generator at the axis frame's own radial
@@ -161,19 +183,24 @@ impl LatheSweep {
     /// the query's meridian, both signs of its radius, exact.
     pub(crate) fn dist(&self, q: Point3) -> f64 {
         let (rho, s) = self.axis.meridian(q);
-        dist_pt_seg2(rho, s, self.r0, self.z0, self.r1, self.z1)
-            .min(dist_pt_seg2(-rho, s, self.r0, self.z0, self.r1, self.z1))
-            - self.nose
+        match &self.hull {
+            Some(h) => sd_convex(h, rho, s).min(sd_convex(h, -rho, s)) - self.round,
+            None => {
+                dist_pt_seg2(rho, s, self.r0, self.z0, self.r1, self.z1)
+                    .min(dist_pt_seg2(-rho, s, self.r0, self.z0, self.r1, self.z1))
+                    - self.round
+            }
+        }
     }
 
     /// The lattice box the solid can reach: the axis segment over the
     /// station span, dilated by the outer radius in each world axis
     /// as far as a disc normal to the axis reaches there
     /// (`rr * sqrt(1 - d_k^2)`), every reach padded by the nose, the
-    /// cap and a cell. On `LatheAxis::Z` it is the annulus box the
+    /// cap and a cell (the footprint's reach for a blade). On `LatheAxis::Z` it is the annulus box the
     /// sweep has always had.
     pub(crate) fn window(&self, cell: f64, cap: f64) -> [(i32, i32); 3] {
-        let pad = self.nose + cap + cell;
+        let pad = self.reach + cap + cell;
         let rr = self.r0.abs().max(self.r1.abs()) + pad;
         let (sl, sh) = (self.z0.min(self.z1) - pad, self.z0.max(self.z1) + pad);
         let o = [self.axis.origin.x, self.axis.origin.y, self.axis.origin.z];
@@ -184,5 +211,65 @@ impl LatheSweep {
             (cell_of(a.min(b) - ext, cell), cell_of(a.max(b) + ext, cell))
         };
         [span(0), span(1), span(2)]
+    }
+}
+
+/// The lathe entry points of the stock (moved here from `backend.rs`
+/// by the 400-line law when the blade profile landed, #21).
+impl Stock {
+    /// A turning program (M13.1 owed, the annular-sector sweep):
+    /// `moves` are the insert's nose-CENTER path (the M5.2 E
+    /// convention) on a lathe whose spindle axis is +Z through the
+    /// origin, `nose` its nose radius; each move removes the solid
+    /// of revolution of its half-plane stadium (`SdfTool::Lathe`).
+    /// The field arm cuts it in closed form; the column arm has no
+    /// revolved reading - a Z height field reads a parting kerf as a
+    /// plunge - and refuses by name (`LATHE_COLUMN_REFUSAL`), the
+    /// honest answer the document verdict gives today.
+    pub fn simulate_lathe(&mut self, moves: &[crate::cl::Move], nose: f64) -> Result<(), StockError> {
+        self.simulate_lathe_about(moves, nose, &LatheAxis::Z)
+    }
+
+    /// `simulate_lathe` about a stated spindle line (#19): the
+    /// document's turning kernels write their moves in the plane of
+    /// the part's fitted axis, wherever it stands.
+    pub fn simulate_lathe_about(
+        &mut self,
+        moves: &[crate::cl::Move],
+        nose: f64,
+        axis: &LatheAxis,
+    ) -> Result<(), StockError> {
+        self.simulate_lathe_profile(moves, &LatheProfile::Nose { radius: nose }, axis)
+    }
+
+    /// The turning program cut with `profile`'s meridian footprint
+    /// (#21): the nose disc, or a blade's own rectangle, V or crown.
+    pub fn simulate_lathe_profile(
+        &mut self,
+        moves: &[crate::cl::Move],
+        profile: &LatheProfile,
+        axis: &LatheAxis,
+    ) -> Result<(), StockError> {
+        match self {
+            Stock::Column(_) => Err(StockError::Invalid(LATHE_COLUMN_REFUSAL.into())),
+            Stock::Field(f) => {
+                if !moves.iter().all(|m| m.is_finite()) {
+                    return Err(StockError::Invalid(
+                        "lathe program carries a non-finite move - the sim refuses instead of cutting nothing silently".into(),
+                    ));
+                }
+                // Every straight chord's meridian checked up front, so
+                // a skewed one refuses before any batch writes a cell.
+                for m in moves.iter().filter(|m| m.arc.is_none()) {
+                    axis.chord_in_meridian(m.from, m.to)?;
+                }
+                let chord_tol = (f.cell() * 0.25).max(1e-9);
+                let tool = SdfTool::Lathe { profile: *profile, axis: *axis };
+                for chunk in moves.chunks(super::field_batch::BATCH_MOVES) {
+                    f.subtract_batch(chunk, &tool, chord_tol)?;
+                }
+                Ok(())
+            }
+        }
     }
 }

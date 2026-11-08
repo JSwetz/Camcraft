@@ -45,7 +45,7 @@ impl Sweep {
     /// inflated into every axis, which would refuse payables.
     fn extent(&self) -> f64 {
         match self {
-            Sweep::Lathe(l) => l.nose(),
+            Sweep::Lathe(l) => l.bound(),
             Sweep::Ball { r, .. } => *r,
             Sweep::Shanked { r, up, .. } => r + dot(*up, *up).sqrt(),
             Sweep::Revolve { kind, .. } => match kind {
@@ -66,7 +66,7 @@ impl Sweep {
         match self {
             // The revolved solid's reach is its own window (`window_of`
             // reads the annulus directly); the nose is its dilation.
-            Sweep::Lathe(l) => (l.nose(), 0.0),
+            Sweep::Lathe(l) => (l.bound(), 0.0),
             Sweep::Ball { r, .. } => (*r, 0.0),
             Sweep::Shanked { r, up, .. } => (*r, dot(*up, *up).sqrt()),
             Sweep::Revolve { kind, .. } => match kind {

@@ -59,6 +59,7 @@
 //!   refuses by name before a single brick is written.
 
 use super::field::SdfField;
+use super::field_blade::LatheProfile;
 use super::field_lathe::{LatheAxis, LatheSweep};
 use super::field_solid::{add, scale, tool_kind, RevKind, ToolKind};
 use super::kernel::StockError;
@@ -102,8 +103,10 @@ pub enum SdfTool {
     /// part spins a full revolution at every instant, so a move
     /// removes the solid of revolution of the half-plane stadium of
     /// radius `nose` about its (radius, station) chord. A pose stamp
-    /// means nothing to a spinning part and is ignored.
-    Lathe { nose: f64, axis: LatheAxis },
+    /// means nothing to a spinning part and is ignored. A blade (#21)
+    /// sweeps its own footprint instead of the nose disc
+    /// ([`LatheProfile`], `field_blade`).
+    Lathe { profile: LatheProfile, axis: LatheAxis },
 }
 
 impl SdfField {
@@ -186,7 +189,7 @@ impl SdfField {
                         b,
                         kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank },
                     },
-                    ToolKind::Lathe { nose, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, *nose)?),
+                    ToolKind::Lathe { foot, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, foot)?),
                 };
                 // The ceiling bounds the WORK: the window as clipped
                 // to the cut region, the only cells the walk can visit.
