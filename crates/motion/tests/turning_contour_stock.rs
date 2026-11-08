@@ -6,7 +6,10 @@
 use camcraft_motion::cl::{Move, MoveKind, Toolpath};
 use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::turning::profile::Frame;
-use camcraft_motion::turning::{chamfer, chamfer_in, multi_pass, multi_pass_in, taper, taper_in, ChamferParams, MultiPassParams, StockEnv, TaperParams};
+use camcraft_motion::turning::{
+    ChamferParams, MultiPassParams, StockEnv, TaperParams, chamfer, chamfer_in, multi_pass,
+    multi_pass_in, taper, taper_in,
+};
 
 fn revolve(meridian: &[(f64, f64)]) -> Vec<Triangle> {
     let v = |j: usize, r: f64, z: f64| {
@@ -17,7 +20,12 @@ fn revolve(meridian: &[(f64, f64)]) -> Vec<Triangle> {
     for seg in meridian.windows(2) {
         let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
         for j in 0..16 {
-            let (a, b, c, d) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
+            let (a, b, c, d) = (
+                v(j, ra, za),
+                v(j + 1, ra, za),
+                v(j, rb, zb),
+                v(j + 1, rb, zb),
+            );
             if ra <= 1e-12 {
                 facets.push(Triangle::new(a, d, c));
             } else if rb <= 1e-12 {
@@ -31,23 +39,54 @@ fn revolve(meridian: &[(f64, f64)]) -> Vec<Triangle> {
     facets
 }
 
-fn rho(p: Point3) -> f64 { p.x.hypot(p.y) }
+fn rho(p: Point3) -> f64 {
+    p.x.hypot(p.y)
+}
 
 fn exits(path: &Toolpath, top: f64) -> Vec<&Move> {
-    path.moves.iter().filter(|m| (m.from.z - top).abs() < 1e-8 && (m.to.z - top).abs() < 1e-8 && rho(m.to) > rho(m.from) + 1e-6).collect()
+    path.moves
+        .iter()
+        .filter(|m| {
+            (m.from.z - top).abs() < 1e-8
+                && (m.to.z - top).abs() < 1e-8
+                && rho(m.to) > rho(m.from) + 1e-6
+        })
+        .collect()
 }
 
 fn controls(part: &[Triangle], blind: Toolpath, ride: impl Fn(Option<StockEnv>, f64) -> Toolpath) {
     let frame = Frame::about(part).expect("axis");
-    let stock = |top| Some(StockEnv { r_out: 10.0, clearance: 1.0, s_top: frame.station_of(top) });
+    let stock = |top| {
+        Some(StockEnv {
+            r_out: 10.0,
+            clearance: 1.0,
+            s_top: frame.station_of(top),
+        })
+    };
     let short = ride(stock(40.0), 40.0);
-    assert_eq!(blind.moves, ride(None, 40.0).moves, "compatibility entry point");
-    assert_eq!(blind.moves, short.moves, "same-sized, same-end stock keeps the old path");
+    assert_eq!(
+        blind.moves,
+        ride(None, 40.0).moves,
+        "compatibility entry point"
+    );
+    assert_eq!(
+        blind.moves, short.moves,
+        "same-sized, same-end stock keeps the old path"
+    );
     let long = ride(stock(48.0), 40.0);
     assert_eq!(short.moves.len(), long.moves.len());
     let out = exits(&long, 40.0);
-    assert!(!out.is_empty() && out.iter().all(|m| m.kind == MoveKind::Feed && m.feed == Some(50.0)));
-    assert!(exits(&short, 40.0).iter().all(|m| m.kind == MoveKind::Rapid));
+    assert!(
+        !out.is_empty()
+            && out
+                .iter()
+                .all(|m| m.kind == MoveKind::Feed && m.feed == Some(50.0))
+    );
+    assert!(
+        exits(&short, 40.0)
+            .iter()
+            .all(|m| m.kind == MoveKind::Rapid)
+    );
     for (a, b) in short.moves.iter().zip(&long.moves) {
         let mut expected = *a;
         if exits(&short, 40.0).contains(&a) {
@@ -59,31 +98,109 @@ fn controls(part: &[Triangle], blind: Toolpath, ride: impl Fn(Option<StockEnv>, 
     // The bar need not exceed the part: an interior window also ends in retained stock.
     let window = ride(stock(40.0), 39.0);
     let out = exits(&window, 39.0);
-    assert!(!out.is_empty() && out.iter().all(|m| m.kind == MoveKind::Feed && m.feed == Some(50.0)));
+    assert!(
+        !out.is_empty()
+            && out
+                .iter()
+                .all(|m| m.kind == MoveKind::Feed && m.feed == Some(50.0))
+    );
     // Stock-aware axial travel must be clear before feeding out radially.
-    let wide = ride(Some(StockEnv { r_out: 14.0, clearance: 1.0, s_top: frame.station_of(48.0) }), 40.0);
-    let axial: Vec<_> = wide.moves.iter().filter(|m| m.kind == MoveKind::Rapid && (m.from.z - m.to.z).abs() > 1e-8).collect();
+    let wide = ride(
+        Some(StockEnv {
+            r_out: 14.0,
+            clearance: 1.0,
+            s_top: frame.station_of(48.0),
+        }),
+        40.0,
+    );
+    let axial: Vec<_> = wide
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Rapid && (m.from.z - m.to.z).abs() > 1e-8)
+        .collect();
     assert!(!axial.is_empty());
-    assert!(axial.iter().all(|m| rho(m.from) >= 15.8 - 1e-8 && rho(m.to) >= 15.8 - 1e-8));
+    assert!(
+        axial
+            .iter()
+            .all(|m| rho(m.from) >= 15.8 - 1e-8 && rho(m.to) >= 15.8 - 1e-8)
+    );
 }
 
 #[test]
 fn chamfer_stock_exits_preserve_geometry_and_cover_interior_windows() {
-    let part = revolve(&[(0.0, -16.0), (10.0, -16.0), (10.0, 38.0), (8.0, 40.0), (0.0, 40.0)]);
-    let p = ChamferParams { tolerance: 0.05, clearance_z: 56.0, top_z: 40.0, bottom_z: 38.0, angle_deg: 45.0, feed: 200.0, plunge_feed: 50.0, nose_radius: 0.8 };
-    controls(&part, chamfer(&part, &p).expect("blind"), |s, top| chamfer_in(&part, &ChamferParams { top_z: top, ..p }, s).expect("chamfer"));
+    let part = revolve(&[
+        (0.0, -16.0),
+        (10.0, -16.0),
+        (10.0, 38.0),
+        (8.0, 40.0),
+        (0.0, 40.0),
+    ]);
+    let p = ChamferParams {
+        tolerance: 0.05,
+        clearance_z: 56.0,
+        top_z: 40.0,
+        bottom_z: 38.0,
+        angle_deg: 45.0,
+        feed: 200.0,
+        plunge_feed: 50.0,
+        nose_radius: 0.8,
+    };
+    controls(&part, chamfer(&part, &p).expect("blind"), |s, top| {
+        chamfer_in(&part, &ChamferParams { top_z: top, ..p }, s).expect("chamfer")
+    });
 }
 
 #[test]
 fn taper_stock_exits_preserve_geometry_and_cover_interior_windows() {
     let part = revolve(&[(0.0, -16.0), (10.0, -16.0), (8.0, 40.0), (0.0, 40.0)]);
-    let p = TaperParams { tolerance: 0.05, clearance_z: 56.0, top_z: 40.0, bottom_z: -16.0, bottom_dia: 20.0, top_dia: 16.0, feed: 200.0, plunge_feed: 50.0, nose_radius: 0.8 };
-    controls(&part, taper(&part, &p).expect("blind"), |s, top| taper_in(&part, &TaperParams { top_z: top, top_dia: 20.0 - 4.0 * (top + 16.0) / 56.0, ..p }, s).expect("taper"));
+    let p = TaperParams {
+        tolerance: 0.05,
+        clearance_z: 56.0,
+        top_z: 40.0,
+        bottom_z: -16.0,
+        bottom_dia: 20.0,
+        top_dia: 16.0,
+        feed: 200.0,
+        plunge_feed: 50.0,
+        nose_radius: 0.8,
+    };
+    controls(&part, taper(&part, &p).expect("blind"), |s, top| {
+        taper_in(
+            &part,
+            &TaperParams {
+                top_z: top,
+                top_dia: 20.0 - 4.0 * (top + 16.0) / 56.0,
+                ..p
+            },
+            s,
+        )
+        .expect("taper")
+    });
 }
 
 #[test]
 fn multipass_stock_exits_preserve_geometry_and_cover_interior_windows() {
-    let part = revolve(&[(0.0, -16.0), (10.0, -16.0), (10.0, 2.0), (6.0, 2.0), (6.0, 40.0), (0.0, 40.0)]);
-    let p = MultiPassParams { tolerance: 0.05, clearance_z: 56.0, top_z: 40.0, bottom_z: -16.0, stepdown: 0.5, stock_to_leave: 0.25, passes: 3, feed: 200.0, plunge_feed: 50.0, nose_radius: 0.8 };
-    controls(&part, multi_pass(&part, &p).expect("blind"), |s, top| multi_pass_in(&part, &MultiPassParams { top_z: top, ..p }, s).expect("multi"));
+    let part = revolve(&[
+        (0.0, -16.0),
+        (10.0, -16.0),
+        (10.0, 2.0),
+        (6.0, 2.0),
+        (6.0, 40.0),
+        (0.0, 40.0),
+    ]);
+    let p = MultiPassParams {
+        tolerance: 0.05,
+        clearance_z: 56.0,
+        top_z: 40.0,
+        bottom_z: -16.0,
+        stepdown: 0.5,
+        stock_to_leave: 0.25,
+        passes: 3,
+        feed: 200.0,
+        plunge_feed: 50.0,
+        nose_radius: 0.8,
+    };
+    controls(&part, multi_pass(&part, &p).expect("blind"), |s, top| {
+        multi_pass_in(&part, &MultiPassParams { top_z: top, ..p }, s).expect("multi")
+    });
 }
