@@ -485,13 +485,18 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the inferred per-operation law they posted with (#196).
         file.version = 51;
     }
-    if file.version == 51 || file.version == 52 {
+    if (51..=53).contains(&file.version) {
         // v51 -> v52 (#329): a work-offset height stops naming its own
         // slot - the setup's is program zero. Agreeing setups take the
-        // slot, disagreeing ones refuse by name; a v52 file is checked
+        // slot, disagreeing ones refuse by name; a v52+ file is checked
         // slot-free (`wcs_migrate`).
         super::wcs_migrate::settle(&mut file, from)?;
-        file.version = 52;
+        file.version = file.version.max(52);
+    }
+    if file.version == 52 {
+        // v52 -> v53 (#326): a setup may hold the part turned. Absent
+        // is "as modelled" - what every v52 file machined.
+        file.version = 53;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
@@ -645,6 +650,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         .ok_or_else(|| corrupt("stock mesh regeneration failed"))?,
                 };
                 model::set_facets(world, &entity, facets.into());
+                // The same UNCONDITIONAL pin as the Model arm (#340): every
+                // SetStock lands facets and moves the counter, the save
+                // writes it, so the load must end where the file left it.
+                // An absent key (0) puts back what that file remembered.
+                model::set_rev(world, &entity, dto.rev);
                 entity.entity_view(world).set(StockDef {
                     shape: shape.clone(),
                 });
@@ -718,11 +728,20 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         corrupt(format!("setup '{}' picks unknown work offset {w:?}", dto.name))
                     })?),
                 };
+                // #326: a turned part must be a rigid transform; anything
+                // else is a corrupt file, never a guess.
+                let part_alignment = match &sdto.part_alignment {
+                    None => None,
+                    Some(a) => Some(a.to_location().ok_or_else(|| {
+                        corrupt(format!("setup '{}' holds the part at a placement that is not a rigid transform", dto.name))
+                    })?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     wcs: sdto.wcs,
                     datum_from: sdto.datum_from,
                     work_offset,
+                    part_alignment,
                 });
             }
         }

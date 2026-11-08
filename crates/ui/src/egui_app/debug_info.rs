@@ -11,6 +11,7 @@ use egui::{Button, Context, Id, Image, Response, RichText, Ui, Vec2, Window};
 use camcraft_app::{machine, model, operation, setup, units};
 
 use super::icons::{Icon, IconSet};
+use crate::build_info;
 use crate::state::State;
 
 /// The status strip's door: the glyph at the strip's 16 px when the icon
@@ -36,7 +37,9 @@ pub(crate) fn report(state: &State) -> String {
     let world = &state.world;
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     let mut lines = vec![
-        format!("CamCraft {} ({profile} build)", env!("CARGO_PKG_VERSION")),
+        format!("CamCraft {} ({profile} build)", build_info::VERSION),
+        format!("Build time: {}", build_info::BUILT_UTC),
+        format!("Source commit: {}", build_info::SOURCE_SHA),
         format!("Platform: {} {}", std::env::consts::OS, std::env::consts::ARCH),
         format!("GPU: {}", state.gpu_line.as_deref().unwrap_or("none (headless)")),
         format!(

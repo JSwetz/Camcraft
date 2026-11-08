@@ -150,7 +150,7 @@ fn flat_face(world: &World, g: &GeoSel) -> Result<Option<Plane>, String> {
     if wind.x * n[0] + wind.y * n[1] + wind.z * n[2] < 0.0 {
         n = scale(n, -1.0);
     }
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    let loc = crate::setup_align::view_pose(world, &e).unwrap_or_default(); // #326
     let wn = quat_rotate_point(loc.rot, Point3::new(n[0], n[1], n[2]));
     let wn = [wn.x, wn.y, wn.z];
     let l = norm(wn);
@@ -174,7 +174,7 @@ fn vertex(world: &World, g: &GeoSel) -> Result<[f64; 3], String> {
     let features = model::features_of(world, &e).ok_or_else(|| gone(g))?;
     let vi = feature::resolve_vertex(&features, id).ok_or_else(|| gone(g))?;
     let v = features.verts.get(vi as usize).ok_or_else(|| gone(g))?;
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    let loc = crate::setup_align::view_pose(world, &e).unwrap_or_default(); // #326
     let w = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
     Ok([w.x, w.y, w.z])
 }
@@ -188,7 +188,7 @@ fn straight_edge(world: &World, g: &GeoSel) -> Result<([f64; 3], [f64; 3]), Stri
     if c.closed {
         return Err(format!("{} of '{}' is a closed loop - pick one straight edge for X", g.feature, g.entity));
     }
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    let loc = crate::setup_align::view_pose(world, &e).unwrap_or_default(); // #326
     let pts: Vec<[f64; 3]> = feature::chain_points(&features, &c)
         .iter()
         .map(|p| {

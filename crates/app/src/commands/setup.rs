@@ -119,6 +119,7 @@ impl CreateSetup {
                 wcs: WCS_SLOTS.iter().map(|s| s.to_string()).collect(),
                 datum_from: String::new(),
                 work_offset: None,
+                part_alignment: None,
             }
         } else {
             SetupDef {
@@ -129,6 +130,9 @@ impl CreateSetup {
                 // offset with its placements (#196): the slot is part of
                 // the datum system being cloned.
                 work_offset: datum_from.and_then(|f| setup::work_offset(world, f)),
+                // #326: the cloned stock and offsets sit in the source's
+                // part frame, so the part alignment rides the transfer.
+                part_alignment: datum_from.and_then(|f| crate::setup_align::stored(world, f)),
             }
         };
         let mut stock = None;
