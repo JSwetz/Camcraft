@@ -75,6 +75,12 @@ pub enum Record {
     /// `wear` (#38): the records between are the cutter-CENTRE path at
     /// `radius_mm`, and the register holds only the wear delta.
     Comp { side: Option<CompSide>, radius_mm: f64, wear: bool },
+    /// A threading cycle (issue #34): `Some` opens the span of explicit
+    /// passes the cycle stands for, `None` (`THREAD END`) closes it.
+    /// The passes between are ordinary motion records - a script with
+    /// a threading cycle writes the record and skips them, any other
+    /// posts them as they are.
+    Thread(Option<super::cnc_thread::ThreadRec>),
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -264,6 +270,8 @@ impl Record {
                 if *wear { " · wear" } else { "" }
             ),
             Record::Comp { side: None, .. } => "comp off".into(),
+            Record::Thread(Some(t)) => t.label(),
+            Record::Thread(None) => "thread cycle end".into(),
         }
     }
 
@@ -403,6 +411,8 @@ pub fn serialize(records: &[Record]) -> String {
                     None => "COMP OFF\n".to_string(),
                 });
             }
+            Record::Thread(Some(t)) => s.push_str(&t.line()),
+            Record::Thread(None) => s.push_str("THREAD END\n"),
         }
     }
     s
@@ -883,6 +893,11 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     }
                 };
                 out.push(Record::Comp { side, radius_mm, wear });
+                in_section = true;
+            }
+            "THREAD" => {
+                let t = super::cnc_thread::parse(it).map_err(fail)?;
+                out.push(Record::Thread(t));
                 in_section = true;
             }
             "PROBE" => {

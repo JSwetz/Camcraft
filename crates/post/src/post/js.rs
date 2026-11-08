@@ -26,6 +26,7 @@ var LINE = "";
 var properties = {};
 var W = properties;
 var currentPosition = { X: 0, Y: 0, Z: 0 };
+var postOptions = {};
 var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false };
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
@@ -122,6 +123,8 @@ pub const HOOKS: &[&str] = &[
     "onDwell",
     "onSpindleSpeed",
     "onRadiusCompensation",
+    "onThreadCycle",
+    "onThreadCycleEnd",
     "onPartLoading",
     "onPartUnloading",
     "onPartTransfer",
@@ -182,6 +185,12 @@ impl Script {
     /// Publish the flattened machine object once.
     pub fn set_machine(&mut self, m: &Value) -> Result<(), PostError> {
         self.eval(&format!("machine = {m};"))?;
+        Ok(())
+    }
+
+    /// Publish the document's post options once (issue #34).
+    pub fn set_options(&mut self, o: &Value) -> Result<(), PostError> {
+        self.eval(&format!("postOptions = {o};"))?;
         Ok(())
     }
 

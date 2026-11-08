@@ -118,6 +118,9 @@ pub enum CommandKind {
     /// is the name, so a registry re-growth never re-points a saved
     /// file's post.
     SelectPostNamed(String),
+    /// The post's user options (issue #34): the undoable
+    /// `SetPostOptions` with the picked value.
+    SetPostOptions(camcraft_app::schema::PostOptions),
     /// The document's theme (M6.1 C), `SelectPost`'s twin: the two
     /// built-ins and a discovered file arrive as a reference (what the
     /// headless tests queue too), and the dialog arm opens the picker.
@@ -2405,6 +2408,14 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
+            CommandKind::SetPostOptions(next) => match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = "post options set".into();
+                }
+                Err(err) => self.refuse(ErrorScope::Setup, format!("post options not set: {err}")),
+            },
             CommandKind::SelectTheme(next) => self.select_theme(next),
             CommandKind::SelectColorVision(next) => self.select_color_vision(next),
             CommandKind::SelectThemeDialog => {

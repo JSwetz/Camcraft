@@ -60,9 +60,20 @@ pub struct PostOutput {
 /// Post a stream text with one script. The machine value is the raw
 /// `.mch` JSON (flattened here); pass `Value::Null` for none.
 pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError> {
+    run_with(cps, mch, stream, &Value::Null)
+}
+
+/// [`run`] with the document's post options (issue #34): a JSON object
+/// the script reads as the global `postOptions` - the user's choices
+/// for this post (e.g. `{"Threading": "G76"}`). `Value::Null` (or any
+/// non-object) leaves the PRELUDE's empty object: every default.
+pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result<PostOutput, PostError> {
     let records = super::normalize_program_order(cnc::parse(stream)?);
     let mut s = Script::load(cps)?;
     s.set_machine(&machine::script_props(mch))?;
+    if options.is_object() {
+        s.set_options(options)?;
+    }
     s.call("onOpen", "")?;
     let head = s.out_len()?;
 
@@ -233,6 +244,22 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                     p.insert("CompensationType".into(), json!(if *wear { "wear" } else { "control" }));
                     s.set_properties(&merged(&base, &p, pos))?;
                     s.call("onRadiusCompensation", &json!(word).to_string())?;
+                }
+            }
+            Record::Thread(t) => {
+                // A threading cycle (issue #34): a lifecycle record like
+                // COMP - no motion, `onCommand` never sees it. A script
+                // without the hooks posts the explicit passes that
+                // follow, exactly as before the record existed.
+                match t {
+                    Some(t) => {
+                        s.set_properties(&merged(&base, &t.props(), pos))?;
+                        s.set_current(pos.0, pos.1, pos.2)?;
+                        s.call("onThreadCycle", "")?;
+                    }
+                    None => {
+                        s.call("onThreadCycleEnd", "")?;
+                    }
                 }
             }
             Record::Probe { tol_mm } => {

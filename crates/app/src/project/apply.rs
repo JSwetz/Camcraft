@@ -486,6 +486,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     // entity): an unspellable value is a corrupt file, refused before any
     // world write. Opening always lands the file's value - including mm,
     // so a stale singleton from the previous document can never leak in.
+    // The post options (issue #34): an unspellable word is a corrupt
+    // file, refused before any world write; absent is the default.
+    let post_options = crate::schema::PostOptions {
+        threading: match file.post_options.as_ref().and_then(|o| o.threading.as_deref()) {
+            None | Some("g32") => crate::schema::ThreadingOutput::G32Passes,
+            Some("g76") => crate::schema::ThreadingOutput::G76Cycle,
+            Some(other) => return Err(corrupt(format!("unknown threading output {other:?}"))),
+        },
+    };
     let doc_units = match file.units.as_deref() {
         None | Some("mm") => Unit::Millimeters,
         Some("in") => Unit::Inches,
@@ -548,6 +557,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     // unvalidated: each names a script, not a limit, and the post-time
     // refusal is the net (`script_source` reads both, and both refuse
     // by name when gone).
+    crate::posting::post_options_set(world, post_options);
     crate::posting::post_set(
         world,
         &match file.post {

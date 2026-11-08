@@ -6,6 +6,7 @@ use crate::geometry::Point3;
 use crate::geometry::units::Unit;
 
 use super::comp::CompSpan;
+use super::thread::ThreadCycle;
 use super::moves::{lattice, Move, MoveKind};
 use super::plane::{z_extrema, ArcPlane};
 use super::cycle::Cycle;
@@ -31,6 +32,10 @@ pub struct Toolpath {
     /// default, and every path before the option. The moves stay the
     /// cutter-centre truth; the spans say what the post writes instead.
     pub comps: Vec<CompSpan>,
+    /// The threading cycles (issue #34, [`ThreadCycle`]): empty for
+    /// every non-threading path. The passes stay the truth; a post
+    /// with a threading cycle writes the record in their place.
+    pub threads: Vec<ThreadCycle>,
 }
 
 impl Toolpath {
@@ -40,6 +45,7 @@ impl Toolpath {
             cycles: Vec::new(),
             notes: Vec::new(),
             comps: Vec::new(),
+            threads: Vec::new(),
         }
     }
 
@@ -365,6 +371,7 @@ impl PathBuilder {
             cycles: self.cycles,
             notes: self.notes,
             comps: self.comps,
+            threads: Vec::new(),
         }
     }
 }

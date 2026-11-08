@@ -27,6 +27,7 @@
 //! as an undersize part.
 
 pub mod cnc;
+pub mod cnc_thread;
 mod coolant;
 pub mod engine;
 pub mod js;
@@ -220,10 +221,26 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // after a lean must be COMMANDED (explicit zero angles), or the
     // machine runs the "upright" move under the old lean.
     let mut tilted = false;
+    // Threading cycles (issue #34) bracket their passes: THREAD before
+    // the span's first move, THREAD END after its last. A record that
+    // does not sit on these moves is not trusted and not written - the
+    // passes then post as themselves, and a script asked for the cycle
+    // refuses by name for want of the record.
+    let mut threads: Vec<&crate::cl::ThreadCycle> = t.threads.iter().filter(|c| c.is_sane(&t.moves)).collect();
+    threads.sort_by_key(|c| c.first);
+    let mut ti = 0usize;
+    let mut open_thread: Option<usize> = None;
     for (mi, m, pre) in program::program_order(t, &mut out) {
         while ci < cycles.len() && cycles[ci].first_move <= mi {
             out.push(Record::Cycle(cycles[ci].clone()));
             ci += 1;
+        }
+        if open_thread.is_none()
+            && let Some(c) = threads.get(ti).filter(|c| c.first == mi)
+        {
+            out.push(Record::Thread(Some(cnc_thread::ThreadRec::from_cycle(c))));
+            open_thread = Some(c.last);
+            ti += 1;
         }
         if let Some(r) = pre {
             out.push(r);
@@ -261,6 +278,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             // `.cnc` producers own the letters directly.
             abc,
         }));
+        if open_thread == Some(mi) {
+            out.push(Record::Thread(None));
+            open_thread = None;
+        }
+    }
+    if open_thread.is_some() {
+        out.push(Record::Thread(None));
     }
     for c in &cycles[ci..] {
         out.push(Record::Cycle((*c).clone()));
