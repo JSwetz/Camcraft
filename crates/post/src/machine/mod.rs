@@ -4,7 +4,9 @@
 //! the app's `machine` module, which re-exports all of this).
 
 pub mod def;
+mod direction;
 mod parse;
 
 pub use def::*;
+pub use direction::AxisDirection;
 pub use parse::parse_mch;
