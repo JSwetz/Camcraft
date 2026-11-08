@@ -223,3 +223,65 @@ fn a_single_band_shaft_with_a_shallow_flat_still_reads_its_axis() {
     assert!(ax.dir.x.abs() < 1e-9 && ax.dir.y.abs() < 1e-9, "{ax:?}");
     assert!((ax.origin.x.powi(2) + ax.origin.y.powi(2)).sqrt() < 1e-6, "{ax:?}");
 }
+
+/// `t` turned by `ang` radians about X.
+fn tilt_x(t: &Triangle, ang: f64) -> Triangle {
+    let (c, s) = (ang.cos(), ang.sin());
+    let r = |p: Point3| Point3::new(p.x, c * p.y - s * p.z, s * p.y + c * p.z);
+    Triangle::new(r(t.a), r(t.b), r(t.c))
+}
+
+#[test]
+fn a_skewed_cross_never_reads_the_rod_or_a_line_between() {
+    // Re-review of PR #223, B1: a single-band Z shaft r10 h100 crossed at
+    // the origin by a rod tilted 5..45 degrees. Seen from the rod's axis
+    // the shaft's wall is a squashed ring; its normals do not keep one
+    // angle to that axis. Refused, or Z - never the rod or between.
+    for deg in [5.0f64, 15.0, 30.0, 45.0] {
+        for (h, bands) in [(60.0, 1), (60.0, 5), (100.0, 1), (100.0, 5)] {
+            let mut f = turned(10.0, 100.0, (0.0, 0.0, -50.0), 1, &|_| false);
+            let rod = turned(10.0, h, (0.0, 0.0, -h / 2.0), bands, &|_| false);
+            f.extend(rod.iter().map(|t| tilt_x(t, deg.to_radians())));
+            if let Ok(r) = fit_report(&f) {
+                let d = r.axis.dir;
+                assert!(d.x.abs() < 1e-6 && d.y.abs() < 1e-6, "{deg} deg, rod h{h} ({bands} bands): {r:?}");
+            }
+        }
+    }
+}
+
+/// A square plate 100 wide, `t` thick, with a centred single-band bore
+/// of radius `r`; the faces as an annulus fan, the sides two triangles.
+fn plate_with_bore(r: f64, t: f64) -> Vec<Triangle> {
+    let q = Point3::new;
+    let edge = |th: f64| {
+        let (c, s) = (th.cos(), th.sin());
+        50.0 / c.abs().max(s.abs())
+    };
+    let mut f: Vec<Triangle> = block(q(-50.0, -50.0, 0.0), q(50.0, 50.0, t)).into_iter().filter(|x| x.normal().z.abs() < 0.5).collect();
+    for j in 0..SEGS {
+        let (t0, t1) = (std::f64::consts::TAU * j as f64 / SEGS as f64, std::f64::consts::TAU * (j + 1) as f64 / SEGS as f64);
+        let at = |rad: f64, th: f64, z: f64| q(rad * th.cos(), rad * th.sin(), z);
+        let (b0, b1, s0, s1) = (at(r, t0, 0.0), at(r, t1, 0.0), at(edge(t0), t0, 0.0), at(edge(t1), t1, 0.0));
+        let up = |p: Point3| q(p.x, p.y, t);
+        f.push(Triangle::new(b0, s1, s0));
+        f.push(Triangle::new(b0, b1, s1));
+        f.push(Triangle::new(up(b0), up(s0), up(s1)));
+        f.push(Triangle::new(up(b0), up(s1), up(b1)));
+        // The bore wall, one band, normals facing the axis.
+        f.push(Triangle::new(b0, up(b1), b1));
+        f.push(Triangle::new(b0, up(b0), up(b1)));
+    }
+    f
+}
+
+#[test]
+fn a_square_plate_with_a_centred_bore_reads_its_axis() {
+    // Re-review of PR #223, B2: the plate's side lines and the bore's
+    // meet at one point; the bore, a full ring about Z, is what turns.
+    for (r, t) in [(20.0, 10.0), (40.0, 10.0), (45.0, 30.0)] {
+        let ax = fit(&plate_with_bore(r, t)).unwrap_or_else(|e| panic!("bore r{r} t{t}: {e}"));
+        assert!(ax.dir.x.abs() < 1e-9 && ax.dir.y.abs() < 1e-9, "bore r{r} t{t}: {ax:?}");
+        assert!((ax.origin.x.powi(2) + ax.origin.y.powi(2)).sqrt() < 1e-6, "bore r{r} t{t}: {ax:?}");
+    }
+}

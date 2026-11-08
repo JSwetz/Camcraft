@@ -13,24 +13,26 @@
 //! A pencil of lines through a point carries no direction of its own,
 //! so it may certify an axis only when it is itself rotationally
 //! symmetric about it - the Gauss map of a surface of revolution is a
-//! union of circles about the axis, so the facets that meet at a point
-//! must spread their area evenly over the bearings about it. So the
-//! inliers are peeled into pencils (the point their lines meet best,
-//! least trimmed squares on the area, then the next among the rest)
-//! and each pencil is judged by itself: its low trigonometric moments
-//! about the axis must vanish (a box face set or a crossing rod's wall
-//! piles its area on 2 or 4 bearings), and a pencil holding half the
-//! inliers must pass the coarseness gate alone. The coarseness gate
-//! itself reads only facets that meet the axis (`axis.rs`), so an
-//! outlier boss lends nothing. A true revolve's rings pass whatever
-//! their band count; a point-concurrent prism or a cross never does.
+//! union of circles about the axis: each ring's normals keep ONE angle
+//! to the axis and bear every azimuth. So the inliers are peeled into
+//! pencils (the point their lines meet best, least trimmed squares on
+//! the area, then the next among the rest) and each pencil is judged
+//! by itself. Its facets, sorted into latitude classes (`n . u`), must
+//! each hold a ring (flats meeting the axis at a ring's latitude ride
+//! with it: a D-flat, a square plate round a bore); a crossing rod
+//! folds onto two bearings at many latitudes and holds none. And its
+//! latitude must not run with the bearing: a skewed rod's ring, seen
+//! from another axis, swings its latitude once per turn. A pencil
+//! holding half the inliers must also pass the coarseness gate alone.
+//! The coarseness gate itself reads only facets that meet the axis
+//! (`axis.rs`), so an outlier boss lends nothing.
 //!
 //! Provenance: the Gauss map of a surface of revolution (do Carmo,
 //! Differential Geometry of Curves and Surfaces) and the concurrency
 //! of its normal lines with the axis (Pottmann & Randrup 1998);
 //! least-squares point of nearest approach to a set of lines, least
-//! trimmed squares (Rousseeuw 1984), and the trigonometric moments of
-//! circular data (Mardia & Jupp, Directional Statistics). Written from those sources and
+//! trimmed squares (Rousseeuw 1984), and the trigonometric regression
+//! of linear on circular data (Mardia & Jupp, Directional Statistics). Written from those sources and
 //! our own design notes; no vendor material.
 
 use crate::geometry::Point3;
@@ -52,8 +54,22 @@ const MIN_PENCIL: f64 = 0.05;
 /// The uneven area of all pencils together, as a share of the inlier
 /// area: the same 10 % the concurrency share lets miss the axis.
 const BIAS_SHARE: f64 = 0.1;
-/// Trigonometric moments read: up to four-fold (a box, a jack).
-const HARMONICS: usize = 4;
+/// Harmonics of the bearing the latitude is regressed on: a ring about
+/// another axis runs its latitude with the first.
+const HARMONICS: usize = 2;
+/// A class holds a ring when its widest bearing skip stays inside this
+/// many sagitta budgets: a keyway's mouth in one band (a skip either
+/// side of its floor) is still a ring, a fold onto two or four bearings
+/// (a crossing rod, a box) never. The whole part still meets the
+/// strict budget in `axis.rs`.
+const RING_SKIP: f64 = 2.0;
+/// Latitude jump that separates two classes (rings) of one pencil.
+const LAT_GAP: f64 = 0.01;
+/// Latitude range past which a class is a continuous run, not a ring.
+const LAT_WIDE: f64 = 0.05;
+/// Latitude swing (sine of the tilt) the bearing must explain before a
+/// pencil counts as off its cones: far above a mesh's rounding.
+const LAT_FLOOR: f64 = 2e-3;
 
 /// The widest empty skip (radians) between the bearings about `u` of
 /// the normals `ns`; `None` when too few bear an azimuth to call
@@ -82,10 +98,9 @@ pub(super) fn skip_budget() -> f64 {
 /// rest - and each pencil is judged ON ITS OWN (review of PR #223: two
 /// crossed single-band cylinders are two pencils at one point, and the
 /// union of a ring and a two-bearing pencil looked round). A pencil of
-/// a revolve is a ring (or zone) about the axis, so its area spreads
-/// evenly over the bearings: its unevenness (low trigonometric
-/// moments, [`unevenness`]), weighted by the pencil's area, may total
-/// at most [`BIAS_SHARE`] of the inliers. A pencil holding half the
+/// a revolve is a ring (or zone) about the axis, so its normals keep
+/// one angle to the axis all round: the area off such cones
+/// ([`off_cone`]) may total at most [`BIAS_SHARE`] of the inliers. A pencil holding half the
 /// inliers must also pass the coarseness gate by itself.
 pub(super) fn borne_out(data: &[Datum], ax: Axis, tol: f64) -> bool {
     let mut rest: Vec<&Datum> = data.iter().filter(|d| dist(d, ax).is_some_and(|e| e <= tol)).collect();
@@ -106,7 +121,7 @@ pub(super) fn borne_out(data: &[Datum], ax: Axis, tol: f64) -> bool {
         if a_near >= POINT_SHARE * a_in && widest_skip(near.iter().map(|d| d.n), ax.dir).is_none_or(|g| g > skip_budget()) {
             return false;
         }
-        biased += unevenness(&near, ax.dir).unwrap_or(1.0) * a_near;
+        biased += off_cone(&near, ax.dir).unwrap_or(1.0) * a_near + ringless(&near, ax.dir);
         if biased > BIAS_SHARE * a_in {
             return false;
         }
@@ -130,33 +145,90 @@ fn frame(u: Point3) -> Option<(Point3, Point3)> {
     Some((e1, u.cross(e1)))
 }
 
-/// How far the facets' area-weighted bearings about `u` stand from
-/// an even ring: the largest of the first [`HARMONICS`] trigonometric
-/// moments `|sum a e^(ik theta)| / sum a` (Mardia & Jupp, Directional
-/// Statistics - the Rayleigh test is k = 1). An even ring of N facets
-/// gives 0 for every k < N; a pencil holding share s of the area on
-/// two opposite bearings (a crossing rod) gives s at k = 2, on four (a
-/// box, a jack) s at k = 4; a D-flat that lumps a cut arc's area on
-/// one bearing keeps the low moments nearly whole. `None` when no
-/// facet bears an azimuth.
-fn unevenness(ds: &[&Datum], u: Point3) -> Option<f64> {
+/// How much of a pencil is NOT on cones about `u`: a surface of
+/// revolution meets its axis at one angle all round each ring, so the
+/// latitude `l = n . u` of its facets does not depend on their bearing
+/// theta. A ring about ANOTHER axis seen from `u` (a skewed or crossing
+/// rod) has `l` running with theta. The share of the latitude's
+/// variance that the first [`HARMONICS`] harmonics of theta explain,
+/// `R^2 = sum_k 2 |sum a (l - mean) e^(ik theta)|^2 / (A^2 var)` (the
+/// trigonometric regression of linear on circular data, Mardia & Jupp,
+/// Directional Statistics), reads as the share of the pencil's area on
+/// such a ring: 0 on any revolve, about the rod's share on a cross.
+/// A pencil whose latitudes are one cone within rounding explains
+/// nothing and gives 0. `None` when no facet bears an azimuth.
+fn off_cone(ds: &[&Datum], u: Point3) -> Option<f64> {
     let (e1, e2) = frame(u)?;
-    let (mut c, mut sn, mut total) = ([0.0f64; HARMONICS], [0.0f64; HARMONICS], 0.0);
-    for d in ds {
-        let Some(t) = bearing(d.n, u, e1, e2) else {
-            continue;
-        };
-        for (k, (ck, sk)) in c.iter_mut().zip(sn.iter_mut()).enumerate() {
-            let kt = (k + 1) as f64 * t;
-            *ck += d.a * kt.cos();
-            *sk += d.a * kt.sin();
-        }
-        total += d.a;
-    }
-    if total <= 0.0 || !total.is_finite() {
+    let pts: Vec<(f64, f64, f64)> = ds.iter().filter_map(|d| bearing(d.n, u, e1, e2).map(|t| (t, d.n.dot(u), d.a))).collect();
+    let total: f64 = pts.iter().map(|p| p.2).sum();
+    if pts.is_empty() || total <= 0.0 || !total.is_finite() {
         return None;
     }
-    Some(c.iter().zip(&sn).fold(0.0f64, |m, (x, y)| m.max((x * x + y * y).sqrt() / total)))
+    let mean = pts.iter().map(|p| p.1 * p.2).sum::<f64>() / total;
+    // The latitude itself (a skewed ring: l runs with theta) and its
+    // square deviation (a crossing ring at 90 degrees: its bearings
+    // fold onto two, where l spreads both ways, so only the spread
+    // runs with theta).
+    let lin = explained(&pts, total, |l| l - mean, LAT_FLOOR);
+    let sq = explained(&pts, total, |l| (l - mean) * (l - mean), LAT_FLOOR * LAT_FLOOR);
+    Some(lin.max(sq))
+}
+
+/// The share (R^2) of the variance of `f(l)` that the first
+/// [`HARMONICS`] harmonics of the bearing explain, counted only when
+/// the explained part itself stands above `floor` (a mesh's rounding
+/// noise is explained by chance, never by a millimetre of tilt).
+fn explained(pts: &[(f64, f64, f64)], total: f64, f: impl Fn(f64) -> f64, floor: f64) -> f64 {
+    let fm = pts.iter().map(|p| p.2 * f(p.1)).sum::<f64>() / total;
+    let var = pts.iter().map(|p| p.2 * (f(p.1) - fm).powi(2)).sum::<f64>() / total;
+    if var.is_nan() || var <= 0.0 {
+        return 0.0;
+    }
+    let mut e = 0.0;
+    for k in 1..=HARMONICS {
+        let (mut c, mut sn) = (0.0, 0.0);
+        for (t, l, a) in pts {
+            let kt = k as f64 * t;
+            c += a * (f(*l) - fm) * kt.cos();
+            sn += a * (f(*l) - fm) * kt.sin();
+        }
+        e += 2.0 * (c * c + sn * sn) / (total * total);
+    }
+    if e.sqrt() <= floor {
+        return 0.0;
+    }
+    (e / var).clamp(0.0, 1.0)
+}
+
+/// The area of the pencil's latitude classes that hold no ring: the
+/// facets sorted by latitude `n . u` and split where it jumps by more
+/// than [`LAT_GAP`]; a revolve's ring (or zone band) is one narrow
+/// class bearing every azimuth (to [`RING_SKIP`]), and flats meeting the axis at its
+/// latitude (a D-flat, a square plate's sides round a bore) ride with
+/// it. A crossing rod's wall seen at 90 degrees folds onto two
+/// bearings at many latitudes: narrow classes with no ring. Classes
+/// wider than [`LAT_WIDE`] are a continuous run of latitudes (a fine
+/// dome, a skewed ring) and are left to [`off_cone`].
+fn ringless(ds: &[&Datum], u: Point3) -> f64 {
+    let Some((e1, e2)) = frame(u) else {
+        return 0.0;
+    };
+    let mut v: Vec<(f64, &Datum)> = ds.iter().filter(|d| bearing(d.n, u, e1, e2).is_some()).map(|d| (d.n.dot(u), *d)).collect();
+    v.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let (mut lost, mut start) = (0.0, 0usize);
+    for i in 1..=v.len() {
+        let split = i == v.len() || v.get(i).zip(v.get(i - 1)).is_some_and(|(b, a)| b.0 - a.0 > LAT_GAP);
+        if !split {
+            continue;
+        }
+        let class = v.get(start..i).unwrap_or(&[]);
+        let wide = class.first().zip(class.last()).is_some_and(|(a, b)| b.0 - a.0 > LAT_WIDE);
+        if !wide && widest_skip(class.iter().map(|c| c.1.n), u).is_none_or(|g| g > RING_SKIP * skip_budget()) {
+            lost += class.iter().map(|c| c.1.a).sum::<f64>();
+        }
+        start = i;
+    }
+    lost
 }
 
 /// The point the lines meet best: the area-weighted least-squares

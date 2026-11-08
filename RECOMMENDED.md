@@ -13712,3 +13712,38 @@ revolved (follow-up material if users hit it with long keyways).
   including a short cross pin holding more than about 10 % of the
   inlier area. A single-band shaft whose keyway or flat is wide enough
   to move the first moment past 10 % is refused.
+
+### #208, second re-review of PR #223: rings by latitude class, latitude must not run with bearing
+
+- **Decided:** the per-pencil moment test (e883ae6) is replaced by two
+  tests on each pencil. (1) **Latitude classes:** the pencil's facets
+  are sorted by latitude `n . u` and split where it jumps by more than
+  0.01. Each narrow class (range at most 0.05) must hold a ring, with
+  its widest bearing skip within twice the sagitta budget; a class
+  that holds none counts its area as off the axis. Flats at a ring's
+  latitude ride with it (a D-flat; a square plate's sides round a
+  centred bore; a keyway floor in its band). (2) **Off-cone share:**
+  the share of the latitude's variance (and of its squared deviation)
+  that the first two bearing harmonics explain (trigonometric
+  regression, Mardia & Jupp). It counts only when the explained swing
+  exceeds 2e-3 (about 0.1 degrees; the jittered-mesh pins explain at
+  most 3.3e-4). Both are summed, weighted by area, and capped at 10 %
+  of the inliers, as before.
+- **Why:** a skewed cross's shaft wall, seen from the rod's axis (or
+  from a line between the two), is a squashed ring: its bearings stay
+  spread, so the moments read it at only (1 - cos ang)/2, but its
+  latitude swings once per turn. A revolve's ring keeps one latitude.
+  The moment test also refused a square plate with a centred bore,
+  because the plate's four sides sit in the bore's pencil; by latitude
+  class they ride with the bore's ring, as a D-flat does. A 90-degree
+  cross folds the crossing wall onto two bearings at many latitudes,
+  so each of those classes holds no ring.
+- **Dropped:** the bearing moments of the whole pencil (they refused
+  plate-with-bore and missed skewed crosses); R^2 with no absolute
+  floor (a jittered shaft's correlated rounding explained up to 19 %
+  of its tiny latitude variance); a strict sagitta budget per class (a
+  keyway confined to one band leaves 30-degree skips beside its floor).
+- **Cost:** a skewed cross under about 0.1 degrees passes as one axis,
+  which is harmless at that angle. A finely meshed dome whose latitude
+  steps are under 0.01 is one wide class, judged by the off-cone share
+  alone.
