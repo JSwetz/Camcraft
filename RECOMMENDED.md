@@ -13635,3 +13635,49 @@ revolved (follow-up material if users hit it with long keyways).
   search finds a false axis); lowering ISO (moves the knife-edge, does
   not remove it). A revolve with no flat end (domed or pointed both
   ends) near L/D 1..2 is still refused; none is known to be needed.
+
+## #208 - normal lines through one point cannot certify an axis (2026-11-08)
+
+- **Decided:** a point-concurrency guard in the axis judgement
+  (`crates/motion/src/multiaxis/axis_point.rs`). Find the point the
+  candidate's inlier normal lines meet best (area-weighted
+  least-squares point of nearest approach, refitted on the area half
+  that misses it least). When the lines through that point (within the
+  sagitta tolerance) carry half the inlier area or more, the coarseness
+  gate is applied to those facets alone: their own bearings about the
+  axis must leave no skip past the sagitta budget. Otherwise the
+  candidate fails and the fit refuses by name as before ("share no
+  rotation axis" / "every axis fits ... equally"). Plus, on an
+  isotropic part a pole (facing-flat) axis is no longer tilted by the
+  direction refinement. The guard alone already refuses the cube; this
+  is a second safeguard asked for in the re-review of PR #204.
+- **Why:** two-triangle faces anchor their normal lines at the face
+  centre, so a box's faces all meet at its centre; a single-band wall's
+  lines all meet at the bar's mid point. Lines through one point meet
+  every line through it, so the concurrency share passed for any
+  direction through the point, and a small finely meshed boss or cross
+  hole supplied the bearings. A pencil of lines has no direction of its
+  own; it can only stand for a revolve when it is itself rotationally
+  symmetric about the axis (the Gauss map of a revolve is circles about
+  the axis). A box's faces bear 2-4 azimuths about any axis; a
+  single-band shaft's wall bears all of them about its own axis and two
+  about a cross one. So the common single-band CAD cylinder still fits
+  (pinned: `a_single_band_bar_still_fits_its_true_axis`), and plates,
+  cubes and cross readings are refused.
+- **Considered and dropped:** (b) sub-sampling big facets into many
+  lines: the circumcenter anchor is what makes a turned facet's line
+  meet the axis exactly; samples elsewhere on a wall facet miss it by
+  up to half a chord, so every coarse revolve would lose concurrency.
+  (a) requiring the contact points to spread along the axis: it refuses
+  the single-band cylinder, the most common real STL, whose direction
+  the Gauss map does fix. (c) refusing whenever the inliers are mostly
+  point-concurrent: same single-band loss. An EGI second-moment
+  symmetry test: a square plate is second-moment symmetric about its
+  normal, so it would pass a plate-with-boss about the plate centre.
+- **Cost / caveat:** the guard can only refuse. A single-band shaft
+  with a keyway or D-flat wider than the sagitta skip (about 28 degrees
+  of bearing on each side of the feature's own facets) in its
+  point-concurrent wall is refused rather than read (the issue's
+  shaft-with-D-flat fixture is refused this way, which the issue
+  allows). Five-band and banded shafts are untouched: their lines meet
+  the axis at several points, so no point carries half the area.

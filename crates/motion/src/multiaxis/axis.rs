@@ -154,19 +154,24 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
         cands.push(Point3::new(vecs[0][2], vecs[1][2], vecs[2][2]));
     }
     let poles = super::axis_poles::candidates(&data, a_total);
-    let tries = cands.into_iter().map(|c| try_axis(&data, c, a_total));
-    let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total, iso)));
-    let mut best: Option<(f64, Axis)> = None;
+    let tries = cands.into_iter().map(|c| try_axis(&data, c, a_total).map(|s| (s, false)));
+    let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total, iso).map(|s| (s, true))));
+    let mut best: Option<((f64, Axis), bool)> = None;
     for sol in tries.flatten() {
-        if best.as_ref().is_none_or(|(r, _)| sol.0 < *r) {
+        if best.as_ref().is_none_or(|((r, _), _)| sol.0 .0 < *r) {
             best = Some(sol);
         }
     }
     // The eigen direction is exact only on an even tessellation; the
     // concurrency rows refine it (axis_refine.rs) and the refined line
     // replaces it only past the noise floor and when the fit's own
-    // residual does not grow - an even revolve keeps its bits.
-    let best = best.map(|(r, ax)| {
+    // residual does not grow - an even revolve keeps its bits. On an
+    // isotropic part a pole axis IS its face normal (the moment names
+    // no direction to refine toward), and is never tilted off it (#208).
+    let best = best.map(|((r, ax), pole)| {
+        if pole && iso {
+            return (r, ax);
+        }
         let Some(v) = super::axis_refine::refine_dir(&data, ax.dir, ax.origin) else {
             return (r, ax);
         };
@@ -309,35 +314,16 @@ pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<
         return None;
     }
     // The coarseness gate: the widest empty skip between facet
-    // bearings about u. sqrt(8 * REL_TOL) radians is exactly the
-    // chord-sagitta budget written in angle - a turn coarse enough
-    // to skip further is a polygon pretending to be a wall.
-    let any = if u.z.abs() < 0.9 {
-        Point3::new(0.0, 0.0, 1.0)
-    } else {
-        Point3::new(1.0, 0.0, 0.0)
-    };
-    let e1 = unit(u.cross(any))?;
-    let e2 = u.cross(e1);
-    let mut angs: Vec<f64> = Vec::new();
-    for d in data {
-        let s = d.n.dot(u);
-        let p = Point3::new(d.n.x - u.x * s, d.n.y - u.y * s, d.n.z - u.z * s);
-        if p.dot(p) <= 1e-4 {
-            continue; // pole facet: bears no azimuth
-        }
-        angs.push(p.dot(e2).atan2(p.dot(e1)).rem_euclid(std::f64::consts::TAU));
+    // bearings about u, inside the chord-sagitta budget written in
+    // angle - a turn coarse enough to skip further is a polygon
+    // pretending to be a wall (axis_point.rs).
+    use super::axis_point::{borne_out, skip_budget, widest_skip};
+    if widest_skip(data.iter().map(|d| d.n), u)? > skip_budget() {
+        return None;
     }
-    if angs.len() <= 2 {
-        return None; // too few bearings to call anything round
-    }
-    angs.sort_by(|x, y| x.total_cmp(y));
-    let mut gap = angs[1] - angs[0];
-    for w in angs.windows(2).skip(1) {
-        gap = gap.max(w[1] - w[0]);
-    }
-    gap = gap.max(std::f64::consts::TAU - angs[angs.len() - 1] + angs[0]);
-    if gap > (8.0 * REL_TOL).sqrt() {
+    // Lines through ONE point meet every line through it: a pencil
+    // certifies an axis only by its own bearings (issue #208).
+    if !borne_out(data, ax, tol) {
         return None;
     }
     Some((sq / a_total).sqrt())
