@@ -52,4 +52,6 @@ pub mod tool_numbers;
 pub use camcraft_tools::tools;
 pub mod units;
 pub use camcraft_sim::verify;
+// #261: the moves a cached path's warnings name.
+pub mod warned_moves;
 pub mod world;
