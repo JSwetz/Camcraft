@@ -64,7 +64,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 36] = [
+    pub(crate) const ALL: [Icon; 37] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
