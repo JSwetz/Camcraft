@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{AreaControls, GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -171,6 +171,9 @@ pub struct Operation {
     /// The area controls (M11.5): how far past - or short of - the
     /// selection the tool may go. Default is the identity.
     pub area: AreaControls,
+    /// The cutting fluid the post switches on for this operation
+    /// (#112). Flood by default - what every post emitted before.
+    pub coolant: CoolantMode,
 }
 
 /// User-facing operation label and explicit position within its setup.
@@ -184,10 +187,35 @@ pub struct OperationMeta {
 /// The cached result of generating an operation: the path plus the
 /// warnings `verify` attached to it. Deleting the operation entity frees
 /// both through the Rust-owned drop hooks (AGENTS.md resource invariant).
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+/// `sig` is the path's [`crate::path_sig::of`], computed once in
+/// [`Toolpath::new`], the only way to build one (the field is private),
+/// so the program-ahead digest reads it per frame without a clone
+/// (#109 review B1). The cache is written whole, never edited in place.
+#[derive(Component, Debug, Clone, PartialEq)]
 pub struct Toolpath {
     pub path: ClPath,
     pub warnings: Vec<Warning>,
+    sig: u64,
+}
+
+impl Toolpath {
+    #[must_use]
+    pub fn new(path: ClPath, warnings: Vec<Warning>) -> Self {
+        let sig = crate::path_sig::of(&path.moves);
+        Self { path, warnings, sig }
+    }
+
+    /// The stored signature of `path` (see the type's doc).
+    #[must_use]
+    pub fn path_sig(&self) -> u64 {
+        self.sig
+    }
+}
+
+impl Default for Toolpath {
+    fn default() -> Self {
+        Self::new(ClPath::default(), Vec::new())
+    }
 }
 
 /// The document's display unit, stored as a flecs singleton (M1.1): on
@@ -226,6 +254,29 @@ pub enum PostRef {
     Builtin,
     Named(String),
     File(String),
+}
+
+/// The user's choices for the document's post (issue #34), a flecs
+/// singleton beside `PostRef`: setup furniture, moved only by
+/// `SetPostOptions` (undoable) or a document load. A script reads the
+/// ones it knows from its `postOptions` global and ignores the rest;
+/// the default is every post's own default, so a document that never
+/// chose writes no key.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PostOptions {
+    /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
+    /// default, or the two-block G76 cycle from the thread record).
+    pub threading: ThreadingOutput,
+}
+
+/// The thread-output choice of [`PostOptions`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThreadingOutput {
+    /// Every pass as synchronized G32 moves - the stream's own passes.
+    #[default]
+    G32Passes,
+    /// One G76 multi-pass threading cycle per thread record.
+    G76Cycle,
 }
 
 /// Which theme the document wears (M6.1 C), a flecs singleton like
@@ -292,9 +343,9 @@ pub struct WorkMaterialDef(pub Option<crate::tools::WorkMaterial>);
 
 /// Ribbon pins (M6.2): the kind indices the user pinned, in pin order -
 /// the ribbon's own Pinned section reads this singleton. A document
-/// SETTING like the theme reference (saved with the project), but NOT
-/// an undoable command: undo replays cuts, not layout, and this is
-/// layout (ROADMAP M6.2's law, stated against the command law). The
+/// SETTING like the theme reference (saved with the project), so like
+/// the theme it changes only through a command - `SetRibbonPins`
+/// (issue #143), undoable and counted as a document change. The
 /// indices are registry-stable - the row order is the product order -
 /// so a pin names its kind the way the theme names its built-in;
 /// an index past the table (a document from a larger registry) is
@@ -327,6 +378,7 @@ pub fn register_schema(world: &World) {
     world.component::<Units>();
     world.component::<MachineDef>();
     world.component::<PostRef>();
+    world.component::<PostOptions>();
     world.component::<ThemeRef>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();

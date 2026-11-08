@@ -14,160 +14,20 @@
 //! Gate map (M4.4): covers camcraft_app::operation (the bore arm of
 //! generate, the envelope verdict wiring, the global nose_radius row),
 //! camcraft_app::commands (Create/GenerateOperation, ChangeTool,
-//! EditOperationParams undo).
+//! EditOperationParams undo), camcraft_app::operation::stamp (#109: the
+//! pilot ahead in the stamp). The bar's body on its feeds (#146) is
+//! turning_bore_feeds.rs.
 //! Lane shape (M4.4): all tests here run in seconds.
 
 mod common;
 
-use flecs_ecs::prelude::World;
-
-use camcraft_app::commands::{
-    AddTool, ChangeTool, CreateOperation, EditOperationParams, GenerateOperation, History,
-    ImportModel, LoadMachine, SetStock,
-};
-use camcraft_app::geometry::{Mesh, Point3, Triangle};
-use camcraft_app::machine::Machine;
+use camcraft_app::commands::{AddTool, ChangeTool, CreateOperation, DeleteOperation, EditOperationParams, GenerateOperation, ImportModel};
+use camcraft_app::drilling::{CycleChoice, Hole};
+use camcraft_app::geo2d::Point2;
 use camcraft_app::model;
 use camcraft_app::operation::{Carried, Height, KindInfo, OpParams, OpStatus, OpType, SrcRef};
-use camcraft_app::schema::Location;
-use camcraft_app::tools::{catalog, Tool};
-use camcraft_app::world::new_world;
 
-const TAU: f64 = std::f64::consts::TAU;
-const BLANK: f64 = 10.0;
-const WALL: f64 = 6.0;
-const FLOOR: f64 = -20.0;
-const D: f64 = 0.4;
-
-fn catalog_tool(name: &str) -> Tool {
-    catalog()
-        .into_iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, t)| t)
-        .expect("catalog entry")
-}
-
-fn add_tool(world: &World, history: &mut History, name: &str) {
-    let cmd = AddTool::new(world, name, catalog_tool(name));
-    history.execute(world, cmd.expect("catalog tool"));
-}
-
-fn status(world: &World, name: &str) -> OpStatus {
-    let e = model::find_by_name(world, name).expect("entity exists");
-    camcraft_app::operation::status_of(world, &e)
-}
-
-fn cache(world: &World, name: &str) -> Option<camcraft_app::schema::Toolpath> {
-    model::find_by_name(world, name).and_then(|e| model::toolpath_of(world, &e))
-}
-
-fn rho(q: Point3) -> f64 {
-    (q.x * q.x + q.y * q.y).sqrt()
-}
-
-/// The closed-solid revolve the turning suites share.
-fn revolve(meridian: &[(f64, f64)]) -> Mesh {
-    let v = |j: usize, r: f64, z: f64| {
-        let th = TAU * j as f64 / 16.0;
-        Point3::new(r * th.cos(), r * th.sin(), z)
-    };
-    let mut facets = Vec::new();
-    for seg in meridian.windows(2) {
-        let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
-        for j in 0..16 {
-            let (a1, a2, b1, b2) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
-            if ra <= 1e-12 {
-                facets.push(Triangle::new(a1, b2, b1));
-            } else if rb <= 1e-12 {
-                facets.push(Triangle::new(a1, a2, b2));
-            } else {
-                facets.push(Triangle::new(a1, a2, b2));
-                facets.push(Triangle::new(a1, b2, b1));
-            }
-        }
-    }
-    Mesh::from_facets(facets)
-}
-
-/// The bored bar: OD 10, an open hole of radius 6 from the top down
-/// to a floor at -20, on a bar long past the hole so the axis fit
-/// reads a revolve, not a dome.
-fn bored() -> Mesh {
-    revolve(&[
-        (0.0, -50.0),
-        (BLANK, -50.0),
-        (BLANK, 50.0),
-        (WALL, 50.0),
-        (WALL, FLOOR),
-        (0.0, FLOOR),
-    ])
-}
-
-/// The plain bar the hole-existence door must refuse.
-fn wall() -> Mesh {
-    revolve(&[(0.0, -50.0), (BLANK, -50.0), (BLANK, 50.0), (0.0, 50.0)])
-}
-
-fn machine(word: &str) -> Machine {
-    Machine {
-        model: format!("TestBench {word}"),
-        kind: Some(word.to_string()),
-        ..Default::default()
-    }
-}
-
-/// A document the boring kind lives in: the bored bar AND a smooth
-/// wall in plain box stock, the lathe mounted, the catalog boring
-/// bar (and the other lathe steel) on the rack.
-fn bore_world() -> (World, History) {
-    let world = new_world();
-    let mut history = History::default();
-    history.execute(
-        &world,
-        SetStock::new(
-            &world,
-            camcraft_app::stock::StockShape::Box {
-                dx: 40.0,
-                dy: 40.0,
-                dz: 110.0,
-            },
-            Location::default(),
-        )
-        .expect("box stock"),
-    );
-    let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(machine("lathe")));
-    history.execute(&world, cmd.expect("lathe"));
-    add_tool(&world, &mut history, "BR-1000");
-    add_tool(&world, &mut history, "TN-1600-0R8");
-    add_tool(&world, &mut history, "EM-0400-2FL");
-    history.execute(&world, ImportModel::from_mesh("bar", bored()));
-    history.execute(&world, ImportModel::from_mesh("wall", wall()));
-    (world, history)
-}
-
-fn bore_params() -> OpParams {
-    OpParams::BoringTurning {
-        tolerance: 0.05,
-        clearance_z: Height::fixed(60.0),
-        top_z: Height::fixed(40.0),
-        bottom_z: Height::fixed(-10.0),
-        feed: 120.0,
-        plunge_feed: 40.0,
-    }
-}
-
-fn create_on(world: &World, history: &mut History, name: &str, tool: &str, src: &str, params: OpParams) {
-    history.execute(
-        world,
-        CreateOperation::new(world, name, tool, SrcRef::Entity(src.into()), params)
-            .expect("create"),
-    );
-    history.execute(world, GenerateOperation::new(world, name).expect("generate"));
-}
-
-fn create(world: &World, history: &mut History, name: &str, params: OpParams) {
-    create_on(world, history, name, "BR-1000", "bar", params);
-}
+use common::bore::*;
 
 #[test]
 fn a_bored_op_runs_clean_in_the_document() {
@@ -175,9 +35,10 @@ fn a_bored_op_runs_clean_in_the_document() {
     // verdict comes back silent, so the op reads Ok with nothing
     // attached. The cached path from the world's side: every ride
     // center stands inside the modeled wall by the bar's own nose,
-    // and the bar travels to and from the cut down the hole's AXIS -
+    // and the bar travels to and from the cut centred on the hole's AXIS -
     // the rapids are the hole's air, not the blank's outside.
     let (world, mut history) = bore_world();
+    pilot(&world, &mut history);
     create(&world, &mut history, "BR1", bore_params());
     let c = cache(&world, "BR1").expect("cached");
     assert_eq!(status(&world, "BR1"), OpStatus::Ok, "the wall verdict is silent");
@@ -188,11 +49,86 @@ fn a_bored_op_runs_clean_in_the_document() {
     for m in &feeds {
         assert!(rho(m.to) <= WALL - D + 1e-9, "center stands inside the wall: {:?}", m.to);
     }
+    // The bar travels with its own axis on the spindle (#103 review
+    // B3): the insert at the Ø10 body's edge, bar and nose centred -
+    // the nose r 5 - D/2 off the axis.
     for m in t.moves.iter().filter(|m| m.kind == camcraft_app::cl::MoveKind::Rapid) {
-        assert!(rho(m.to) < 1e-6, "a boring rapid leaves the axis - through steel: {:?}", m.to);
+        assert!((rho(m.to) - (5.0 - D * 0.5)).abs() < 1e-6, "a boring rapid off the bar's centred line: {:?}", m.to);
     }
     assert!((feeds.last().unwrap().to.z - 40.0).abs() < 0.05, "the ride spends the window's top");
     assert!(t.is_chained(), "the chain holds");
+}
+
+#[test]
+fn a_boring_approach_into_a_solid_bar_with_no_pilot_is_convicted_and_blocks_the_post() {
+    // #103: the bar's approach runs down the axis (r 0, Z 60 -> -10);
+    // with no drill ahead the solid bar stands there - the part's own
+    // hole is not in the stock until something cuts it.
+    let (world, mut history) = bore_world();
+    create(&world, &mut history, "BR1", bore_params());
+    let c = cache(&world, "BR1").expect("cached");
+    assert!(c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: 0 }), "the approach went unnamed: {:?}", c.warnings);
+    let out = std::env::temp_dir().join(format!("camcraft-bore-nopilot-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&out);
+    match camcraft_app::posting::post_setup(&world, &out) {
+        Ok(_) => panic!("a boring bar rapiding into a solid bar posted"),
+        Err(e) => assert!(e.contains("post blocked") && e.contains("rapid move 0 "), "refused, but not by the rapid law: {e}"),
+    }
+    assert!(!out.exists(), "a refused post writes nothing");
+}
+
+#[test]
+fn a_ten_mm_bar_down_a_four_mm_pilot_is_convicted() {
+    // #103 review B1: the nose fits the Ø4 hole, the bar's Ø10 body
+    // does not - the body is judged, not the nose alone.
+    let (world, mut history) = bore_world();
+    pilot_of(&world, &mut history, "DR-0400-L", 2.05);
+    create(&world, &mut history, "BR1", bore_params());
+    let c = cache(&world, "BR1").expect("cached");
+    assert!(c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: 0 }), "the body rode a 4 mm hole unnamed: {:?}", c.warnings);
+}
+
+#[test]
+fn a_bar_whose_shank_outgrows_its_head_is_judged_by_its_full_shank() {
+    // #103 review B4: head Ø8, shank Ø12, nose 0.4, in a Ø15 bore over a
+    // Ø13 pilot. The kernel centres the whole bar (nose r 5); the shank,
+    // read at its full size both ways a record can mean it, spans r
+    // -7..7 - past the pilot's 6.5: convicted. Read at half the
+    // diameters (generate passing d/2) it would span -1..6 and pass
+    // silently - this pins the body's size at the app level.
+    let (world, mut history) = bore_world();
+    let wide = revolve(&[(0.0, -50.0), (BLANK, -50.0), (BLANK, 50.0), (7.5, 50.0), (7.5, FLOOR), (0.0, FLOOR)]);
+    history.execute(&world, ImportModel::from_mesh("wide", wide));
+    let mut bar = catalog_tool("BR-1000");
+    bar.diameter = 8.0;
+    bar.shank_d = 12.0;
+    history.execute(&world, AddTool::new(&world, "BR-0812", bar).expect("a sane bar"));
+    let mut drill = catalog_tool("DR-0400");
+    drill.flute_len = 70.0;
+    drill.diameter = 13.0;
+    drill.shank_d = 13.0;
+    history.execute(&world, AddTool::new(&world, "DR-1300-L", drill).expect("a sane drill"));
+    let hole = Hole { xy: Point2::new(0.0, 0.0), radius: 6.55, entry_z: 50.0, floor_z: -16.0, through: false, stepped: false };
+    let drill_params = OpParams::Drill {
+        clearance_z: Height::fixed(60.0),
+        retract_z: None,
+        top_z: Height::fixed(50.0),
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 120.0,
+        plunge_feed: 80.0,
+        holes: vec![hole],
+        cross: vec![],
+    };
+    create_on(&world, &mut history, "AX0", "DR-1300-L", "wide", drill_params);
+    assert_eq!(status(&world, "AX0"), OpStatus::Ok, "the pilot drills");
+    create_on(&world, &mut history, "BR1", "BR-0812", "wide", bore_params());
+    let c = cache(&world, "BR1").expect("cached");
+    let r0 = rho(c.path.moves[0].to);
+    assert!((r0 - 5.0).abs() < 1e-6, "the kernel centres the whole bar, nose r 5: {r0}");
+    assert!(c.warnings.contains(&camcraft_app::verify::Warning::RapidInStock { at: 0 }), "the shank rode through the pilot wall: {:?}", c.warnings);
 }
 
 #[test]
@@ -237,6 +173,7 @@ fn a_regrind_of_the_nose_convicts_through_the_digest() {
     // Undoing the grind reads Stale again: the digest is a question
     // about NOW, never a remembered verdict.
     let (world, mut history) = bore_world();
+    pilot(&world, &mut history);
     create(&world, &mut history, "BR1", bore_params());
     assert_eq!(status(&world, "BR1"), OpStatus::Ok);
     let mut fatter = catalog_tool("BR-1000");
@@ -279,6 +216,7 @@ fn the_bore_seed_stands() {
         panic!("the seed must be bore params");
     };
     assert_eq!((*tolerance, *feed, *plunge_feed), (0.05, 120.0, 40.0), "the seed carries the setup's numbers");
+    pilot(&world, &mut history);
     create_on(&world, &mut history, "ST", "BR-1000", "bar", seed);
     let c = cache(&world, "ST").expect("cached");
     assert_eq!(status(&world, "ST"), OpStatus::Ok, "the seed's numbers stand");
@@ -328,3 +266,38 @@ fn an_upward_window_refuses_at_the_create_door() {
     let msg = err.to_string();
     assert!(msg.contains("must cut downward"), "{msg}");
 }
+
+#[test]
+fn a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale() {
+    // #109: BR1's approach down the axis is acquitted by AX0's hole, so
+    // AX0 is an input of BR1's verdict. Deleting the pilot, or drilling
+    // it again to Z 0, must mark BR1 Stale and refuse the post - never
+    // post the cached approach into the bar it no longer bored.
+    for shallow in [false, true] {
+        let (world, mut history) = bore_world();
+        pilot(&world, &mut history);
+        create(&world, &mut history, "BR1", bore_params());
+        assert_eq!(status(&world, "BR1"), OpStatus::Ok, "the pilot acquits the approach");
+        if shallow {
+            let ax0 = model::find_by_name(&world, "AX0").expect("pilot");
+            let mut p = model::operation_of(&world, &ax0).expect("op").params;
+            if let OpParams::Drill { holes, .. } = &mut p {
+                holes[0].floor_z = 0.0;
+            }
+            history.execute(&world, EditOperationParams::new(&world, "AX0", p).expect("a legal floor"));
+            history.execute(&world, GenerateOperation::new(&world, "AX0").expect("regenerate the pilot"));
+            assert_eq!(status(&world, "AX0"), OpStatus::Ok, "the shallow pilot drills");
+        } else {
+            history.execute(&world, DeleteOperation::new(&world, "AX0").expect("delete the pilot"));
+        }
+        assert_eq!(status(&world, "BR1"), OpStatus::Stale, "the pilot ahead moved (shallow: {shallow})");
+        let out = std::env::temp_dir().join(format!("camcraft-bore-109-{shallow}-{}.nc", std::process::id()));
+        let _ = std::fs::remove_file(&out);
+        match camcraft_app::posting::post_setup(&world, &out) {
+            Ok(_) => panic!("a bore acquitted by a moved pilot posted (shallow: {shallow})"),
+            Err(e) => assert!(e.contains("BR1") && e.contains("regenerate"), "refused, but not as stale: {e}"),
+        }
+        assert!(!out.exists(), "a refused post writes nothing");
+    }
+}
+

@@ -26,6 +26,7 @@ var LINE = "";
 var properties = {};
 var W = properties;
 var currentPosition = { X: 0, Y: 0, Z: 0 };
+var postOptions = {};
 var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm" };
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
@@ -122,6 +123,8 @@ pub const HOOKS: &[&str] = &[
     "onDwell",
     "onSpindleSpeed",
     "onRadiusCompensation",
+    "onThreadCycle",
+    "onThreadCycleEnd",
     "onPartLoading",
     "onPartUnloading",
     "onPartTransfer",
@@ -134,6 +137,9 @@ pub const HOOKS: &[&str] = &[
 pub struct Script {
     ctx: Context,
     present: Vec<(&'static str, bool)>,
+    /// The `coolantModes = true` manifest flag (#150): the script reads
+    /// `PARAM Coolant`. Without it a non-Flood ask is refused by name.
+    coolant_modes: bool,
 }
 
 impl Script {
@@ -148,6 +154,7 @@ impl Script {
         let mut s = Self {
             ctx,
             present: Vec::new(),
+            coolant_modes: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -158,6 +165,10 @@ impl Script {
             present.push((*h, yes));
         }
         s.present = present;
+        s.coolant_modes = s
+            .eval("typeof coolantModes !== \"undefined\" && coolantModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
         Ok(s)
     }
 
@@ -174,6 +185,12 @@ impl Script {
     /// Publish the flattened machine object once.
     pub fn set_machine(&mut self, m: &Value) -> Result<(), PostError> {
         self.eval(&format!("machine = {m};"))?;
+        Ok(())
+    }
+
+    /// Publish the document's post options once (issue #34).
+    pub fn set_options(&mut self, o: &Value) -> Result<(), PostError> {
+        self.eval(&format!("postOptions = {o};"))?;
         Ok(())
     }
 
@@ -212,6 +229,12 @@ impl Script {
     /// True when `name` exists (used for the onPlunge preference).
     pub fn hook_exists(&self, name: &str) -> bool {
         self.has(name)
+    }
+
+    /// True when the script declares `coolantModes = true` - it reads
+    /// the section's `PARAM Coolant` (#150).
+    pub fn reads_coolant(&self) -> bool {
+        self.coolant_modes
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

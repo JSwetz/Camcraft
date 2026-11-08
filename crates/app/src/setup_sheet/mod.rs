@@ -107,7 +107,7 @@ pub fn render(world: &World, setup_name: Option<&str>) -> Result<String, String>
     out.push_str(&format!("SETUP SHEET - {title}\n"));
     out.push_str("LAW: every number is resolved from the live document at render\n");
     out.push_str("     time (no timestamps - the same document renders byte-identical).\n");
-    out.push_str("     Operations follow the program law: setup rank, then name.\n");
+    out.push_str("     Operations follow the program law: setup rank, then position.\n");
     out.push_str("PAGE 1 OF 1 (single-page sheet)\n");
     out.push('\n');
 

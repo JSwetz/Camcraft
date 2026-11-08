@@ -10,7 +10,8 @@
 //! `posting::wcs_context` hands the post, the one the spindle law
 //! judges against), run there, and carried back - so the kernel's own
 //! laws hold about the spindle the machine turns. The reach and holder
-//! laws (issue #84, `drill_reach`) judge the chain in the same frame.
+//! laws (issue #84, `drill_reach`) judge the chain in the same frame; the finished chain, back in the
+//! world, is judged against the part's solid (issue #117, `cross_part`).
 //!
 //! Provenance: a lathe's or mill-turn's live-tool radial position is
 //! measured from the spindle centreline (RS-274 / ISO 6983 lathe
@@ -105,6 +106,8 @@ pub(super) fn cross_drill(
     super::cross_stock::rapids_clear(&t, &st, p.tool)?;
     super::drill_reach::cross_holder(&t, facets, stock, (ox, oy), p.tool, tool_name)?;
     if on_origin {
+        // Issue #117: what the chain leaves is judged against the part.
+        super::cross_part::part_clear(&t, facets, p.tool, p.holes)?;
         return Ok(t);
     }
     // The kernel's chain is straight, cycle-free and computer-
@@ -126,6 +129,7 @@ pub(super) fn cross_drill(
     if !t.is_chained() || !t.all_finite() {
         return Err(GenError::Invalid("cross-drill chain self-check failed after the spindle shift".into()));
     }
+    super::cross_part::part_clear(&t, facets, p.tool, p.holes)?;
     Ok(t)
 }
 

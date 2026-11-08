@@ -13,6 +13,8 @@
 //! of generate, collect_job's spindle_law door and its wcs_origin).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod punched_bar;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::Toolpath;
@@ -25,44 +27,30 @@ use camcraft_app::schema::{Location, Operation};
 use camcraft_app::tools::catalog;
 use camcraft_app::world::new_world;
 
-const TAU: f64 = std::f64::consts::TAU;
 /// Where the moved bar's axis stands: off the world origin in X and Y.
 const AT: (f64, f64) = (10.0, 4.0);
 
-/// A closed r10 bar, z in [-20, 20], revolved about world Z and moved
-/// by (`dx`, `dy`).
+/// The finished r10 bar, z in [-80, 20] (`punched_bar::FOOT`), revolved about world Z with
+/// `holes(0, 0)` modelled in it (issue #117: the part law refuses a hole
+/// the model lacks), moved by (`dx`, `dy`).
 fn bar(dx: f64, dy: f64) -> Mesh {
-    let meridian = [(0.0, -20.0), (10.0, -20.0), (10.0, 20.0), (0.0, 20.0)];
-    let segs = 64;
-    let v = |j: usize, r: f64, z: f64| {
-        let th = TAU * j as f64 / segs as f64;
-        Point3::new(r * th.cos() + dx, r * th.sin() + dy, z)
-    };
-    let mut facets = Vec::new();
-    for seg in meridian.windows(2) {
-        let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
-        for j in 0..segs {
-            let (a1, a2, b1, b2) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
-            if ra <= 1e-12 {
-                facets.push(Triangle::new(a1, b2, b1));
-            } else if rb <= 1e-12 {
-                facets.push(Triangle::new(a1, a2, b2));
-            } else {
-                facets.push(Triangle::new(a1, a2, b2));
-                facets.push(Triangle::new(a1, b2, b1));
-            }
-        }
-    }
-    Mesh::from_facets(facets)
+    let m = |p: Point3| Point3::new(p.x + dx, p.y + dy, p.z);
+    let f = punched_bar::punched_bar(10.0, punched_bar::FOOT, punched_bar::TOP, &holes(0.0, 0.0))
+        .facets
+        .iter()
+        .map(|t| Triangle::new(m(t.a), m(t.b), m(t.c)))
+        .collect();
+    Mesh::from_facets(f)
 }
 
 /// A right-trapezoid prism: its sides' perpendicular bisectors meet at
-/// no one point, so no axis of revolution reads off it.
+/// no one point, so no axis of revolution reads off it. Its x = 12 face
+/// carries the suite's (12, 0, 10) -X hole, 6 deep, modelled (#117).
 fn prism() -> Mesh {
     let q = [(-10.0, -8.0), (12.0, -8.0), (12.0, 4.0), (-10.0, 10.0)];
     let p = |i: usize, z: f64| Point3::new(q[i % 4].0, q[i % 4].1, z);
-    let mut f = Vec::new();
-    for i in 0..4 {
+    let mut f = punched_bar::punched_x_face(12.0, (-8.0, 4.0), (-20.0, 20.0), (0.0, 10.0), 2.0, 6.0);
+    for i in [0, 2, 3] {
         let (a, b, c, d) = (p(i, -20.0), p(i + 1, -20.0), p(i + 1, 20.0), p(i, 20.0));
         f.push(Triangle::new(a, b, c));
         f.push(Triangle::new(a, c, d));
@@ -116,6 +104,7 @@ fn op(cross: Vec<CrossHole>) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 
@@ -336,4 +325,17 @@ fn a_work_offset_moved_after_a_mill_turn_cross_drill_stales_it_and_the_post_refu
     // Moved back, the cached path is fresh again.
     place_g54(&world, &mut history, 0.0, 0.0);
     assert_eq!(operation::status_of(&world, &e), OpStatus::Ok);
+}
+
+#[test]
+fn a_short_punched_bar_reads_as_turned_about_its_axis() {
+    // Issue #152: the r10 x 40 bar (L/D 2) with one modelled radial
+    // hole tipped the axis fit's isotropy door, and every lathe cross
+    // drill refused it as "every axis fits". Its facing flats name the
+    // axis now.
+    let f = punched_bar::punched_bar(10.0, -20.0, punched_bar::TOP, &holes(0.0, 0.0)[..1]).facets;
+    let ax = camcraft_motion::multiaxis::axis::fit(&f).expect("a short punched bar is turned");
+    let off = ax.dir.cross(Point3::new(0.0, 0.0, 1.0));
+    assert!(off.dot(off).sqrt() < 1e-6, "{ax:?}");
+    assert!(ax.origin.dot(ax.origin).sqrt() < 1e-6, "{ax:?}");
 }
