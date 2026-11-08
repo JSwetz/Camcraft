@@ -468,4 +468,25 @@ fn a_face_job_on_the_built_in_770mx_passes_the_gate_and_posts_inch() {
         "{}",
         posted.program
     );
+    // #131, found on the 770MX: the face's first move is a plunge FEED from
+    // its clearance start, and after the tool change Z stands at the top of
+    // travel - the program crawled the whole stroke at the plunge rate. The
+    // post rapids to the start height (clearance, Z 25 mm = 0.9843 in) once
+    // X Y are known, and the feed runs only the stretch the generator planned.
+    let lines: Vec<&str> = posted.program.lines().collect();
+    let first_feed = lines
+        .iter()
+        .position(|l| l.starts_with("G1 "))
+        .expect("a feed");
+    assert_eq!(
+        lines[first_feed - 1],
+        "G0 Z0.9843",
+        "rapid to clearance before the first feed\n{}",
+        posted.program
+    );
+    assert!(
+        lines[first_feed - 2].starts_with("G0 X") && !lines[first_feed - 2].contains('Z'),
+        "X Y first, Z up\n{}",
+        posted.program
+    );
 }

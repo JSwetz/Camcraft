@@ -236,9 +236,20 @@ function xyFirst(x, y) {
   block(["G0", wo("X", x, orgX), wo("Y", y, orgY)]);
   xyUnknown = false;
 }
+// A feed or arc as the first move after a tool change starts, in the
+// stream, from the generator's own start point - its clearance height
+// (a face plunges from START). After the G30 the tool stands at the top
+// of Z travel, so feeding from there would crawl the whole stroke at the
+// plunge rate. Once X Y are positioned, a rapid takes Z down to that
+// start height - where the generator says the tool already is - and the
+// feed runs only the stretch it planned (proven on the 770MX, #131).
 function startXY(p) {
+  if (!xyUnknown) return;
   if (has(p.StartX) && has(p.StartY)) xyFirst(p.StartX, p.StartY);
   else xyFirst(p.X, p.Y);
+  if (!xyUnknown && has(p.StartZ) && has(p.Z) && p.StartZ > p.Z) {
+    block(["G0", wo("Z", p.StartZ, orgZ)]);
+  }
 }
 
 // While a canned-cycle group is open its expanded hole chain is the
