@@ -231,8 +231,10 @@ only when one of these holds:
      commands for UI changes, ~400-line files; post scripts
      `assets/posts/*.cps` are exempt from the line limit).
 
-   A quick pass over these points, without building, is enough to flag a
-   PR ready; the full review comes after.
+   A quick pass over these points is enough to flag a PR ready: it reads
+   the PR, its stated test results and its mergeability, and does not
+   rebuild (the author ran the quick gate). The full independent review
+   comes after, on the ready PR.
 
 **Once ready, the branch takes no more pushes.** A late fix, a needed merge
 of `main` or any other change first turns it back into a draft
@@ -244,12 +246,12 @@ re-tested, and only then is flagged ready again.
 | Label | Meaning | What happens |
 |---|---|---|
 | `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
-| `needs-rework` (red) | review found blockers | back to draft; fix and push |
-| `conflicts` (orange) | no longer merges with `main` | back to draft; merge `main`, re-test |
+| `needs-rework` (red) | review found blockers | the reviewer turns it back into a draft; fix, push, flag ready again |
+| `conflicts` (orange) | no longer merges with `main` | the reviewer turns it back into a draft; merge `main`, re-test, flag ready again |
 
-A new push after a review gets a fresh review; the marker
-`<!-- pr-reviewer: <commit> -->` in the review comment ties each verdict to
-the commit it judged.
+When a PR comes back from draft with a new head, that head gets a fresh
+review; the marker `<!-- pr-reviewer: <head sha> -->` in the review comment
+ties each verdict to the commit it judged.
 
 ### Review and merge: a manual gate
 

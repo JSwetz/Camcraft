@@ -51,16 +51,17 @@ Otherwise list open PRs that are ready for review (non-draft) with their head SH
 ```bash
 gh pr list --repo NeoTech/Camcraft --state open --limit 100 \
   --json number,isDraft,author,headRepositoryOwner,headRefOid,reviews,comments \
-  --jq '.[] | select((.isDraft|not) and .headRepositoryOwner.login != "NeoTech")
+  --jq '.[] | select(.isDraft|not)
         | .headRefOid as $s
         | select([.reviews[].body, .comments[].body] | map(select(contains("<!-- pr-reviewer: " + $s))) | length == 0)
         | "\(.number) \(.author.login) \($s)"'
 ```
 
 Every line printed is a PR that needs a review:
-- it comes from a fork - our own issue PRs are reviewed in the release cut by
-  the main session (AGENTS.md "A cut goes PR review"), not here, unless the
-  user named one;
+- it is ready for review - a fork PR or one of our own (user, 2026-11-08:
+  "All PR*s made by owner should be reviewd and tagged"); our own PRs are
+  flagged ready by a quick pass (AGENTS.md "Every PR opens as a draft") and
+  get their full review here;
 - no review or comment carries the marker for its current head SHA (a new push
   after our last review means the contributor answered - review again).
 

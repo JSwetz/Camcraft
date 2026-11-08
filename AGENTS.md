@@ -178,9 +178,15 @@ go to `CHANGELOG.md`.
   user saids its ok or the tests are done. Once its been flagged ready to
   review no more pushes should be performed"). A PR is created with
   `--draft` and stays a draft while work, gating and review fixes land on
-  it. It is flagged ready (`gh pr ready <M>`) only when the user says so,
-  or when its gate tier is green on its final head and its independent
-  review is clean. Once ready, its branch takes **no more pushes**: a late
+  it. It is flagged ready (`gh pr ready <M>`) when the user says so, or
+  when a **quick pass** confirms its gates hold (user, 2026-11-08: "the
+  quickpass was to make em ready for review.. so flag em"): it merges
+  cleanly with `main`, its author's quick gate is green on its final head
+  with the pinning tests named, its body is complete (what changed, how
+  tested, what was not exercised, `Changelog:`, `Fixes`/`Refs`), and it
+  keeps this file's laws. The quick pass reads the PR, it does not
+  rebuild; the full independent review comes after, on the ready PR
+  (`/review-prs`, "Outside PRs are reviewed" below). Once ready, its branch takes **no more pushes**: a late
   finding, a needed `git merge origin/main` or any other change first turns
   it back into a draft (`gh pr ready <M> --undo`), says why in a PR
   comment, is pushed and re-gated, and only then is flagged ready again.
@@ -573,15 +579,20 @@ run on demand (`/review-prs`, or `/review-prs <N>` for one PR) and on a loop
 its own worktree, builds, runs the suites it touches and clippy, checks this
 file's laws, and posts a plain review **comment** whose first line is
 `<!-- pr-reviewer: <head sha> -->` (the marker that stops a second review of
-the same push). It never approves, requests changes, merges, pushes or labels:
+the same push), and sets the review label (below). It never approves, requests changes, merges or pushes:
 the user approves and merges an outside PR by hand ("make sure u leave a
 comment and allow us to approve it manually"). **Never two PR reviews at
 once** ("make sure we are not running concurrent PR reviews"): one PR per
 `/review-prs` run, guarded by the lock `.claude/pr-review.lock` (`<N> <sha>
 <UTC>`) - a run that finds a lock younger than 90 min stops; an older one is
 stale and is cleared with its leftover `../cc-pr<N>-review` worktree. Our own
-issue PRs are not reviewed here; a fix PR is reviewed before it merges
-(below), a `feat` or breaking PR at the cut (step 1 above).
+issue PRs are reviewed here too once flagged ready (user, 2026-11-08: "All
+PR*s made by owner should be reviewd and tagged"); a fix PR merges once
+that review is clean, a `feat` or breaking PR at the cut (step 1 above).
+**Review labels**, one colour per state: green `merge-ready` (clean review
+and mergeable), red `needs-rework` (blockers - the reviewer turns the PR
+back into a draft), orange `conflicts` (no longer merges with `main` -
+back to draft).
 
 `fix` / `perf` / `refactor` PRs and docs-, process- and CI-only PRs (no release) merge once
 reviewed by a subagent that did not write them (and, for `fix` / `perf` /
