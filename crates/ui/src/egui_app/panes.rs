@@ -1352,14 +1352,10 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconS
         RichText::new(text.as_str()).color(ui.visuals().text_color())
     };
     ui.horizontal(|ui| {
-        ui.add(Label::new(line).selectable(true))
-            .on_hover_text(text.as_str())
-            .context_menu(|ui| {
-                if ui.button("Copy message").clicked() {
-                    ui.ctx().copy_text(text.clone());
-                    ui.close();
-                }
-            });
+        // The right-hand widgets are laid out first so a long status line
+        // can never push them off the strip (#157: the Debug info door
+        // must stay reachable); the line takes what is left, truncated,
+        // with the full text on hover and in "Copy message".
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // #157: the Debug info door, rightmost - the glyph when the
             // icon set is up, its name when it is not (headless frames
@@ -1378,6 +1374,16 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconS
                     state.pending.push_back(CommandKind::RegenerateAll);
                 }
             }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(Label::new(line).selectable(true).truncate())
+                    .on_hover_text(text.as_str())
+                    .context_menu(|ui| {
+                        if ui.button("Copy message").clicked() {
+                            ui.ctx().copy_text(text.clone());
+                            ui.close();
+                        }
+                    });
+            });
         });
     });
     ui.allocate_rect(rect, Sense::hover());

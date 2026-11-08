@@ -17,9 +17,13 @@ use crate::state::State;
 /// set is up, the words when it is not. Both answer to "Debug info".
 pub(super) fn button(ui: &mut Ui, icons: Option<&IconSet>) -> Response {
     let resp = match icons.and_then(|s| s.texture(Icon::DebugInfo)) {
-        Some(tex) => ui
-            .add(Button::image(Image::new(tex).fit_to_exact_size(Vec2::splat(16.0))).frame(false))
-            .on_hover_text("Debug info"),
+        // The glyph is white at load; tint it with the body ink (as the
+        // ribbon cells do) so it reads on the light theme too.
+        Some(tex) => {
+            let ink = ui.visuals().text_color();
+            let glyph = Image::new(tex).fit_to_exact_size(Vec2::splat(16.0)).tint(ink);
+            ui.add(Button::image(glyph).frame(false)).on_hover_text("Debug info")
+        }
         None => ui.small_button("Debug info"),
     };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Debug info"));
