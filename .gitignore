@@ -13,6 +13,7 @@
 *.log
 # UI snapshot test outputs (the blessed goldens live in crates/ui/tests/snapshots)
 *.new.png
+*.diff.png
 /tests/
 
 # --- editor / agent / personal local config -----------------------------

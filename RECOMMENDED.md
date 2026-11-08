@@ -13878,3 +13878,16 @@ inside, and they wrap as before.
   refusal under Adaptive and Offset rings.
 - Not done (follow-up worth an issue): rotate the development's branch to an azimuth
   where the work is turned, so a D-flat bar wraps whatever its placement.
+
+### PR #239 gate: Linux snapshot tolerance after Windows golden refresh
+
+**Chosen:** use the snapshot library's per-OS threshold of 1.0 on Linux for
+`egui_app_light` and 1.5 for `egui_tool_editor`; retain the default 0.6 on
+other platforms. The Linux rerender differs from the Windows goldens at only
+one and four pixels above 0.6 respectively; the light image clears at 1.0
+and the tool editor at 1.5. Ignore generated `*.diff.png` files alongside
+the already ignored `*.new.png`.
+
+**Dropped:** re-rendering the goldens on Linux, which would reverse the
+Windows fix and make its gate fail again; a global tolerance change, which
+would weaken unrelated snapshots.
