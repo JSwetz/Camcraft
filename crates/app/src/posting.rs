@@ -283,6 +283,7 @@ mod suppressed;
 mod wcs_rotation;
 #[path = "posting_wcs_slot.rs"]
 mod wcs_slot;
+pub(crate) use wcs_rotation::{offset_frame, OffsetFrame};
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
@@ -729,7 +730,17 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             _ => None,
         };
         let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
+        // Commentary for the program (#257): kinds by their panel
+        // labels, the setup by the resolution law (implicit members
+        // name the first setup, as the setup sheet does).
+        let op_kind = op.params.kind().to_string();
+        let tool_kind = tool.kind.to_string();
+        let setup_name = crate::setup::effective(world, setup).unwrap_or_default();
         let d = Dump {
+            op_kind: &op_kind,
+            setup_name: &setup_name,
+            tool_kind: &tool_kind,
+            tool_corner_r: tool.corner_r,
             probe_result,
             op_name: &display_name,
             part_load,

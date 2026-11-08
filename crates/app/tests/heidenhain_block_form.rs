@@ -69,6 +69,13 @@ fn check_form(nc: &str, what: &str) -> Vec<String> {
         assert!(n > last && n < 99_999_999, "{what}: N{n} after N{last} - numbers rise, below the end block");
         last = n;
         let body = body.strip_suffix('*').unwrap_or_else(|| panic!("{what}: no `*` terminator: {l:?}"));
+        // A comment block (#257) carries text, not words: numbered and
+        // terminated like any block, its text free of `*` and a second `;`.
+        if let Some(text) = body.strip_prefix(';') {
+            assert!(!text.contains(';') && !text.contains('*'), "{what}: comment text is clean: {l:?}");
+            bodies.push(body.to_string());
+            continue;
+        }
         for w in body.split(' ') {
             let mut c = w.chars();
             let head = c.next().unwrap_or(' ');
@@ -150,8 +157,9 @@ fn heidenhain_drilling_posts_its_chain_with_the_dwell_at_the_bottom() {
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     let b = check_form(&out.program, "drilling");
     let at = |s: &str| b.iter().position(|x| x == s).unwrap_or_else(|| panic!("no {s:?} in\n{}", out.program));
-    assert_eq!(b[0], "T4 G17 S3000", "the manual's T block: number, spindle axis, speed");
-    assert_eq!(b[1], "M3");
+    assert_eq!(b[0], "; T4 6MM DRILL", "the tool comment (#257) leads its tool call");
+    assert_eq!(b[1], "T4 G17 S3000", "the manual's T block: number, spindle axis, speed");
+    assert_eq!(b[2], "M3");
     // The drill: down at feed, dwell 0.25 s in seconds, out at rapid.
     let bottom = at("G01 X+10 Y+10 Z-6 F100");
     assert_eq!(b[bottom + 1], "FUNCTION DWELL TIME0.25", "{}", out.program);

@@ -1,7 +1,9 @@
 %
 O0001 (TestBench mill-turn)
 G21 G18 G40 G80 G99
+(OPERATION: C wrap - G54)
 G54
+(T0101 BN-0600 - D6)
 T0101
 G50 S6000
 G98
