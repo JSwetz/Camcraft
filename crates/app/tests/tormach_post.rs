@@ -237,7 +237,7 @@ fn the_registry_ships_the_tormach_post_for_mills() {
     ));
 }
 
-/// The 770-family belt: a speed only one range serves names that range
+/// The 770MX belt (its .mch ranges): a speed only one range serves names that range
 /// in a comment before the spindle starts; a tool number outside
 /// PathPilot's table is refused by name.
 #[test]

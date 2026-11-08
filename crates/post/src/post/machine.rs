@@ -113,6 +113,14 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
     if let Some(s) = m.spindle_max {
         head.insert("spindle".to_owned(), json!({"max": s}));
     }
+    if !m.spindle_ranges.is_empty() {
+        // #170: the hand-changed speed ranges, [[low, high], ...] rpm.
+        let rs: Vec<Value> = m.spindle_ranges.iter().map(|(lo, hi)| json!([lo, hi])).collect();
+        head.insert("spindleRanges".to_owned(), Value::Array(rs));
+    }
+    if let Some(b) = m.rigid_tapping {
+        head.insert("rigidTapping".to_owned(), json!(b));
+    }
     if let Some(n) = m.spindles {
         // The handoff inventory (M5.3 C): how many heads stated a
         // spindle. Absent when the file stated none - never a 1
@@ -267,6 +275,18 @@ pub fn script_props(m: &Value) -> Value {
         "rtcp": rtcp,
         "spindles": spindles.map_or(Value::Null, |n| json!(n)),
         "units": if units_inch(m) { "inch" } else { "mm" },
+        // #170: the speed ranges a hand belt/gear change picks between
+        // ([] when unstated), and whether a rigid tap is possible (true
+        // unless the machine says it is not - the unstated-limit law).
+        "spindleRanges": get(m, &["kinematics", "static", "head", "spindleRanges"])
+            .or(get(m, &["spindleRanges"]))
+            .filter(|v| v.is_array())
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "rigidTapping": get(m, &["kinematics", "static", "head", "rigidTapping"])
+            .or(get(m, &["rigidTapping"]))
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
     })
 }
 
