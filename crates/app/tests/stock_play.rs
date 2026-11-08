@@ -158,10 +158,12 @@ fn frames_until(w: &PlayWorker, k: usize) -> Vec<PlayFrame> {
 fn the_worker_publishes_a_model_that_follows_the_cutter() {
     let world = faced_doc();
     let w = PlayWorker::spawn(PlaySeed::gather(&world, false, COARSE).expect("seed")).expect("worker");
+    assert!(w.needs_poll(), "the first picture is still pending");
     let total = w.index().total();
     assert!(total > 4, "rows to play: {total}");
     let first = frames_until(&w, 0);
     assert_eq!(first.last().map(|f| f.at), Some(0), "the uncut stock is published first");
+    assert!(!w.needs_poll(), "a paused playhead at its displayed target is idle");
     let uncut = frame(&first[0].view.stock);
     // The playhead advances in steps; each published picture is cut by
     // no fewer moves than the one before, and the end is the end.
@@ -170,8 +172,10 @@ fn the_worker_publishes_a_model_that_follows_the_cutter() {
     let mut changed = 0;
     for k in [total / 4, total / 2, 3 * total / 4, total] {
         w.request(k);
+        assert!(w.needs_poll(), "a new playhead target needs frames");
         let fr = frames_until(&w, k);
         assert_eq!(fr.last().map(|f| f.at), Some(k), "the worker reaches the playhead");
+        assert!(!w.needs_poll(), "the landed frame needs no further polling");
         for f in &fr {
             assert!(f.at >= *ats.last().unwrap_or(&0), "published views advance monotonically: {ats:?} then {}", f.at);
             ats.push(f.at);

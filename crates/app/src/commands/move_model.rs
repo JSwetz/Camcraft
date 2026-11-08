@@ -16,12 +16,10 @@
 //!   chokepoint as every pose write (`check_location`, shared from the
 //!   fixture module so there is one law): a finite position and a
 //!   quaternion that normalizes, or the command never enters history.
-//! - **The model's own `Location` is the single truth.** Everything
-//!   downstream - facet transforms, the stock solid, the staleness
-//!   digest that hashes this entity's `SrcRef::Entity` - already reads
-//!   or hashes it, so moving a part marks its operations Stale with no
-//!   cascade write here. The command writes one component, like
-//!   `MoveFixture`.
+//! - **The model's `Location` is the single truth for its geometry.**
+//!   The same rigid placement change carries stock made from that model,
+//!   or the stock of a document with one part. Existing operation stamps
+//!   read the changed placements and become stale.
 //! - **Pages own their verbs.** A fixture is placed on the Fixtures
 //!   page (`MoveFixture`), a work offset on the Work Offsets page
 //!   (`SetWcsOrigin`), and the machine table is derived prose - all
@@ -35,8 +33,10 @@ use flecs_ecs::prelude::World;
 use crate::commands::fixture::check_location;
 use crate::commands::{Command, CommandError};
 use crate::fixture::MACHINE_TABLE;
+use crate::geometry::{quat_conjugate, quat_mul, transform_inverse_point, transform_point};
 use crate::model;
 use crate::schema::Location;
+use crate::stock::StockShape;
 
 /// Place a model: the same rigid transform any page sets, applied to
 /// the named part. Construction snapshots the previous `Location` for
@@ -45,6 +45,7 @@ pub struct MoveModel {
     name: String,
     prev: Location,
     next: Location,
+    stock: Vec<(String, Location, Location)>,
 }
 
 impl MoveModel {
@@ -68,10 +69,39 @@ impl MoveModel {
         }
         let next = check_location(location, &format!("'{name}'"))?;
         let prev = model::transform_of(world, &entity).unwrap_or_default();
+        let single_part = model::model_entities(world)
+            .iter()
+            .filter(|(_, entity)| !model::is_fixture(world, entity))
+            .count()
+            == 1;
+        let stock = model::named_entities(world)
+            .into_iter()
+            .filter_map(|(stock_name, entity)| {
+                let shape = model::stock_def_of(world, &entity)?;
+                let follows = match shape {
+                    StockShape::FromModel { source } => source == name,
+                    _ => single_part,
+                };
+                follows.then(|| {
+                    let before = model::transform_of(world, &entity).unwrap_or_default();
+                    let local = transform_inverse_point(before.pos, prev.pos, prev.rot);
+                    let after = Location {
+                        pos: transform_point(local, next.pos, next.rot),
+                        rot: quat_mul(quat_mul(next.rot, quat_conjugate(prev.rot)), before.rot),
+                    };
+                    (stock_name, before, after)
+                })
+            })
+            .map(|(stock_name, before, after)| {
+                check_location(after, &format!("stock '{stock_name}'"))
+                    .map(|after| (stock_name, before, after))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(MoveModel {
             name: name.to_string(),
             prev,
             next,
+            stock,
         })
     }
 }
@@ -81,11 +111,21 @@ impl Command for MoveModel {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             model::set_transform(world, &entity, self.next);
         }
+        for (name, _, next) in &self.stock {
+            if let Some(entity) = model::find_by_name(world, name) {
+                model::set_transform(world, &entity, *next);
+            }
+        }
     }
 
     fn invert(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             model::set_transform(world, &entity, self.prev);
+        }
+        for (name, prev, _) in &self.stock {
+            if let Some(entity) = model::find_by_name(world, name) {
+                model::set_transform(world, &entity, *prev);
+            }
         }
     }
 }

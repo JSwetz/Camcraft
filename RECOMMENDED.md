@@ -13523,6 +13523,56 @@ revolved (follow-up material if users hit it with long keyways).
   surface (needs a lifted-tool / stock-edge distance per wall segment;
   the ring bound d / 8 plus the chord bulge is stated instead).
 
+## #164: Idle window redraw and high CPU
+
+- The reported project loads and processes through the CLI in under a second.
+  The windowed shell currently uses `ControlFlow::Poll` and requests another
+  redraw unconditionally after each frame, so an open project keeps rebuilding
+  its scene and browser even when the user is idle.
+- Choose event-driven redraw: request a frame for input and queued commands;
+  honor egui's repaint delay for timed UI work; keep a bounded timer while
+  simulation or import progress needs frames. An idle document then waits for
+  an event. This targets the repeated work while preserving live playback.
+- Review added one follow-up frame after input because the shell collects the
+  scene before the UI can change browser eyes or toolpath visibility. Suspend
+  frame timers while the window is occluded, then redraw when it becomes
+  visible again; hidden surfaces have no useful picture to update.
+
+## Model placement and existing stock
+
+- Carry existing stock by the same rigid transform when its source is the
+  moved model, or when the document has only one non-fixture part. This
+  preserves the stock's position and orientation relative to the part, and
+  keeps the model and stock placement change in one undo step.
+- In a document with several parts, leave box and cylinder stock in place:
+  a fitted stock can cover more than one part and has no stored source link.
+  A from-model stock has that link and follows its named source.
+- Dropped: refitting stock to the new world-axis bounding box on every model
+  move. A refit would discard the stock orientation and placement the user
+  already chose.
+
+## Facing pick on a rotated part
+
+- A picked face already gives the facing boundary. Only open chains and
+  chain-only selections need whole-model and stock silhouettes, so skip
+  their sixteen-section projections for face-only picks. A steep face is
+  refused at the pick with the existing horizontal-face guidance.
+- Canonicalize face boundary rings in linear time with minimum-rotation
+  scans in both directions. The previous comparison rebuilt every rotated
+  copy of the ring, quadratic work repeated by the Geometry panel.
+- Dropped: a UI-only cache of the selection account. It would hide the
+  repeated work but leave the same expensive path in command validation
+  and generation.
+- Follow-up from the edge-pick hand test: a Face operation can use an open
+  chain, so its panel and viewport legitimately need the model and stock
+  silhouettes. Cache the exact input/output of the shared sixteen-section
+  projection for meshes up to 50,000 facets. Exact facet comparison avoids
+  a digest collision becoming a wrong machining preview; a four-entry
+  bound keeps the memory cost finite. Larger meshes use the original path.
+- `CAMCRAFT_PROFILE_PROJECTION=1` reports projection cache misses with
+  elapsed time and occasional hit counts. It is opt-in so a normal window
+  does not spend time printing diagnostics on every read.
+
 ### #103 after merging #106 (rapid footprint): the facing approach and the lathe's radial rapids
 
 - **Verdict on facing.nc's new 1/5/9/13/17 (inward `G00 X14.6 -> X11.6`
@@ -13941,6 +13991,19 @@ inside, and they wrap as before.
   refusal under Adaptive and Offset rings.
 - Not done (follow-up worth an issue): rotate the development's branch to an azimuth
   where the work is turned, so a D-flat bar wraps whatever its placement.
+
+### PR #239 gate: Linux snapshot tolerance after Windows golden refresh
+
+**Chosen:** use the snapshot library's per-OS threshold of 1.0 on Linux for
+`egui_app_light` and 1.5 for `egui_tool_editor`; retain the default 0.6 on
+other platforms. The Linux rerender differs from the Windows goldens at only
+one and four pixels above 0.6 respectively; the light image clears at 1.0
+and the tool editor at 1.5. Ignore generated `*.diff.png` files alongside
+the already ignored `*.new.png`.
+
+**Dropped:** re-rendering the goldens on Linux, which would reverse the
+Windows fix and make its gate fail again; a global tolerance change, which
+would weaken unrelated snapshots.
 
 ## #197 - the Stock page shows the models' size (2026-11-07)
 
