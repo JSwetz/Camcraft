@@ -159,10 +159,15 @@ fn real(p: &Parameter) -> Option<f64> {
 mod tests {
     use super::*;
 
+    /// A Part 21 header as exporters write it: the reader's tokenizer
+    /// refuses an empty HEADER section.
+    const HEADER: &str = "HEADER;\nFILE_DESCRIPTION( ( '' ), '2;1' );\n\
+                          FILE_NAME( 'units.step', '2026-11-08T00:00:00', ( '' ), ( '' ), '', '', '' );\n\
+                          FILE_SCHEMA( ( 'AUTOMOTIVE_DESIGN' ) );\nENDSEC;";
+
     /// The units of a file whose DATA section is `data`.
     fn units(data: &str) -> Result<Option<f64>, String> {
-        let text =
-            format!("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n{data}\nENDSEC;\nEND-ISO-10303-21;\n");
+        let text = format!("ISO-10303-21;\n{HEADER}\nDATA;\n{data}\nENDSEC;\nEND-ISO-10303-21;\n");
         let ex = ruststep::parser::parse(&text).expect("the test file parses");
         mm_per_unit(ex.data.first().expect("a data section"))
     }
