@@ -1,0 +1,46 @@
+//! The file DTOs as plain JSON values, for the doors that speak JSON but
+//! are not a file (the MCP server, #128): operation parameters, tools and
+//! stock read and written in exactly the shape a `.camproj` holds them,
+//! so an agent's patch and a saved project can never disagree on a name.
+//!
+//! Provenance: our own persistence contract (this module's siblings),
+//! re-exposed; no new schema. Clean-room, public sources only.
+
+use super::{OpParams, ParamsDto, StockDto, StockShape, Tool, ToolDto};
+
+use serde_json::Value;
+
+/// An operation's parameters as the file writes them: one-key object,
+/// the kind's snake_case tag, then the fields (`{"face": {...}}`).
+#[must_use]
+pub fn params_to_json(p: &OpParams) -> Value {
+    serde_json::to_value(ParamsDto::from_params(p)).unwrap_or(Value::Null)
+}
+
+/// The reverse door: a tagged parameter object back to the domain type.
+/// Shape errors (a missing field, a string where a number goes) are the
+/// refusal text; sanity (finite, positive) stays the commands' law.
+pub fn params_from_json(v: &Value) -> Result<OpParams, String> {
+    let dto: ParamsDto = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
+    Ok(dto.to_params())
+}
+
+#[must_use]
+pub fn tool_to_json(t: &Tool) -> Value {
+    serde_json::to_value(ToolDto::from_tool(t)).unwrap_or(Value::Null)
+}
+
+pub fn tool_from_json(v: &Value) -> Result<Tool, String> {
+    let dto: ToolDto = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
+    Ok(dto.to_tool())
+}
+
+#[must_use]
+pub fn stock_to_json(s: &StockShape) -> Value {
+    serde_json::to_value(StockDto::from_shape(s)).unwrap_or(Value::Null)
+}
+
+pub fn stock_from_json(v: &Value) -> Result<StockShape, String> {
+    let dto: StockDto = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
+    Ok(dto.to_shape())
+}

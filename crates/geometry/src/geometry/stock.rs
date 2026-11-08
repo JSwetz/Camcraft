@@ -122,6 +122,31 @@ pub fn fit_box(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> {
     Some((StockShape::Box { dx, dy, dz }, pos))
 }
 
+/// Box stock that wraps `bounds` by a separate allowance on each side
+/// (#198): `sides` is `[-X, +X, -Y, +Y, bottom, top]`, each a finite
+/// non-negative length. The box is placed so each face stands its own
+/// allowance off the models (XY centre between the padded faces, bottom at
+/// `min.z - bottom`). Degenerate input yields `None`, as [`fit_box`].
+#[must_use]
+pub fn fit_box_sides(bounds: &Aabb, sides: [f64; 6]) -> Option<(StockShape, Point3)> {
+    if !sides.iter().all(|s| s.is_finite() && *s >= 0.0) {
+        return None;
+    }
+    let (min, max) = (bounds.min, bounds.max);
+    if !(min.is_finite() && max.is_finite()) {
+        return None;
+    }
+    let [xm, xp, ym, yp, zb, zt] = sides;
+    let (x0, x1) = (min.x - xm, max.x + xp);
+    let (y0, y1) = (min.y - ym, max.y + yp);
+    let (z0, z1) = (min.z - zb, max.z + zt);
+    let (dx, dy, dz) = (x1 - x0, y1 - y0, z1 - z0);
+    if !(positive(dx) && positive(dy) && positive(dz)) {
+        return None;
+    }
+    Some((StockShape::Box { dx, dy, dz }, Point3::new((x0 + x1) * 0.5, (y0 + y1) * 0.5, z0)))
+}
+
 /// Cylinder stock that wraps `bounds`: the diameter is the diagonal of the
 /// margin-padded footprint (a circle contains the whole model, which an
 /// extent-width one would not), the height spans z plus margins. Written
@@ -144,6 +169,26 @@ pub fn fit_cylinder(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> 
 mod tests {
     use super::*;
     use crate::geometry::Mesh;
+
+    #[test]
+    fn a_box_fits_each_side_by_its_own_allowance() {
+        let b = Aabb { min: Point3::new(-10.0, -5.0, 0.0), max: Point3::new(30.0, 15.0, 12.0) };
+        let (shape, pos) = fit_box_sides(&b, [1.0, 3.0, 0.0, 2.0, 0.5, 4.0]).expect("fits");
+        assert_eq!(shape, StockShape::Box { dx: 44.0, dy: 22.0, dz: 16.5 });
+        // Faces at X -11 / 33, Y -5 / 17, Z -0.5 / 16.
+        assert_eq!(pos, Point3::new(11.0, 6.0, -0.5));
+        // Equal sides read exactly as the single-margin fit.
+        assert_eq!(fit_box_sides(&b, [2.0; 6]), fit_box(&b, 2.0));
+    }
+
+    #[test]
+    fn a_negative_or_broken_side_allowance_is_refused() {
+        let b = Aabb { min: Point3::new(0.0, 0.0, 0.0), max: Point3::new(10.0, 10.0, 10.0) };
+        assert!(fit_box_sides(&b, [1.0, 1.0, -0.1, 1.0, 1.0, 1.0]).is_none(), "negative");
+        assert!(fit_box_sides(&b, [1.0, f64::NAN, 1.0, 1.0, 1.0, 1.0]).is_none(), "NaN");
+        let flat = Aabb { min: Point3::new(0.0, 0.0, 5.0), max: Point3::new(10.0, 10.0, 5.0) };
+        assert!(fit_box_sides(&flat, [0.0; 6]).is_none(), "a flat model with no Z allowance has no height");
+    }
 
     #[test]
     fn box_mesh_is_xy_centered_and_starts_at_z_zero() {
