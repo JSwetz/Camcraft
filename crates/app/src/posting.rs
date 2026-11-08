@@ -511,9 +511,6 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(suppressed::suppressed_problems(world));
     // The rotated-offset clause (#315): the post carries translation only.
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
-    // The picked-offset clause (#196): a height on another slot than its
-    // setup's pick is a conflict, never a silent override.
-    problems.extend(wcs_slot::slot_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
         match crate::machine::check_document(world, &m) {
@@ -677,7 +674,7 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             .iter()
             .find(|(n, _)| *n == op.tool)
             .map_or(0, |(_, t)| *t);
-        let (wcs, origin) = wcs_context(world, setup, &op.params);
+        let (wcs, origin) = wcs_context(world, setup);
         // The stock box is THIS operation's setup context (M3.2 A): a
         // later setup's block is where and how tall its own stock says.
         let boxz = model::stock_world_aabb_for(world, setup);
@@ -759,10 +756,9 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
     Ok(streams)
 }
 
-/// The work offset this operation posts to: its setup's picked slot
-/// (#196), else the first WCS slot its height grammar references, else
-/// the default `G54` - and that slot's origin as the machine would
-/// measure it. `pub(crate)` so the
+/// The work offset an operation of the `setup` context posts to: the
+/// setup's slot (#196, #329: its pick, else `G54` - heights carry none)
+/// and that slot's origin as the machine would measure it. `pub(crate)` so the
 /// machine-limit travel check (M2.3 C) reads program coordinates by
 /// exactly this law, not by a second copy of it.
 ///
@@ -770,12 +766,8 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
 /// names do not take setup suffixes. The ENTITY the origin is measured
 /// from follows the setup (M3.2 A): `Setup2/G54` is the same machine
 /// offset word, re-placed for that setup's clamping.
-pub(crate) fn wcs_context<'a>(
-    world: &World,
-    setup: Option<&str>,
-    params: &'a OpParams,
-) -> (&'a str, [f64; 3]) {
-    let slot = wcs_slot::wcs_slot(world, setup, params);
+pub(crate) fn wcs_context(world: &World, setup: Option<&str>) -> (&'static str, [f64; 3]) {
+    let slot = wcs_slot::wcs_slot(world, setup);
     let name = WCS_SLOTS[slot];
     let origin = crate::setup::wcs_entity(world, setup, slot)
         .and_then(|e| model::transform_of(world, &e))

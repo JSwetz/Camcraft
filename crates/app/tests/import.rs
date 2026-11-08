@@ -196,6 +196,32 @@ fn step_real_world_file_imports() {
     assert!(b.min.x.is_finite() && b.max.z.is_finite());
 }
 
+/// #306: the AP214 sample states its lengths in metres
+/// (`CONVERSION_BASED_UNIT('METRE', ..)` over `SI_UNIT($, .METRE.)`), so
+/// it imports at its true size in millimetres, about 65 mm across - not
+/// 0.065 mm, its numbers read as millimetres.
+#[test]
+fn a_step_file_in_metres_imports_at_its_size_in_millimetres() {
+    let m = import::load_model(&testdata("sample_ap214.step")).expect("must import");
+    let b = m.bounds().expect("bounds");
+    let width = b.max.x - b.min.x;
+    assert!((60.0..70.0).contains(&width), "the part is {width} mm wide");
+}
+
+/// The millimetre file (`SI_UNIT(.MILLI., .METRE.)`) keeps its numbers.
+#[test]
+fn a_step_file_in_millimetres_keeps_its_numbers() {
+    let m = import::load_model(&testdata("Milling-test.step")).expect("must import");
+    let b = m.bounds().expect("bounds");
+    assert!(
+        (b.max.x - 29.994_477).abs() < 1e-3 && (b.max.z - 20.0).abs() < 1e-9,
+        "max corner ({}, {}, {})",
+        b.max.x,
+        b.max.y,
+        b.max.z
+    );
+}
+
 #[test]
 fn step_garbage_is_clean_error_never_panic() {
     // Valid-syntax-but-wrong shapes: every one must Err (or at worst import

@@ -19,7 +19,7 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     AddTool, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel, LoadMachine,
-    SetStock, SetWcsOrigin,
+    SetSetupWorkOffset, SetStock, SetWcsOrigin,
 };
 use camcraft_app::drilling::{CycleChoice, Hole};
 use camcraft_app::geo2d::Point2;
@@ -288,23 +288,29 @@ fn a_work_offset_moved_after_generation_stales_the_op_and_is_refused_by_name_at_
 }
 
 #[test]
-fn a_height_on_g55_measures_the_spindle_from_g55() {
-    // The slot is the one the heights reference: G55 at y = 1 under a
-    // bar on the world origin is 1 mm off, whatever G54 says.
+fn a_setup_on_g55_measures_the_spindle_from_g55() {
+    // The slot is the setup's (#196, #329): G55 at y = 1 under a bar on
+    // the world origin is 1 mm off, whatever G54 says.
     let on_g55 = || match facing() {
         OpParams::Facing { tolerance, top_z, bottom_z, stepdown, feed, plunge_feed, .. } => {
-            let clearance_z = Height { reference: HeightReference::WorkOffset(1), offset: 25.0 };
+            let clearance_z = Height { reference: HeightReference::WorkOffset, offset: 25.0 };
             OpParams::Facing { tolerance, clearance_z, top_z, bottom_z, stepdown, feed, plunge_feed }
         }
         other => other,
     };
+    let on_g55_setup = |world: &World, history: &mut History| {
+        history.execute(world, CreateSetup::new(world, None, None).expect("materialize Setup1"));
+        history.execute(world, SetSetupWorkOffset::new(world, "Setup1", Some(1)).expect("pick G55"));
+    };
     let (world, mut history) = lathe_world(revolve(&BAR, 16, |p| p), &["TN-1600-0R8"]);
     place(&world, &mut history, "G55", 0.0, 1.0);
+    on_g55_setup(&world, &mut history);
     assert_refused(&world, &mut history, "F1", "TN-1600-0R8", on_g55(), &["spindle", "1.000 mm", "G55"]);
 
     // And G55 on the bar's axis passes, with G54 left elsewhere.
     let (world, mut history) = lathe_world(revolve(&BAR, 16, moved(10.0, 0.0)), &["TN-1600-0R8"]);
     place(&world, &mut history, "G55", 10.0, 0.0);
+    on_g55_setup(&world, &mut history);
     generate(&world, &mut history, "F1", "TN-1600-0R8", on_g55()).expect("G55 on the axis generates");
 }
 

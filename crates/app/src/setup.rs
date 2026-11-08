@@ -87,12 +87,25 @@ pub fn def_of(world: &World, name: &str) -> Option<SetupDef> {
 }
 
 /// The program offset a setup PICKED (#196), as a [`WCS_SLOTS`] index;
-/// `None` when it picked none (the inferred per-operation law) or the
+/// `None` when it picked none (the `G54` default, [`wcs_slot`]) or the
 /// name wears no setup. An out-of-range stored index reads as no pick -
 /// `SetSetupWorkOffset` and the loader refuse one, so it cannot arise.
 #[must_use]
 pub fn work_offset(world: &World, name: &str) -> Option<usize> {
     def_of(world, name)?.work_offset.filter(|i| *i < WCS_SLOTS.len())
+}
+
+/// THE work-offset law (#196, #329): the `WCS_SLOTS` index every
+/// operation of the declared setup context posts at AND measures its
+/// work-offset heights from - the setup's pick, else `G54` (slot 0).
+/// A height carries no slot of its own, so one setup is one program
+/// zero by construction. A document without setups (or a context naming
+/// no setup) has no pick and reads `G54`.
+#[must_use]
+pub fn wcs_slot(world: &World, setup: Option<&str>) -> usize {
+    effective(world, setup)
+        .and_then(|s| work_offset(world, &s))
+        .unwrap_or(0)
 }
 
 /// The effective setup of an operation or piece of furniture: what the

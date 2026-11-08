@@ -63,8 +63,10 @@ pub fn resolve_height(
         HeightReference::BottomOfStock => model::stock_world_aabb_for(world, setup)?.min.z,
         HeightReference::TopOfModel => model::solid_world_aabb(world)?.max.z,
         HeightReference::BottomOfModel => model::solid_world_aabb(world)?.min.z,
-        HeightReference::WorkOffset(i) => {
-            let entity = crate::setup::wcs_entity(world, setup, i)?;
+        HeightReference::WorkOffset => {
+            // #329: the setup's offset, never the height's own.
+            let slot = crate::setup::wcs_slot(world, setup);
+            let entity = crate::setup::wcs_entity(world, setup, slot)?;
             model::transform_of(world, &entity).unwrap_or_default().pos.z
         }
         HeightReference::TopOfSelection | HeightReference::BottomOfSelection => {
@@ -97,7 +99,11 @@ pub fn missing_source(
         HeightReference::TopOfModel | HeightReference::BottomOfModel => {
             model::solid_world_aabb(world).is_none().then_some("no model loaded")
         }
-        HeightReference::WorkOffset(i) => match crate::setup::wcs_entity_name(world, setup, i) {
+        HeightReference::WorkOffset => match crate::setup::wcs_entity_name(
+            world,
+            setup,
+            crate::setup::wcs_slot(world, setup),
+        ) {
             None => Some("work offset slot out of range (G54..G59)"),
             Some(name) => model::find_by_name(world, &name)
                 .is_none()
