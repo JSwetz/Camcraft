@@ -13941,3 +13941,33 @@ inside, and they wrap as before.
   refusal under Adaptive and Offset rings.
 - Not done (follow-up worth an issue): rotate the development's branch to an azimuth
   where the work is turned, so a D-flat bar wraps whatever its placement.
+
+## #197 - the Stock page shows the models' size (2026-11-07)
+
+- **Chosen:** a two-line readout above the stock fields - "Models: X x Y x
+  Z <unit>" and the X/Y/Z extents - from `model::solid_world_aabb`, the
+  very box Fit to Models wraps (its hover says so), in the document's
+  units; with no models, a dim "No models yet" line.
+- **Why:** the reporter wanted the primitive's dimensions in view while
+  typing stock numbers.
+- **Dropped:** the *selected* model's box only (the stock wraps the whole
+  job, and Fit already reads all models); copying the size into the
+  fields on a click (Fit to Models already does it with a margin; the
+  per-side allowance is #198).
+
+## #198 - box stock fitted per side (2026-11-07)
+
+- **Chosen:** for box stock the Stock page offers "Per side": six
+  allowances (-X, +X, -Y, +Y, bottom, top) replace the single fit margin,
+  and Fit to Models sends `StockFitSides`, which wraps the models' box by
+  each side's own amount (`stock::fit_box_sides`: each face its own
+  allowance off the models; refused by name for a negative or
+  non-finite allowance) through the same undoable `SetStock` as the
+  single-margin fit (both now share `State::apply_stock_fit`). Equal
+  sides read exactly as the single-margin fit.
+- **Why:** a blank is rarely padded evenly - a facing allowance on top,
+  nothing under a flat bottom, more on the side a vise jaw grips.
+- **Dropped:** per-side for cylinders (a radial allowance is one number;
+  bottom/top could follow if asked); storing the allowances in the
+  document (they are a fit recipe, not stock - the stock stays the
+  explicit box the fit produced).
