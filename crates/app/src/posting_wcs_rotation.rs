@@ -63,7 +63,7 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
         }
         let setup = op.setup.as_deref();
         let slot = wcs_slot(world, setup);
-        let Some(wcs) = crate::setup::wcs_entity(world, setup, slot) else {
+        let Some(wcs) = crate::setup::wcs_entity(world, setup) else {
             continue; // never placed: the identity at the origin
         };
         let Some(loc) = model::transform_of(world, &wcs) else {
@@ -73,7 +73,7 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
         if angle <= ROT_TOL_RAD {
             continue;
         }
-        let entity = crate::setup::wcs_entity_name(world, setup, slot).unwrap_or_default();
+        let entity = crate::setup::wcs_entity_name(world, setup);
         let label = model::operation_label(world, &name, &e);
         if let Some(hit) = hits.iter_mut().find(|h| h.0 == entity) {
             hit.2.push(label);
@@ -81,8 +81,8 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
         }
         let word = WCS_SLOTS.get(slot).copied().unwrap_or("G54");
         let owner = match crate::setup::effective(world, setup) {
-            Some(s) => format!("setup {s}: its work offset {word}"),
-            None => format!("work offset {word}"),
+            Some(s) => format!("setup {s}: its WCS ({word})"),
+            None => format!("the WCS ({word})"),
         };
         let prefix = format!(
             "{owner} is rotated {:.3} deg about {}; posting a rotated work offset is not \

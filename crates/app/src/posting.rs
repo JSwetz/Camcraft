@@ -756,19 +756,18 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
 }
 
 /// The work offset an operation of the `setup` context posts to: the
-/// setup's slot (#196, #329: its pick, else `G54` - heights carry none)
-/// and that slot's origin as the machine would measure it. `pub(crate)` so the
+/// setup's word (#196, #342: its label, else `G54`) and the setup's one
+/// WCS origin as the machine would measure it. `pub(crate)` so the
 /// machine-limit travel check (M2.3 C) reads program coordinates by
 /// exactly this law, not by a second copy of it.
 ///
 /// The G-code WORD is always `WCS_SLOTS[slot]` - the machine's register
 /// names do not take setup suffixes. The ENTITY the origin is measured
-/// from follows the setup (M3.2 A): `Setup2/G54` is the same machine
-/// offset word, re-placed for that setup's clamping.
+/// from is the setup's WCS (M3.2 A, #342), whatever word it is labelled.
 pub(crate) fn wcs_context(world: &World, setup: Option<&str>) -> (&'static str, [f64; 3]) {
     let slot = wcs_slot::wcs_slot(world, setup);
     let name = WCS_SLOTS[slot];
-    let origin = crate::setup::wcs_entity(world, setup, slot)
+    let origin = crate::setup::wcs_entity(world, setup)
         .and_then(|e| model::transform_of(world, &e))
         .map_or([0.0; 3], |t| [t.pos.x, t.pos.y, t.pos.z]);
     (name, origin)

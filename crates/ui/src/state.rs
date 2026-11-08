@@ -140,11 +140,10 @@ pub enum CommandKind {
     /// before the command is built, so a failing mode never enters
     /// the history.
     SelectColorVision(ColorVision),
-    /// Work offset: slot origin plus full orientation as yaw-pitch-roll
-    /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
-    /// pure-yaw setups use roll = pitch = 0.
+    /// The active setup's WCS (#342: one per setup): origin plus full
+    /// orientation as yaw-pitch-roll degrees (R = Rz ⊗ Ry ⊗ Rx). The world
+    /// stores a unit quaternion; pure-yaw setups use roll = pitch = 0.
     SetWcs {
-        slot: String,
         pos: [f64; 3],
         roll_deg: f64,
         pitch_deg: f64,
@@ -384,10 +383,9 @@ impl Default for StockUi {
 }
 
 /// Editable fields of the Setup pane's WCS group; see [`StockUi`] for the
-/// transient-ness rule. `slot` indexes [`WCS_SLOTS`].
+/// transient-ness rule. The draft is the active setup's one WCS (#342).
 #[derive(Clone, Debug, Default)]
 pub struct WcsUi {
-    pub slot: usize,
     pub x: f64,
     pub y: f64,
     pub z: f64,
@@ -418,9 +416,9 @@ pub struct WcsUi {
 
 /// Editable fields of the Setups page (M3.2 A). Transient like [`StockUi`]:
 /// the world's SetupDef entities and the active singleton are the truth.
-/// `pick` indexes the page's setup list (clamped at draw, like
-/// `wcs_ui.slot`); `datum` rides the New button's checkbox - transfer the
-/// current setup's stock and offsets into the new one, the shop's
+/// `pick` indexes the page's setup list (clamped at draw); `datum` rides
+/// the New button's checkbox - transfer the current setup's stock and
+/// WCS into the new one, the shop's
 /// re-clamp law.
 #[derive(Clone, Debug, Default)]
 pub struct SetupsUi {
@@ -1307,8 +1305,8 @@ pub enum UiTarget {
     None,
     /// The stock solid (its page doubles as the creation form).
     Stock,
-    /// One of [`camcraft_app::schema::WCS_SLOTS`], by index.
-    WcsSlot(usize),
+    /// The active setup's one WCS (#342).
+    Wcs,
     /// A model entity: the info page.
     Model(String),
     /// A tool entity, or the empty name for the tool page as destination
@@ -1332,7 +1330,7 @@ impl UiTarget {
         match self {
             UiTarget::None => false,
             UiTarget::Stock => true,
-            UiTarget::WcsSlot(i) => *i < WCS_SLOTS.len(),
+            UiTarget::Wcs => true,
             UiTarget::Model(name) => model::model_entities(world)
                 .into_iter()
                 .any(|(n, _)| *name == n),
@@ -1566,7 +1564,7 @@ impl State {
             }
         }
         let placed =
-            camcraft_app::setup::wcs_entity(&self.world, active.as_deref(), self.wcs_ui.slot)
+            camcraft_app::setup::wcs_entity(&self.world, active.as_deref())
                 .and_then(|entity| model::transform_of(&self.world, &entity));
         match placed {
             Some(loc) => {
@@ -2558,7 +2556,6 @@ impl State {
                 self.apply_stock_fit(stock::fit_box_sides(&bounds, sides));
             }
             CommandKind::SetWcs {
-                slot,
                 pos,
                 roll_deg,
                 pitch_deg,
@@ -2570,7 +2567,7 @@ impl State {
                 if !roll_deg.is_finite() || !pitch_deg.is_finite() || !yaw_deg.is_finite() {
                     self.refuse(
                         ErrorScope::Setup,
-                        format!("offset not set: {slot} rotation angles must be finite"),
+                        "WCS not set: rotation angles must be finite".to_owned(),
                     );
                     return;
                 }
@@ -2582,13 +2579,15 @@ impl State {
                         yaw_deg.to_radians(),
                     ),
                 };
-                match SetWcsOrigin::new(&self.world, &slot, location) {
+                match SetWcsOrigin::new(&self.world, location) {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
-                        self.status = format!("{slot} origin set");
+                        let active = camcraft_app::setup::active(&self.world);
+                        self.status =
+                            format!("{} origin set", camcraft_app::setup::wcs_label(&self.world, active.as_deref()));
                     }
-                    Err(err) => self.refuse(ErrorScope::Setup, format!("offset not set: {err}")),
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("WCS not set: {err}")),
                 }
             }
             CommandKind::AddTool { name, tool } => match AddTool::new(&self.world, &name, tool) {
@@ -2936,7 +2935,7 @@ impl State {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
                         let word = WCS_SLOTS.get(slot.unwrap_or(0)).copied().unwrap_or("G54");
-                        self.status = format!("{setup} work offset: {word}");
+                        self.status = format!("{setup} WCS posts as {word}");
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("work offset not changed: {err}"));
@@ -3549,13 +3548,18 @@ impl State {
         self.machine_editor = None; // nor a draft over its machine's numbers
         self.rename_draft = None;
         self.dragging_op = None;
-        match project::load(&self.world, &path) {
-            Ok(()) => {
+        match project::load_noted(&self.world, &path) {
+            Ok(notes) => {
                 self.project_path = Some(path.clone());
                 // The loaded document is the new clean point (#107).
                 self.history.mark_clean();
                 self.doc_version += 1;
-                self.status = format!("opened {}", path.display());
+                // #342: what a migration changed is said, never silent.
+                self.status = if notes.is_empty() {
+                    format!("opened {}", path.display())
+                } else {
+                    format!("opened {} - {}", path.display(), notes.join("; "))
+                };
             }
             Err(err) => self.status = format!("open failed: {err}"),
         }

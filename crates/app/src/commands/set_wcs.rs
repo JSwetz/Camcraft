@@ -1,61 +1,50 @@
-//! SetWcsOrigin: place a work coordinate system in one of the G54..G59
-//! machine-offset slots.
+//! SetWcsOrigin: place the active setup's one work coordinate system
+//! (#342) - its origin and orientation.
 //!
-//! Slot names are the public RS-274/ISO 6983 work-offset codes; the entity
-//! name IS the slot, and the `Wcs` tag distinguishes it from a model that
-//! happens to share the name. Provenance: published G-code standards only.
+//! A setup has exactly one WCS; which `G54`..`G59` word the post writes
+//! for it is the setup's label (`SetSetupWorkOffset`), never chosen here.
+//! The `Wcs` tag distinguishes the entity from a model that happens to
+//! share the name. Provenance: published G-code standards (RS-274 / ISO
+//! 6983 work-offset semantics) and our own design notes only.
 
 use flecs_ecs::prelude::World;
 
 use crate::commands::{Command, CommandError};
 use crate::geometry::normalize_quat;
 use crate::model;
-use crate::schema::{Location, WCS_SLOTS, Wcs};
+use crate::schema::{Location, Wcs};
 
 pub struct SetWcsOrigin {
-    /// The entity this command places - the active setup's name for this
-    /// slot at construction time (M3.2 A): `G54` in a legacy document,
-    /// `Setup2/G54` when the active setup owns its furniture. The G-code
-    /// word is never stored: it comes from the slot index in the
-    /// operation's params at post time, and only the LOOKUP follows the
-    /// setup (the one G-word law).
+    /// The entity this command places - the active setup's WCS at
+    /// construction time (`G54` in a document without setups,
+    /// `Setup2/WCS` when the active setup owns its own). The G-code word
+    /// is never stored here: it is the setup's label at post time.
     entity_name: String,
     location: Location,
-    /// Where the slot pointed before; `None` means the entity did not exist
+    /// Where the WCS sat before; `None` means the entity did not exist
     /// yet, so the inverse removes it.
     prev: Option<Location>,
 }
 
 impl SetWcsOrigin {
-    /// Validates against the world now: a known slot, a finite rigid
-    /// transform, and no name collision with a model (AGENTS.md: validate
-    /// early, never fail deep).
-    pub fn new(world: &World, slot: &str, location: Location) -> Result<Self, CommandError> {
-        if !WCS_SLOTS.contains(&slot) {
-            return Err(CommandError::Invalid(format!(
-                "'{slot}' is not a work offset slot (expected one of {})",
-                WCS_SLOTS.join(", ")
-            )));
-        }
+    /// Validates against the world now: a finite rigid transform and no
+    /// name collision with a model (AGENTS.md: validate early, never fail
+    /// deep).
+    pub fn new(world: &World, location: Location) -> Result<Self, CommandError> {
         let mut location = location;
         if !location.rot.iter().all(|v| v.is_finite()) {
             return Err(CommandError::Invalid(
-                "work offset rotation must be finite (check the angle inputs)".into(),
+                "WCS rotation must be finite (check the angle inputs)".into(),
             ));
         }
         location.rot = normalize_quat(location.rot).ok_or_else(|| {
-            CommandError::Invalid("work offset rotation is degenerate (zero norm)".into())
+            CommandError::Invalid("WCS rotation is degenerate (zero norm)".into())
         })?;
         if !location.pos.is_finite() {
-            return Err(CommandError::Invalid("work offset placement must be finite".into()));
+            return Err(CommandError::Invalid("WCS placement must be finite".into()));
         }
         let active = crate::setup::active(world);
-        let slot_ix = WCS_SLOTS
-            .iter()
-            .position(|s| *s == slot)
-            .ok_or_else(|| CommandError::Invalid(format!("'{slot}' is not a work offset slot")))?;
-        let entity_name = crate::setup::wcs_entity_name(world, active.as_deref(), slot_ix)
-            .unwrap_or_else(|| slot.to_string());
+        let entity_name = crate::setup::wcs_entity_name(world, active.as_deref());
         let prev = match model::find_by_name(world, &entity_name) {
             Some(entity) => {
                 if !model::is_wcs(world, &entity) {
@@ -70,6 +59,12 @@ impl SetWcsOrigin {
             location,
             prev,
         })
+    }
+
+    /// The entity this command places.
+    #[must_use]
+    pub fn entity_name(&self) -> &str {
+        &self.entity_name
     }
 }
 

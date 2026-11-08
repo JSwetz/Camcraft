@@ -59,7 +59,7 @@ fn faced_block() -> (World, History) {
 
 fn place_g54(world: &World, h: &mut History, rot: [f64; 4]) {
     let loc = Location { pos: Point3::new(10.0, 5.0, 1.0), rot };
-    h.execute(world, SetWcsOrigin::new(world, "G54", loc).expect("place G54"));
+    h.execute(world, SetWcsOrigin::new(world, loc).expect("place G54"));
 }
 
 fn tmp_nc(tag: &str) -> std::path::PathBuf {
@@ -94,7 +94,7 @@ fn a_rotated_work_offset_is_refused_by_name() {
     let err = posting::post_setup(&world, &path).expect_err("a turned G54 must not post");
     assert!(!path.exists(), "a refusal leaves no file");
     assert!(
-        err.contains("work offset G54 is rotated 90.000 deg about Z")
+        err.contains("the WCS (G54) is rotated 90.000 deg about Z")
             && err.contains("posting a rotated work offset is not supported yet")
             && err.contains("re-align it without rotation or post from an unrotated setup")
             && err.contains("(operations: Face1)"),
@@ -111,7 +111,7 @@ fn a_setups_rotated_offset_names_the_setup() {
     place_g54(&world, &mut h, quat_from_euler(30f64.to_radians(), 0.0, 0.0));
     let err = posting::post_setup(&world, &tmp_nc("setup")).expect_err("refused");
     assert!(
-        err.contains("setup Setup1: its work offset G54 is rotated 30.000 deg about X"),
+        err.contains("setup Setup1: its WCS (G54) is rotated 30.000 deg about X"),
         "names the setup and the axis, got: {err}"
     );
 }
