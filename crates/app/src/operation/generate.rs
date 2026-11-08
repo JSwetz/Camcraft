@@ -49,6 +49,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         hs,
         stock_facets,
         stock_aabb,
+        analytic_stock,
         mut section_z,
         mut picked_region,
         mut contour_sel,
@@ -2880,7 +2881,17 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             }
             // The all-air verdict (M13.8): a finish that provably cuts
             // nothing says so by name instead of passing silent.
-            let path = super::air_law::air_noted(path, mode, &material.facets, stock_top_z, &geom);
+            let mut path = super::air_law::air_noted(path, mode, &material.facets, stock_top_z, &geom);
+            // #104: explain the height mismatch, without replacing any move-level
+            // verdict. Tilted, rotary and turning heights are not world-Z tops.
+            if stock_aabb.is_some()
+                && matches!(params.kind().info().section, Section::Mill2D | Section::Mill3D)
+            {
+                super::top_stock::note(
+                    &mut path, hl.face_top.or(hl.top), &region,
+                    stock_facets.as_deref().unwrap_or(&material.facets), analytic_stock.then_some(&mut verify_prior),
+                );
+            }
             Ok((path, warns))
         }
         Some(f) => {

@@ -761,7 +761,7 @@ fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
     );
     assert_eq!(status(&world, "Slot1"), OpStatus::Ok);
     let before = cache(&world, "Slot1").expect("cached").path;
-    assert!(before.notes.is_empty(), "the wall dive says nothing: {:?}", before.notes);
+    assert!(before.notes.len() == 1 && before.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "no entry fallback, only the independent Top/stock warning: {:?}", before.notes);
     assert_eq!(
         before.moves.iter().filter(|m| m.arc.is_some()).count(),
         0,
@@ -798,7 +798,7 @@ fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
         after.moves.iter().any(|m| m.arc.is_some()),
         "a channel this wide certifies the orbit - it must land"
     );
-    assert!(after.notes.is_empty(), "certified, nothing to say: {:?}", after.notes);
+    assert!(after.notes.len() == 1 && after.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "a certified orbit adds no entry note; only the Top/stock warning remains: {:?}", after.notes);
     assert_ne!(
         before.moves, after.moves,
         "the entry edit changed the path, not just the stamp"
@@ -4120,7 +4120,7 @@ fn ramp_flag_case(bottom_z: f64) {
         GenerateOperation::new(&world, "Ramp1").expect("regen"),
     );
     let t = cache(&world, "Ramp1").expect("cached").path;
-    assert!(t.notes.is_empty(), "a gentle tangent says nothing: {:?}", t.notes);
+    assert!(t.notes.len() == 1 && t.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "a gentle tangent adds no entry note; only the Top/stock warning remains: {:?}", t.notes);
     assert_eq!(t.moves, base.moves, "silent skip means the same path");
 
     // Undo the regen, then the edit: the default flag is a digest
@@ -4191,7 +4191,7 @@ fn ladder_number_case(bottom_z: f64) {
         GenerateOperation::new(&world, "L1").expect("regen"),
     );
     let t = cache(&world, "L1").expect("cached").path;
-    assert!(t.notes.is_empty(), "an inert word says nothing: {:?}", t.notes);
+    assert!(t.notes.len() == 1 && t.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "the inert word adds no note; only the Top/stock warning remains: {:?}", t.notes);
     assert_eq!(t.moves, base.moves, "inert means the same path");
 
     // Two steps back lands on the unstamped digest again.
