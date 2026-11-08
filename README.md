@@ -248,8 +248,8 @@ re-tested, and only then is flagged ready again.
 | Label | Meaning | What happens |
 |---|---|---|
 | `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
-| `needs-rework` (red) | review found blockers | the reviewer turns it back into a draft; fix, push, flag ready again |
-| `conflicts` (orange) | no longer merges with `main` | the reviewer turns it back into a draft; merge `main`, re-test, flag ready again |
+| `needs-rework` (red) | review found blockers | a maintainer PR goes back to draft; fix, push, flag ready again (a fork PR stays as its contributor set it; the review comment says what to fix) |
+| `conflicts` (orange) | no longer merges with `main` | a maintainer PR goes back to draft; merge `main`, re-test, flag ready again (a fork PR: the contributor merges `main`) |
 
 When a PR comes back from draft with a new head, that head gets a fresh
 review; the marker `<!-- pr-reviewer: <head sha> -->` in the review comment

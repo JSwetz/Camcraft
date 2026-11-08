@@ -590,9 +590,10 @@ issue PRs are reviewed here too once flagged ready (user, 2026-11-08: "All
 PR*s made by owner should be reviewd and tagged"); a fix PR merges once
 that review is clean, a `feat` or breaking PR at the cut (step 1 above).
 **Review labels**, one colour per state: green `merge-ready` (clean review
-and mergeable), red `needs-rework` (blockers - the reviewer turns the PR
-back into a draft), orange `conflicts` (no longer merges with `main` -
-back to draft).
+and mergeable), red `needs-rework` (blockers), orange `conflicts` (no
+longer merges with `main`). On red or orange the reviewer turns one of our
+own PRs back into a draft; a fork PR is left as its contributor set it,
+and the review comment says what to fix.
 
 `fix` / `perf` / `refactor` PRs and docs-, process- and CI-only PRs (no release) merge once
 reviewed by a subagent that did not write them (and, for `fix` / `perf` /
