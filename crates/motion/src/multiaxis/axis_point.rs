@@ -70,6 +70,20 @@ const LAT_WIDE: f64 = 0.05;
 /// Latitude swing (sine of the tilt) the bearing must explain before a
 /// pencil counts as off its cones: far above a mesh's rounding.
 const LAT_FLOOR: f64 = 2e-3;
+/// Latitude bin width inside a wide class (#237): a fine dome's
+/// latitudes run continuously, so the class is cut into bins this wide
+/// and each bin's bearings are read for a fold.
+const LAT_BIN: f64 = 0.02;
+/// A bin is folded when an area-weighted bearing harmonic (1st to 4th)
+/// keeps this share of its area: one flat (1st), two opposite faces
+/// (2nd), three (3rd), or faces and caps a quarter turn apart (4th - a
+/// flat bar's sides and ends about its width) - never a ring, a hex or a
+/// fine wall, whose low harmonics cancel. (A square section inside a
+/// dome is refused too: fail closed, the safe side.)
+const FOLD: f64 = 0.5;
+/// Folded area, as a share of the inlier area, past which a wide class
+/// hides flat faces that do not revolve (#237): a rod through a ball.
+const FOLD_SHARE: f64 = 0.02;
 
 /// The widest empty skip (radians) between the bearings about `u` of
 /// the normals `ns`; `None` when too few bear an azimuth to call
@@ -119,6 +133,12 @@ pub(super) fn borne_out(data: &[Datum], ax: Axis, tol: f64) -> bool {
             break;
         }
         if a_near >= POINT_SHARE * a_in && widest_skip(near.iter().map(|d| d.n), ax.dir).is_none_or(|g| g > skip_budget()) {
+            return false;
+        }
+        // #237: a wide class (a fine ball's continuous latitudes) is not
+        // a ring check's business, but flats hiding in it are: a rod's
+        // faces through a ball fold onto two bearings at one latitude.
+        if folded(&near, ax.dir) > FOLD_SHARE * a_in {
             return false;
         }
         biased += off_cone(&near, ax.dir).unwrap_or(1.0) * a_near + ringless(&near, ax.dir);
@@ -231,6 +251,63 @@ fn ringless(ds: &[&Datum], u: Point3) -> f64 {
     lost
 }
 
+/// The area folded onto a few bearings inside the pencil's WIDE latitude
+/// classes (#237) - the classes [`ringless`] leaves to [`off_cone`]. A
+/// fine ball meshed by UV quads puts every facet's line through its
+/// centre, so a rod or bar through that centre shares its pencil, and the
+/// ball's continuous latitudes swallow the rod's faces into one wide
+/// class. Cut into [`LAT_BIN`] bins, a revolve's bin bears its area evenly
+/// round the axis (the low bearing harmonics cancel); the rod's bin holds
+/// two opposite faces, whose 2nd harmonic keeps nearly all of it. The
+/// returned area is each such bin's area times its strongest of the 1st
+/// to 4th harmonics, for bins past [`FOLD`].
+fn folded(ds: &[&Datum], u: Point3) -> f64 {
+    let Some((e1, e2)) = frame(u) else {
+        return 0.0;
+    };
+    let mut v: Vec<(f64, f64, f64)> = ds
+        .iter()
+        .filter_map(|d| bearing(d.n, u, e1, e2).map(|b| (d.n.dot(u), b, d.a)))
+        .filter(|(l, b, a)| l.is_finite() && b.is_finite() && a.is_finite() && *a > 0.0)
+        .collect();
+    v.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut out = 0.0;
+    let mut start = 0usize;
+    for i in 1..=v.len() {
+        let split = i == v.len() || v.get(i).zip(v.get(i - 1)).is_some_and(|(b, a)| b.0 - a.0 > LAT_GAP);
+        if !split {
+            continue;
+        }
+        let class = v.get(start..i).unwrap_or(&[]);
+        start = i;
+        let wide = class.first().zip(class.last()).is_some_and(|(a, b)| b.0 - a.0 > LAT_WIDE);
+        if !wide {
+            continue;
+        }
+        let mut bins: std::collections::BTreeMap<i64, Vec<(f64, f64)>> = std::collections::BTreeMap::new();
+        for (l, b, a) in class {
+            bins.entry((l / LAT_BIN).floor() as i64).or_default().push((*b, *a));
+        }
+        for bin in bins.values() {
+            let area: f64 = bin.iter().map(|p| p.1).sum();
+            if !(area > 0.0) {
+                continue;
+            }
+            let fold = (1..=4)
+                .map(|k| {
+                    let k = k as f64;
+                    let (c, s) = bin.iter().fold((0.0, 0.0), |(c, s), (b, a)| (c + a * (k * b).cos(), s + a * (k * b).sin()));
+                    c.hypot(s) / area
+                })
+                .fold(0.0, f64::max);
+            if fold > FOLD {
+                out += fold * area;
+            }
+        }
+    }
+    out
+}
+
 /// The point the lines meet best: the area-weighted least-squares
 /// point of nearest approach, refitted on the area half that misses it
 /// least until that half settles. `None` when the lines fix no point
@@ -301,3 +378,7 @@ fn miss(d: &Datum, c: Point3) -> f64 {
 #[cfg(test)]
 #[path = "axis_point_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "axis_wide_tests.rs"]
+mod wide_tests;
