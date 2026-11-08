@@ -17,7 +17,7 @@
 use flecs_ecs::prelude::World;
 
 use crate::cl::ArcPlane;
-use crate::geometry::feature::FaceKind;
+use crate::geometry::feature::{self, FaceKind};
 use crate::geometry::{Point3, normalize_quat, quat_conjugate, quat_mul, quat_rotate_point, transform_point};
 use crate::model;
 use crate::operation::{FeatureSel, GeoSel};
@@ -83,6 +83,8 @@ struct Datum {
     normal: [f64; 3],
     along: Option<[f64; 3]>,
     anchor: [f64; 3],
+    /// For two edges: the face they both bound, whose outside they take.
+    face: Option<GeoSel>,
 }
 
 /// The part alignment (document frame -> setup frame) that lays the
@@ -193,7 +195,7 @@ fn face_datum(world: &World, g: &GeoSel) -> Result<Datum, String> {
     }
     let local = Point3::new(sum[0] / area, sum[1] / area, sum[2] / area);
     let w = transform_point(local, loc.pos, loc.rot);
-    Ok(Datum { normal, along: None, anchor: [w.x, w.y, w.z] })
+    Ok(Datum { normal, along: None, anchor: [w.x, w.y, w.z], face: None })
 }
 
 fn edge_datum(world: &World, first: &GeoSel, second: &GeoSel) -> Result<Datum, String> {
@@ -214,16 +216,96 @@ fn edge_datum(world: &World, first: &GeoSel, second: &GeoSel) -> Result<Datum, S
             "the two edges are parallel - pick two edges that meet at an angle".into()
         });
     }
-    let mut n = unit(c).ok_or("the two edges span no plane - re-pick them")?;
-    // The plane's outside is the side away from the parts' centre (two
-    // edges carry no winding); on a plane through the centre, d1 x d2.
-    let mid = scale([a1[0] + b1[0] + a2[0] + b2[0], a1[1] + b1[1] + a2[1] + b2[1], a1[2] + b1[2] + a2[2] + b2[2]], 0.25);
-    if let Some(ctr) = setup_align::part_centre(world)
-        && dot(n, sub(mid, [ctr.x, ctr.y, ctr.z])) < 0.0
-    {
-        n = scale(n, -1.0);
+    let n = unit(c).ok_or("the two edges span no plane - re-pick them")?;
+    // The plane's outside is the outside of the one flat face both edges
+    // bound, read from that face's facet winding (#330 review). Two edges
+    // alone carry no side, and a part's centre does not tell it on a
+    // concave part, so nothing is guessed: no such face, no lay.
+    let face = shared_face(world, first, second)?;
+    let out = outward_normal(world, &face, model::transform_of)?.ok_or(NO_SHARED_FACE)?;
+    let s = dot(n, out);
+    if !(s.is_finite() && norm(cross(n, out)) <= IN_FACE_SIN) {
+        return Err(format!("the two edges do not lie in the plane of {} - pick the face instead", face.feature));
     }
-    Ok(Datum { normal: n, along: Some(d1), anchor: a1 })
+    let n = if s < 0.0 { scale(n, -1.0) } else { n };
+    Ok(Datum { normal: n, along: Some(d1), anchor: a1, face: Some(face) })
+}
+
+/// Refusal for two edges with no single flat face between them.
+const NO_SHARED_FACE: &str = "the two edges do not bound one face, so their outside is not defined - pick the face instead";
+/// The edges' plane and their shared face's plane agree this closely
+/// (sine of the angle between the normals).
+const IN_FACE_SIN: f64 = 1e-6;
+
+/// The one flat face both picked edges bound (every feature edge of each
+/// picked run borders it), as a face pick. None, or more than one: refused.
+fn shared_face(world: &World, first: &GeoSel, second: &GeoSel) -> Result<GeoSel, String> {
+    if first.entity != second.entity {
+        return Err(NO_SHARED_FACE.into());
+    }
+    let e = model::find_by_name(world, &first.entity).ok_or_else(|| gone(first))?;
+    let features = model::features_of(world, &e).ok_or_else(|| gone(first))?;
+    let a = bounded_faces(&features, first)?;
+    let b = bounded_faces(&features, second)?;
+    let common: Vec<&feature::Face> = a
+        .iter()
+        .filter(|fi| b.contains(fi))
+        .filter_map(|&fi| features.faces.get(fi as usize))
+        .filter(|f| f.kind == FaceKind::Planar)
+        .collect();
+    match common.as_slice() {
+        [f] => Ok(GeoSel { entity: first.entity.clone(), feature: FeatureSel::Face(f.id) }),
+        _ => Err(NO_SHARED_FACE.into()),
+    }
+}
+
+/// The faces (indices) every feature edge of the picked run borders.
+fn bounded_faces(features: &feature::Features, g: &GeoSel) -> Result<Vec<u32>, String> {
+    let FeatureSel::Chain(cid) = g.feature else { return Err(gone(g)) };
+    let c = feature::resolve_chain(features, cid).ok_or_else(|| gone(g))?;
+    let mut common: Option<Vec<u32>> = None;
+    for &ei in &c.edges {
+        let te = features.edges.get(ei as usize).ok_or_else(|| gone(g))?;
+        let k = te.n_facets.min(3) as usize;
+        let mut here: Vec<u32> = te
+            .facets
+            .get(..k)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|&t| features.facet_face.get(t as usize).copied())
+            .collect();
+        here.sort_unstable();
+        here.dedup();
+        common = Some(match common {
+            None => here,
+            Some(prev) => prev.into_iter().filter(|f| here.contains(f)).collect(),
+        });
+    }
+    Ok(common.unwrap_or_default())
+}
+
+/// Which way the picks' outside faces before Apply, in plain words, e.g.
+/// "outside: +Z of Face 1a2b (away from the material)". Read in the
+/// document frame, like [`lay_on_plane`]; refuses as it does.
+pub fn plane_side(world: &World, picks: &[GeoSel]) -> Result<String, String> {
+    let d = datum_of(world, picks)?;
+    let dir = axis_words(d.normal);
+    Ok(match (&d.face, picks.first()) {
+        (Some(f), _) => format!("outside: {dir}, the outside of {} that both edges bound", f.feature),
+        (None, Some(g)) => format!("outside: {dir} of {} (away from the material)", g.feature),
+        (None, None) => format!("outside: {dir}"),
+    })
+}
+
+/// A unit direction as "+Z" when it runs along an axis, else its parts.
+fn axis_words(n: [f64; 3]) -> String {
+    for (k, name) in ["X", "Y", "Z"].iter().enumerate() {
+        let v = n.get(k).copied().unwrap_or(0.0);
+        if (v.abs() - 1.0).abs() <= 1e-9 {
+            return format!("{}{name} in the model", if v < 0.0 { "-" } else { "+" });
+        }
+    }
+    format!("({:.3}, {:.3}, {:.3}) in the model", n[0], n[1], n[2])
 }
 
 /// The shortest turn taking unit `from` onto unit `to`. Antiparallel: a

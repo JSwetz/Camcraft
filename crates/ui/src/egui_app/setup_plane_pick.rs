@@ -12,6 +12,7 @@
 use egui::{ComboBox, RichText, Ui};
 
 use camcraft_app::cl::ArcPlane;
+use camcraft_app::commands::AlignPartToSetup;
 use camcraft_app::pick::{self, PlaneLay};
 
 use crate::state::{CommandKind, State};
@@ -68,13 +69,16 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     if armed {
         let picks = state.plane_pick.as_ref().map(|p| p.picks.clone()).unwrap_or_default();
         let lay = PlaneLay { plane: d.plane, flip: d.flip, place: d.place };
-        let check = pick::lay_on_plane(&state.world, &picks, lay);
+        // The command's own check: a refused pick, or one that gives the
+        // alignment the setup already holds, greys Apply out with the why.
+        let check = AlignPartToSetup::check_lay(&state.world, setup, &picks, lay).map_err(|e| e.to_string());
+        let side = pick::plane_side(&state.world, &picks).ok();
         ui.horizontal(|ui| {
             let words: Vec<String> = picks.iter().map(|g| format!("{} of '{}'", g.feature, g.entity)).collect();
             let text = if words.is_empty() { "nothing picked yet".to_owned() } else { words.join(", ") };
             ui.label(RichText::new(format!("      Picked: {text}")).weak());
             let tip = match &check {
-                Ok(_) => format!("Turn the part so the pick lies on {}.", pick::plane_label(d.plane)),
+                Ok(()) => format!("Turn the part so the pick lies on {}.", pick::plane_label(d.plane)),
                 Err(why) => why.clone(),
             };
             if ui
@@ -86,6 +90,10 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
                 state.pending.push_back(CommandKind::LayPartOnPlane { setup: setup.to_owned(), picks, lay });
             }
         });
+        if let Some(side) = &side {
+            ui.label(RichText::new(format!("      {side}")).weak())
+                .on_hover_text("The side of the pick taken as its outside: it faces the plane's axis (or away, with Flip).");
+        }
     }
     ui.data_mut(|m| m.insert_temp(id, d));
 }

@@ -30,12 +30,20 @@ offsets stay refused.
   world axis. The landing is proven before storing: the turned normal
   must sit within 1e-9 rad of the target axis, else refused.
 - **Two edges: which side is out.** Two edges carry no winding, so the
-  plane's outward normal is the side away from the parts' bounds centre
-  (d1 x d2 when the plane runs through the centre). Edges closer than
-  1 degree to parallel are refused: "coincident" when they lie on one
-  line (within 0.01 mm), else "parallel". Skew (non-coplanar) edges are
-  accepted: their directions still span the plane; the first edge's
-  start is the point set to the level.
+  plane's outside is taken from the one flat face both edges bound (every
+  feature edge of each picked run borders it): that face's outward
+  normal from its facet winding, the same reader the face pick uses. The
+  first draft guessed the side away from the parts' bounds centre (d1 x
+  d2 on a plane through the centre); review on PR #346 showed it lays a
+  concave part (a pocket floor, an L-bracket's step) upside down, so it
+  was dropped rather than patched with a tolerance. Two edges that bound
+  no common flat face (or two, or that sit on different bodies) are
+  refused: "the two edges do not bound one face, so their outside is not
+  defined - pick the face instead". This also refuses skew
+  (non-coplanar) edges, which the first draft accepted. Edges closer
+  than 1 degree to parallel are refused: "coincident" when they lie on
+  one line (within 0.01 mm), else "parallel". The first edge's start is
+  the point set to the level.
 - **Which setup.** The row's setup on the Setups page (each setup row
   carries the control, like the #326 presets), so a second setup can lay
   a different face down. With no setup there is no row: #326 keeps the
@@ -51,8 +59,11 @@ offsets stay refused.
   mode, so one click mode takes both edges and faces. A face click
   replaces the draft; an edge click toggles that edge and keeps the last
   two. The draft picks are drawn in the violet pick outline. Apply is
-  enabled only when the app's own reading of the picks succeeds; the
-  disabled button's tooltip says why. Only Apply is a command.
+  enabled only when the app's own reading of the picks succeeds and the
+  result differs from what the setup already holds; the disabled
+  button's tooltip says why ("already holds the part that way" included).
+  The row shows the side taken as outside before Apply ("outside: +Z in
+  the model of Face ..."). Only Apply is a command.
 - **Shared readers.** The 3-2-1's outward-normal and straight-edge readers
   in `pick::align` take the frame as a parameter (the 3-2-1 keeps the
   active setup's view; #330 reads the document frame); behaviour of the

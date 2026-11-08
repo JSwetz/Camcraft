@@ -7,7 +7,7 @@
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, Vec2};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 
 use camcraft_app::commands::ImportModel;
@@ -133,4 +133,37 @@ fn edge_picks_keep_the_last_two_and_parallel_edges_push_nothing() {
     assert!(state.status.contains("parallel"), "{}", state.status);
     assert_eq!(setup_align::stored(&state.world, "Setup1"), None, "a refusal writes nothing");
     assert!(state.plane_pick.is_some(), "a refusal keeps the draft to re-pick");
+}
+
+/// The row names the side taken as the pick's outside before Apply, and
+/// a re-pick that gives the alignment the setup already holds greys Apply
+/// out (the command's own check) instead of refusing after the click.
+#[test]
+fn the_side_is_shown_and_a_pick_that_changes_nothing_greys_apply_out() {
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(1000.0, 300.0))
+        .build_ui_state(frame, with_part());
+    h.run();
+    h.get_by_label("Pick face or edges").click();
+    h.run();
+    let wall = front_wall(h.state());
+    crate::plane_pick::take(h.state_mut(), wall.clone());
+    h.run();
+    let side = |h: &Harness<'static, State>| {
+        h.query_by_label_contains("outside: -Y in the model").is_some()
+    };
+    assert!(side(&h), "the wall's outside (-Y) is shown before Apply");
+    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply"));
+    assert!(!apply.accesskit_node().is_disabled(), "the wall lays the part differently");
+    apply.click();
+    h.run();
+    assert!(wall_normal(h.state()).is_some(), "Setup1 holds the part laid");
+    // The same pick again: nothing would change.
+    h.get_by_label("Pick face or edges").click();
+    h.run();
+    crate::plane_pick::take(h.state_mut(), wall);
+    h.run();
+    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply"));
+    assert!(apply.accesskit_node().is_disabled(), "the setup already holds the part that way");
+    assert!(side(&h), "the side is still shown");
 }
