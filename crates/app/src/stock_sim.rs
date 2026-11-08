@@ -178,7 +178,7 @@ pub fn simulate_document(
         simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
     }
 
-    let model_facets = part_facets(world);
+    let model_facets = part_facets(world)?;
     let dev = deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?;
     let classes = color_classes(&dev);
     let surface = dex.surface(&classes);
@@ -316,7 +316,38 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
 /// to the gouge verdict (counting them here would read a clamped job
 /// as a part with a vise-shaped hole in it). Visibility is a display
 /// choice; the verdict judges all the rest.
-pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Vec<Triangle> {
+///
+/// #326: in a document where a setup holds the part turned, the part is
+/// read in the frame of the one setup the program machines in; a program
+/// spanning setups that hold it differently is refused by name (carrying
+/// the cut stock between part alignments is #317's engine).
+pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Result<Vec<Triangle>, String> {
+    if !crate::setup_align::any_aligned(world) {
+        return Ok(part_facets_as_modelled(world));
+    }
+    let mut setups: Vec<Option<String>> = Vec::new();
+    for (_, e) in crate::setup::operation_order(world) {
+        let Some(op) = crate::model::operation_of(world, &e) else { continue };
+        if op.suppressed {
+            continue;
+        }
+        let eff = crate::setup::effective(world, op.setup.as_deref());
+        if !setups.contains(&eff) {
+            setups.push(eff);
+        }
+    }
+    match setups.as_slice() {
+        [] => Ok(crate::setup_align::parts_facets_in(world, crate::setup::active(world).as_deref())),
+        [one] => Ok(crate::setup_align::parts_facets_in(world, one.as_deref())),
+        many if many.iter().any(|s| crate::setup_align::alignment(world, s.as_deref()).is_some()) => Err(
+            "the program spans setups that hold the part differently (part alignment) - the sim cannot              carry the cut stock from one alignment into the next yet"
+                .into(),
+        ),
+        _ => Ok(part_facets_as_modelled(world)),
+    }
+}
+
+fn part_facets_as_modelled(world: &flecs_ecs::prelude::World) -> Vec<Triangle> {
     use crate::geometry::transform_point;
     use crate::model;
 

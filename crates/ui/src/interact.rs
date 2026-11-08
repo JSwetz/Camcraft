@@ -403,7 +403,7 @@ pub(crate) fn edge_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<(S
         let Some(features) = model::features_of(&state.world, &entity) else {
             continue;
         };
-        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
+        let loc = camcraft_app::setup_align::view_pose(&state.world, &entity).unwrap_or_default(); // #326
         for (i, e) in features.edges.iter().enumerate() {
             let (Some(a), Some(b)) = (features.verts.get(e.a as usize), features.verts.get(e.b as usize)) else {
                 continue;
@@ -681,7 +681,7 @@ pub(crate) fn feature_segments(
     let Some(features) = model::features_of(&state.world, &found) else {
         return;
     };
-    let loc = model::transform_of(&state.world, &found).unwrap_or_default();
+    let loc = camcraft_app::setup_align::view_pose(&state.world, &found).unwrap_or_default(); // #326
     let mvp = state.cam.mvp(aspect);
     match sel {
         FeatureSel::Face(fid) => {
@@ -1678,7 +1678,7 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
         let Some(features) = model::features_of(&state.world, &entity) else {
             continue;
         };
-        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
+        let loc = camcraft_app::setup_align::view_pose(&state.world, &entity).unwrap_or_default(); // #326
         let draw = |out: &mut Vec<[f32; 6]>, pts: &[[f64; 3]], closed: bool| {
             let n = pts.len();
             if n < 2 || (closed && n < 3) {
