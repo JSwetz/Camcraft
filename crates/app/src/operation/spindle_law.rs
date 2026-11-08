@@ -193,11 +193,19 @@ pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result
     if worst.is_finite() && worst <= SPINDLE_TOL {
         return Ok(set_aside_note(&r));
     }
+    Err(refusal(&r, slot))
+}
+
+/// The refusal of a reading off the spindle by more than
+/// [`SPINDLE_TOL`]: an untrusted fit says the reading is biased, a
+/// trusted one names the misplacement and the act that fixes it.
+fn refusal(r: &SpindleReading, slot: &str) -> GenError {
+    let worst = r.worst();
     let pct = shown_pct(r.outlier_share);
     if !r.trusted {
         // The fit itself is in doubt: moving the work offset onto a
         // biased axis may only move the error (issue #71).
-        return Err(GenError::Invalid(format!(
+        return GenError::Invalid(format!(
             "the part's axis of revolution cannot be read to the lathe spindle's {SPINDLE_TOL} mm: \
              {pct:.1}% of the part's turned (non-end-face) surface does not revolve about any one \
              axis (off-centre features - keyways, flats, cross holes), and the axis read through \
@@ -206,7 +214,7 @@ pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result
              revolved stock first and machine those features in a later setup, or model them \
              out of the turned part",
             r.offset_mid, r.lean_deg
-        )));
+        ));
     }
     let aside = if r.outlier_share > 0.0 {
         format!(
@@ -216,7 +224,7 @@ pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result
     } else {
         String::new()
     };
-    Err(GenError::Invalid(format!(
+    GenError::Invalid(format!(
         "the part's axis of revolution is not the lathe spindle: it leans {:.3} degrees \
          off world Z and stands {:.3} mm off the {slot} origin at Z{:.3}{aside}, moving a part \
          point {worst:.4} mm (the lathe programs diameters about world Z through the work \
@@ -224,7 +232,7 @@ pub(super) fn check(facets: &[Triangle], origin: [f64; 3], slot: &str) -> Result
          eccentric or a coned face; align the part's axis with world Z and move the work \
          offset onto it",
         r.lean_deg, r.offset_mid, r.mid_z
-    )))
+    ))
 }
 
 /// Whether `params` works about the spindle on the document's machine:
@@ -261,3 +269,7 @@ pub(crate) fn post_problem(world: &World, name: &str, e: &Entity) -> Option<Stri
     let why = check(&m.facets, origin, slot).err()?;
     Some(format!("{name}: {why} - fix it and regenerate before posting"))
 }
+
+#[cfg(test)]
+#[path = "spindle_law_tests.rs"]
+mod tests;
