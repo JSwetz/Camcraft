@@ -226,7 +226,9 @@ only when one of these holds:
      (`scripts/gate.ps1 -Tier quick` / `scripts/gate.sh quick`), with the
      pinning tests named in the description;
    - **Complete description** - what changed, how it was tested, what was
-     *not* exercised, a `Changelog:` line, and `Fixes #N` / `Refs #N`;
+     *not* exercised, a `Changelog:` line, and `Fixes #N` / `Refs #N` when
+     it works an issue (a docs or process PR the maintainer asked for
+     directly has none);
    - **Laws** - the `AGENTS.md` rules above (clean-room, no panics,
      commands for UI changes, ~400-line files; post scripts
      `assets/posts/*.cps` are exempt from the line limit).

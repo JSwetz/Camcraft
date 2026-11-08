@@ -99,6 +99,12 @@ After posting the review, read `gh pr view <N> --json mergeable`
 - clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` (never green while it conflicts);
 - blocking review -> add `needs-rework`, remove `merge-ready`; also add `conflicts` if it conflicts.
 
+A red or orange verdict also turns the PR back into a draft
+(`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it
+ready again for a fresh review (AGENTS.md "Every PR opens as a draft").
+That applies to our own PRs; a fork contributor's PR is left as they set
+it, and the review comment says what to fix.
+
 Whoever refreshes a branch re-reads `mergeable` after the push: once it is
 `MERGEABLE`, drop `conflicts` and restore `merge-ready` if the last review
 was clean. Merging a PR can turn others `CONFLICTING`, so each run also
@@ -108,7 +114,7 @@ conflict to `conflicts`.
 ## 3. Report
 
 One short line per PR: number, author, verdict, link to the posted review.
-If a review could not be posted, say why. Do not merge, approve, label, or
+If a review could not be posted, say why. Do not merge or approve, and set no labels beyond step 2b's review labels; do not
 close anything; do not reply on the contributor's behalf.
 
 ## 4. Mirror claim comments - add and withdraw
