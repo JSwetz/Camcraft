@@ -125,6 +125,7 @@ fn drill_op(src: &str, top: f64, clear: f64, holes: Vec<Hole>, cross: Vec<CrossH
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 
@@ -174,7 +175,7 @@ fn a_holder_that_would_sweep_the_end_face_on_the_swing_is_refused_by_name() {
         let (world, _h) = turret_world(word, false, |t| t.shank_len = 2.0);
         let e = operation::generate(&world, &drill_op("bar", 20.0, 5.0, vec![], pair.clone()), "").err();
         let e = e.map(|e| e.to_string()).unwrap_or_else(|| panic!("{word}: the holder swept the end face"));
-        for s in ["DR-0400's holder", "dia. 44.000", "14.000 mm behind the tip", "inside the stock's radius"] {
+        for s in ["DR-0400's holder", "dia. 44.000", "14.000 mm behind the tip", "inside material"] {
             assert!(e.contains(s), "{word}: the refusal names '{s}': {e}");
         }
         // The swing raised by the user clears it: z45, the holder's
@@ -251,7 +252,7 @@ fn a_holder_is_judged_against_the_stock_in_its_own_z_band() {
         assert!(r.is_ok(), "{word}: the flange is far below the holder: {:?}", r.err());
         let e = operation::generate(&world, &op(0.0), "").err().map(|e| e.to_string());
         let e = e.unwrap_or_else(|| panic!("{word}: the holder swept the flange"));
-        for s in ["DR-0400's holder", "inside the stock's radius 30.000"] {
+        for s in ["DR-0400's holder", "inside material 30.000 mm out"] {
             assert!(e.contains(s), "{word}: the refusal names '{s}': {e}");
         }
     }

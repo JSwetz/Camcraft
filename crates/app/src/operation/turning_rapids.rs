@@ -140,7 +140,7 @@ pub(super) struct SignedMeridian {
 impl SignedMeridian {
     /// The sign's half plane is the path's own: the first point off
     /// the axis (the kernels walk one plane through it).
-    fn of(f: &Frame, path: &Toolpath) -> Self {
+    pub(super) fn of(f: &Frame, path: &Toolpath) -> Self {
         let origin = f.point(0.0, 0.0);
         let dir = f.point(0.0, 1.0) - origin;
         let off = |q: Point3| {
@@ -161,7 +161,7 @@ impl SignedMeridian {
 
     /// Does `q` stand in the path's own meridian half planes (either
     /// side of the axis), within `tol`?
-    fn in_plane(&self, q: Point3, tol: f64) -> bool {
+    pub(super) fn in_plane(&self, q: Point3, tol: f64) -> bool {
         let d = q - self.origin;
         let s = d.dot(self.dir);
         let w = Point3::new(d.x - self.dir.x * s, d.y - self.dir.y * s, d.z - self.dir.z * s);
@@ -181,7 +181,7 @@ impl SignedMeridian {
 
 /// The station the program ahead faced the stock down to, or `None`
 /// when nothing ahead cut or it cannot be read (the raw stock stands).
-fn faced_end(prior: &mut PriorCell, f: &Frame, sm: &SignedMeridian, cx: &Meridian) -> Option<f64> {
+pub(super) fn faced_end(prior: &mut PriorCell, f: &Frame, sm: &SignedMeridian, cx: &Meridian) -> Option<f64> {
     let dex = prior.get()?;
     let c = sm.origin;
     // The whole face out to the stock's reach: the highest ring stands.
@@ -358,7 +358,7 @@ struct Kerf {
 /// kernel, which rapids axially outside the work and radially out of
 /// its own groove at the helix's end station. A kernel that rapids
 /// ACROSS the threaded length below the crests must not lean on it.
-fn kerf_of(m: &crate::cl::Move, sm: &SignedMeridian, tol: f64) -> Option<((f64, f64), (f64, f64))> {
+pub(super) fn kerf_of(m: &crate::cl::Move, sm: &SignedMeridian, tol: f64) -> Option<((f64, f64), (f64, f64))> {
     let (p, q) = (sm.sr(m.from), sm.sr(m.to));
     let Some(arc) = m.arc.as_ref() else { return Some((p, q)) };
     let on_axis = (arc.center.x - sm.origin.x).hypot(arc.center.y - sm.origin.y) <= tol.max(1e-9) * (1.0 + p.1.abs());
@@ -368,13 +368,13 @@ fn kerf_of(m: &crate::cl::Move, sm: &SignedMeridian, tol: f64) -> Option<((f64, 
 
 /// Offsets across `[-h, h]`, at most 0.25 mm apart, ends included (none
 /// for `h` = 0).
-fn spread(h: f64) -> impl Iterator<Item = f64> {
+pub(super) fn spread(h: f64) -> impl Iterator<Item = f64> {
     let n = if h > 0.0 { (2.0 * h / 0.25).ceil().min(4000.0) as usize } else { 0 };
     (0..=n).filter(move |_| n > 0).map(move |k| -h + 2.0 * h * k as f64 / n as f64)
 }
 
 /// Distance from `p` to the segment `a`-`b` in the meridian plane.
-fn seg_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+pub(super) fn seg_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     let (vx, vy) = (b.0 - a.0, b.1 - a.1);
     let l2 = vx * vx + vy * vy;
     let t = if l2 > 0.0 { (((p.0 - a.0) * vx + (p.1 - a.1) * vy) / l2).clamp(0.0, 1.0) } else { 0.0 };
