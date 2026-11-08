@@ -259,6 +259,13 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t))
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        // A touch probe removes no stock (#108): its stylus only ever
+        // meets the part tangent, and the protected-move law in
+        // `operation::probe_op` already convicted any other meeting -
+        // so the probe op carves nothing and stays out of the plan.
+        if tool.kind == crate::tools::ToolKind::Probe {
+            continue;
+        }
         let cache = model::toolpath_of(world, e)
             .ok_or_else(|| format!("{name}: lost its toolpath"))?;
         // The cone's slope, cot of the half-angle from the axis -

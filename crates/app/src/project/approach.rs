@@ -64,6 +64,10 @@ pub struct ApproachDto {
     /// on; absent is in computer, every earlier file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_comp: Option<bool>,
+    /// The wear variant (#38): written only when on; absent is not
+    /// wear, every earlier file. `control_comp` wins if both are set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wear_comp: Option<bool>,
 }
 
 fn lead_dto(l: Lead) -> LeadDto {
@@ -116,6 +120,7 @@ pub fn approach_to_dto(a: &Approach) -> Option<ApproachDto> {
         axis_tol: num(a.axis_tol, d.axis_tol),
         arc_xy: flag(a.arc_xy, d.arc_xy),
         control_comp: (a.compensation == Compensation::Control).then_some(true),
+        wear_comp: (a.compensation == Compensation::Wear).then_some(true),
     };
     (dto != ApproachDto::default()).then_some(dto)
 }
@@ -151,7 +156,13 @@ pub fn approach_from_dto(d: Option<&ApproachDto>) -> Approach {
         axis_start: d.axis_start.unwrap_or(a.axis_start),
         axis_tol: d.axis_tol.unwrap_or(a.axis_tol),
         arc_xy: d.arc_xy.unwrap_or(a.arc_xy),
-        compensation: if d.control_comp == Some(true) { Compensation::Control } else { Compensation::Computer },
+        compensation: if d.control_comp == Some(true) {
+            Compensation::Control
+        } else if d.wear_comp == Some(true) {
+            Compensation::Wear
+        } else {
+            Compensation::Computer
+        },
         center_cutting: true,
     }
 }

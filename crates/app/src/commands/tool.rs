@@ -71,7 +71,7 @@ impl Command for AddTool {
         };
         entity
             .entity_view(world)
-            .set(ToolDef { tool: self.tool.clone() });
+            .set(ToolDef { tool: self.tool.clone(), number: None });
     }
 
     fn invert(&self, world: &World) {
@@ -118,19 +118,23 @@ impl ChangeTool {
 }
 
 impl Command for ChangeTool {
+    // #221: the number is the tool table's, not the geometry's - a
+    // ChangeTool (either way) keeps whatever number the tool has now.
     fn apply(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
+            let number = model::tool_number_of(world, &entity);
             entity
                 .entity_view(world)
-                .set(ToolDef { tool: self.next.clone() });
+                .set(ToolDef { tool: self.next.clone(), number });
         }
     }
 
     fn invert(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
+            let number = model::tool_number_of(world, &entity);
             entity
                 .entity_view(world)
-                .set(ToolDef { tool: self.prev.clone() });
+                .set(ToolDef { tool: self.prev.clone(), number });
         }
     }
 }
@@ -140,6 +144,8 @@ impl Command for ChangeTool {
 pub struct DeleteTool {
     name: String,
     tool: Tool,
+    /// #221: the tool's number, restored with it on undo.
+    number: Option<u32>,
     location: Location,
 }
 
@@ -153,6 +159,7 @@ impl DeleteTool {
         Ok(DeleteTool {
             name: name.to_string(),
             tool,
+            number: model::tool_number_of(world, &entity),
             location: model::transform_of(world, &entity).unwrap_or_default(),
         })
     }
@@ -173,6 +180,6 @@ impl Command for DeleteTool {
         model::set_transform(world, &entity, self.location);
         entity
             .entity_view(world)
-            .set(ToolDef { tool: self.tool.clone() });
+            .set(ToolDef { tool: self.tool.clone(), number: self.number });
     }
 }

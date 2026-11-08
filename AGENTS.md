@@ -19,8 +19,14 @@ afterwards - the work must not bother them.
   a choice appears, take the recommended option and keep moving; occasional
   one-line status feedback is fine, a blocking question is not.
 - **Every recommendation is recorded.** Each decision taken unattended gets
-  an entry in `RECOMMENDED.md` - what was chosen, why, what was considered
-  and dropped - as the discussion ledger for after the roadmap is cleared.
+  an entry - what was chosen, why, what was considered and dropped - as the
+  discussion ledger for after the roadmap is cleared. On an issue branch it
+  goes in that PR's own file, `docs/decisions/<issue>-<slug>.md`, never in
+  `RECOMMENDED.md` itself: every branch appending to one shared file made
+  each merge re-conflict every other open PR (user, 2026-11-08: "this is
+  getting annoying"). The cut gathers the files into `RECOMMENDED.md`
+  (`scripts/collect-decisions.ps1`, release step 2); `docs/decisions/README.md`
+  has the format.
 - **Never stop, never recap mid-roadmap.** There is no "wrap up and check
   in" state: the next issue is claimed when the current gate is green.
   Session summaries are for compaction, not for the user.
@@ -41,8 +47,9 @@ Since 2026-11-07 (user: "move off the roadmap and track work as ISSUES") the
 work list is the repo's open GitHub issues, read and written with `gh`.
 `ROADMAP.md` is a frozen archive (`DONE.md` was retired - it lives in git
 history and in every tag up to v0.8.1): read it for history and
-design context, never add work to them. Decisions still go to
-`RECOMMENDED.md`; shipped changes go to `CHANGELOG.md`.
+design context, never add work to them. Decisions go to a per-PR file in
+`docs/decisions/` (gathered into `RECOMMENDED.md` at the cut); shipped changes
+go to `CHANGELOG.md`.
 
 - **Use the gh-issues skill.** Any work that reads, files, comments on,
   labels, claims, closes or reopens an issue loads the `gh-issues` skill
@@ -51,7 +58,8 @@ design context, never add work to them. Decisions still go to
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
 - **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review"`
-  and take the highest priority first: `P0` (wrong output, gouge, crash,
+  (then drop any whose comments hold a live contributor claim - "A claim
+  comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
@@ -96,19 +104,45 @@ design context, never add work to them. Decisions still go to
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
   worktree/branch <name> · plan: <one line>"`. Never work an issue that
-  carries `claimed` unless its last claim comment is older than 4 hours with
-  no newer comment from the claimant - then it is stale: comment "reclaimed
-  from <old claimant> (stale)" and take it.
+  carries `claimed` unless its last claim comment is an agent's and older
+  than 4 hours with no newer comment from the claimant - then it is stale:
+  comment "reclaimed from <old claimant> (stale)" and take it. A
+  contributor's claim comment never goes stale on a timer ("A claim comment
+  is a claim", below).
 - **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
   an Agent should have the tag source:agent"). Every issue an agent opens
   carries the `source:agent` label alongside its `P*` and `area:*` labels -
   including a bug the user reported in chat and an agent filed for them.
   An issue a human opens on GitHub never gets it. Agents and the user share
   one GitHub account, so the label, not the author, tells them apart.
-- **Outside contributors' claims count.** A claim comment from a
-  contributor without label rights is a claim: the main session sets
-  `claimed` and the assignee for them and replies, and their issue is not
-  picked while the claim is fresh (4 h rule).
+- **A claim comment is a claim** (user, 2026-11-08: "a comment should
+  suffice ... if we come across a claimed issue thru comment we should
+  just label it as such - and vice versa if they remove their comment,
+  remove their claim label for em as part of maintenance.. Otherwise the
+  comment stands as claimed."). Only collaborators can set labels, so
+  anyone else claims an issue by commenting on it with a line starting
+  `claimed:` (or `/claim`). The comment is the claim; the label only
+  mirrors it.
+  - **Check before claiming.** Before `Claim before any code`, read the
+    issue's comments (`gh issue view N --comments`). A claim comment by
+    anyone other than the owner account (agents post as the owner) means
+    the issue is taken: do not work it, even if it has no `claimed` label -
+    unless that same person later commented `unclaim` (a withdrawn claim).
+  - **Mirror it.** An issue found with such a comment but without the
+    label gets `claimed` and the claimant as assignee (if GitHub refuses
+    the assignee, the label alone), plus one reply: "Claim recorded for
+    @<login> - label and assignee set (only collaborators can set labels;
+    your comment is the claim)."
+  - **Withdrawn = deleted.** A contributor's claim stands for as long as
+    their claim comment exists - the 4 h stale rule is for agent claims
+    only. If the comment is deleted, or the claimant comments `unclaim`,
+    the claim is gone: remove `claimed` and their assignment, and comment
+    "claim by @<login> withdrawn (comment removed) - issue is free again".
+  - **Maintenance.** Every `/review-prs` run (step 4) and every issue pick
+    does this sweep for the issues it touches: label the comment-only
+    claims, and drop the label where the only claim comment behind it is
+    gone. A `claimed` label backed by an agent's claim comment follows the
+    4 h rule above instead.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
@@ -122,8 +156,8 @@ design context, never add work to them. Decisions still go to
   minor/major cut; docs/process/CI-only PRs merge once reviewed. The fixing commit ends its body with `Fixes #N` (`Refs #N` for
   partial work, which never closes). When its gate is green:
   `git push -u origin issue/N-<slug>`, then
-  `gh pr create --base main --head issue/N-<slug> --title "<conventional
-  subject>" --body-file <file>` - the body says what changed, the readings,
+  `gh pr create --draft --base main --head issue/N-<slug> --title
+  "<conventional subject>" --body-file <file>` - the body says what changed, the readings,
   the pinning test(s), a `Changelog:` line (the one-line row text, or
   `none` for docs/test-only) and ends `Fixes #N`. Then, in the same step:
   swap `claimed` for `in-review`, and comment `fix on issue/N-<slug> · PR #M
@@ -136,6 +170,19 @@ design context, never add work to them. Decisions still go to
   (dropped, or held by the user with a PR comment) swaps `in-review` for
   `blocked` (held, say on what) or for nothing (dropped, say why), with an
   issue comment - an issue never sits in `in-review` without an open PR.
+- **Every PR opens as a draft** (user, 2026-11-08: "All PR's should be done
+  as drafts to start with. And not flagged ready to review until either
+  user saids its ok or the tests are done. Once its been flagged ready to
+  review no more pushes should be performed"). A PR is created with
+  `--draft` and stays a draft while work, gating and review fixes land on
+  it. It is flagged ready (`gh pr ready <M>`) only when the user says so,
+  or when its gate tier is green on its final head and its independent
+  review is clean. Once ready, its branch takes **no more pushes**: a late
+  finding, a needed `git merge origin/main` or any other change first turns
+  it back into a draft (`gh pr ready <M> --undo`), says why in a PR
+  comment, is pushed and re-gated, and only then is flagged ready again.
+  Merging (by the main session for fix/docs PRs, at the cut for `feat`)
+  takes only a ready PR, never a draft.
 - **Never close by hand without a commit**, except: a duplicate (link the
   original), already done (name the commit that did it), or a decided
   won't-do (label `wontfix`, give the reason). Each needs that comment.
@@ -464,8 +511,9 @@ a tag"):
    review by a subagent that did not write it (`/code-review` on the PR, or
    a reviewer briefed with the diff, not the author's conclusion); findings
    are fixed on that branch and pushed. A PR that no longer merges cleanly
-   takes `git merge origin/main` on its branch (append-only files such as
-   `RECOMMENDED.md` keep both sides), is re-gated (quick), and pushed. Then
+   takes `git merge origin/main` on its branch (an older branch that still
+   appends to `RECOMMENDED.md` keeps both sides), is re-gated (quick), and
+   pushed. Then
    `gh pr merge M --merge --delete-branch` - merge commits, never squash or
    rebase, so branch commits keep the hashes the issue comments name. A
    worktree still holding the branch is removed first (the local delete
@@ -474,7 +522,10 @@ a tag"):
    merge parent-first.
 2. **Release branch.** Sync main (`git pull --ff-only`), then
    `git switch -c release/vX.Y.Z`. The version is the highest bump among
-   the commits since the last tag (table above). Write `RELEASE_NOTES.md`
+   the commits since the last tag (table above). Run
+   `scripts/collect-decisions.ps1 -Version X.Y.Z` (appends every
+   `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
+   removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per
    behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows), commit as `docs: X.Y.Z release notes;
    changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`

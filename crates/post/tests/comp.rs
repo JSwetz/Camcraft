@@ -20,14 +20,22 @@ fn fanuc() -> String {
 #[test]
 fn comp_records_round_trip_and_malformed_ones_refuse() {
     let recs = vec![
-        Record::Comp { side: Some(CompSide::Left), radius_mm: 3.0 },
-        Record::Comp { side: Some(CompSide::Right), radius_mm: 2.5 },
-        Record::Comp { side: None, radius_mm: 0.0 },
+        Record::Comp { side: Some(CompSide::Left), radius_mm: 3.0, wear: false },
+        Record::Comp { side: Some(CompSide::Right), radius_mm: 2.5, wear: true },
+        Record::Comp { side: None, radius_mm: 0.0, wear: false },
     ];
     let text = cnc::serialize(&recs);
-    assert!(text.contains("COMP LEFT 3000\n") && text.contains("COMP RIGHT 2500\n") && text.contains("COMP OFF\n"), "{text}");
+    assert!(text.contains("COMP LEFT 3000\n") && text.contains("COMP RIGHT 2500 WEAR\n") && text.contains("COMP OFF\n"), "{text}");
     assert_eq!(cnc::parse(&text).unwrap(), recs);
-    for bad in ["COMP LEFT\n", "COMP UP 3000\n", "COMP LEFT 0\n", "COMP RIGHT -3000\n", "COMP LEFT x\n"] {
+    for bad in [
+        "COMP LEFT\n",
+        "COMP UP 3000\n",
+        "COMP LEFT 0\n",
+        "COMP RIGHT -3000\n",
+        "COMP LEFT x\n",
+        "COMP LEFT 3000 FULL\n",
+        "COMP OFF WEAR\n",
+    ] {
         assert!(cnc::parse(bad).is_err(), "{bad:?} must refuse");
     }
 }
@@ -109,7 +117,7 @@ fn fanuc_refuses_a_comp_word_that_would_land_on_an_arc_a_rapid_or_the_section_en
 
 #[test]
 fn every_other_shipped_post_refuses_control_compensation_by_name() {
-    for stem in ["haas", "mazak", "sinumerik", "heidenhain", "fanuc-lathe"] {
+    for stem in ["haas", "mazak", "sinumerik", "heidenhain", "fanuc-lathe", "tormach"] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../assets/posts/{stem}.cps"));
         let cps = std::fs::read_to_string(path).expect("post");
         let out = engine::run(&cps, &Value::Null, STREAM).unwrap_or_else(|e| panic!("{stem}: {e}"));

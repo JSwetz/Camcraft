@@ -309,21 +309,40 @@ pub(super) fn canon_ring(ring: &[(i64, i64)]) -> Vec<(i64, i64)> {
     if n == 0 {
         return Vec::new();
     }
-    let mut best: Option<Vec<(i64, i64)>> = None;
-    // The two directions: forward (step 1) and mirrored (step n - 1,
-    // i.e. backward). M11.4 A: the old second step was 2, which is no
-    // mirror at all - a face loop and its edge chain walked the other
-    // way never deduped (harmless for `Region::new`'s union, but two
-    // copies of one boundary for every consumer counting loops).
-    for start in 0..n {
-        for step in [1usize, n - 1] {
-            let walk: Vec<(i64, i64)> = (0..n).map(|k| ring[(start + k * step) % n]).collect();
-            if best.as_ref().is_none_or(|b| walk < *b) {
-                best = Some(walk);
+    // Booth's minimum-rotation scan is linear. The old walk allocated 2n
+    // whole rings and compared them, quadratic work on every face pick and
+    // every Geometry-panel redraw for a finely tessellated boundary.
+    let forward = minimum_rotation(ring);
+    let reversed: Vec<_> = ring.iter().rev().copied().collect();
+    let backward = minimum_rotation(&reversed);
+    let a: Vec<_> = (0..n).map(|k| ring[(forward + k) % n]).collect();
+    let b: Vec<_> = (0..n).map(|k| reversed[(backward + k) % n]).collect();
+    a.min(b)
+}
+
+fn minimum_rotation(ring: &[(i64, i64)]) -> usize {
+    let n = ring.len();
+    let (mut i, mut j, mut k) = (0, 1, 0);
+    while i < n && j < n && k < n {
+        match ring[(i + k) % n].cmp(&ring[(j + k) % n]) {
+            std::cmp::Ordering::Equal => k += 1,
+            std::cmp::Ordering::Greater => {
+                i += k + 1;
+                if i <= j {
+                    i = j + 1;
+                }
+                k = 0;
+            }
+            std::cmp::Ordering::Less => {
+                j += k + 1;
+                if j <= i {
+                    j = i + 1;
+                }
+                k = 0;
             }
         }
     }
-    best.unwrap_or_default()
+    i.min(j) % n
 }
 
 /// Run one generated path after another. Both start and end on the
@@ -337,4 +356,43 @@ pub(super) fn stitch(mut a: Toolpath, mut b: Toolpath) -> Toolpath {
     a.moves.append(&mut b.moves);
     a.cycles.append(&mut b.cycles);
     a
+}
+
+#[cfg(test)]
+mod canonical_ring_tests {
+    use super::canon_ring;
+
+    fn reference(ring: &[(i64, i64)]) -> Vec<(i64, i64)> {
+        let n = ring.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let mut best = None;
+        for start in 0..n {
+            for step in [1, n - 1] {
+                let walk: Vec<_> = (0..n).map(|k| ring[(start + k * step) % n]).collect();
+                if best.as_ref().is_none_or(|old| walk < *old) {
+                    best = Some(walk);
+                }
+            }
+        }
+        best.unwrap_or_default()
+    }
+
+    #[test]
+    fn linear_canonical_ring_matches_all_short_rotations_and_mirrors() {
+        assert_eq!(canon_ring(&[]), Vec::new());
+        for len in 1..=7u32 {
+            for mut code in 0..3usize.pow(len) {
+                let ring: Vec<_> = (0..len)
+                    .map(|_| {
+                        let digit = code % 3;
+                        code /= 3;
+                        (digit as i64, 0)
+                    })
+                    .collect();
+                assert_eq!(canon_ring(&ring), reference(&ring), "{ring:?}");
+            }
+        }
+    }
 }
