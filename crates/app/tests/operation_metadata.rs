@@ -117,10 +117,52 @@ fn version_49_operations_keep_legacy_name_order() {
     let mut file: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).expect("file"))
         .expect("JSON");
     file["version"] = serde_json::json!(49);
+    // A real v49 file never carried positions: strip the ones #167 stores.
+    if let Some(entities) = file["entities"].as_array_mut() {
+        for entity in entities {
+            if let Some(op) = entity.get_mut("operation").and_then(|o| o.as_object_mut()) {
+                op.remove("order");
+            }
+        }
+    }
     std::fs::write(&path, serde_json::to_vec_pretty(&file).expect("JSON")).expect("downgrade fixture");
     let loaded = new_world();
     project::load(&loaded, &path).expect("v49 migration");
     let _ = std::fs::remove_file(&path);
     assert_eq!(keys(&loaded), ["A_Face", "Z_Face"]);
     assert_eq!(label(&loaded, "A_Face"), "A_Face");
+}
+
+#[test]
+fn created_operations_post_in_creation_order_not_name_order() {
+    let (world, mut history) = seed();
+    add(&world, &mut history, "Rough");
+    add(&world, &mut history, "Finish");
+    assert_eq!(keys(&world), ["Rough", "Finish"], "#167: creation order, not name order");
+    add(&world, &mut history, "B");
+    add(&world, &mut history, "A");
+    assert_eq!(keys(&world), ["Rough", "Finish", "B", "A"]);
+    history.undo(&world);
+    assert_eq!(keys(&world), ["Rough", "Finish", "B"]);
+    history.redo(&world);
+    assert_eq!(keys(&world), ["Rough", "Finish", "B", "A"]);
+}
+
+#[test]
+fn creating_after_legacy_unordered_ops_keeps_their_name_order() {
+    let (world, mut history) = seed();
+    add(&world, &mut history, "Z_Face");
+    add(&world, &mut history, "A_Face");
+    // An older project's ops carry no stored position: they read in name order.
+    for name in ["Z_Face", "A_Face"] {
+        let entity = model::find_by_name(&world, name).expect("op");
+        entity.entity_view(&world).set(camcraft_app::schema::OperationMeta::default());
+    }
+    assert_eq!(keys(&world), ["A_Face", "Z_Face"]);
+    add(&world, &mut history, "M_Face");
+    assert_eq!(keys(&world), ["A_Face", "Z_Face", "M_Face"], "legacy order kept, new op last");
+    history.undo(&world);
+    assert_eq!(keys(&world), ["A_Face", "Z_Face"]);
+    let legacy = model::find_by_name(&world, "Z_Face").expect("op");
+    assert_eq!(model::operation_meta_of(&world, &legacy).order, None, "undo restores the unpinned position");
 }

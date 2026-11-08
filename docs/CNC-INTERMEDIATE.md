@@ -33,7 +33,7 @@ committed golden is a legal post input.
 | `CYCLE <TYPE> X.. Y.. Z.. [R.. ENTRY.. Q.. P.. F.. AT..]` | one canned cycle |
 | `PART LOAD [ADVANCE <µm>]` / `PART UNLOAD` | a part lifecycle event: `dump` brackets each section with them; ADVANCE rides the LOAD alone (the bar's next bite, µm) |
 | `PART TRANSFER <from> <to>` | the handoff step of the same family: station `from` (1-based, the order the machine file states its spindles) hands the part to station `to`; both operands required, a missing or zero-station number refuses by name |
-| `COMP LEFT <µm>` / `COMP RIGHT <µm>` / `COMP OFF` | cutter radius compensation in the control (M13.11): engage (G41 / G42, the register holding this radius) on the next motion record, or cancel (G40) on it. The motion records between an engage and its cancel are the PART contour the control offsets, not the cutter centre - a script that cannot say the words refuses by name |
+| `COMP LEFT <µm> [WEAR]` / `COMP RIGHT <µm> [WEAR]` / `COMP OFF` | cutter radius compensation in the control (M13.11): engage (G41 / G42, the register holding this radius) on the next motion record, or cancel (G40) on it. The motion records between an engage and its cancel are the PART contour the control offsets, not the cutter centre - except under `WEAR` (#38), where they are the cutter-centre path walked at this radius and the register holds only the wear delta (`properties.CompensationType` `"wear"`, else `"control"`) - a script that cannot say the words refuses by name |
 | `PROBE <µm>` | the measurement ask (M5.3 D): the deviation budget, in µm, that the finished part is to be probed to after this section's last cut. The number is the switch - no word when no ask - and the verdict it deserves (whether the program's own cuts can measure to it, and which pass owes a re-run) is the app post gate's, never the streams |
 | `START X <i> Y <i> Z <i>` / `END` | legacy `.cl` position lines: consumed silently (END ends the record span) |
 
@@ -85,6 +85,7 @@ behavior only):
 | `SpindleSpeed` | rpm (PARAM) |
 | `WorkOffset` `OriginX` `OriginY` `OriginZ` | WCS slot + machine origin (PARAMs) |
 | `StockXYLeft/Right/Front/Back` `StockZTop` | stock bounds (PARAMs) |
+| `Coolant` | `off` / `mist` / `through-tool` (PARAM, #112) - absent means flood; the post picks the machine's code of that family, refusing by operation name when it states none; a script without `coolantModes = true` is refused any non-flood ask (#150) |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |

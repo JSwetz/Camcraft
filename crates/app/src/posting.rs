@@ -599,6 +599,7 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             part_unload,
             part_transfer,
             probe_tol,
+            coolant: op.coolant,
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

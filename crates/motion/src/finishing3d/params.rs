@@ -244,6 +244,40 @@ pub fn scallop_stepover(r: f64, tol: f64) -> f64 {
     (8.0 * r * tol).sqrt()
 }
 
+/// The scallop law's reach ceiling (M13.9, #37): the spacing at which
+/// the cusp formula `h = r − √(r² − (s/2)²)` stops describing a cusp.
+/// At `s = 2r` the two balls only touch and `h = r`; past it they never
+/// meet and the strip between them is uncut ground, not a scallop. So
+/// a stated `stepover` or `steep_stepover` at or past the ball
+/// diameter is refused by name, never generated into a path whose
+/// verdict would read a "cusp" a full radius tall. The tolerance has
+/// the same ceiling through the auto law: `√(8·r·tol)` - the small-cusp
+/// form of the formula above - reaches `2r` at `tol = r/2`, so a
+/// tolerance at or past half the ball radius is refused too (the
+/// exact formula never lets a cusp reach that tall short of `s = √3·r`;
+/// such a "tolerance" is no finishing promise). Inputs below the
+/// ceiling are untouched: no clamp, no rounding.
+pub(super) fn scallop_ceiling(p: &Finish3DParams) -> Result<(), GenError> {
+    let d = p.tool_diameter;
+    for (name, s) in [("stepover", p.stepover), ("steep stepover", p.steep_stepover)] {
+        if let Some(s) = s
+            && s >= d
+        {
+            return Err(GenError::Invalid(format!(
+                "3D finish {name} {s} mm reaches the scallop ceiling: passes a ball diameter ({d} mm) apart leave uncut ground, not a cusp"
+            )));
+        }
+    }
+    if p.tolerance >= d / 4.0 {
+        return Err(GenError::Invalid(format!(
+            "3D finish tolerance {} mm reaches the scallop ceiling: at half the ball radius ({} mm) the scallop stepover is a full ball diameter",
+            p.tolerance,
+            d / 4.0
+        )));
+    }
+    Ok(())
+}
+
 /// The adaptive march's refinement floor, mm: `delta0/4096` by its
 /// own right (the quarter-chord bisection has to stop SOMEWHERE),
 /// raised - never lowered - by an explicit `min_step`. A NaN floor
@@ -326,6 +360,7 @@ pub(super) fn validate(p: &Finish3DParams, facets: &[Triangle]) -> Result<(), Ge
             "3D finish needs finite positive tool, tolerance, feeds, heights and surface-finish numbers".into(),
         ));
     }
+    scallop_ceiling(p)?;
     if facets.is_empty() {
         return Err(GenError::Empty("model has no facets".into()));
     }
