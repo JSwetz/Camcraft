@@ -453,7 +453,11 @@ function onProbeResult() {
     var sum = [];
     for (var k = 0; k < a.Measures.length; k++) sum.push("R" + (probeBase + 3 * a.Measures[k] + ai));
     var mean = a.Measures.length > 1 ? "(" + sum.join("+") + ")/" + a.Measures.length : sum[0];
-    block(["R" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    // The sign is folded into the operator so a negative expected value
+    // (edge, outside corner) never writes a doubled sign like `--`.
+    var ex = a.Expected - org[ai];
+    var op = ex < 0 ? "+" : "-";
+    block(["R" + (dev + i) + "=" + mean + op + fu(Math.abs(ex))]);
     stopAlarm("ABS(R" + (dev + i) + ")>" + fu(p.Tolerance), 65001, "PROBE " + a.Axis + " OUT OF TOLERANCE");
   }
   if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {

@@ -26,12 +26,22 @@ const HEIDENHAIN: &str = include_str!("../../../assets/posts/heidenhain.cps");
 /// The bore centre of tests/probe_op.rs: a 20 mm bore at (30, 30),
 /// rim Z 20, four touches (seek + measure each).
 fn bore_stream(set_wcs: Option<u8>, wcs: &str) -> String {
+    probe_stream(ProbeMode::Bore, ProbeDir::ZNeg, Point3::new(30.0, 30.0, 20.0), 10.0, set_wcs, wcs)
+}
+
+/// An edge +X touch at the part edge X 0: the 4 mm ball trips at X -2,
+/// so the expected value is negative.
+fn edge_stream() -> String {
+    probe_stream(ProbeMode::Edge, ProbeDir::XPos, Point3::new(0.0, 5.0, 20.0), 0.0, Some(1), "G54")
+}
+
+fn probe_stream(mode: ProbeMode, dir: ProbeDir, target: Point3, radius: f64, set_wcs: Option<u8>, wcs: &str) -> String {
     let p = ProbeParams {
-        mode: ProbeMode::Bore,
-        dir: ProbeDir::ZNeg,
+        mode,
+        dir,
         dir_y: ProbeDir::YPos,
-        target: Point3::new(30.0, 30.0, 20.0),
-        radius: 10.0,
+        target,
+        radius,
         ball_diameter: 4.0,
         approach: 5.0,
         overtravel: 5.0,
@@ -42,7 +52,7 @@ fn bore_stream(set_wcs: Option<u8>, wcs: &str) -> String {
         inset: 5.0,
         clearance_z: 50.0,
     };
-    let t = probe_cycle(&p).expect("bore");
+    let t = probe_cycle(&p).expect("probe cycle");
     let d = post::Dump {
         op_name: "Probe1",
         tool_number: 7,
@@ -145,4 +155,31 @@ fn heidenhain_refuses_a_probe_by_name() {
     for hook in ["onProbeMove", "onProbeRetreat", "onProbeResult"] {
         assert!(out.warnings.iter().any(|w| w.contains(hook)), "refused by {hook}: {:?}", out.warnings);
     }
+}
+
+/// A negative expected value (edge probe) folds its sign into the
+/// operator: no doubled sign like `#190=#100--2` is ever written.
+fn no_doubled_sign(prog: &str) {
+    assert!(!prog.contains("--") && !prog.contains("+-") && !prog.contains("-+"), "doubled sign:\n{prog}");
+}
+
+#[test]
+fn haas_edge_deviation_folds_its_sign() {
+    let prog = post_ok(HAAS, &edge_stream());
+    no_doubled_sign(&prog);
+    assert!(prog.contains("#190=#100+2\n"), "{prog}");
+}
+
+#[test]
+fn mazak_edge_deviation_folds_its_sign() {
+    let prog = post_ok(MAZAK, &edge_stream());
+    no_doubled_sign(&prog);
+    assert!(prog.contains("#190=#100+2\n"), "{prog}");
+}
+
+#[test]
+fn sinumerik_edge_deviation_folds_its_sign() {
+    let prog = post_ok(SINUMERIK, &edge_stream());
+    no_doubled_sign(&prog);
+    assert!(prog.contains(" R90=R50+2\n"), "{prog}");
 }
