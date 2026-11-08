@@ -318,7 +318,10 @@ pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<
     // angle - a turn coarse enough to skip further is a polygon
     // pretending to be a wall (axis_point.rs).
     use super::axis_point::{borne_out, skip_budget, widest_skip};
-    if widest_skip(data.iter().map(|d| d.n), u)? > skip_budget() {
+    // Only the facets that MEET the axis may vouch for its roundness:
+    // an outlier boss lent its bearings to a prism (review of PR #223).
+    let meets = data.iter().filter(|d| super::axis_robust::dist(d, ax).is_some_and(|e| e <= tol));
+    if widest_skip(meets.map(|d| d.n), u)? > skip_budget() {
         return None;
     }
     // Lines through ONE point meet every line through it: a pencil

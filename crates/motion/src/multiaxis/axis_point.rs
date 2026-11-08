@@ -14,20 +14,23 @@
 //! so it may certify an axis only when it is itself rotationally
 //! symmetric about it - the Gauss map of a surface of revolution is a
 //! union of circles about the axis, so the facets that meet at a point
-//! must bear every azimuth about it, up to the sagitta budget, on
-//! their own. A box's faces bear four azimuths about any axis (or
-//! two); a single-band shaft's wall bears all of them about its own
-//! axis and two about a cross one. So: find the point the inliers'
-//! normal lines meet best (least trimmed squares on the area); when
-//! the lines through it carry half the inlier area, the coarseness
-//! gate is applied to those facets alone. A true revolve's ring passes
-//! it whatever its band count; a point-concurrent prism never does.
+//! must spread their area evenly over the bearings about it. So the
+//! inliers are peeled into pencils (the point their lines meet best,
+//! least trimmed squares on the area, then the next among the rest)
+//! and each pencil is judged by itself: its low trigonometric moments
+//! about the axis must vanish (a box face set or a crossing rod's wall
+//! piles its area on 2 or 4 bearings), and a pencil holding half the
+//! inliers must pass the coarseness gate alone. The coarseness gate
+//! itself reads only facets that meet the axis (`axis.rs`), so an
+//! outlier boss lends nothing. A true revolve's rings pass whatever
+//! their band count; a point-concurrent prism or a cross never does.
 //!
 //! Provenance: the Gauss map of a surface of revolution (do Carmo,
 //! Differential Geometry of Curves and Surfaces) and the concurrency
 //! of its normal lines with the axis (Pottmann & Randrup 1998);
-//! least-squares point of nearest approach to a set of lines and least
-//! trimmed squares (Rousseeuw 1984). Written from those sources and
+//! least-squares point of nearest approach to a set of lines, least
+//! trimmed squares (Rousseeuw 1984), and the trigonometric moments of
+//! circular data (Mardia & Jupp, Directional Statistics). Written from those sources and
 //! our own design notes; no vendor material.
 
 use crate::geometry::Point3;
@@ -41,24 +44,24 @@ use super::linalg::{solve3, unit};
 const POINT_SHARE: f64 = 0.5;
 /// Trimming rounds that find the point a pencil of lines meets.
 const ROUNDS: usize = 6;
+/// Pencils peeled off the inliers at most (a banded wall is one per
+/// band; past this the rest are too small to bias anything).
+const MAX_PENCILS: usize = 12;
+/// Smallest pencil, as a share of the inlier area, worth judging.
+const MIN_PENCIL: f64 = 0.05;
+/// The uneven area of all pencils together, as a share of the inlier
+/// area: the same 10 % the concurrency share lets miss the axis.
+const BIAS_SHARE: f64 = 0.1;
+/// Trigonometric moments read: up to four-fold (a box, a jack).
+const HARMONICS: usize = 4;
 
 /// The widest empty skip (radians) between the bearings about `u` of
 /// the normals `ns`; `None` when too few bear an azimuth to call
 /// anything round. `sqrt(8 * REL_TOL)` is the chord-sagitta budget in
 /// angle: a skip past it is a polygon pretending to be a wall.
 pub(super) fn widest_skip(ns: impl Iterator<Item = Point3>, u: Point3) -> Option<f64> {
-    let any = if u.z.abs() < 0.9 { Point3::new(0.0, 0.0, 1.0) } else { Point3::new(1.0, 0.0, 0.0) };
-    let e1 = unit(u.cross(any))?;
-    let e2 = u.cross(e1);
-    let mut angs: Vec<f64> = Vec::new();
-    for n in ns {
-        let s = n.dot(u);
-        let p = Point3::new(n.x - u.x * s, n.y - u.y * s, n.z - u.z * s);
-        if p.dot(p) <= 1e-4 {
-            continue; // pole facet: bears no azimuth
-        }
-        angs.push(p.dot(e2).atan2(p.dot(e1)).rem_euclid(std::f64::consts::TAU));
-    }
+    let (e1, e2) = frame(u)?;
+    let mut angs: Vec<f64> = ns.filter_map(|n| bearing(n, u, e1, e2)).collect();
     if angs.len() <= 2 {
         return None;
     }
@@ -74,23 +77,86 @@ pub(super) fn skip_budget() -> f64 {
 }
 
 /// True when the inliers of `ax` (normal lines within `tol`) bear the
-/// axis out: either they do not meet at one point, or the facets that
-/// do bear every azimuth about it on their own.
+/// axis out. The inliers are peeled into pencils - the lines through
+/// one point, found by [`pencil_point`], then the next point among the
+/// rest - and each pencil is judged ON ITS OWN (review of PR #223: two
+/// crossed single-band cylinders are two pencils at one point, and the
+/// union of a ring and a two-bearing pencil looked round). A pencil of
+/// a revolve is a ring (or zone) about the axis, so its area spreads
+/// evenly over the bearings: its unevenness (low trigonometric
+/// moments, [`unevenness`]), weighted by the pencil's area, may total
+/// at most [`BIAS_SHARE`] of the inliers. A pencil holding half the
+/// inliers must also pass the coarseness gate by itself.
 pub(super) fn borne_out(data: &[Datum], ax: Axis, tol: f64) -> bool {
-    let inl: Vec<&Datum> = data.iter().filter(|d| dist(d, ax).is_some_and(|e| e <= tol)).collect();
-    let a_in: f64 = inl.iter().map(|d| d.a).sum();
+    let mut rest: Vec<&Datum> = data.iter().filter(|d| dist(d, ax).is_some_and(|e| e <= tol)).collect();
+    let a_in: f64 = rest.iter().map(|d| d.a).sum();
     if a_in <= 0.0 || !a_in.is_finite() {
         return true; // judge's share gate speaks for an empty set
     }
-    let Some(c) = pencil_point(&inl) else {
-        return true; // the lines fix no point: no pencil to fear
-    };
-    let near: Vec<&&Datum> = inl.iter().filter(|d| miss(d, c) <= tol).collect();
-    let a_near: f64 = near.iter().map(|d| d.a).sum();
-    if a_near < POINT_SHARE * a_in {
-        return true;
+    let mut biased = 0.0;
+    for _ in 0..MAX_PENCILS {
+        let Some(c) = pencil_point(&rest) else {
+            break; // the lines fix no point: no pencil left to fear
+        };
+        let (near, far): (Vec<&Datum>, Vec<&Datum>) = rest.iter().partition(|d| miss(d, c) <= tol);
+        let a_near: f64 = near.iter().map(|d| d.a).sum();
+        if near.len() < 3 || a_near < MIN_PENCIL * a_in {
+            break;
+        }
+        if a_near >= POINT_SHARE * a_in && widest_skip(near.iter().map(|d| d.n), ax.dir).is_none_or(|g| g > skip_budget()) {
+            return false;
+        }
+        biased += unevenness(&near, ax.dir).unwrap_or(1.0) * a_near;
+        if biased > BIAS_SHARE * a_in {
+            return false;
+        }
+        rest = far;
     }
-    widest_skip(near.iter().map(|d| d.n), ax.dir).is_some_and(|g| g <= skip_budget())
+    true
+}
+
+/// The bearing of `n` about `u` in the frame (e1, e2); `None` for a
+/// pole (a normal along the axis bears no azimuth).
+fn bearing(n: Point3, u: Point3, e1: Point3, e2: Point3) -> Option<f64> {
+    let s = n.dot(u);
+    let p = Point3::new(n.x - u.x * s, n.y - u.y * s, n.z - u.z * s);
+    (p.dot(p) > 1e-4).then(|| p.dot(e2).atan2(p.dot(e1)).rem_euclid(std::f64::consts::TAU))
+}
+
+/// A frame perpendicular to `u`.
+fn frame(u: Point3) -> Option<(Point3, Point3)> {
+    let any = if u.z.abs() < 0.9 { Point3::new(0.0, 0.0, 1.0) } else { Point3::new(1.0, 0.0, 0.0) };
+    let e1 = unit(u.cross(any))?;
+    Some((e1, u.cross(e1)))
+}
+
+/// How far the facets' area-weighted bearings about `u` stand from
+/// an even ring: the largest of the first [`HARMONICS`] trigonometric
+/// moments `|sum a e^(ik theta)| / sum a` (Mardia & Jupp, Directional
+/// Statistics - the Rayleigh test is k = 1). An even ring of N facets
+/// gives 0 for every k < N; a pencil holding share s of the area on
+/// two opposite bearings (a crossing rod) gives s at k = 2, on four (a
+/// box, a jack) s at k = 4; a D-flat that lumps a cut arc's area on
+/// one bearing keeps the low moments nearly whole. `None` when no
+/// facet bears an azimuth.
+fn unevenness(ds: &[&Datum], u: Point3) -> Option<f64> {
+    let (e1, e2) = frame(u)?;
+    let (mut c, mut sn, mut total) = ([0.0f64; HARMONICS], [0.0f64; HARMONICS], 0.0);
+    for d in ds {
+        let Some(t) = bearing(d.n, u, e1, e2) else {
+            continue;
+        };
+        for (k, (ck, sk)) in c.iter_mut().zip(sn.iter_mut()).enumerate() {
+            let kt = (k + 1) as f64 * t;
+            *ck += d.a * kt.cos();
+            *sk += d.a * kt.sin();
+        }
+        total += d.a;
+    }
+    if total <= 0.0 || !total.is_finite() {
+        return None;
+    }
+    Some(c.iter().zip(&sn).fold(0.0f64, |m, (x, y)| m.max((x * x + y * y).sqrt() / total)))
 }
 
 /// The point the lines meet best: the area-weighted least-squares

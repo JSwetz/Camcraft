@@ -13681,3 +13681,34 @@ revolved (follow-up material if users hit it with long keyways).
   shaft-with-D-flat fixture is refused this way, which the issue
   allows). Five-band and banded shafts are untouched: their lines meet
   the axis at several points, so no point carries half the area.
+
+### #208, review of PR #223: pencils judged one by one; only inliers vouch for roundness
+
+- **Decided:** (1) the coarseness gate reads only the facets whose
+  normal lines MEET the candidate axis; outliers (an off-centre boss)
+  no longer supply bearings. (2) The inliers are peeled into pencils
+  (lines through one point, one after another, up to 12, each of at
+  least 5 % of the inlier area), and each pencil is judged by itself:
+  its area-weighted low trigonometric moments about the axis (k = 1..4)
+  must vanish. The moments times the pencil's area, summed, may total
+  at most 10 % of the inlier area (the same 10 % the concurrency share
+  allows to miss). A pencil holding half the inliers must still pass
+  the coarseness gate alone.
+- **Why:** with sides split into three or more rectangles, no one
+  point held half the area, so the first guard never fired; and two
+  crossed single-band rods are two pencils at ONE point, whose union
+  looked round about the cross axis. A revolve's ring spreads its area
+  evenly over the bearings (all moments below its segment count
+  vanish); a crossing rod's wall puts its share s on two opposite
+  bearings (k = 2 moment s), a box's faces on four (k = 4).
+- **Dropped:** Kuiper's statistic against the uniform circle (tried
+  first): it reads two opposite lumps at only half their share (0.19
+  for a crossing rod holding 37 %), the same as a D-flat's single lump
+  that a real part needs to pass, so no threshold separated them. The
+  moments do: a flat that lumps a cut arc's area on one bearing keeps
+  the low moments nearly whole (about 0.015 at k = 2 for a 1 mm flat
+  on r10).
+- **Cost:** crossed rods of any proportion are refused (fail closed),
+  including a short cross pin holding more than about 10 % of the
+  inlier area. A single-band shaft whose keyway or flat is wide enough
+  to move the first moment past 10 % is refused.
