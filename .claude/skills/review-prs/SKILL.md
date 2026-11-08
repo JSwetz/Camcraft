@@ -99,6 +99,12 @@ After posting the review, read `gh pr view <N> --json mergeable`
 - clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` (never green while it conflicts);
 - blocking review -> add `needs-rework`, remove `merge-ready`; also add `conflicts` if it conflicts.
 
+A PR that changes `crates/ui/tests/snapshots/*.png` is a blocking review
+(`needs-rework`): the pixel goldens are release-lane and are regenerated
+only at the cut (AGENTS.md "Pixel snapshots are release-lane", #255). The
+fix is to drop the PNG changes and update the structural assertions
+instead.
+
 A red or orange verdict also turns the PR back into a draft
 (`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it
 ready again for a fresh review (AGENTS.md "Every PR opens as a draft").
