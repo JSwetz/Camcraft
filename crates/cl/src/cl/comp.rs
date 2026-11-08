@@ -33,8 +33,14 @@ pub enum CompSide {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompSpan {
     pub side: CompSide,
-    /// The nominal cutter radius the control's register must hold, mm.
+    /// The nominal cutter radius, mm: what the control's register must
+    /// hold in control mode; in wear mode the radius the centre path
+    /// was walked at (the register then holds only the wear delta).
     pub radius: f64,
+    /// Wear compensation (#38): `programmed` is the cutter-centre walk
+    /// itself, so the register must hold the wear delta, NOT the
+    /// radius - a full radius there cuts the part a radius undersize.
+    pub wear: bool,
     /// Index of the engage move (the lead-in) in the path.
     pub first: usize,
     /// Index of the cancel move (the lead-out) in the path, inclusive.

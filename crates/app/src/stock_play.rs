@@ -344,7 +344,7 @@ impl FieldPlay {
             // A rotary slice is chorded about the fitted axis, turning
             // from the pose the program held before it (M13.1).
             let cut = match (&op.rotary, &op.lathe) {
-                (_, Some(l)) => self.cur.simulate_lathe_about(moves, l.nose, &l.axis),
+                (_, Some(l)) => self.cur.simulate_lathe_profile(moves, &l.profile, &l.axis),
                 (Some(ax), None) => {
                     let tol = crate::stock_sim::rotary_pose_tol(self.cur.cell());
                     crate::stock_sim::simulate_rotary_slice(&mut self.cur, &sim, &op.moves, a - op.start, ax, tol).map(|_| ())

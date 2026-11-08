@@ -229,6 +229,17 @@ pub fn tool_of(world: &World, entity: &Entity) -> Option<Tool> {
     entity.entity_view(world).try_get::<&ToolDef>(|t| t.tool.clone())
 }
 
+/// The tool's own controller number (#221), if one was set. `None` both
+/// for an unnumbered tool and for a non-tool; `tool_numbers` decides what
+/// an unnumbered tool posts as.
+#[must_use]
+pub fn tool_number_of(world: &World, entity: &Entity) -> Option<u32> {
+    entity
+        .entity_view(world)
+        .try_get::<&ToolDef>(|t| t.number)
+        .flatten()
+}
+
 /// The operation definition, if this entity is an operation.
 #[must_use]
 pub fn operation_of(world: &World, entity: &Entity) -> Option<Operation> {

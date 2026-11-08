@@ -222,11 +222,15 @@ fn a_plumb_bar_on_the_origin_or_under_a_moved_work_offset_posts_the_same_program
     let (plain, warnings) = post(&world);
     assert!(warnings.is_empty(), "{warnings:?}");
 
-    // The same bar 10 mm over in X, and G54 moved onto its axis: the
-    // spindle IS the part's axis, and the program measures from it.
+    // The same bar 10 mm over in X, its stock with it (#122: facing reads
+    // the stock, so a blank left behind is a different job), and G54
+    // moved onto its axis: the spindle IS the part's axis, and the
+    // program measures from it.
     let bar = revolve(&BAR, 16, |p| Point3::new(p.x + 10.0, p.y, p.z));
     let (world, mut history) = lathe_world(bar, &["TN-1600-0R8"]);
     let at = Location { pos: Point3::new(10.0, 0.0, 0.0), rot: IDENTITY_Q };
+    let stock = SetStock::new(&world, camcraft_app::stock::StockShape::Box { dx: 40.0, dy: 40.0, dz: 40.0 }, at);
+    history.execute(&world, stock.expect("the box moves with the bar"));
     history.execute(&world, SetWcsOrigin::new(&world, "G54", at).expect("set G54"));
     generate(&world, &mut history, "F1", "TN-1600-0R8", facing()).expect("a bar on its work offset generates");
     let (moved, warnings) = post(&world);

@@ -100,7 +100,7 @@ fn the_ladder_walks_the_wall_at_every_rung() {
     // The law as pinned: every pass ENDS on the axis (rho 0) and
     // STARTS outside the skin - rho at least R + NOSE, the tangency
     // of the ball with the wall its window covers.
-    let t = facing(&drum(), &params(FACE_Z, STEP, NOSE)).expect("a drum faces");
+    let t = facing(&drum(), None, &params(FACE_Z, STEP, NOSE)).expect("a drum faces");
     let mut rungs: Vec<(f64, f64)> = Vec::new(); // (station, start rho)
     for m in &t.moves {
         if m.kind == MoveKind::Feed && rho(m.to) < 1e-9 {
@@ -137,7 +137,7 @@ fn the_ladder_walks_the_wall_at_every_rung() {
 
 #[test]
 fn a_point_cannot_face() {
-    let err = facing(&drum(), &params(FACE_Z, STEP, 0.0)).expect_err("nose 0 must refuse");
+    let err = facing(&drum(), None, &params(FACE_Z, STEP, 0.0)).expect_err("nose 0 must refuse");
     assert!(format!("{err:?}").contains("cannot face"), "{err:?}");
 }
 
@@ -146,10 +146,10 @@ fn a_stepdown_past_the_nose_reaches_refused() {
     // The ridge law: one infeed of twice the nose already closes
     // the window; past it a sheet stands between rungs, and the
     // kernel says so at the door instead of posting a lie.
-    let err = facing(&drum(), &params(FACE_Z, 2.0, NOSE)).expect_err("2.0 > 2*0.8");
+    let err = facing(&drum(), None, &params(FACE_Z, 2.0, NOSE)).expect_err("2.0 > 2*0.8");
     assert!(format!("{err:?}").contains("stepdown"), "{err:?}");
     // Exactly twice the nose is the last honest infeed: accepted.
-    assert!(facing(&drum(), &params(FACE_Z, 1.6, NOSE)).is_ok(), "2r is lawful");
+    assert!(facing(&drum(), None, &params(FACE_Z, 1.6, NOSE)).is_ok(), "2r is lawful");
 }
 
 #[test]
@@ -157,10 +157,10 @@ fn nothing_above_the_plane_is_empty_not_wrong() {
     // The facing plane AT the work's top, and above it: an honest
     // nothing-to-cut is a verdict, never an Ok path that cuts air.
     let t = drum();
-    let err = facing(&t, &params(10.0, STEP, NOSE)).expect_err("plane at the top");
+    let err = facing(&t, None, &params(10.0, STEP, NOSE)).expect_err("plane at the top");
     assert!(matches!(err, GenError::Empty(_)), "{err:?}");
     assert!(format!("{err:?}").contains("nothing to face"), "{err:?}");
-    assert!(facing(&t, &params(12.0, STEP, NOSE)).is_err(), "plane above the top");
+    assert!(facing(&t, None, &params(12.0, STEP, NOSE)).is_err(), "plane above the top");
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn an_axis_lying_on_the_table_is_refused_by_name() {
             Triangle::new(s(tr.a), s(tr.b), s(tr.c))
         })
         .collect();
-    let err = facing(&t, &params(FACE_Z, STEP, NOSE)).expect_err("a lying axis must refuse");
+    let err = facing(&t, None, &params(FACE_Z, STEP, NOSE)).expect_err("a lying axis must refuse");
     assert!(format!("{err:?}").contains("off vertical"), "{err:?}");
 }
 
@@ -188,16 +188,49 @@ fn corrupt_numbers_die_at_the_door() {
     // not planned.
     let mut p = params(FACE_Z, STEP, NOSE);
     p.facing_z = f64::NAN;
-    assert!(facing(&drum(), &p).is_err(), "a nan height must not reach the ladder");
+    assert!(facing(&drum(), None, &p).is_err(), "a nan height must not reach the ladder");
     let p = params(FACE_Z, 0.0, NOSE);
-    assert!(facing(&drum(), &p).is_err(), "a zero infeed is not a ladder");
-    assert!(facing(&[], &p).is_err(), "no facets to face");
-    let err = facing(&drum(), &params(FACE_Z, 1e-8, 0.8))
+    assert!(facing(&drum(), None, &p).is_err(), "a zero infeed is not a ladder");
+    assert!(facing(&[], None, &p).is_err(), "no facets to face");
+    let err = facing(&drum(), None, &params(FACE_Z, 1e-8, 0.8))
         .expect_err("the rung cap must fire before any loop runs");
     assert!(format!("{err:?}").contains("ladder"), "{err:?}");
     // Non-finite vertices too: profile_of's gate, before any reading.
     let bad = vec![
         Triangle::new(p3(0.0, 0.0, 10.0), p3(f64::NAN, 0.0, -10.0), p3(0.0, 0.0, -10.0)),
     ];
-    assert!(facing(&bad, &params(FACE_Z, STEP, NOSE)).is_err(), "a corrupt mesh is named, not walked");
+    assert!(facing(&bad, None, &params(FACE_Z, STEP, NOSE)).is_err(), "a corrupt mesh is named, not walked");
+}
+
+#[test]
+fn a_stock_allowance_above_the_finished_part_is_faced_off() {
+    // #122: the part sits at its finished length (top Z 10) and the
+    // setup's bar is longer (to Z 12) and wider (r 7). Facing to the
+    // part's end must climb the stock's allowance - five rungs, 10.0
+    // through 12.0 - with every pass starting outside the BAR's skin
+    // and every rapid outside it too; without the stock the same plane
+    // is honestly empty.
+    let part = drum();
+    let bar = revolve(16, &[(0.0, -10.0), (7.0, -10.0), (7.0, 12.0), (0.0, 12.0)]);
+    let p = params(10.0, STEP, NOSE); // top_z 12: the stock's end
+    assert!(matches!(facing(&part, None, &p), Err(GenError::Empty(_))), "no stock: nothing to face");
+    let t = facing(&part, Some(&bar), &p).expect("the allowance faces");
+    let mut rungs: Vec<(f64, f64)> = Vec::new();
+    for m in &t.moves {
+        if m.kind == MoveKind::Feed && rho(m.to) < 1e-9 {
+            rungs.push((station(m.to) - NOSE, rho(m.from)));
+        }
+    }
+    assert_eq!(rungs.len(), 5, "five passes across the 2 mm allowance: {rungs:?}");
+    for (k, (s, start)) in rungs.iter().enumerate() {
+        let want = 10.0 + (4 - k) as f64 * STEP;
+        assert!((s - want).abs() < 1e-9, "rung {k} at {s}, want {want}: {rungs:?}");
+        assert!(*start > 7.0 + NOSE - 1e-9, "rung at {s} started inside the bar (rho {start})");
+    }
+    for m in &t.moves {
+        if m.kind == MoveKind::Rapid && station(m.to) > 12.0 - 1e-9 {
+            assert!(rho(m.to) > 7.0 + NOSE - 1e-9, "a rapid over the bar's end inside its radius: {m:?}");
+        }
+        assert!(station(m.to) >= 10.0 + NOSE - 1e-9, "a CL point below the finished end: {m:?}");
+    }
 }

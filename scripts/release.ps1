@@ -78,6 +78,19 @@ if (-not $NoTag) { Fail "main is branch-protected (PR only): cut on release/v$Ve
 $existing = git tag --list $tag
 if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
 if ($existing) { Fail "tag $tag already exists" }
+# The publish job of release.yml cuts this version's notes out of
+# RELEASE_NOTES.md as everything before its first "---" line (the file keeps
+# every release, newest first). Apply the same checks here, before the bump:
+# v0.14.0 replaced the file with its own section, the tag went out, and only
+# the publish job refused it (#272).
+$notesLines = @(Get-Content RELEASE_NOTES.md | ForEach-Object { $_.TrimEnd() })
+$notesEnd = [Array]::IndexOf($notesLines, '---')
+if ($notesEnd -lt 0) { Fail "RELEASE_NOTES.md has no '---' line: put this version's section on top of the history, separated by '---'" }
+if ($notesEnd -le 1) { Fail "RELEASE_NOTES.md has no notes for $Version before its first '---'" }
+$notesHead = $notesLines[0].TrimStart([char]0xFEFF)
+if ($notesHead -notmatch [regex]::Escape($Version)) { Fail "RELEASE_NOTES.md's first section is '$notesHead', not $Version" }
+if (-not (($notesLines[1..($notesEnd - 1)] -join "`n").Trim())) { Fail "RELEASE_NOTES.md's $Version section is empty" }
+Write-Host "RELEASE_NOTES.md: $Version section ($($notesEnd - 1) lines) above the history"
 Write-Host "tag $tag is free"
 
 # ---- 2. Gate ------------------------------------------------------------

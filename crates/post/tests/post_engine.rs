@@ -397,6 +397,8 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         warnings: vec!["drill vs hole dia advisory".into()],
         part_transfer: false,
         probe_tol: None,
+        coolant: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -459,6 +461,8 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         warnings: vec![],
         part_transfer: false,
         probe_tol: None,
+        coolant: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -742,6 +746,8 @@ fn dump_brackets_the_section_with_the_feeder() {
         warnings: vec![],
         part_transfer: false,
         probe_tol: None,
+        coolant: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -838,6 +844,8 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
         warnings: vec![],
         part_transfer: true,
         probe_tol: None,
+        coolant: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| {
@@ -934,6 +942,8 @@ fn dump_places_the_probe_after_the_cut_before_the_handoff() {
         warnings: vec![],
         part_transfer: true,
         probe_tol: Some(0.05),
+        coolant: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| recs.iter().position(pat).expect("record present");
@@ -950,4 +960,42 @@ fn dump_places_the_probe_after_the_cut_before_the_handoff() {
     // No ask writes no event - the byte-identity the goldens watch.
     let d2 = Dump { probe_tol: None, ..d };
     assert!(!camcraft_post::post::dump(&t, &d2).iter().any(|r| matches!(r, Record::Probe { .. })));
+}
+
+#[test]
+fn dump_states_coolant_only_off_the_flood_default() {
+    // #112: flood is what a section states by saying nothing (every
+    // golden and legacy stream), any other ask rides one PARAM ahead
+    // of the section, and it round-trips the text form.
+    use camcraft_post::geometry::Point3;
+    use camcraft_post::post::CoolantMode;
+    let t = Toolpath::new(vec![camcraft_post::cl::Move::new(
+        MoveKind::Feed,
+        Point3 { x: 0.0, y: 0.0, z: 1.0 },
+        Point3 { x: 0.0, y: 0.0, z: -1.0 },
+        Some(100.0),
+    )]);
+    let coolant_params = |c: CoolantMode| -> Vec<serde_json::Value> {
+        let d = Dump { op_name: "Op1", coolant: c, ..Default::default() };
+        camcraft_post::post::dump(&t, &d)
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::Param { name, value } if name == "Coolant" => Some(value),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(coolant_params(CoolantMode::Flood).is_empty(), "flood writes no word");
+    assert_eq!(coolant_params(CoolantMode::Off), vec![json!("off")]);
+    assert_eq!(coolant_params(CoolantMode::Mist), vec![json!("mist")]);
+    assert_eq!(coolant_params(CoolantMode::ThroughTool), vec![json!("through-tool")]);
+    let d = Dump { op_name: "Op1", coolant: CoolantMode::Mist, ..Default::default() };
+    let records = camcraft_post::post::dump(&t, &d);
+    let section = records.iter().position(|r| matches!(r, Record::Section { begin: true }));
+    let param = records
+        .iter()
+        .position(|r| matches!(r, Record::Param { name, .. } if name == "Coolant"));
+    assert!(param < section, "the ask stands ahead of its section");
+    let back = cnc::parse(&cnc::serialize(&records)).expect("own output parses");
+    assert_eq!(back, records, "the word round-trips the text form");
 }

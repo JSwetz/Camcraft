@@ -1344,6 +1344,38 @@ impl OpParams {
                     h.write_u8(u8::from(hole.stepped));
                 }
             }
+            // The probe (#108): every number moves the touches or the
+            // verdict, so every number digests - the modes and the
+            // directions by their stable ordinals.
+            OpParams::Probe {
+                clearance_z,
+                mode,
+                dir,
+                dir_y,
+                target,
+                radius,
+                approach,
+                overtravel,
+                backoff,
+                fast_feed,
+                slow_feed,
+                depth,
+                inset,
+                set_wcs,
+                tolerance,
+            } => {
+                wh(h, *clearance_z);
+                h.write_u8(*mode as u8);
+                h.write_u8(*dir as u8);
+                h.write_u8(*dir_y as u8);
+                for v in [
+                    target[0], target[1], target[2], *radius, *approach, *overtravel, *backoff,
+                    *fast_feed, *slow_feed, *depth, *inset, *tolerance,
+                ] {
+                    w(h, v);
+                }
+                h.write_u8(set_wcs.unwrap_or(0xff));
+            }
             OpParams::Thread {
                 clearance_z,
                 retract_z,
@@ -1432,6 +1464,11 @@ impl OpParams {
                 // approach keeps its digest.
                 if a.compensation == crate::links::Compensation::Control {
                     h.write_u8(0xC5);
+                }
+                // #38: the wear variant posts the centre path under
+                // G41/G42 - its own byte, again only when on.
+                if a.compensation == crate::links::Compensation::Wear {
+                    h.write_u8(0xC6);
                 }
                 match a.lead_out {
                     None => h.write_u8(0xFF),

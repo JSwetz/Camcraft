@@ -74,6 +74,12 @@ pub enum ToolKind {
     /// door reads it: a 45-degree chamfer takes a 90-degree cone, the
     /// shop's catalog law. Only `Taper` reads it among the mill kinds.
     Taper,
+    /// Touch probe (#108): a spindle-mounted stylus that measures, never
+    /// cuts. `diameter` is the stylus BALL's, `flute_len` the stylus
+    /// length below the probe body (`shank_*`); `corner_r` is the ball
+    /// radius by law (a probe tip is a sphere). It turns no spindle and
+    /// removes no stock: only the Probe operation mounts it.
+    Probe,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -90,6 +96,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Thread => "threading insert",
             ToolKind::Form => "form gauge",
             ToolKind::Taper => "chamfer mill",
+            ToolKind::Probe => "touch probe",
         };
         f.write_str(s)
     }
@@ -269,6 +276,13 @@ impl Tool {
                 // would divide on nothing (kind-scoped, as above;
                 // the global bound keeps it under a flat).
                 ToolKind::Taper => self.tip_angle > 0.0,
+                // A probe tip is a sphere: the ball radius IS the
+                // corner, and a stylus shorter than its own ball is
+                // no stylus at all.
+                ToolKind::Probe => {
+                    (self.corner_r - self.diameter * 0.5).abs() < 1e-9
+                        && self.flute_len >= self.diameter
+                }
                 _ => true,
             }
     }
@@ -328,7 +342,7 @@ impl Tool {
         let mut p: Vec<(f64, f64)> = Vec::new();
         add_pt(&mut p, 0.0, 0.0);
         match self.kind {
-            ToolKind::BallNose => {
+            ToolKind::BallNose | ToolKind::Probe => {
                 let steps = 24;
                 let top = r.min(zc);
                 for i in 1..steps {
@@ -518,6 +532,9 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("TD-1732-60", td(16.0, 1.732, 60.0, 8.0, 16.0, 800.0, 120.0)),
         ("FG-0600-04", fg(16.0, 6.0, 4.0, 8.0, 16.0, 1500.0, 40.0)),
         ("FG-1200-08", fg(16.0, 12.0, 8.0, 8.0, 16.0, 1200.0, 50.0)),
+        // The touch probe (#108): a 4 mm ruby ball on a 30 mm stylus, the
+        // everyday starter size - the Probe kind's catalog hint.
+        ("PRB-0400", probe_tool(4.0, 30.0)),
     ];
     // Cutting data (M13.2): the rotating mills state their edge
     // material and flute count - carbide, as the speeds above were
@@ -541,6 +558,35 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         }
     }
     v
+}
+
+/// A touch probe of stylus ball `ball_d` mm over a stylus `stylus_len` mm
+/// long (#108): the ball is the whole tip (corner = radius), the probe
+/// body rides as the shank band. `rpm` and `feed` are nominal - the
+/// probe turns no spindle, and the Probe operation states its own
+/// seek and measure feeds - but every tool states them positive.
+#[must_use]
+pub fn probe_tool(ball_d: f64, stylus_len: f64) -> Tool {
+    Tool {
+        kind: ToolKind::Probe,
+        diameter: ball_d,
+        corner_r: ball_d * 0.5,
+        tip_angle: 0.0,
+        pitch: 0.0,
+        nose_radius: 0.0,
+        width: 0.0,
+        flute_len: stylus_len,
+        shank_d: 20.0,
+        shank_len: 40.0,
+        holder_d: 0.0,
+        holder_len: 0.0,
+        material_group: String::new(),
+        rpm: 1.0,
+        feed: 300.0,
+        tool_material: None,
+        flutes: None,
+        center_cutting: false,
+    }
 }
 
 #[cfg(test)]

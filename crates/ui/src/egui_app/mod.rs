@@ -32,9 +32,11 @@ pub(crate) mod gpu_select;
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
 pub mod contrast;
 mod boundary;
+mod stock_info;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
 pub mod colorvision;
+mod post_options;
 pub mod cvd;
 mod icons;
 mod layout;
@@ -56,6 +58,7 @@ mod fields;
 mod geo_page;
 mod heights_page;
 mod holes_page;
+mod probe_page;
 mod kind_editors;
 mod mill2d_more_page;
 mod mill2d_page;
@@ -95,9 +98,17 @@ mod footer_tests;
 #[cfg(test)]
 mod dialog_tests;
 #[cfg(test)]
+mod coolant_tests;
+#[cfg(test)]
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
+#[cfg(test)]
+mod fresh_op_tests;
+#[cfg(test)]
+mod tool_number_tests;
+#[cfg(test)]
+mod gate_route_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
 /// selects the no-window proof (seeded document, fallback adapter, View3D

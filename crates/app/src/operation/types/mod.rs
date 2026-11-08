@@ -23,6 +23,9 @@ pub use area::{
     AREA_DISTANCE_MAX, AreaControls, BoundaryMode, BoundaryShape, ChainSide, Containment, CornerStyle,
     ExtraBoundary, OpenBoundary, area_applies, area_unsupported,
 };
+/// The coolant choice is the stream's own type (#112): one enum from the
+/// op field to the post's `PARAM Coolant`, no mapping to drift.
+pub use camcraft_post::post::CoolantMode;
 pub use height::{Height, HeightReference};
 pub use params::{OpParams, Tilt};
 pub use sel::{FeatureSel, GenStamp, GeoSel, OpStatus, OpType, SrcRef, WCS_SLOTS};
