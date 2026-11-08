@@ -234,6 +234,10 @@ pub fn deburr(facets: &[Triangle], p: &DeburrParams) -> Result<Toolpath, GenErro
     }
     for run in &runs {
         let first = run[0];
+        // Leave the previous run's cut straight up before travelling
+        // (#304): the cone ends a run still in the edge it broke, so a
+        // diagonal rapid from there would drag it up and across the part.
+        retract(&mut b, p.clearance_z);
         b.push(
             MoveKind::Rapid,
             Point3::new(first.x, first.y, p.clearance_z),
@@ -245,17 +249,24 @@ pub fn deburr(facets: &[Triangle], p: &DeburrParams) -> Result<Toolpath, GenErro
             b.push(MoveKind::Feed, tip(pt), Some(p.feed));
         }
     }
-    let cur = b.at();
-    b.push(
-        MoveKind::Rapid,
-        Point3::new(cur.x, cur.y, p.clearance_z),
-        None,
-    );
+    retract(&mut b, p.clearance_z);
     let path = b.finish();
     if !path.all_finite() {
         return Err(GenError::Invalid("deburr path left the finite horizon".into()));
     }
     Ok(path)
+}
+
+/// A vertical rapid from where the path stands up to the clearance
+/// plane, or nothing when it is already there (the path's start).
+/// Vertical because the cone ends a run touching the edge it broke:
+/// straight up is the one direction that leaves the break without
+/// crossing more of the part.
+fn retract(b: &mut PathBuilder, clearance_z: f64) {
+    let cur = b.at();
+    if cur.z < clearance_z {
+        b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, clearance_z), None);
+    }
 }
 
 /// Weld one edge's endpoints to a chain segment.

@@ -94,7 +94,7 @@ impl PlaySeed {
     /// `texels` cells (see `FieldPlay::new` for `judged`).
     pub fn gather(world: &flecs_ecs::prelude::World, judged: bool, texels: f64) -> Result<Self, String> {
         let (stock_facets, planned, cell) = display_inputs(world, texels)?;
-        let part = judged.then(|| crate::stock_sim::part_facets(world));
+        let part = if judged { Some(crate::stock_sim::part_facets(world)?) } else { None };
         Ok(PlaySeed { stock_facets, planned, cell, part })
     }
 

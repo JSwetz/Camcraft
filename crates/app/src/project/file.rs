@@ -48,7 +48,11 @@ use super::*;
 /// its setup's. Older files' per-height slots move onto their setup when
 /// the setup agreed and refuse by name when not (`wcs_migrate`); an old
 /// reader must refuse a v52 file rather than read `{"work_offset": {}}`.
-pub const PROJECT_VERSION: u32 = 52;
+/// v53 (#326): a setup may hold the part turned (`part_alignment`, a
+/// rigid transform document -> setup frame). Absent reads as "as
+/// modelled", so every v52 file loads unchanged; an old reader must
+/// refuse a v53 file rather than machine a flipped setup unflipped.
+pub const PROJECT_VERSION: u32 = 53;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

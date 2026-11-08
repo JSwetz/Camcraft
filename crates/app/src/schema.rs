@@ -130,12 +130,21 @@ pub struct ToolDef {
 /// lifts an older file's per-height slots onto this field when the whole
 /// setup agreed (`project::wcs_migrate`). Written only by
 /// `SetSetupWorkOffset` and that migration.
+/// `part_alignment` (#326) is how the PART sits in this setup: the rigid
+/// transform from the document frame into the setup frame (which face
+/// is on the table, which edge runs along X). The stock, the offsets and
+/// the fixtures of the setup are placed in that frame already; only the
+/// parts read through it (`setup_align`). `None` - the default - is "as
+/// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
+/// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
+/// carries it) and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
     pub wcs: Vec<String>,
     pub datum_from: String,
     pub work_offset: Option<usize>,
+    pub part_alignment: Option<Location>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
