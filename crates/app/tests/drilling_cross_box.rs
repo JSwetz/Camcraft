@@ -13,6 +13,8 @@
 //! Provenance: our own fixtures (a revolved r10 bar, box and cylinder
 //! raw stock); no vendor material.
 
+mod punched_bar;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::{MoveKind, Toolpath};
@@ -48,6 +50,21 @@ fn bar(r: f64) -> Mesh {
         f.push(Triangle::new(Point3::new(0.0, 0.0, 20.0), b1, b2));
     }
     Mesh::from_facets(f)
+}
+
+/// The finished r10 bar with this suite's on-line holes modelled
+/// (issue #117: the part law refuses a hole the model lacks): +X at z0
+/// 18 deep (the shallower +X holes ride inside it) and +Y at z0 3 deep.
+fn drilled() -> Mesh {
+    punched_bar::punched_bar(
+        PART_R,
+        punched_bar::FOOT,
+        punched_bar::TOP,
+        &[
+            hole(Point3::new(PART_R, 0.0, 0.0), Point3::new(-1.0, 0.0, 0.0), -18.0),
+            hole(Point3::new(0.0, PART_R, 0.0), Point3::new(0.0, -1.0, 0.0), -3.0),
+        ],
+    )
 }
 
 fn hole(origin: Point3, dir: Point3, floor_d: f64) -> CrossHole {
@@ -87,10 +104,10 @@ fn square(side: f64) -> StockShape {
     StockShape::Box { dx: side, dy: side, dz: 40.0 }
 }
 
-/// The r10 bar on `word`'s machine with `stock` (z -20..20) and the
-/// catalog DR-0400 re-ground by `grind`.
+/// The drilled r10 bar on `word`'s machine with `stock` (z -20..20)
+/// and the catalog DR-0400 re-ground by `grind`.
 fn world_on(word: &str, stock: StockShape, grind: impl Fn(&mut Tool)) -> (World, History) {
-    world_with(word, stock, bar(PART_R), grind)
+    world_with(word, stock, drilled(), grind)
 }
 
 /// `world_on` with `part` in place of the r10 bar.
@@ -172,7 +189,10 @@ fn a_60_box_mouth_sits_at_the_face_not_the_corner_radius() {
 fn an_off_centre_hole_on_a_box_face_enters_at_the_face() {
     let cross = vec![hole(Point3::new((PART_R * PART_R - 49.0).sqrt(), 7.0, 0.0), Point3::new(-1.0, 0.0, 0.0), -3.0)];
     for word in ["lathe", "mill-turn"] {
-        let (world, _h) = world_on(word, square(60.0), |t| {
+        // The r30 face sets every standoff; the part is an r3.5 core
+        // the hole (y 4..10, tip x 4.14) never reaches - a hole the
+        // r10 bar would have to carry as a notch (issue #117).
+        let (world, _h) = world_with(word, square(60.0), bar(3.5), |t| {
             t.diameter = 6.0;
             t.shank_d = 6.0;
         });
@@ -254,10 +274,16 @@ fn a_cylinder_stock_chain_is_unchanged_bit_for_bit() {
         hole(Point3::new(-PART_R, 0.0, -10.0), Point3::new(1.0, 0.0, 0.0), -6.0),
     ];
     let off = vec![hole(Point3::new((PART_R * PART_R - 81.0).sqrt(), 9.0, 0.0), Point3::new(-1.0, 0.0, 0.0), -3.0)];
+    // The d40 raw bar sets every standoff, so the part only has to
+    // carry the holes (issue #117): the three are modelled in the r10
+    // bar; the off-centre one (y 7..11) would be a notch in it, so it
+    // runs over an r6 core it never reaches - the same chain.
+    let parts = [punched_bar::punched_bar(PART_R, punched_bar::FOOT, punched_bar::TOP, &three), bar(6.0)];
     let got: Vec<u64> = [three, off]
         .into_iter()
-        .map(|cross| {
-            let (world, _h) = world_on("mill-turn", StockShape::Cylinder { diameter: 40.0, height: 40.0 }, |_| {});
+        .zip(parts)
+        .map(|(cross, part)| {
+            let (world, _h) = world_with("mill-turn", StockShape::Cylinder { diameter: 40.0, height: 40.0 }, part, |_| {});
             let (t, _) = operation::generate(&world, &op(cross), "").expect("the round bar drills");
             fingerprint(&t)
         })
@@ -265,11 +291,26 @@ fn a_cylinder_stock_chain_is_unchanged_bit_for_bit() {
     assert_eq!(got, vec![2202346499980779381, 1828336726059972913], "the round-bar chains moved");
 }
 
-/// The r10 bar with a block (a modelling error) poking out through the
-/// face of a 40 box (r20) to x `out`, over y `y0..y1`, z -3..3.
+/// The drilled r10 bar with a block (a modelling error) poking out
+/// through the face of a 40 box (r20) to x `out`, over y `y0..y1`, z
+/// -3..3.
 fn bar_with_lump(out: f64, y0: f64, y1: f64) -> Mesh {
-    let mut f = bar(PART_R).facets.to_vec();
+    let mut f = drilled().facets.to_vec();
     f.extend(cube(Point3::new(8.0, y0, -3.0), Point3::new(out, y1, 3.0)).facets.iter().copied());
+    Mesh::from_facets(f)
+}
+
+/// The drilled r10 bar with four lumps out to x `out` in the CORNERS
+/// of the drill's square body band about the +X line (|y|, |z| in
+/// 1.6..3): inside the band the entry reads, outside the round drill
+/// (1.6 * sqrt 2 > 2), so the hole drills clear of the part (#117).
+fn bar_with_corner_lumps(out: f64) -> Mesh {
+    let mut f = drilled().facets.to_vec();
+    for (sy, sz) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        let (y0, y1) = if sy > 0.0 { (1.6, 3.0) } else { (-3.0, -1.6) };
+        let (z0, z1) = if sz > 0.0 { (1.6, 3.0) } else { (-3.0, -1.6) };
+        f.extend(cube(Point3::new(10.5, y0, z0), Point3::new(out, y1, z1)).facets.iter().copied());
+    }
     Mesh::from_facets(f)
 }
 
@@ -295,7 +336,7 @@ fn along_line(t: &Toolpath) -> Vec<(Point3, Point3)> {
 fn a_part_poking_out_of_the_box_face_still_bounds_the_along_line_rapids() {
     let cross = vec![hole(Point3::new(PART_R, 0.0, 0.0), Point3::new(-1.0, 0.0, 0.0), -3.0)];
     for word in ["mill-turn"] {
-        let (world, _h) = world_with(word, square(40.0), bar_with_lump(26.0, -3.0, 3.0), |_| {});
+        let (world, _h) = world_with(word, square(40.0), bar_with_corner_lumps(26.0), |_| {});
         let (t, _) = operation::generate(&world, &op(cross.clone()), "")
             .unwrap_or_else(|e| panic!("{word}: the cross drill generates: {e}"));
         let rapids = along_line(&t);

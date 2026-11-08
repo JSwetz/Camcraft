@@ -389,10 +389,7 @@ impl PathDto {
             .map(CompSpanDto::to_span)
             .filter(|c| c.is_sane(&path.moves))
             .collect();
-        ToolpathCache {
-            path,
-            warnings: self.warnings.clone(),
-        }
+        ToolpathCache::new(path, self.warnings.clone())
     }
 }
 

@@ -35,9 +35,18 @@ if [ -f "$lock" ]; then cat "$lock"; find "$lock" -mmin +90; fi
 
 ## 1. Find PRs that need a review
 
-If the user named a PR (`/review-prs 58`), take just that one and go to step 2.
+**Only PRs marked ready for review are reviewed - never a draft** (user,
+2026-11-08: "Update the review-prs skill to only review PRs that is ready
+to review"; AGENTS.md "Every PR opens as a draft"). A draft is still being
+worked on and may take more pushes; reviewing it wastes a full build.
 
-Otherwise list open, non-draft PRs with their head SHA and reviews:
+If the user named a PR (`/review-prs 58`), check it first:
+`gh pr view <N> --json isDraft,state --jq '.isDraft, .state'`. If it is a
+draft (or not open), say "PR #N is a draft - not reviewed until it is marked
+ready (`gh pr ready N`)" in one line and stop. Otherwise take just that one
+and go to step 2.
+
+Otherwise list open PRs that are ready for review (non-draft) with their head SHA and reviews:
 
 ```bash
 gh pr list --repo NeoTech/Camcraft --state open --limit 100 \
@@ -80,14 +89,16 @@ close anything; do not reply on the contributor's behalf.
 ## 4. Apply outside contributors' claims
 
 Contributors without Triage rights cannot add the `claimed` label or
-assign themselves, so their claim is a comment (AGENTS.md "Outside
+assign themselves, and collaborators often claim by comment alone too, so
+every claim comment from anyone but the owner account (agents post as the
+owner) is checked; its claim is a comment (AGENTS.md "Outside
 contributors' claims count"). On every run, after the PR steps, find
 fresh claim comments that have not been applied yet:
 
 ```bash
 since=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-4H +%Y-%m-%dT%H:%M:%SZ)
 gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
-  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.author_association|test("OWNER|MEMBER|COLLABORATOR")|not))
+  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.user.login != "NeoTech"))
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 

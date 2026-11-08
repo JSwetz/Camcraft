@@ -77,6 +77,7 @@ fn empty_egui_meshes_are_filtered_before_gpu_submission() {
 
 mod face_origin;
 mod layout;
+mod unsaved;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -368,7 +369,8 @@ fn file_ops_round_trip_through_commands() {
     let path = std::env::temp_dir().join(format!("camcraft-egui-md-{}.camproj", std::process::id()));
     let saved_title = format!("CamCraft - {}", path.file_name().unwrap().to_string_lossy());
     assert_eq!(harness.state().state.project_path, None);
-    assert_eq!(harness.state().state.window_title(), "CamCraft - Untitled");
+    // The seed is unsaved work: the title carries the '*' (#107).
+    assert_eq!(harness.state().state.window_title(), "*CamCraft - Untitled");
 
     harness
         .state_mut().state.pending
@@ -2223,11 +2225,12 @@ fn a_gated_dropdown_row_click_answers_and_closes() {
 }
 
 /// The pin gesture, at the level its law lives on (M6.2): the
-/// right-click writes the document's pinned list and says so, but
-/// never the history - undo replays the cut, not the layout, and the
-/// pin must still be there after the undo.
+/// right-click changes the document's pinned list and says so. The
+/// pins are saved with the project, so the pin is a command on the
+/// history (issue #143): the first undo takes the pin back, the second
+/// takes the cut back, and redo re-applies them in order.
 #[test]
-fn right_click_pins_and_undo_replays_only_the_cuts() {
+fn right_click_pins_and_undo_takes_the_pin_back() {
     use camcraft_app::operation::Section;
     let mut harness = shell_harness();
     harness.run();
@@ -2279,17 +2282,36 @@ fn right_click_pins_and_undo_replays_only_the_cuts() {
         "the toggle must say so: {}",
         harness.state().state.status
     );
-    // Undo the cut; the pin is layout, not a cut - it survives.
+    // Undo: the pin is the newest change, so it goes first and the cut
+    // stays (issue #143 - a pin is a command, not a side write).
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    assert!(
+        camcraft_app::ribbon::pinned_of(&harness.state().state.world).is_empty(),
+        "the first undo takes the pin back"
+    );
+    assert!(
+        model::find_by_name(&harness.state().state.world, "2D Pocket1").is_some(),
+        "the first undo leaves the cut"
+    );
+    // The second undo takes the cut back; redo twice restores both.
     harness.state_mut().state.pending.push_back(CommandKind::Undo);
     harness.run();
     assert!(
         model::find_by_name(&harness.state().state.world, "2D Pocket1").is_none(),
-        "undo must have taken the operation back"
+        "the second undo takes the operation back"
+    );
+    harness.state_mut().state.pending.push_back(CommandKind::Redo);
+    harness.state_mut().state.pending.push_back(CommandKind::Redo);
+    harness.run();
+    assert!(
+        model::find_by_name(&harness.state().state.world, "2D Pocket1").is_some(),
+        "redo re-cuts the pocket"
     );
     assert_eq!(
         camcraft_app::ribbon::pinned_of(&harness.state().state.world),
         vec![2],
-        "undo replays cuts, not layout (M6.2's pin law)"
+        "redo re-pins it"
     );
     // Right-click again - now at the inline cell the pin created (one
     // home: the bar, not the door too): unpinned, the door takes the
@@ -4223,6 +4245,10 @@ fn a_successful_post_opens_the_viewer_and_new_document_retires_it() {
     }
     let _ = std::fs::remove_file(&path);
     harness.state_mut().state.pending.push_back(CommandKind::NewDocument);
+    // The document is unsaved: New waits for the prompt's answer (#107).
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::ResolveUnsaved(crate::unsaved::UnsavedChoice::DontSave));
     harness.run();
     assert!(
         harness.state().state.post_view.is_none(),

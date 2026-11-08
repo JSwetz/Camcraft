@@ -224,10 +224,7 @@ impl Command for DeleteOperation {
         entity.entity_view(world).set(self.operation.clone());
         entity.entity_view(world).set(self.meta.clone());
         if let Some((path, warnings)) = &self.cache {
-            entity.entity_view(world).set(Toolpath {
-                path: path.clone(),
-                warnings: warnings.clone(),
-            });
+            entity.entity_view(world).set(Toolpath::new(path.clone(), warnings.clone()));
         }
     }
 }

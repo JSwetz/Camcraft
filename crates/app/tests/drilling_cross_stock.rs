@@ -11,6 +11,8 @@
 //! collect_job's stock facets).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod punched_bar;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::{MoveKind, Toolpath};
@@ -24,35 +26,15 @@ use camcraft_app::stock::StockShape;
 use camcraft_app::tools::{Tool, catalog};
 use camcraft_app::world::new_world;
 
-const TAU: f64 = std::f64::consts::TAU;
 /// The finished bar's radius and the raw bar's: drilled before turning.
 const PART_R: f64 = 10.0;
 const STOCK_R: f64 = 20.0;
 
-/// A closed bar of radius `r`, z in [-20, 20], revolved about world Z.
-fn bar(r: f64) -> Mesh {
-    let meridian = [(0.0, -20.0), (r, -20.0), (r, 20.0), (0.0, 20.0)];
-    let segs = 64;
-    let v = |j: usize, r: f64, z: f64| {
-        let th = TAU * j as f64 / segs as f64;
-        Point3::new(r * th.cos(), r * th.sin(), z)
-    };
-    let mut facets = Vec::new();
-    for seg in meridian.windows(2) {
-        let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
-        for j in 0..segs {
-            let (a1, a2, b1, b2) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
-            if ra <= 1e-12 {
-                facets.push(Triangle::new(a1, b2, b1));
-            } else if rb <= 1e-12 {
-                facets.push(Triangle::new(a1, a2, b2));
-            } else {
-                facets.push(Triangle::new(a1, a2, b2));
-                facets.push(Triangle::new(a1, b2, b1));
-            }
-        }
-    }
-    Mesh::from_facets(facets)
+/// The finished bar of radius `r`, z in [-80, 20] (`punched_bar::FOOT`), revolved about world
+/// Z, with `cross` modelled in it (issue #117: the part law refuses a
+/// hole the model lacks).
+fn bar(r: f64, cross: &[CrossHole]) -> Mesh {
+    punched_bar::punched_bar(r, punched_bar::FOOT, punched_bar::TOP, cross)
 }
 
 /// Three stations on the finished r10 face: +X, +Y, then -X (the
@@ -106,6 +88,17 @@ fn world_with(word: &str, stock: Option<(StockShape, f64)>) -> (World, History) 
 /// `world_with` with the bar (and its stock) centred on `at`, and the
 /// catalog DR-0400 re-ground by `grind` (a wider drill, a fatter shank).
 fn world_on(word: &str, stock: Option<(StockShape, f64)>, at: (f64, f64), grind: impl Fn(&mut Tool)) -> (World, History) {
+    world_part(word, stock, at, grind, bar(PART_R, &holes()))
+}
+
+/// `world_on` with `part` (centred on the world origin) for the bar.
+fn world_part(
+    word: &str,
+    stock: Option<(StockShape, f64)>,
+    at: (f64, f64),
+    grind: impl Fn(&mut Tool),
+    part: Mesh,
+) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
     if let Some((shape, z0)) = stock {
@@ -121,7 +114,7 @@ fn world_on(word: &str, stock: Option<(StockShape, f64)>, at: (f64, f64), grind:
     grind(&mut tool);
     history.execute(&world, AddTool::new(&world, "DR-0400", tool).expect("catalog tool"));
     let shift = |p: Point3| Point3::new(p.x + at.0, p.y + at.1, p.z);
-    let moved = bar(PART_R).facets.iter().map(|t| Triangle::new(shift(t.a), shift(t.b), shift(t.c))).collect();
+    let moved = part.facets.iter().map(|t| Triangle::new(shift(t.a), shift(t.b), shift(t.c))).collect();
     history.execute(&world, ImportModel::from_mesh("bar", Mesh::from_facets(moved)));
     (world, history)
 }
@@ -308,10 +301,14 @@ fn op_with(cross: Vec<CrossHole>, clear: f64) -> Operation {
 fn an_off_centre_hole_s_drill_edge_stays_outside_the_raw_stock_on_the_approach() {
     let hole = one(Point3::new((PART_R * PART_R - 81.0).sqrt(), 9.0, 0.0), Point3::new(-1.0, 0.0, 0.0));
     for word in ["lathe", "mill-turn"] {
-        let (world, _h) = world_on(word, raw_bar(), (0.0, 0.0), |t| {
+        // The r20 raw bar sets every standoff; the hole (y 6..12) would
+        // be a notch in the r10 bar, so the part is an r5 core it never
+        // reaches (issue #117) - the same chain.
+        let grind = |t: &mut Tool| {
             t.diameter = 6.0;
             t.shank_d = 6.0;
-        });
+        };
+        let (world, _h) = world_part(word, raw_bar(), (0.0, 0.0), grind, bar(5.0, &[]));
         let (t, _) = operation::generate(&world, &op_with(vec![hole], 1.0), "")
             .unwrap_or_else(|e| panic!("{word}: the off-centre hole drills: {e}"));
         let entry = t.moves.iter().position(|m| m.kind == MoveKind::Plunge).map(|i| t.moves[i].from);
@@ -334,10 +331,11 @@ fn the_end_face_swing_clears_a_shank_wider_than_the_drill() {
     ];
     let cross: Vec<CrossHole> = cross.into_iter().map(|h| CrossHole { radius: 1.5, ..h }).collect();
     for (word, stock) in [("lathe", None), ("mill-turn", None), ("lathe", raw_bar()), ("mill-turn", raw_bar())] {
-        let (world, _h) = world_on(word, stock, (0.0, 0.0), |t| {
+        let grind = |t: &mut Tool| {
             t.diameter = 3.0;
             t.shank_d = 6.0;
-        });
+        };
+        let (world, _h) = world_part(word, stock, (0.0, 0.0), grind, bar(PART_R, &cross));
         let (t, _) = operation::generate(&world, &op_with(cross.clone(), 0.0), "")
             .unwrap_or_else(|e| panic!("{word}: the opposite pair drills: {e}"));
         let swing = t.moves.iter().filter(|m| m.kind == MoveKind::Rapid && m.from.z.min(m.to.z) > 20.0);

@@ -14,7 +14,9 @@ vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
 minimumRevision = 1;
-extension = "nc";
+// TNC 640 User's Manual, ISO programming (ID 892909-25) p. 143: an
+// ISO program carries the .I extension (#52).
+extension = "I";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
