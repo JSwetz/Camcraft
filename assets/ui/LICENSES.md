@@ -73,7 +73,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## egui stack (the shell since M1.4.2 M-g; crates.io deps, see ROADMAP.md M1.4.1)
+## egui stack (the shell since M1.4.2 M-g; crates.io deps, see docs/spike-egui-go-no-go.md)
 
 `egui`, `egui-winit`, `egui-wgpu` (and their `epaint`/`efonts` internals)
 are licensed MIT OR Apache-2.0; we accept the MIT option, text below.
