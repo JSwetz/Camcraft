@@ -15,6 +15,7 @@ extension = "nc";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -288,12 +289,16 @@ function afterOp() {
   if (ask === "optional-stop") { block(["M1"]); return; }
   if (ask === "stop") { block(["M0"]); return; }
   if (ask === "home") {
+    // A reference return under TCPM is one many controls alarm on:
+    // G49 drops it (and the length offset) first; the next preamble
+    // states G49 and its own H again, so nothing carries over.
+    if (tcpmOn) { block(["G49"]); tcpmOn = false; }
     block(["G91", "G28", "Z0"]);  // straight up to the reference point first
     block(["G28", "X0", "Y0"]);
     block(["G90"]);               // absolute again before the next section
     return;
   }
-  msg("unknown after-operation ask " + ask);
+  msg(coolantWho() + "unknown after-operation ask " + ask);
 }
 
 function endPreamble() {

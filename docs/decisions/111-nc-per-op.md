@@ -41,3 +41,11 @@
   set plain. Judging each file by its own material sim (fresh stock):
   the gouge law is against the model, so the whole-program sim already
   judges every op's cuts; a rerun on a part already cut is the use case.
+
+## #111 - merge with main (2026-11-08)
+
+- Per-op files post with the document's post options (main's #34
+  `postOptions`, e.g. the lathe's G76 choice) through
+  `engine::run_numbered_with`, so a per-op file and the combined
+  program read the same choices. The suppression refusal of #110's
+  review applies to per-op posting too (same `verification_report`).

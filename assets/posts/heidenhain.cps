@@ -20,6 +20,7 @@ extension = "I";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -243,10 +244,10 @@ function afterOp() {
     // #50: this dialect has no home move it can trust - G53 is a
     // datum-table shift and M91 rides a builder-set datum - so a
     // trip home is refused by name, never guessed.
-    msg("the Heidenhain post cannot go home after an operation (no machine-referenced home it can trust) - choose a stop instead");
+    msg(coolantWho() + "the Heidenhain post cannot go home after an operation (no machine-referenced home it can trust) - choose a stop instead");
     return;
   }
-  msg("unknown after-operation ask " + ask);
+  msg(coolantWho() + "unknown after-operation ask " + ask);
 }
 
 function endPreamble() {

@@ -1043,3 +1043,32 @@ fn dump_states_the_after_action_only_off_the_none_default() {
     let back = cnc::parse(&cnc::serialize(&records)).expect("own output parses");
     assert_eq!(back, records, "the word round-trips the text form");
 }
+
+#[test]
+fn a_stop_asked_of_a_script_without_after_modes_is_refused_by_name() {
+    // #110 review B2: a script that never reads PARAM AfterOperation
+    // would run straight on past the operator's stop - the engine
+    // refuses the ask by operation name; `afterModes = true` lets the
+    // script's own words through.
+    let stream = cnc::serialize(&[
+        Record::Param { name: "OperationName".into(), value: json!("Adaptive2") },
+        Record::Param { name: "AfterOperation".into(), value: json!("stop") },
+        Record::Section { begin: true },
+        Record::Section { begin: false },
+    ]);
+    let body = r#"
+var ask = "";
+function onParameter(name, value) { if (name === "AfterOperation") ask = String(value); }
+function onSectionEnd() { if (ask === "stop") writeln("M0"); ask = ""; }
+"#;
+    let deaf = engine::run(body, &serde_json::Value::Null, &stream).expect("the script runs");
+    assert_eq!(deaf.warnings.len(), 1, "{:?}", deaf.warnings);
+    let w = &deaf.warnings[0];
+    assert!(w.starts_with("operation Adaptive2: asks a program stop"), "{w}");
+    assert!(w.contains("afterModes"), "{w}");
+
+    let hearing = format!("afterModes = true;\n{body}");
+    let out = engine::run(&hearing, &serde_json::Value::Null, &stream).expect("the script runs");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    assert!(out.program.lines().any(|l| l == "M0"), "{}", out.program);
+}

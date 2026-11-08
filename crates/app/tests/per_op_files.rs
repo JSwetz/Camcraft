@@ -131,11 +131,13 @@ fn the_combined_program_still_numbers_o0001_and_is_unchanged_by_the_split() {
 #[test]
 fn a_suppressed_op_writes_no_file() {
     let (world, mut history) = two_faces(["Face1", "Face2"]);
-    history.execute(&world, EditOperationParams::with_suppressed(&world, "Face1", true).expect("suppress"));
+    // The LAST op: nothing posted after it was generated against its
+    // cut (suppressing Face1 would refuse - #110 review B1).
+    history.execute(&world, EditOperationParams::with_suppressed(&world, "Face2", true).expect("suppress"));
     let dir = folder("suppressed");
     let files = posting::post_per_op(&world, &dir, "job").expect("posts");
     assert_eq!(files.len(), 1);
-    assert_eq!(listing(&dir), vec!["job_01_Face2.nc"], "numbered in the program that posts");
+    assert_eq!(listing(&dir), vec!["job_01_Face1.nc"], "numbered in the program that posts");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

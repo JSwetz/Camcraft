@@ -277,6 +277,8 @@ pub struct Posted {
 mod sim_clause_impl;
 #[path = "posting_per_op.rs"]
 mod per_op;
+#[path = "posting_suppressed.rs"]
+mod suppressed;
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
@@ -494,6 +496,11 @@ pub fn verification_report(world: &World) -> GateReport {
 
     let sim = sim_clause(world);
     problems.extend(sim.problem);
+
+    // The suppression clause (#110 review B1): an op generated against
+    // a suppressed op's cut refuses by name - the cut it assumed is not
+    // in the program.
+    problems.extend(suppressed::suppressed_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
         match crate::machine::check_document(world, &m) {

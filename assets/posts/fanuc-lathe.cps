@@ -15,6 +15,7 @@ extension = "nc";
 setCodePage = "utf-8";
 capabilities = 2; // reference contract: integer feature mask (bit 2 = turning)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine refuses them for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
@@ -297,7 +298,7 @@ function afterOp() {
     block(["G28", "W0"]);
     return;
   }
-  msg("unknown after-operation ask " + ask);
+  msg(coolantWho() + "unknown after-operation ask " + ask);
 }
 
 function endPreamble() {

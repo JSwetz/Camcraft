@@ -43,3 +43,49 @@
   sim, setup sheet, tool list) assumes an op has a tool and a path, so a
   toolpath-less entry is a larger change than the timebox; the per-op
   after-action covers the same NC. Filed as #155.
+
+## #110 - review fixes: suppression against the program ahead, afterModes (2026-11-08)
+
+- **Suppression ahead of a dependent refuses (review B1).** The
+  "considered and dropped" above is reversed. Re-machining and the
+  generation-time rapid verdicts walk `setup::operation_order` with no
+  suppressed filter, so a later op is always generated against every
+  earlier same-setup cut - suppressed ones included. The post cannot
+  know the part is already cut that far, and the program sim does not
+  judge rapids through stock, so posting without that cut is the
+  silent wrong answer. **Chosen:** a clause in
+  `posting::verification_report` (`posting_suppressed.rs`): for each
+  posted op whose verdicts read the program ahead
+  (`operation::reads_prior` - un-posed ops, Pocket3D, Drill), every
+  suppressed op ahead of it in its setup that cut something (non-empty
+  path, not a probe; `rest::suppressed_cuts_ahead`) refuses by name:
+  "operation Rest2 was generated against the cut of suppressed Rough1;
+  unsuppress Rough1 or suppress Rest2 too". The per-op post runs the
+  same gate. Suppressing the last op of a setup, an op another setup
+  follows, or one only posed ops follow still posts.
+  **Considered and dropped:** a per-post opt-in that keeps the
+  debugging case (the review's alternative) - a header line would be
+  the only guard on a program that rapids through steel; the user can
+  suppress the dependents too, and a rerun of one later op is what
+  "one file per operation" (#111) already gives. Regenerating the
+  dependents against the posted list instead (a suppressed filter in
+  `ahead_of`) - would make suppression change geometry and stale every
+  op after it, the opposite of what the issue asks of a toggle.
+- **`afterModes = true` (review B2).** The `coolantModes` pattern
+  (#150): the six shipped posts that write `afterOp()` declare it; for
+  a script without it the engine refuses any `PARAM AfterOperation`
+  by operation name ("operation X: asks a program stop after it, but
+  this post script does not declare afterModes ..."), a counted
+  warning that holds the post. Tormach (added on main after this
+  branch) does not write the after-action yet, so it refuses the ask
+  rather than running on past it.
+- **Review notes taken:** Fanuc drops TCPM (`G49`) before a Go home
+  reference return when G43.4 is armed; the Heidenhain home refusal and
+  every post's unknown-ask refusal name the operation. The double home
+  on a last-op Go home (afterOp, then onClose) is left - harmless.
+- **Merge with main:** main's `PostOptions` (#34, threading) and this
+  branch's were one idea twice; one singleton now carries
+  `{ threading, skip_stops, per_op }`, one `SetPostOptions` command.
+  The file keeps `skip_stops` / `per_op_files` as top-level keys
+  (already shipped in this PR's format), `post_options.threading`
+  where main put it.

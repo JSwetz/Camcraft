@@ -136,8 +136,19 @@ pub fn run_numbered_with(
                     let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
                     let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
                     warnings.push(format!(
-                        "{who}asks {} coolant, but this post script does not declare                          coolantModes (it does not read PARAM Coolant) - set the operation's                          coolant to Flood or use a post that reads it",
+                        "{who}asks {} coolant, but this post script does not declare coolantModes (it does not read PARAM Coolant) - set the operation's coolant to Flood or use a post that reads it",
                         value.as_str().unwrap_or("non-flood")
+                    ));
+                }
+                // A post that does not declare `afterModes` would run
+                // straight on past an operator's stop or trip home (#110):
+                // refused by name, a counted warning, never silent.
+                if name == "AfterOperation" && !s.reads_after_operation() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}asks {} after it, but this post script does not declare afterModes (it does not read PARAM AfterOperation) - set the operation to Continue or use a post that reads it",
+                        super::AfterOperation::describe_word(value.as_str().unwrap_or(""))
                     ));
                 }
                 // A C-axis live-tool section (issue #33) posted through a

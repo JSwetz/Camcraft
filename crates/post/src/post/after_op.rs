@@ -62,6 +62,18 @@ impl AfterOperation {
         }
     }
 
+    /// A stream word as the refusal names it ("a program stop"), the
+    /// word itself when it is none of ours.
+    #[must_use]
+    pub fn describe_word(word: &str) -> String {
+        match word {
+            "optional-stop" => "an optional stop".to_owned(),
+            "stop" => "a program stop".to_owned(),
+            "home" => "a trip home".to_owned(),
+            other => format!("{other:?}"),
+        }
+    }
+
     /// Whether this is the default (serde's skip test: an untouched
     /// operation writes no key, so older files round-trip unchanged).
     #[must_use]

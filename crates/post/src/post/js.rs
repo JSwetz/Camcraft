@@ -151,6 +151,10 @@ pub struct Script {
     /// voices C-axis live-tool sections. Without it a `PARAM LiveTool`
     /// section is refused by name.
     live_tooling: bool,
+    /// The `afterModes = true` manifest flag (#110): the script reads
+    /// `PARAM AfterOperation`. Without it a section asking a stop or a
+    /// trip home is refused by name - the script would run straight on.
+    after_modes: bool,
 }
 
 impl Script {
@@ -167,6 +171,7 @@ impl Script {
             present: Vec::new(),
             coolant_modes: false,
             live_tooling: false,
+            after_modes: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -183,6 +188,10 @@ impl Script {
             .unwrap_or(false);
         s.live_tooling = s
             .eval("typeof liveTooling !== \"undefined\" && liveTooling === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.after_modes = s
+            .eval("typeof afterModes !== \"undefined\" && afterModes === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         Ok(s)
@@ -270,6 +279,12 @@ impl Script {
     /// a C-axis live-tool section (issue #33).
     pub fn voices_live_tooling(&self) -> bool {
         self.live_tooling
+    }
+
+    /// True when the script declares `afterModes = true` - it reads
+    /// `PARAM AfterOperation` and writes the stop or home (#110).
+    pub fn reads_after_operation(&self) -> bool {
+        self.after_modes
     }
 
     /// Lines flushed so far (the driver's section boundary marker).
