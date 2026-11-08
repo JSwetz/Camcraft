@@ -255,7 +255,7 @@ ENDSECTION
 fn non_rtcp_dialects_refuse_a_tilted_stream() {
     // Haas (and the four share the law): a tilted stream is a
     // refusal, never a prismatic approximation of 5-axis motion.
-    for name in ["haas", "mazak", "sinumerik", "heidenhain"] {
+    for name in ["haas", "mazak", "sinumerik", "heidenhain", "tormach"] {
         let cps = read(&format!("assets/posts/{name}.cps"));
         let stream = "TOOL 1 T1\nSECTION\nFeed X 0 Y 0 Z -1 F 1000 A 40000\nENDSECTION\n";
         let out = engine::run(&cps, &serde_json::json!({}), stream).expect("run");

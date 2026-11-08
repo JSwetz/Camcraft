@@ -85,6 +85,22 @@ const FOLD: f64 = 0.5;
 /// hides flat faces that do not revolve (#237): a rod through a ball.
 const FOLD_SHARE: f64 = 0.02;
 
+/// A facet counts as square to the axis when its normal's axial
+/// component stays under this (#246).
+const FLAT_SQUARE: f64 = 0.05;
+
+/// Does `d` face the axis squarely - a flat (a D-flat, a square plate's
+/// side) whose plane the axis's foot falls on (#246)? Its centroid's
+/// normal line may miss the axis by part of the flat's own width, so the
+/// concurrency tolerance sets it aside; but the flat's normal IS a
+/// bearing the revolve's envelope shows, and the coarseness readings must
+/// see it. Admitted: a facet square to the axis whose line misses by less
+/// than half its own size. An off-axis boss's facets miss by far more
+/// than their size, so they still lend nothing (review of PR #223).
+pub(super) fn faces_axis(d: &Datum, ax: Axis) -> bool {
+    d.n.dot(ax.dir).abs() < FLAT_SQUARE && dist(d, ax).is_some_and(|e| e <= 0.5 * d.a.max(0.0).sqrt())
+}
+
 /// The widest empty skip (radians) between the bearings about `u` of
 /// the normals `ns`; `None` when too few bear an azimuth to call
 /// anything round. `sqrt(8 * REL_TOL)` is the chord-sagitta budget in
@@ -118,6 +134,11 @@ pub(super) fn skip_budget() -> f64 {
 /// inliers must also pass the coarseness gate by itself.
 pub(super) fn borne_out(data: &[Datum], ax: Axis, tol: f64) -> bool {
     let mut rest: Vec<&Datum> = data.iter().filter(|d| dist(d, ax).is_some_and(|e| e <= tol)).collect();
+    let flats: Vec<Point3> = data
+        .iter()
+        .filter(|d| dist(d, ax).is_some_and(|e| e > tol) && faces_axis(d, ax))
+        .map(|d| d.n)
+        .collect();
     let a_in: f64 = rest.iter().map(|d| d.a).sum();
     if a_in <= 0.0 || !a_in.is_finite() {
         return true; // judge's share gate speaks for an empty set
@@ -132,7 +153,11 @@ pub(super) fn borne_out(data: &[Datum], ax: Axis, tol: f64) -> bool {
         if near.len() < 3 || a_near < MIN_PENCIL * a_in {
             break;
         }
-        if a_near >= POINT_SHARE * a_in && widest_skip(near.iter().map(|d| d.n), ax.dir).is_none_or(|g| g > skip_budget()) {
+        // The pencil's bearings, plus the flats that face the axis (#246):
+        // a single-band D-flat bar's wall is one pencil whose skip at the
+        // flat is the flat's own width - the flat's normal fills it.
+        let skip = widest_skip(near.iter().map(|d| d.n).chain(flats.iter().copied()), ax.dir);
+        if a_near >= POINT_SHARE * a_in && skip.is_none_or(|g| g > skip_budget()) {
             return false;
         }
         // #237: a wide class (a fine ball's continuous latitudes) is not

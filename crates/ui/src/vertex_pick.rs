@@ -208,6 +208,28 @@ pub fn queue_origin_at_face(state: &mut State, entity: &str, sel: FeatureSel, z_
     });
 }
 
+/// Queue the 3-2-1 alignment (#187) of the open operation's picks onto the
+/// WCS pane's slot: position and angles both from the app's frame, through
+/// the same undoable `SetWcs` command as the origin chips.
+pub fn queue_wcs_321(state: &mut State) {
+    let a = match camcraft_app::pick::align_321(&state.world, &state.op_ui.geo) {
+        Ok(a) => a,
+        Err(why) => {
+            state.status = format!("WCS not aligned: {why}");
+            return;
+        }
+    };
+    let slot = WCS_SLOTS.get(state.wcs_ui.slot).or(WCS_SLOTS.first()).copied().unwrap_or("G54");
+    state.status = format!("{slot} aligned 3-2-1 to the picked face, edge and origin");
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: slot.to_string(),
+        pos: a.pos,
+        roll_deg: a.roll_deg,
+        pitch_deg: a.pitch_deg,
+        yaw_deg: a.yaw_deg,
+    });
+}
+
 /// Screen-space marker for a vertex: a small diamond around its
 /// projection, as viewport-uv segment pairs like `feature_segments`.
 pub(crate) fn vertex_marker(

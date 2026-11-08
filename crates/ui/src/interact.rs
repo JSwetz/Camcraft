@@ -551,10 +551,21 @@ pub(crate) struct Gizmo {
 
 /// Axis colors and tip offsets shared by the line overlay and the labels.
 const AXES: [([f32; 3], [f64; 3]); 3] = [
-    ([0.85, 0.22, 0.18], [1.0, 0.0, 0.0]),
-    ([0.20, 0.78, 0.30], [0.0, 1.0, 0.0]),
-    ([0.28, 0.48, 0.95], [0.0, 0.0, 1.0]),
+    ([0.90, 0.25, 0.20], [1.0, 0.0, 0.0]),
+    ([0.25, 0.82, 0.35], [0.0, 1.0, 0.0]),
+    // #195: the old 0.28/0.48/0.95 blue all but vanished on the dark
+    // viewport ground once dimmed for the world axes.
+    ([0.38, 0.64, 1.0], [0.0, 0.0, 1.0]),
 ];
+
+/// How much the neutral world axes are dimmed against a work offset's
+/// triad (#195: was 0.55 for the lines - too dark to read).
+const WORLD_DIM: f32 = 0.8;
+
+/// Screen-space stroke widths of a gizmo axis, px (#195): the coloured
+/// line over a dark outline that keeps it readable on any ground.
+pub(crate) const GIZMO_STROKE_PX: f32 = 3.0;
+pub(crate) const GIZMO_OUTLINE_PX: f32 = 5.0;
 
 const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
 
@@ -567,7 +578,8 @@ fn gizmo_len(state: &State) -> f64 {
                 .max(b.max.z - b.min.z)
         })
         .unwrap_or(0.0);
-    (extent * 0.25).max(10.0)
+    // #195: shorter - the triad marks the origin, it does not span the part.
+    (extent * 0.15).max(8.0)
 }
 
 /// Reference-geometry overlay: world origin axes (dimmed) plus one colored
@@ -807,7 +819,7 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 continue;
             };
             let c = if gizmo.world_axes {
-                [rgb[0] * 0.65, rgb[1] * 0.65, rgb[2] * 0.65]
+                [rgb[0] * WORLD_DIM, rgb[1] * WORLD_DIM, rgb[2] * WORLD_DIM]
             } else {
                 *rgb
             };
@@ -815,6 +827,40 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
         }
     }
     out
+}
+
+/// The origin gizmos as screen-space segments (#195): (uv start, uv end,
+/// linear rgb) per axis, for the shell to stroke at [`GIZMO_STROKE_PX`]
+/// over the 1 px GPU lines of [`collect_overlay`] (a wgpu line has no
+/// width). An axis with an end behind the camera is skipped.
+pub(crate) fn gizmo_segments(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2], [f32; 3])> {
+    let len = gizmo_len(state);
+    let mvp = state.cam.mvp(aspect);
+    let mut out = Vec::new();
+    for gizmo in gizmos(state) {
+        let base = Point3::new(gizmo.pos[0], gizmo.pos[1], gizmo.pos[2]);
+        let Some(o) = project_uv(&mvp, gizmo.pos) else {
+            continue;
+        };
+        for (rgb, dir) in &AXES {
+            let p = transform_point(Point3::new(dir[0] * len, dir[1] * len, dir[2] * len), base, gizmo.rot);
+            let Some(tip) = project_uv(&mvp, [p.x, p.y, p.z]) else {
+                continue;
+            };
+            let c = if gizmo.world_axes {
+                [rgb[0] * WORLD_DIM, rgb[1] * WORLD_DIM, rgb[2] * WORLD_DIM]
+            } else {
+                *rgb
+            };
+            out.push((o, tip, c));
+        }
+    }
+    out
+}
+
+/// Is this overlay label an axis letter (drawn larger, #195)?
+pub(crate) fn is_axis_label(text: &str) -> bool {
+    AXIS_NAMES.contains(&text)
 }
 
 // ---------------------------------------------------- overlay builders
@@ -831,7 +877,7 @@ pub(crate) fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
                 gizmo.rot,
             );
             let c = if gizmo.world_axes {
-                [rgb[0] * 0.55, rgb[1] * 0.55, rgb[2] * 0.55]
+                [rgb[0] * WORLD_DIM, rgb[1] * WORLD_DIM, rgb[2] * WORLD_DIM]
             } else {
                 *rgb
             };

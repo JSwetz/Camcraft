@@ -265,6 +265,11 @@ pub struct ToolDto {
     /// earlier tool was taken to be - no version step.
     #[serde(default = "centre_cutting", skip_serializing_if = "is_centre_cutting")]
     pub center_cutting: bool,
+    /// #221 addition, additive (no version step): the controller's tool
+    /// number. Absent from every older file and written only when set;
+    /// absent means "post by list position", what every older tool did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
 }
 
 fn centre_cutting() -> bool {
@@ -359,6 +364,7 @@ impl ToolDto {
             }),
             flutes: t.flutes,
             center_cutting: t.center_cutting,
+            number: None,
         }
     }
 

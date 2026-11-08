@@ -27,6 +27,8 @@ pub mod theme;
 pub mod color_vision;
 pub mod set_wcs;
 pub mod tool;
+// #221: a tool's controller number.
+pub mod tool_number;
 pub mod update_model;
 
 use flecs_ecs::prelude::World;
@@ -56,6 +58,7 @@ pub use theme::{theme_of, theme_set, SetTheme};
 pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
+pub use tool_number::SetToolNumber;
 pub use update_model::UpdateModel;
 
 #[derive(Debug, thiserror::Error)]
