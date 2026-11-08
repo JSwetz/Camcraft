@@ -86,6 +86,13 @@ fn positive(what: &str, v: f64) -> Result<(), StockError> {
 }
 
 impl LatheProfile {
+    /// `Ok` when the profile is a footprint the field can sweep; the
+    /// refusal by name otherwise (the same gate the sweep applies,
+    /// for a caller that wants it said before any cell is cut).
+    pub fn validate(&self) -> Result<(), StockError> {
+        self.footprint().map(|_| ())
+    }
+
     /// The validated footprint, refused by name when nonsense.
     pub(crate) fn footprint(&self) -> Result<Footprint, StockError> {
         match *self {

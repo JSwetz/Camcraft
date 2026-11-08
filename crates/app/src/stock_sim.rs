@@ -21,7 +21,7 @@ pub use rotary::{
 // blade's refusal, the verdict's refusal.
 #[path = "stock_sim_lathe.rs"]
 pub mod lathe;
-pub use lathe::{LathePlan, LATHE_VERDICT_REFUSAL};
+pub use lathe::{LathePlan, LATHE_HELIX_REFUSAL, LATHE_THREAD_REFUSAL, LATHE_VERDICT_REFUSAL};
 
 use crate::geometry::Triangle;
 
@@ -289,7 +289,7 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // family path lives in the half-plane of its fitted axis, so
         // the plan carries the nose and that axis for the field eye's
         // revolved stadium, a blade its own footprint (`lathe`, #21).
-        let lathe = lathe::lathe_plan(world, name, &op, &tool)?;
+        let lathe = lathe::lathe_plan(world, name, &op, &tool, &cache.path.moves)?;
         planned.push(Planned {
             name: name.clone(),
             moves: cache.path.moves,

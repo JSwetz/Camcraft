@@ -28,9 +28,18 @@
 //!   crest, a form gauge its crown of `nose_radius` across `width` -
 //!   each with its tip at the band's centre and its body `flute_len`
 //!   outward, the reading #103's meridian rapid law
-//!   (`operation::turning_rapids`) holds the same blade to. A gauge
-//!   with no sane crown falls back to its band's rectangle, the
-//!   envelope that never under-claims it.
+//!   (`operation::turning_rapids`) holds the same blade to. A profile
+//!   that is no footprint (a NaN or oversize corner, a gauge band wider
+//!   than its crown) refuses by name, never a guessed stand-in.
+//! - **A thread is not cut yet.** The Threading kernel writes helical
+//!   half-turn arcs about the spindle; a revolved reading of a helix
+//!   removes a full ring at every station, so the picture would show
+//!   the crests cut that the insert leaves. A thread tool's program
+//!   with helical moves refuses by name ([`LATHE_THREAD_REFUSAL`]),
+//!   any other program arcing about its spindle likewise
+//!   ([`LATHE_HELIX_REFUSAL`]); the thread op's own revolved verdict
+//!   at generation stands. An axial thread pass (meridian moves only)
+//!   is cut with the V footprint.
 //! - **The footprint is the whole modelled solid.** Only the nose
 //!   stadium or the blade's footprint is swept: an insert's flanks and
 //!   the holder are not
@@ -51,6 +60,24 @@ use crate::tools::{Tool, ToolKind};
 
 /// The column verdict's refusal of a turning program, said once.
 pub const LATHE_VERDICT_REFUSAL: &str = "a turning program is cut by the field eye about its fitted spindle, but the column verdict reads Z heights from above (a parting kerf reads as a plunge) - not judged here; the revolved verdict at generation stands";
+
+/// The refusal of a helical threading program, said once.
+pub const LATHE_THREAD_REFUSAL: &str = "the lathe stock sim does not cut threads yet (helical passes) - not simulated; the thread op's verdict still stands";
+
+/// The refusal of any other turning program that arcs about its
+/// spindle (a helix, not a meridian move), said once.
+pub const LATHE_HELIX_REFUSAL: &str =
+    "a move arcs about the spindle (a helix, not a move in one meridian) - the lathe stock sim revolves only meridian moves - not simulated";
+
+/// Whether `m` is an arc whose plane does not hold the spindle line:
+/// its normal is not square to the axis, so the arc winds about it
+/// (a meridian plane contains the axis, so its normal is square to it).
+fn arcs_about(axis: &LatheAxis, m: &crate::cl::Move) -> bool {
+    let Some(arc) = m.arc else { return false };
+    let n = arc.plane.point(0.0, 0.0, 1.0);
+    let d = axis.dir();
+    (n.x * d[0] + n.y * d[1] + n.z * d[2]).abs() > 1e-9
+}
 
 /// What a turning op's plan carries into the field: the footprint
 /// its moves sweep and the spindle line it revolves about.
@@ -79,24 +106,25 @@ fn profile_of(tool: &Tool) -> Option<LatheProfile> {
     let height = tool.flute_len;
     Some(match tool.kind {
         ToolKind::Turning | ToolKind::Bore => LatheProfile::Nose { radius: tool.nose_radius },
-        ToolKind::Groove => LatheProfile::Blade { width: tool.width, corner: tool.corner_r.min(0.5 * tool.width), height },
+        // The tool's own numbers, unclamped: a nonsense corner or
+        // crown refuses by name at the gate below.
+        ToolKind::Groove => LatheProfile::Blade { width: tool.width, corner: tool.corner_r, height },
         ToolKind::Thread => LatheProfile::Thread { width: tool.width, angle: tool.tip_angle, height },
-        ToolKind::Form if tool.nose_radius.is_finite() && tool.width <= 2.0 * tool.nose_radius => {
-            LatheProfile::Form { width: tool.width, crown: tool.nose_radius, height }
-        }
-        ToolKind::Form => LatheProfile::Blade { width: tool.width, corner: 0.0, height },
+        ToolKind::Form => LatheProfile::Form { width: tool.width, crown: tool.nose_radius, height },
         _ => return None,
     })
 }
 
-/// The lathe plan of `op`: `None` for an op outside the Turn family,
-/// the plan for a turning tool, and the refusal by name for a
-/// non-turning tool or for a source no axis fits.
+/// The lathe plan of `op` cutting `moves`: `None` for an op outside
+/// the Turn family, the plan for a turning tool, and the refusal by
+/// name for a non-turning tool, a footprint that is no footprint, a
+/// helical thread, or a source no axis fits.
 pub(crate) fn lathe_plan(
     world: &flecs_ecs::prelude::World,
     name: &str,
     op: &crate::schema::Operation,
     tool: &Tool,
+    moves: &[crate::cl::Move],
 ) -> Result<Option<LathePlan>, String> {
     if op.params.kind().info().family() != crate::operation::Family::Turn {
         return Ok(None);
@@ -114,11 +142,21 @@ pub(crate) fn lathe_plan(
     {
         return Err(format!("{name}: the insert carries no sane nose radius ({radius}) - not simulated"));
     }
+    profile.validate().map_err(|e| format!("{name}: {e} - not simulated"))?;
     let facets = crate::operation::source_facets(world, op.setup.as_deref(), &op.src)
         .map_err(|e| format!("{name}: the lathe frame needs the op's source: {e}"))?;
     let frame = crate::turning::profile::Frame::about(&facets)
         .map_err(|e| format!("{name}: no spindle fits the op's source, so its turn has no frame to cut in: {e}"))?;
     let (o, p) = (frame.point(0.0, 0.0), frame.point(0.0, 1.0));
     let axis = LatheAxis::new(o, [p.x - o.x, p.y - o.y, p.z - o.z]).map_err(|e| format!("{name}: {e}"))?;
+    // A helix about the spindle (the Threading kernel's half-turn
+    // arcs) is no meridian chord: it is refused here by name, never
+    // as a "skewed chord" deep in the field walk (the law above).
+    if moves.iter().any(|m| arcs_about(&axis, m)) {
+        return Err(match profile {
+            LatheProfile::Thread { .. } => format!("{name}: {LATHE_THREAD_REFUSAL}"),
+            _ => format!("{name}: {LATHE_HELIX_REFUSAL}"),
+        });
+    }
     Ok(Some(LathePlan { profile, axis }))
 }
