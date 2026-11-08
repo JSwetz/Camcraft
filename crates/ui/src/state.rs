@@ -268,6 +268,14 @@ pub enum CommandKind {
         setup: String,
         angles: [f64; 3],
     },
+    /// Lay the part on a G17 / G18 / G19 plane in a setup (#330): one
+    /// flat face or two straight edges, read by the app. Undoable
+    /// (`AlignPartToSetup`). Never touches the work offset.
+    LayPartOnPlane {
+        setup: String,
+        picks: Vec<camcraft_app::operation::GeoSel>,
+        lay: camcraft_app::pick::PlaneLay,
+    },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
     /// Ok-or-Stale from the two setups' placements.
@@ -1219,6 +1227,9 @@ pub struct State {
     /// The Boundary group's pick target (M11.5); `None` routes picks to
     /// the selection as always.
     pub boundary_pick: Option<BoundaryPick>,
+    /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
+    /// Face/Edge picks into it ahead of the boundary and the selection.
+    pub plane_pick: Option<crate::plane_pick::PlanePick>,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1376,6 +1387,7 @@ impl State {
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             boundary_pick: None,
+            plane_pick: None,
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
@@ -2955,6 +2967,23 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("part alignment not changed: {err}"));
+                    }
+                }
+            }
+            CommandKind::LayPartOnPlane { setup, picks, lay } => {
+                match AlignPartToSetup::lay_on_plane(&self.world, &setup, &picks, lay) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.plane_pick = None;
+                        self.status = format!(
+                            "{setup} part laid on {}: {}",
+                            camcraft_app::pick::plane_label(lay.plane),
+                            crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("part not laid on the plane: {err}"));
                     }
                 }
             }
