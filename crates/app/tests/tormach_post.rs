@@ -377,3 +377,95 @@ fn the_first_move_after_a_tool_change_positions_xy_with_z_up() {
         out.program
     );
 }
+
+/// The machine's travel bands are in PROGRAM coordinates (relative to the
+/// work offset, `assets/machines/AGENTS.md`), so the 770MX states its full
+/// stroke each way: a band of -13.25..0 in Z blocked every clearance move
+/// above G54 Z0 - the first real job through the GUI (a Face) refused to
+/// post with "40 limit problem(s) ... the stroke is -336.550..0.000".
+#[test]
+fn a_face_job_on_the_built_in_770mx_passes_the_gate_and_posts_inch() {
+    use camcraft_app::commands::{
+        AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SelectPost,
+        SetStock,
+    };
+    use camcraft_app::geometry::{Point3, cube};
+    use camcraft_app::operation::{Height, OpParams, SrcRef};
+    use camcraft_app::schema::{Location, PostRef};
+    use camcraft_app::stock::StockShape;
+    use camcraft_app::tools::catalog;
+
+    let world = camcraft_app::world::new_world();
+    let mut h = History::default();
+    h.execute(
+        &world,
+        LoadMachine::builtin(&world, "Tormach 770MX").expect("built-in machine"),
+    );
+    h.execute(
+        &world,
+        SelectPost::new(&world, PostRef::Named("Tormach PathPilot".into())).expect("post"),
+    );
+    let stock = SetStock::new(
+        &world,
+        StockShape::Box {
+            dx: 60.0,
+            dy: 60.0,
+            dz: 20.0,
+        },
+        Location::default(),
+    );
+    h.execute(&world, stock.expect("stock"));
+    h.execute(
+        &world,
+        ImportModel::from_mesh(
+            "part",
+            cube(Point3::new(0.0, 0.0, 0.0), Point3::new(40.0, 40.0, 19.0)),
+        ),
+    );
+    // The catalog's 12000 rpm is over the 770MX's 10000 - a separate
+    // gate refusal; this test is about travel, so run within the spindle.
+    let mut tool = catalog()
+        .into_iter()
+        .find(|(n, _)| *n == "EM-0400-2FL")
+        .map(|(_, t)| t)
+        .expect("tool");
+    tool.rpm = 8000.0;
+    h.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", tool).expect("add tool"),
+    );
+    // G54 is unplaced (the world origin, the stock's floor): clearance at
+    // Z 25 mm and the cut at Z 19.5 both stand ABOVE G54 Z0.
+    let face = OpParams::Face {
+        holes: Default::default(),
+        blend_turns: false,
+        tilt: None,
+        stepover: 3.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    };
+    h.execute(
+        &world,
+        CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face).expect("face"),
+    );
+    h.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
+    let path =
+        std::env::temp_dir().join(format!("camcraft_tormach_face_{}.nc", std::process::id()));
+    let posted = camcraft_app::posting::post_setup(&world, &path);
+    let _ = std::fs::remove_file(&path);
+    let posted =
+        posted.unwrap_or_else(|e| panic!("the 770MX gate must pass a plain face job: {e}"));
+    assert!(
+        posted.program.contains("G20 G17 G90 G91.1 G94"),
+        "{}",
+        posted.program
+    );
+}
