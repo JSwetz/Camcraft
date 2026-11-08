@@ -290,7 +290,7 @@ fn folded(ds: &[&Datum], u: Point3) -> f64 {
         }
         for bin in bins.values() {
             let area: f64 = bin.iter().map(|p| p.1).sum();
-            if !(area > 0.0) {
+            if area.is_nan() || area <= 0.0 {
                 continue;
             }
             let fold = (1..=4)
