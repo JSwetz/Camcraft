@@ -110,45 +110,49 @@ One short line per PR: number, author, verdict, link to the posted review.
 If a review could not be posted, say why. Do not merge, approve, label, or
 close anything; do not reply on the contributor's behalf.
 
-## 4. Apply outside contributors' claims
+## 4. Mirror claim comments - add and withdraw
 
-Contributors without Triage rights cannot add the `claimed` label or
-assign themselves, and collaborators often claim by comment alone too, so
-every claim comment from anyone but the owner account (agents post as the
-owner) is checked; its claim is a comment (AGENTS.md "Outside
-contributors' claims count"). On every run, after the PR steps, find
-fresh claim comments that have not been applied yet:
+A claim comment is a claim (AGENTS.md "A claim comment is a claim"): only
+collaborators can set labels, so anyone else claims by commenting a line
+that starts `claimed:` or `/claim`. The label only mirrors the comment. On
+every run, after the PR steps, sync the two both ways.
+
+**Add.** Find claim comments by anyone but the owner account (agents post
+as the owner):
 
 ```bash
-since=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-4H +%Y-%m-%dT%H:%M:%SZ)
+since=$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
 gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
-  --jq '.[] | select((.body|test("^ *claimed:"; "i")) and (.user.login != "NeoTech"))
+  --jq '.[] | select((.body|test("^ *(claimed:|/claim)"; "i")) and (.user.login != "NeoTech"))
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 
-For each line `<N> <login> <time>` (the window only finds claims made since
-a recent tick; a claim applied earlier keeps its label and assignee and is
-judged stale by AGENTS.md's rule - 4 h with no newer comment from the
-claimant - not by this window; on the first run of a session, or after the loop was
-off, widen it to `-7 days` so a claim kept fresh by later comments is not
-missed - its freshness is then checked as in "held" below):
-- **already applied** - the issue carries `claimed` and `<login>` is an
-  assignee: skip silently (this keeps each 10-minute tick from replying
-  again);
-- **closed issue**: skip;
-- **held by someone else** - it carries `claimed` and either the latest
-  claim comment by another claimant (an agent's `claimed:` comment counts)
-  or that claimant's newest comment is younger than 4 h, or no claim
-  comment can be found at all (be conservative: a label without a findable
-  claim is held): do not take it. Reply once - only if no comment after
-  `<time>` already mentions `@<login>` - that it is in progress, naming
-  the claimant and branch or PR;
+For each line `<N> <login> <time>`:
+- **closed issue**, or **already mirrored** (`claimed` set and `<login>`
+  assigned, or `claimed` set and a "Claim recorded for @<login>" reply
+  exists): skip silently;
+- **held by someone else** - an earlier claim comment by another
+  contributor still exists, or a fresh agent claim (4 h rule): do not
+  mirror; reply once (only if no later comment mentions `@<login>`) naming
+  the current claimant;
 - **otherwise**: `gh issue edit N --add-label claimed --add-assignee <login>`
-  (if GitHub refuses the assignee, still add the label) and reply
-  `gh issue comment N --body "Claim recorded for @<login> - label and assignee set (contributors without triage rights claim by comment). It goes stale after 4 h with no update from you."`
-  If the old claim was stale, say "reclaimed from <old claimant> (stale)".
+  (if GitHub refuses the assignee, add the label alone) and reply
+  `Claim recorded for @<login> - label and assignee set (only collaborators can set labels; your comment is the claim).`
+  A contributor's claim does not go stale on a timer; it stands while the
+  comment exists.
 
-Report one line per applied claim; nothing found stays silent.
+**Withdraw.** For every open issue carrying `claimed`
+(`gh issue list --state open --label claimed --limit 200`), look for the
+claim behind it: a claim comment by a non-owner (or an agent's `claimed:`
+comment, which follows the 4 h rule instead). If the only claim behind the
+label was a contributor's comment that is now deleted, or that contributor
+later commented `unclaim`, remove the label and their assignment
+(`gh issue edit N --remove-label claimed --remove-assignee <login>`) and
+comment `claim by @<login> withdrawn (comment removed) - issue is free again`.
+A label with no findable claim of any kind and no "Claim recorded" reply
+was set by a collaborator by hand: leave it.
+
+Report one line per mirrored or withdrawn claim; nothing found stays silent.
 
 ## Periodic run
 
