@@ -134,6 +134,10 @@ pub(super) enum Cmd {
     Save,
     SaveAs,
     Post,
+    /// The setups door (#322): opens the Setups page, the one place a
+    /// document's first setup is created - a fresh document has no
+    /// other way there.
+    Setups,
     Stock,
     Origin,
     Tools,
@@ -169,7 +173,7 @@ pub(super) enum Cmd {
 const FILE: (&str, &[Cmd]) =
     ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::SaveAs, Cmd::Post]);
 const SETUP: (&str, &[Cmd]) =
-    ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine]);
+    ("Setup", &[Cmd::Setups, Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine]);
 
 /// The bar's whole op-shortcut budget (the ribbon law): at most this
 /// many Create cells stand inline, and they are the user's pins. The
@@ -278,6 +282,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Save => "Save",
         Cmd::SaveAs => "Save As",
         Cmd::Post => "Post",
+        Cmd::Setups => "Setups",
         Cmd::Stock => "Stock",
         Cmd::Origin => "Origin",
         Cmd::Tools => "Tools",
@@ -348,6 +353,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Save => "Save the project\tCtrl+S".into(),
         Cmd::SaveAs => "Save the project under a new name\tCtrl+Shift+S".into(),
         Cmd::Post => "Post NC program (validation gate), then review it\tCtrl+P".into(),
+        Cmd::Setups => "Setups: create, activate and delete the document's setups".into(),
         Cmd::Stock => "Stock definition".into(),
         Cmd::Origin => "Work offset (WCS)".into(),
         Cmd::Tools => "Tool library".into(),
@@ -597,6 +603,9 @@ pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
         Cmd::Save => Some(Icon::Save),
         Cmd::SaveAs => Some(Icon::Save),
         Cmd::Post => Some(Icon::Post),
+        // A setup is a clamping: the workholding glyph, from the
+        // existing set (#322), so it never twins Origin's beside it.
+        Cmd::Setups => Some(Icon::Fixture),
         Cmd::Stock => Some(Icon::Stock),
         Cmd::Origin => Some(Icon::WorkOffset),
         Cmd::Tools => Some(Icon::Tools),
@@ -735,6 +744,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Save => actions::save_project(state),
         Cmd::SaveAs => actions::save_project_as(state),
         Cmd::Post => actions::post_program(state),
+        Cmd::Setups => actions::target(state, UiTarget::Setups),
         Cmd::Stock => actions::target(state, UiTarget::Stock),
         Cmd::Origin => {
             let slot = state.wcs_ui.slot.min(WCS_SLOTS.len() - 1);
@@ -1491,23 +1501,23 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let setup_open = state.browser_expanded[BrowserSection::Setup.index()];
     push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Parent(setup_open), None, false, false, 0, Leaf::Parent(BrowserSection::Setup));
     if setup_open {
-        // As before, the manager appears only after the document has an
-        // explicit setup. Stock and WCS follow the active setup.
+        // The manager row stands whenever the section is open (#322):
+        // its page is where the FIRST setup is created, so hiding it
+        // until a setup exists left a fresh document no way in. Stock
+        // and WCS follow the active setup.
         let active = camcraft_app::setup::active(&state.world);
-        if !camcraft_app::setup::names(&state.world).is_empty() {
-            push_row(
-                &mut rows,
-                &mut leaves,
-                "Setups".to_owned(),
-                active.clone().unwrap_or_default(),
-                painted::Kind::Section,
-                Some(Icon::WorkOffset),
-                matches!(t, UiTarget::Setups),
-                false,
-                1,
-                Leaf::Setups,
-            );
-        }
+        push_row(
+            &mut rows,
+            &mut leaves,
+            "Setups".to_owned(),
+            active.clone().unwrap_or_default(),
+            painted::Kind::Section,
+            Some(Icon::Fixture),
+            matches!(t, UiTarget::Setups),
+            false,
+            1,
+            Leaf::Setups,
+        );
         let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
         let stock_hidden = state.hidden_stocks.contains(&stock_name);
         push_row(

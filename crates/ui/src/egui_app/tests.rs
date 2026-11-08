@@ -81,6 +81,7 @@ mod stock_size;
 mod stock_fit_sides;
 mod layout;
 mod unsaved;
+mod first_setup;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -2550,6 +2551,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Save, "Save the project\tCtrl+S"),
         (Cmd::SaveAs, "Save the project under a new name\tCtrl+Shift+S"),
         (Cmd::Post, "Post NC program (validation gate), then review it\tCtrl+P"),
+        (Cmd::Setups, "Setups: create, activate and delete the document's setups"),
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),
@@ -4457,18 +4459,20 @@ fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
 }
 
 #[test]
-fn setup_navigation_is_conditional_and_operations_keep_a_flat_browser() {
+fn setup_navigation_is_always_reachable_and_operations_keep_a_flat_browser() {
     let plan = panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]);
     let setup_group = plan.iter().find(|group| group.title == "Setup").expect("setup group");
     assert_eq!(
         setup_group.cells.as_slice(),
-        &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
-        "the Setup toolbar matches its original cells"
+        &[Cmd::Setups, Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
+        "the Setup toolbar opens on the Setups door (#322)"
     );
 
+    // #322: a fresh document shows the manager too - its page is where
+    // the first setup is created.
     let blank = State::new();
     let (rows, leaves) = panes::browser_rows(&blank);
-    assert!(!leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
+    assert!(leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
     assert!(!rows.iter().any(|row| row.label == "Global Setup"));
     assert!(rows.iter().any(|row| row.label == "Operations"));
 
