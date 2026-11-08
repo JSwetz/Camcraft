@@ -54,6 +54,7 @@ fn op(cross: Vec<CrossHole>) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 
