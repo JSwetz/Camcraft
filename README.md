@@ -180,6 +180,15 @@ gouge, crash, data loss), then `P1` (wrong behaviour a user hits), then `P2`
 (owed polish), oldest first. Each issue carries one `P*` label and one or
 more `area:*` labels. Issues opened by an agent also carry `source:agent`.
 
+**`needs-research` issues are not work items yet.** The label marks a large
+idea with open questions (a new machine type, a documentation site, a new
+kernel): research and decisions come first, and the outcome is a set of
+smaller, concrete issues, each with its own `P*`, `area:*` and a "Done means"
+line. Nobody claims a `needs-research` issue to write code. Its work is
+answering the open questions in comments and filing the sub-issues; once
+every sub-issue is filed and linked from it, it is closed, and the
+sub-issues are picked up like any other issue.
+
 1. **Claim before you code.** Comment
    `claimed: <name> · <UTC time> · branch <name> · plan: <one line>`. The
    maintainer adds the `claimed` label and assignee for contributors who
