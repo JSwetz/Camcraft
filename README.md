@@ -159,6 +159,8 @@ Actions runs only on a pushed release tag; the CI and nightly workflows in
   (`git show v0.14.0:ROADMAP.md`).
 - `RECOMMENDED.md`: the decision ledger, with what was chosen, why, and
   what was dropped.
+- [Machine onboarding](docs/MACHINE-ONBOARDING.md): source facts, registration,
+  software-test seams, and current limitations for machine definitions/posts.
 - `AGENTS.md`: engineering rules (clean-room protocol, the never-crash /
   never-gouge directive, layering, testing).
 - `RELEASE_NOTES.md`, `TESTING.md`: the current release.
