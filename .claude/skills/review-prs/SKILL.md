@@ -51,16 +51,17 @@ Otherwise list open PRs that are ready for review (non-draft) with their head SH
 ```bash
 gh pr list --repo NeoTech/Camcraft --state open --limit 100 \
   --json number,isDraft,author,headRepositoryOwner,headRefOid,reviews,comments \
-  --jq '.[] | select((.isDraft|not) and .headRepositoryOwner.login != "NeoTech")
+  --jq '.[] | select(.isDraft|not)
         | .headRefOid as $s
         | select([.reviews[].body, .comments[].body] | map(select(contains("<!-- pr-reviewer: " + $s))) | length == 0)
         | "\(.number) \(.author.login) \($s)"'
 ```
 
 Every line printed is a PR that needs a review:
-- it comes from a fork - our own issue PRs are reviewed in the release cut by
-  the main session (AGENTS.md "A cut goes PR review"), not here, unless the
-  user named one;
+- it is ready for review - a fork PR or one of our own (user, 2026-11-08:
+  "All PR*s made by owner should be reviewd and tagged"); our own PRs are
+  flagged ready by a quick pass (AGENTS.md "Every PR opens as a draft") and
+  get their full review here;
 - no review or comment carries the marker for its current head SHA (a new push
   after our last review means the contributor answered - review again).
 
@@ -98,6 +99,12 @@ After posting the review, read `gh pr view <N> --json mergeable`
 - clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` (never green while it conflicts);
 - blocking review -> add `needs-rework`, remove `merge-ready`; also add `conflicts` if it conflicts.
 
+A red or orange verdict also turns the PR back into a draft
+(`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it
+ready again for a fresh review (AGENTS.md "Every PR opens as a draft").
+That applies to our own PRs; a fork contributor's PR is left as they set
+it, and the review comment says what to fix.
+
 Whoever refreshes a branch re-reads `mergeable` after the push: once it is
 `MERGEABLE`, drop `conflicts` and restore `merge-ready` if the last review
 was clean. Merging a PR can turn others `CONFLICTING`, so each run also
@@ -107,7 +114,7 @@ conflict to `conflicts`.
 ## 3. Report
 
 One short line per PR: number, author, verdict, link to the posted review.
-If a review could not be posted, say why. Do not merge, approve, label, or
+If a review could not be posted, say why. Do not merge or approve, and set no labels beyond step 2b's review labels; do not
 close anything; do not reply on the contributor's behalf.
 
 ## 4. Mirror claim comments - add and withdraw
