@@ -401,6 +401,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         coolant: Default::default(),
         after: Default::default(),
         probe_result: None,
+        ..Default::default()
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -466,6 +467,7 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         coolant: Default::default(),
         after: Default::default(),
         probe_result: None,
+        ..Default::default()
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -752,6 +754,7 @@ fn dump_brackets_the_section_with_the_feeder() {
         coolant: Default::default(),
         after: Default::default(),
         probe_result: None,
+        ..Default::default()
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -851,6 +854,7 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
         coolant: Default::default(),
         after: Default::default(),
         probe_result: None,
+        ..Default::default()
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| {
@@ -950,6 +954,7 @@ fn dump_places_the_probe_after_the_cut_before_the_handoff() {
         coolant: Default::default(),
         after: Default::default(),
         probe_result: None,
+        ..Default::default()
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| recs.iter().position(pat).expect("record present");
