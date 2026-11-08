@@ -55,6 +55,14 @@ unstated capability into existence.
     traverse bands and collision sweep read these directly). Linear:
     mm (unit-scaled); rotary: DEGREES, never unit-scaled. Must be
     finite with `max > min` or the field is dropped.
+  - linear only: `direction` `1` | `-1` (#373) - which way the slide
+    moves for a + command; absent or null is `1`, and anything else
+    refuses the file NAMING the axis. The program frame stays standard
+    (ISO 841); the stated `travel` is the machine's own stroke, so an
+    inverted axis is judged as `-v` against it. Until the post
+    translates inverted axes (#374), posting for such a machine is
+    refused by name. A rotary part's numeric `-1` refuses (a reversed
+    rotary is not supported).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
     finite numbers or the file refuses NAMING the axis (a garbled
     tilt vector must never read as "no tilt": the RTCP judgment rides
