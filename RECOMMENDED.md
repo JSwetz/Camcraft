@@ -13183,6 +13183,39 @@ revolved (follow-up material if users hit it with long keyways).
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
 
+## #107 - unsaved changes: a dirty flag and a save prompt on exit (2026-11-07)
+
+- **Chosen:** the document is dirty when the command history's undo
+  depth differs from the depth recorded at the last save or load
+  (`History::is_dirty` / `History::mark_clean` in `camcraft_app::commands`).
+  Undo back to the saved point is clean again; a redo past it is dirty
+  again; a fresh command while the saved state sits on the redo stack
+  makes the saved point unreachable (`None`), so the same depth on a new
+  branch stays dirty. `History::clear` (New, Open) starts clean. Ephemeral
+  state (selection via `execute_ephemeral`, camera, hover, layout) never
+  touches the history, so it never dirties.
+- **Why on `History`, not `project::is_dirty(world)`:** the history lives
+  in the UI's `State`, not in the world, and the flag is a property of the
+  history position; putting it next to `undo`/`redo` keeps it exact by
+  construction and still in the app layer. Cost to move: a thin
+  `project::is_dirty(&History)` wrapper if a non-UI caller wants one.
+- **UI:** the window title leads with `*` while dirty. New, Open (the
+  dialog arm) and Quit over a dirty document are held in
+  `State::unsaved_prompt` and an egui `Modal` asks Save / Don't Save /
+  Cancel (Escape or the backdrop = Cancel); the answer is a queued
+  `CommandKind::ResolveUnsaved`. Save without a path asks for one; a
+  cancelled or failed save keeps the document and the app open. The
+  window X now queues a Quit like Ctrl+Q (a shell whose GPU failed still
+  closes at once, since it never drains the queue).
+- **The shell is winit, not eframe:** the brief's
+  `viewport().close_requested()` + `CancelClose` does not apply - the
+  shell owns `WindowEvent::CloseRequested`, so it simply does not exit
+  there.
+- **Dropped:** guarding the headless `OpenProjectFile` / `SaveProjectFile`
+  arms (scripts and tests drive them; a prompt there would hang a
+  headless run); a dirty counter bumped per command (cannot know when an
+  undo returns to the saved state); hashing the document (costly, and
+  derived caches such as toolpaths would make it noisy).
 ## #103: a turned path's axial rapids judged in the meridian plane (partial)
 
 - **Law.** `operation/turning_rapids.rs` no longer drops the column law's

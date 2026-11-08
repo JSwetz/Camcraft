@@ -81,14 +81,30 @@ pub trait Command {
 
 /// Linear undo/redo over executed commands. Executing a fresh command clears
 /// the redo stack (standard history semantics).
-#[derive(Default)]
+///
+/// The history also knows whether the document has unsaved changes (#107):
+/// `saved` is the undo depth at the last save or load. The document is
+/// clean exactly when the current depth equals it - so undoing back to the
+/// saved point is clean again, and redoing past it is dirty again. A fresh
+/// command executed while the saved point sits on the redo stack discards
+/// that state for good, so the saved point becomes unreachable (`None`).
 pub struct History {
     done: Vec<Box<dyn Command>>,
     redo: Vec<Box<dyn Command>>,
+    saved: Option<usize>,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self { done: Vec::new(), redo: Vec::new(), saved: Some(0) }
+    }
 }
 
 impl History {
     pub fn execute(&mut self, world: &World, command: impl Command + 'static) {
+        if self.saved.is_some_and(|depth| depth > self.done.len()) {
+            self.saved = None;
+        }
         command.apply(world);
         self.done.push(Box::new(command));
         self.redo.clear();
@@ -123,9 +139,23 @@ impl History {
     }
 
     /// Drop all history; used when a document replaces the current one.
+    /// The replacing document (blank or loaded) starts clean.
     pub fn clear(&mut self) {
         self.done.clear();
         self.redo.clear();
+        self.saved = Some(0);
+    }
+
+    /// Record the current position as the saved state (after a save or a
+    /// load succeeded).
+    pub fn mark_clean(&mut self) {
+        self.saved = Some(self.done.len());
+    }
+
+    /// True when the document differs from the last save or load: the
+    /// history position is not the recorded saved position.
+    pub fn is_dirty(&self) -> bool {
+        self.saved != Some(self.done.len())
     }
 
     pub fn can_undo(&self) -> bool {
