@@ -9,11 +9,13 @@
 //! input list (zero/NaN/inf sizes, empty and open shells, collapsing offsets).
 //!
 //! Gate map (M12.1): covers camcraft_kernel::solidcore_impl and solidcore's
-//! public primitive/boolean/offset/mass/query entry points.
+//! public primitive/boolean/offset/mass/query entry points, and the seam's
+//! blend and union/intersect guards (camcraft_kernel::solidcore_blend).
 
-use camcraft_kernel::Kernel;
+use camcraft_kernel::{Blend, Kernel};
 use camcraft_kernel::solidcore_impl::{SolidcoreKernel, VOLUME_ACCURACY};
-use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::math::Point3;
@@ -223,4 +225,106 @@ fn seam_turns_every_degenerate_case_into_err() {
     }
     let m = k.measure(&mut Brep::new());
     assert!(m.is_err(), "seam measure of an empty brep: {m:?}");
+}
+
+/// The stage-2 ops at the seam: nonsense blend input and empty booleans are
+/// clean `Err`s, never a panic and never an unchanged or invalid solid.
+#[test]
+fn seam_refuses_degenerate_blends_and_empty_booleans() {
+    let mut k = SolidcoreKernel::default();
+    let edge: [[f64; 3]; 1] = [[5.0, 0.0, 0.0]];
+    let cases: [(&str, Vec<[f64; 3]>, f64); 10] = [
+        ("NaN radius", edge.to_vec(), f64::NAN),
+        ("zero radius", edge.to_vec(), 0.0),
+        ("negative radius", edge.to_vec(), -1.0),
+        ("inf radius", edge.to_vec(), f64::INFINITY),
+        ("radius past the conservative guard", edge.to_vec(), 6.0),
+        ("no picks", Vec::new(), 1.0),
+        ("pick off every edge", vec![[5.0, 5.0, 5.0]], 1.0),
+        ("NaN pick", vec![[f64::NAN, 0.0, 0.0]], 1.0),
+        ("one edge picked twice", vec![[5.0, 0.0, 0.0], [6.0, 0.0, 0.0]], 1.0),
+        ("pick at a vertex (ambiguous)", vec![[0.0, 0.0, 0.0]], 1.0),
+    ];
+    for (name, picks, r) in cases {
+        for kind in [Blend::Round, Blend::Chamfer] {
+            let r = k
+                .make_box([0.0; 3], [10.0; 3])
+                .and_then(|b| k.blend_edges(b, &picks, r, kind));
+            println!("blend {name:<28} {kind:?} -> {:?}", r.as_ref().map(|_| "Ok"));
+            assert!(r.is_err(), "seam blend {name} ({kind:?}) came back Ok");
+        }
+    }
+    assert!(k.blend_edges(Brep::new(), &edge, 1.0, Blend::Round).is_err(), "blend of an empty brep");
+    // disjoint operands: the intersection is empty -> Err
+    let a = k.make_box([0.0; 3], [10.0; 3]);
+    let b = k.make_box([20.0; 3], [10.0; 3]);
+    if let (Ok(a), Ok(b)) = (a, b) {
+        let r = k.boolean_intersect(a, b);
+        println!("intersect disjoint -> {:?}", r.as_ref().map(|_| "Ok"));
+        assert!(r.is_err(), "intersect of disjoint boxes came back Ok");
+    }
+    let b = k.make_box([0.0; 3], [10.0; 3]);
+    if let Ok(b) = b {
+        let r = k.boolean_intersect(b, Brep::new());
+        assert!(r.is_err(), "intersect with an empty brep came back Ok");
+    }
+    let b = k.make_box([0.0; 3], [10.0; 3]);
+    if let Ok(b) = b {
+        // empty + box: either refused or exactly the box, never anything else
+        let r = k.boolean_union(Brep::new(), b).and_then(|mut u| k.measure(&mut u));
+        println!("union empty + box -> {r:?}");
+        if let Ok(m) = r {
+            assert!((m.volume - 1000.0).abs() < 1e-6, "union empty + box: {m:?}");
+        }
+    }
+}
+
+/// The port's own answers on the stage-2 degenerate inputs, pinned like
+/// `KNOWN_PORT_VERDICTS` (a separate table so stage 1's stays unchanged).
+/// `box & empty` returning the whole box is a FINDING against the port;
+/// the seam refuses empty operands up front. `box & disjoint box` is an
+/// `Ok` non-solid the seam's result check turns into `Err`. The r6 round
+/// is CORRECT (1000 - 360 (1 - pi/4)); the seam still refuses it on
+/// purpose - its radius guard is conservative (decision 4 in
+/// docs/decisions/27-solidcore-bench.md).
+const KNOWN_PORT_VERDICTS_STAGE2: &[(&str, &str)] = &[
+    ("box & empty", "Ok solid V=1000.000"),
+    ("empty | box", "Err"),
+    ("box & disjoint box", "Ok non-solid"),
+    ("fillet r6 on a 10-box edge", "Ok solid V=922.743"),
+    ("fillet r NaN on a 10-box edge", "Err"),
+];
+
+#[test]
+fn port_stage2_degenerates_never_panic_and_match_pinned_verdicts() {
+    let mut observed: Vec<(String, String)> = Vec::new();
+    let mut k = solidcore::Kernel::default();
+    let b = unit_box(&mut k);
+    let r = boolean_intersection(&mut k, b, Brep::new());
+    observed.push(("box & empty".into(), verdict(&k, r.as_ref())));
+    let b = unit_box(&mut k);
+    let r = boolean_union(&mut k, Brep::new(), b);
+    observed.push(("empty | box".into(), verdict(&k, r.as_ref())));
+    let a = unit_box(&mut k);
+    let far = prim::create_box(&mut k, Point3::new(20.0, 20.0, 20.0), 10.0, 10.0, 10.0);
+    let r = far.and_then(|f| boolean_intersection(&mut k, a, f));
+    observed.push(("box & disjoint box".into(), verdict(&k, r.as_ref())));
+    for (name, radius) in [("fillet r6 on a 10-box edge", 6.0), ("fillet r NaN on a 10-box edge", f64::NAN)] {
+        let mut k = solidcore::Kernel::default();
+        let mut b = unit_box(&mut k);
+        let edge = b.edges().ids().next();
+        let r = match edge {
+            Some(e) => fillet_edges(&mut k, &mut b, &[e], radius, 1, 1, 1.0).map(|()| b),
+            None => Ok(Brep::new()),
+        };
+        observed.push((name.into(), verdict(&k, r.as_ref())));
+    }
+    for (n, v) in &observed {
+        println!("{n:<36} -> {v}");
+    }
+    let pinned: Vec<(String, String)> = KNOWN_PORT_VERDICTS_STAGE2
+        .iter()
+        .map(|(n, v)| ((*n).to_string(), (*v).to_string()))
+        .collect();
+    assert_eq!(observed, pinned, "port verdicts changed - re-triage the findings");
 }

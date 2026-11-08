@@ -109,6 +109,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## tracing stack (terminal diagnostics, crates/app/src/logging.rs - #163)
+
+`tracing` and `tracing-subscriber` (with their `tracing-core`,
+`tracing-log`, `sharded-slab`, `thread_local`, `nu-ansi-term` and
+`matchers` internals) are crates.io dependencies licensed MIT; retained
+as a license condition, same posture as the egui notice.
+
+MIT License (tracing)
+
+Copyright (c) 2019 Tokio Contributors
+
 ## truck (STEP import and tessellation, crates/app/src/geometry/import/step.rs; reference kernel in crates/kernel's tests)
 
 `truck-stepio`, `truck-meshalgo`, `truck-modeling`, `truck-polymesh`,

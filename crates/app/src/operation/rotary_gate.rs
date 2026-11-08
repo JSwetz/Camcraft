@@ -5,13 +5,11 @@
 //! fitted axis the generator turned about must be one the mounted
 //! machine states - refused by name where it states none.
 //!
-//! The C half is PINNED, not delivered: the post's pose law
-//! (`cl::axis_to_angles`) renders a stated tool AXIS as [A, B, 0] -
-//! a direction vector has two degrees of freedom and C is the one it
-//! cannot carry - so a part turning about the spindle would post as
-//! A/B swings the mill-turn does not have. Until the stream carries
-//! a rotary ANGLE beside the tool axis, a C-axis rotary op refuses
-//! here, by name, instead of posting a wrong letter.
+//! The C half (issue #33): the spindle's C is admitted and answered
+//! as 'C'; the caller then stamps the path with the stated C angle
+//! (`cl::stamp_c`) - the post's pose law renders a tool AXIS as
+//! [A, B, 0] and cannot carry C, so the angle rides beside it, and a
+//! C-axis op never posts as A/B swings the mill-turn does not have.
 //!
 //! Provenance: our own wiring of the machine inventory to the pose
 //! law; axis lettering per RS-274 / ISO 6983 convention. No vendor
@@ -28,8 +26,7 @@ const SAME_LINE: f64 = 0.999;
 /// world frame) for `kind`. `None` machine, or a machine whose
 /// rotaries state no axis vector, checks nothing (the unstated-limit
 /// law) and answers `Ok(None)`. A stated inventory must hold a rotary
-/// on that line, and that rotary must not be C (pinned, see the
-/// module doc).
+/// on that line.
 pub(super) fn rotary_letter(
     machine: Option<&(String, Vec<AxisLimits>)>,
     dir: [f64; 3],
@@ -63,14 +60,38 @@ pub(super) fn rotary_letter(
             if names.is_empty() { "none".to_owned() } else { names.join(", ") }
         )));
     };
-    let letter = ax.name.chars().next().map(|c| c.to_ascii_uppercase());
-    if letter == Some('C') {
+    Ok(ax.name.chars().next().map(|c| c.to_ascii_uppercase()))
+}
+
+/// Stamp a rotary kind's part-frame path with the spindle C (issue
+/// #33) when the gate answered the machine's C for the fitted line
+/// `c_axis`; any other letter returns the path untouched. The line
+/// must stand along world Z - C turns about Z - and the stamp is split
+/// to `tol` (the op's verify budget), refused by name where the law
+/// cannot hold (`cl::stamp_c`).
+pub(super) fn stamp_spindle_c(
+    path: crate::cl::Toolpath,
+    c_axis: Option<crate::multiaxis::axis::Axis>,
+    tol: f64,
+    kind: &str,
+) -> Result<crate::cl::Toolpath, GenError> {
+    let Some(ax) = c_axis else {
+        return Ok(path);
+    };
+    let d = ax.dir;
+    let len = (d.x * d.x + d.y * d.y + d.z * d.z).sqrt();
+    if !(len > 1e-12 && (d.z / len).abs() >= SAME_LINE) {
         return Err(GenError::Invalid(format!(
-            "{kind} would turn the part on {model}'s {} (the spindle as C axis): the post's pose law states a tool axis as A/B only and carries no C word yet - C-axis live tooling is pinned until the stream carries the rotary angle (M13.5 B)",
-            ax.name
+            "{kind}: the part turns about ({:.3}, {:.3}, {:.3}), not the spindle's Z line - C cannot hold it",
+            d.x, d.y, d.z
         )));
     }
-    Ok(letter)
+    // The line's XY where it crosses z = 0 (it stands within SAME_LINE
+    // of vertical, so the crossing is finite).
+    let t = -ax.origin.z / d.z;
+    let center = [ax.origin.x + d.x * t, ax.origin.y + d.y * t];
+    let tol = if tol.is_finite() && tol > 0.0 { tol } else { crate::machining2d::ARC_FIT_TOL };
+    crate::cl::stamp_c(&path, center, tol).map_err(|e| GenError::Invalid(format!("{kind}: {e}")))
 }
 
 #[cfg(test)]
@@ -99,12 +120,11 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_line_and_the_spindle_both_refuse_by_name() {
+    fn a_missing_line_refuses_by_name_and_the_spindle_answers_c() {
         let b = ("Bench".to_owned(), vec![rot("B", [0.0, 1.0, 0.0])]);
         let e = rotary_letter(Some(&b), [1.0, 0.0, 0.0], "Rotary Offset").err();
         assert!(e.is_some_and(|e| e.to_string().contains("states no rotary on that line")));
         let c = ("MT".to_owned(), vec![rot("C", [0.0, 0.0, 1.0])]);
-        let e = rotary_letter(Some(&c), [0.0, 0.0, 1.0], "Rotary Contour").err();
-        assert!(e.is_some_and(|e| e.to_string().contains("pinned")));
+        assert_eq!(rotary_letter(Some(&c), [0.0, 0.0, 1.0], "Rotary Contour").ok(), Some(Some('C')));
     }
 }

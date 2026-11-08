@@ -95,8 +95,17 @@ writes `dist/camcraft-<ver>-win-x64-setup.exe` beside the zip.
 
 `sign.ps1` signs exes and the installer with `signtool` (SHA-256 digest,
 RFC-3161 timestamp so signatures outlive the certificate). It is called by
-`release.ps1` after the build and before the zip, and again on the
-installer; `release.yml` does the same.
+`release.ps1` after the build and before the zip; `release.yml` does the
+same.
+
+The installer and the uninstaller Inno Setup embeds in it are signed by
+ISCC itself, through `sign.ps1`: when `sign.ps1 -Status` reports a
+certificate, `installer.ps1` passes `/DSignToolName=camcraft` (which turns
+on `SignTool=camcraft` and `SignedUninstaller=yes` in `camcraft.iss`) and
+`/Scamcraft=powershell.exe ... sign.ps1 -Path $f`, so ISCC runs the same
+signtool command on the uninstaller and on the setup exe. Without a
+certificate neither switch is passed (`installer signing: off ...` in the
+log) and the build is the unsigned one it always was.
 
 With no certificate configured it prints `unsigned: no certificate
 configured` and exits 0: the unsigned release is a legitimate release, as
@@ -120,5 +129,4 @@ an unsigned release, not a failed one.
 
 Obtaining a certificate: buy an OV or EV code-signing certificate from any
 public CA (EV ones live on hardware tokens or a cloud signing service, which
-is the local-thumbprint route). Known follow-on: the uninstaller embedded by
-Inno Setup is not signed yet (Inno's `SignTool` directive is the hook).
+is the local-thumbprint route).

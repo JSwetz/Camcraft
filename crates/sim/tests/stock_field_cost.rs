@@ -20,7 +20,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 fn feed(from: Point3, to: Point3) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis: None }
+    Move { rotary: None, kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis: None }
 }
 
 /// A `w` x `w` x 5 slab on unit cells (band 4, cap 4).

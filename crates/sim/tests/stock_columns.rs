@@ -23,7 +23,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 fn mv(kind: MoveKind, from: Point3, to: Point3) -> Move {
-    Move { kind, from, to, feed: Some(500.0), arc: None, axis: None }
+    Move { rotary: None, kind, from, to, feed: Some(500.0), arc: None, axis: None }
 }
 
 /// A plunge, a level pass at -1.3 (not a lattice plane), a second

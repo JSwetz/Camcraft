@@ -217,11 +217,12 @@ if (-not $Installer) {
 } else {
     $installerScript = Join-Path $PSScriptRoot "installer.ps1"
     Run "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $installerScript, "-Version", $Version, "-Stage", $stage, "-OutDir", (Join-Path $root "dist"))
+    # installer.ps1 signs the setup exe and its embedded uninstaller through
+    # ISCC's SignTool when a certificate is configured (sign.ps1 decides), so
+    # no separate sign.ps1 pass on the setup exe here.
     if ($DryRun) {
-        Write-Host "[dry-run] sign.ps1 -Path $setup (if ISCC produced it)"
-    } elseif (Test-Path $setup) {
-        Run "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript, "-Path", $setup)
-    } else {
+        Write-Host "[dry-run] installer.ps1 signs setup + uninstaller via ISCC SignTool if CAMCRAFT_SIGN_* is set"
+    } elseif (-not (Test-Path $setup)) {
         Write-Host "no installer produced (ISCC.exe missing); the zip is the release"
     }
 }

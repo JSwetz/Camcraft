@@ -131,7 +131,8 @@ fn pick_model(state: &mut State, p: [f32; 2]) {
     let hit = pick::first_hit_f(&state.world, origin, dir, |name| {
         state.hidden_in_view(name)
     });
-    let hit = crate::machined::filter_hit(state, origin, dir, hit);
+    let (hit, facet) = crate::machined::filter_hit_facet(state, origin, dir, hit);
+    state.hover_mesh = facet;
     // The click also tells us the exact facet under the pointer;
     // keeping it alive so the highlight matches the selection.
     state.hover = hit
@@ -268,6 +269,7 @@ fn hover_feature_at(state: &mut State, p: [f32; 2]) -> Option<(String, FeatureSe
 /// (AGENTS.md). `held` stands in for the shell's own left-press book-
 /// keeping (the app keeps `left_press` OUTSIDE State, across frames).
 pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
+    state.hover_mesh = None; // re-earned below by a mesh hit, or gone
     let idle_over_viewport =
         state.drag.is_none() && !held && state.viewport_hot && inside_viewport(state, p);
     if !idle_over_viewport {
@@ -309,7 +311,8 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
     });
     // The machined mesh, when drawn, is what a stock hover reports
     // (M13.1 owed) - never the uncut box the ray crossed.
-    let hit = crate::machined::filter_hit(state, origin, dir, hit);
+    let (hit, facet) = crate::machined::filter_hit_facet(state, origin, dir, hit);
+    state.hover_mesh = facet;
     state.hover = hit.map(|(entity, facet, _)| {
         let feature = match mode {
             // The triangle highlight is exactly what the feature modes

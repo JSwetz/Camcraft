@@ -194,6 +194,7 @@ impl TiltedFrame {
                     let (cu, cv) = arc.plane.center_uv(arc.center);
                     let c3 = self.to_world(arc.plane.point(cu, cv, 0.0));
                     moves.push(Move {
+                        rotary: None,
                         kind: m.kind,
                         from: self.to_world(m.from),
                         to: self.to_world(m.to),
@@ -210,6 +211,7 @@ impl TiltedFrame {
                             continue; // a collapsed chord is no motion
                         }
                         moves.push(Move {
+                            rotary: None,
                             kind: m.kind,
                             from: a,
                             to: b,
@@ -222,6 +224,7 @@ impl TiltedFrame {
                 // Upright: an arc is still an arc — translate and go.
                 Some(arc) if self.is_upright() => {
                     moves.push(Move {
+                        rotary: None,
                         kind: m.kind,
                         from: self.to_world(m.from),
                         to: self.to_world(m.to),
@@ -267,6 +270,7 @@ impl TiltedFrame {
                             continue; // a collapsed chord is no motion
                         }
                         moves.push(Move {
+                            rotary: None,
                             kind: m.kind,
                             from: w[0],
                             to: w[1],
@@ -278,6 +282,7 @@ impl TiltedFrame {
                 }
                 None => {
                     moves.push(Move {
+                        rotary: None,
                         kind: m.kind,
                         from: self.to_world(m.from),
                         to: self.to_world(m.to),
@@ -303,6 +308,7 @@ impl TiltedFrame {
                         .programmed
                         .iter()
                         .map(|m| Move {
+                            rotary: None,
                             kind: m.kind,
                             from: self.to_world(m.from),
                             to: self.to_world(m.to),

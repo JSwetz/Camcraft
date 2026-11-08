@@ -14,7 +14,10 @@ pub fn generate(
     op: &Operation,
     op_name: &str,
 ) -> Result<(Toolpath, Vec<Warning>), GenError> {
-    run_job(collect_job(world, op, op_name)?)
+    let job = collect_job(world, op, op_name).inspect_err(|e| {
+        tracing::warn!(op = op_name, kind = %op.params.kind(), "generation refused before it ran: {e}");
+    })?;
+    run_job(job)
 }
 
 /// Run a fully-collected job: every world read happened in
@@ -28,7 +31,20 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // path whichever arm cut it: a note, never a warning - the post
     // is not held for features the op honestly leaves standing.
     let note = job.spindle_note.take();
-    let (mut path, warns) = run_job_arms(job)?;
+    let kind = job.params.kind();
+    let _span = tracing::info_span!("generate", op = %job.op_name).entered();
+    let started = std::time::Instant::now();
+    tracing::debug!(kind = %kind, "generation started");
+    let (mut path, warns) = run_job_arms(job).inspect_err(|e| {
+        tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
+    })?;
+    tracing::info!(
+        kind = %kind,
+        moves = path.moves.len(),
+        warnings = warns.len(),
+        ms = crate::logging::elapsed_ms(started),
+        "generated"
+    );
     if let Some(n) = note
         && !path.notes.contains(&n)
     {
@@ -69,6 +85,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         area,
         wcs_origin,
         spindle_note: _,
+        op_name: _,
     } = job;
     // The probe (#108) cuts nothing: its own protected-move law judges
     // the stylus against the model, and no cutting law or region applies.
@@ -1156,11 +1173,14 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let kind = if is_contour { "Rotary Contour" } else { "Rotary Parallel" };
             // M13.5 B: the letter is the machine's. The fitted line
             // the kernel will turn about must be a rotary the mounted
-            // machine states (A/B on a table; C is pinned by name).
-            rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, kind)?;
+            // machine states (A/B on a table, or the spindle's C -
+            // issue #33 - whose angle the path then states).
+            let spindle_c = rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, kind)?;
             let path = super::plunge_solid::guard_posed(
                 kind, tool.center_cutting, tool.kind == crate::tools::ToolKind::BallNose, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
+            // Issue #33: on the spindle's C the path states its angle.
+            let path = super::rotary_gate::stamp_spindle_c(path, spindle_c, *tolerance, kind)?;
             (region, path)
         }
         // M5.1 stage E2: the rotary rough. The pocket ladder runs in
@@ -1233,7 +1253,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let _ = tolerance;
             // M13.5 B: the machine's letter for the line the ladder
             // wraps about, or the refusal by name.
-            rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, "Rotary Offset")?;
+            let spindle_c = rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, "Rotary Offset")?;
             // M13.8: the ladder peels from the setup STOCK's outer
             // radius about the fitted axis (the part's skin when no
             // separate stock is set, or when the stock sits inside it).
@@ -1243,6 +1263,10 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &pp,
                 &axis,
             )?;
+            // Issue #33: on the spindle's C the path states its angle,
+            // split to the verify budget so the machine's C-linear
+            // motion is the chord the laws judge.
+            let path = super::rotary_gate::stamp_spindle_c(path, spindle_c, *tolerance, "Rotary Offset")?;
             // M11.3 owed (2): the wrap-space entry guard judged the
             // ladder before the wrap posed it; the law judges the FINAL
             // posed path. Solid is the true bar (#16): the stock
@@ -3006,16 +3030,18 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 /// turn the part about, fitted from the same facets it reads, held
 /// against the mounted machine's rotary inventory. A fit that fails
 /// here is left to the kernel, which refuses it by its own name; a
-/// line no stated rotary holds, or the spindle's C, refuses here.
+/// line no stated rotary holds refuses here. The spindle's C answers
+/// the fitted line (issue #33) - the path is then stamped with its C.
 fn rotary_letter_gate(
     machine: Option<&(String, Vec<crate::machine::AxisLimits>)>,
     facets: &[Triangle],
     kind: &str,
-) -> Result<(), GenError> {
+) -> Result<Option<crate::multiaxis::axis::Axis>, GenError> {
     let Ok(ax) = crate::multiaxis::axis::fit(facets) else {
-        return Ok(());
+        return Ok(None);
     };
-    super::rotary_gate::rotary_letter(machine, [ax.dir.x, ax.dir.y, ax.dir.z], kind).map(|_| ())
+    let letter = super::rotary_gate::rotary_letter(machine, [ax.dir.x, ax.dir.y, ax.dir.z], kind)?;
+    Ok((letter == Some('C')).then_some(ax))
 }
 
 /// The fixture laws (c2)/(d2) at generation, exactly as the post gate

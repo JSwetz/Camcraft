@@ -5,7 +5,7 @@
 //! Provenance: our own parser, specced from the observable shape of a
 //! machine file and RS-274/ISO 6983 axis-lettering convention.
 
-use super::def::{AxisLimits, Coolant, Kind, Machine};
+use super::def::{AxisLimits, Coolant, Kind, LiveToolCodes, Machine};
 
 /// The number a machine field reads as, with the unstated-limit law:
 /// absent, null, non-numeric, or exactly zero reads `None`; a
@@ -62,6 +62,25 @@ fn collect_axes(
 /// takes: bare name strings (a named option, no code - posts
 /// nothing), or `{name, mCode}` objects. The code may itself be a
 /// string ("M8") or a bare number (8), normalized to the word form.
+/// `tool_station.live_tool` (issue #33): the four builder words, all
+/// non-empty strings, or None (a partial set states nothing usable).
+fn parse_live_tool(v: Option<&serde_json::Value>) -> Option<LiveToolCodes> {
+    let v = v?;
+    let word = |k: &str| {
+        v.get(k)
+            .and_then(|w| w.as_str())
+            .map(str::trim)
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+    };
+    Some(LiveToolCodes {
+        c_axis_on: word("c_axis_on")?,
+        c_axis_off: word("c_axis_off")?,
+        spindle_on: word("spindle_on")?,
+        spindle_off: word("spindle_off")?,
+    })
+}
+
 fn parse_coolants(v: Option<&serde_json::Value>) -> Vec<Coolant> {
     let Some(arr) = v.and_then(|a| a.as_array()) else {
         return Vec::new();
@@ -196,6 +215,7 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
             m.spindle_d = scale(rate(sp.and_then(|s| s.get("body_diameter"))), f);
             m.spindle_len = scale(rate(sp.and_then(|s| s.get("body_length"))), f);
             m.coolants = parse_coolants(ts.and_then(|t| t.get("coolants")));
+            m.live_tool = parse_live_tool(ts.and_then(|t| t.get("live_tool")));
         }
         if m.coolants.is_empty() {
             // Some files keep the option list at the tooling root

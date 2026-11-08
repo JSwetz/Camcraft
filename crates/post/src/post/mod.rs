@@ -174,6 +174,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     if let Some(word) = d.coolant.param_word() {
         out.push(Record::Param { name: "Coolant".into(), value: json!(word) });
     }
+    // A path stating spindle C angles (issue #33) is live-tool work on
+    // a C turn: the section says so before it opens, so a script can
+    // engage C and the live spindle in its preamble - and the engine
+    // refuses, by name, a script that does not declare `liveTooling`.
+    if t.moves.iter().any(|m| m.rotary.is_some()) {
+        out.push(Record::Param { name: "LiveTool".into(), value: json!("radial") });
+    }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
     }
@@ -293,12 +300,21 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             }));
             continue;
         }
-        let abc = match m.axis {
-            Some(a) if !crate::cl::is_vertical(&a) => {
+        // A C-axis live-tool move (issue #33) commands its stated
+        // spindle angle and nothing else: the tool axis is the
+        // station's, fixed in the machine, so A/B hold zero. The C law
+        // (`cl::stamp_c`) is section-scoped - the post disengages C at
+        // the section's end - so no modal lean is left standing.
+        let abc = match (m.rotary, m.axis) {
+            (Some(c), _) => {
+                tilted = false;
+                Some([0.0, 0.0, c])
+            }
+            (None, Some(a)) if !crate::cl::is_vertical(&a) => {
                 tilted = true;
                 Some(crate::cl::axis_to_angles(a))
             }
-            Some(_) if tilted => {
+            (None, Some(_)) if tilted => {
                 tilted = false;
                 Some([0.0, 0.0, 0.0])
             }

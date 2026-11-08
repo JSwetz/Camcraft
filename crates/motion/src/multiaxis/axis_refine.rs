@@ -17,7 +17,9 @@
 //! settle the second-order terms. The caller keeps the refined
 //! direction only when it moves past the noise floor and does not
 //! raise the fit's own residual, so an even revolve keeps its eigen
-//! direction bit for bit (the goldens' identity frame).
+//! direction bit for bit (the goldens' identity frame) - and it does
+//! not refine an eigen line that already meets every normal line to
+//! rounding ([`worth_refining`], #228).
 //!
 //! Provenance: line-complex fitting of revolved surfaces from normal
 //! lines in Plucker coordinates (Pottmann & Wallner, Computational
@@ -27,7 +29,7 @@
 
 use crate::geometry::Point3;
 
-use super::axis::Datum as Line;
+use super::axis::{Axis, Datum as Line};
 use super::linalg::unit;
 
 /// Below this step (radians) a refinement is rounding, not a fact
@@ -35,6 +37,21 @@ use super::linalg::unit;
 const SETTLED: f64 = 1e-13;
 /// The refinement's unknowns: two tilts, two shifts.
 const N: usize = 4;
+/// A fit residual this small, per mm of the part's mean radius, is
+/// rounding: the line already meets every normal line (#228).
+const CONCURRENT: f64 = 1e-9;
+
+/// Is the eigen line `ax`, whose fit residual is `r`, worth refining
+/// (#228)? Not when it already meets every normal line to rounding: a
+/// refinement can then only trade it for a tilt the rows cannot see.
+/// A bar tessellated as two rings anchors every side facet's line at
+/// the bar's mid-station, so no row sees a tilt about it; rounding
+/// picked one of 26 microradians, accepted on a residual "lower" by
+/// noise, and the rotary wrap's seam law read the leaning columns as a
+/// feature on the seam.
+pub(super) fn worth_refining(lines: &[Line], ax: Axis, r: f64, a_total: f64) -> bool {
+    super::axis::line(lines, ax.dir, a_total).is_some_and(|(_, rho)| r > CONCURRENT * rho)
+}
 
 /// Refine the direction `u0` of an axis through `o0` against the
 /// normal lines; `None` when the system is singular or not finite (the

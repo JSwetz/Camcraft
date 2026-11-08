@@ -11,8 +11,12 @@
 //! off its centre line, is refused by name (PR #210's review: wrapped, it
 //! gouged to the axis); a bar with a facet missing is refused by name.
 //!
+//! #228: a plain bar tessellated as two rings wraps in every
+//! orientation (its axis fit is exact, not tilted by rounding), and a
+//! seam refusal names a tessellation cause as well as a feature.
+//!
 //! Gate map (M4.4): covers camcraft_motion::multiaxis (rotary_offset,
-//! rotary_seam), on
+//! rotary_seam, axis, axis_refine), on
 //! this suite's own prism fixtures.
 //! Lane shape (M4.4): every wrap here is Offset rings or a refusal;
 //! the suite runs in about a minute in debug.
@@ -21,7 +25,7 @@ use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::machining2d::PocketStrategy;
 use camcraft_motion::cl::MoveKind;
 use camcraft_motion::machining3d::{Entry3D, Pocket3DParams};
-use camcraft_motion::multiaxis::{rotary_offset_developed, rotary_offset_in, AxisControl};
+use camcraft_motion::multiaxis::{axis, rotary_offset_developed, rotary_offset_in, AxisControl};
 
 const TAU: f64 = std::f64::consts::TAU;
 const RAD: f64 = 6.0;
@@ -289,4 +293,92 @@ fn an_off_centre_flat_across_the_seam_never_puts_a_tip_in_the_part() {
         }
     }
     assert!(wrapped >= 6, "the 2 mm tool roughs the placements clear of the seam: {wrapped}");
+}
+
+/// [`ring`] turned `rot` radians about the axis.
+fn turned(ring: Vec<Point3>, rot: f64) -> Vec<Point3> {
+    let (c, s) = (rot.cos(), rot.sin());
+    ring.into_iter().map(|q| Point3::new(q.x * c - q.y * s, q.x * s + q.y * c, q.z)).collect()
+}
+
+/// The ring counts and turns #228's review refused a plain bar at: at
+/// turn 0 one ring vertex stands on the wrap's +-pi branch.
+const PLAIN_CASES: [(usize, f64); 4] = [(16, 0.0), (16, 0.3), (64, 0.0), (64, 0.3)];
+
+/// #228: a plain bar meshed as two rings (long side facets, axis-fan
+/// caps, the way CAD exports a cylinder) fits its true axis exactly.
+/// Every side facet anchors its normal line at the bar's mid-station,
+/// so no line sees a tilt about it, and the refinement used to pick one
+/// by rounding (26 microradians at n 16).
+#[test]
+fn a_two_ring_bar_fits_its_true_axis() {
+    for (n, rot) in PLAIN_CASES {
+        let f = prism(&[turned(ring(n, -40.0, None), rot), turned(ring(n, 40.0, None), rot)]);
+        let ax = axis::fit(&f).expect("a revolve");
+        let tilt = ax.dir.x.hypot(ax.dir.y);
+        assert!(tilt < 1e-12, "n {n} turn {rot}: the axis leans {tilt:e} rad: {ax:?}");
+    }
+}
+
+/// #228: the same plain bar wraps in every one of those orientations,
+/// with no cut tip inside the part (main refused all but one, naming a
+/// feature the bar does not have).
+#[test]
+fn a_plain_two_ring_bar_wraps_in_every_orientation() {
+    let st = stock(6.5, -40.0, 40.0);
+    let p = params(PocketStrategy::OffsetRings, 2.0, 12.0);
+    for (n, rot) in PLAIN_CASES {
+        let f = prism(&[turned(ring(n, -40.0, None), rot), turned(ring(n, 40.0, None), rot)]);
+        let t = rotary_offset_in(&f, Some(&st), &p, &control()).unwrap_or_else(|e| panic!("n {n} turn {rot}: {e}"));
+        assert!(t.all_finite(), "n {n} turn {rot}: a non-finite move");
+        let sect = turned(ring(n, 0.0, None), rot);
+        let inside = feeds(&t).filter(|m| m.to.z.abs() < 40.0 && deep_inside(&sect, m.to, 0.05)).count();
+        assert!(feeds(&t).count() > 50, "n {n} turn {rot}: too few cuts");
+        assert_eq!(inside, 0, "n {n} turn {rot}: cut tips inside the part");
+    }
+}
+
+/// #228's other case: a stepped shaft whose two diameters were meshed
+/// with different column counts (16 on the neck, 64 on the body) puts
+/// more than two columns on the seam. It is refused, and the refusal
+/// names the tessellation, not only a feature the shaft does not have
+/// (wrapping it would also answer the issue, but nothing here pins what
+/// such a wrap cuts, so the refusal is what is pinned).
+#[test]
+fn a_shaft_meshed_with_mixed_column_counts_is_refused_naming_the_tessellation() {
+    let neck = |z: f64| ring(16, z, None).into_iter().map(|q| Point3::new(q.x * 4.0 / RAD, q.y * 4.0 / RAD, z)).collect::<Vec<_>>();
+    let (n0, n1) = (neck(-40.0), neck(0.0));
+    let (b0, b1) = (ring(64, 0.0, None), ring(64, 40.0, None));
+    let mut f = Vec::new();
+    for (a, b) in [(&n0, &n1), (&b0, &b1)] {
+        let n = a.len();
+        for j in 0..n {
+            let k = (j + 1) % n;
+            tri(&mut f, a[j], a[k], b[k]);
+            tri(&mut f, a[j], b[k], b[j]);
+        }
+    }
+    // The shoulder at Z 0: four body columns to each neck column, zipped
+    // as a fan from each neck vertex over its quarter of the body ring
+    // and one triangle across to the next neck vertex.
+    for j in 0..16 {
+        let k = (j + 1) % 16;
+        for m in 0..4 {
+            let (b, c) = (4 * j + m, (4 * j + m + 1) % 64);
+            tri(&mut f, n1[j], b0[c], b0[b]);
+        }
+        tri(&mut f, n1[j], n1[k], b0[(4 * j + 4) % 64]);
+    }
+    let (c0, c1) = (Point3::new(0.0, 0.0, -40.0), Point3::new(0.0, 0.0, 40.0));
+    for j in 0..16 {
+        tri(&mut f, c0, n0[(j + 1) % 16], n0[j]);
+    }
+    for j in 0..64 {
+        tri(&mut f, c1, b1[j], b1[(j + 1) % 64]);
+    }
+    let p = params(PocketStrategy::OffsetRings, 2.0, 12.0);
+    match rotary_offset_in(&f, Some(&stock(6.5, -40.0, 40.0)), &p, &control()) {
+        Ok(_) => panic!("the mixed-count shaft wrapped: pin what it cuts before accepting that"),
+        Err(e) => assert!(e.to_string().contains("different column counts"), "refused, but not naming the tessellation: {e}"),
+    }
 }

@@ -107,6 +107,7 @@ impl Default for History {
 
 impl History {
     pub fn execute(&mut self, world: &World, command: impl Command + 'static) {
+        tracing::debug!(command = command_name(&command), "execute");
         if self.saved.is_some_and(|depth| depth > self.done.len()) {
             self.saved = None;
         }
@@ -118,6 +119,7 @@ impl History {
     pub fn undo(&mut self, world: &World) -> bool {
         match self.done.pop() {
             Some(command) => {
+                tracing::debug!("undo");
                 command.invert(world);
                 self.redo.push(command);
                 true
@@ -174,4 +176,11 @@ impl History {
     pub fn is_empty(&self) -> bool {
         self.done.is_empty() && self.redo.is_empty()
     }
+}
+
+/// A command's short type name for the dispatch log (#163):
+/// `camcraft_app::commands::set_wcs::SetWcsOrigin` reads `SetWcsOrigin`.
+fn command_name<T>(_: &T) -> &'static str {
+    let full = std::any::type_name::<T>();
+    full.rsplit("::").next().unwrap_or(full)
 }
