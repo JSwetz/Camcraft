@@ -7,10 +7,12 @@
 //! refits on the revolved surface, so a correctly placed keyed shaft
 //! passes and generates; the same shaft off G54 is still refused, by
 //! the misplaced-part message, naming the share the fit set aside.
+//! A keyway too large for the plain fit's gate (issue #113: 20 mm long,
+//! a deep floor) is read by the consensus pass and passes the same way.
 //!
 //! Gate map (M4.4): covers app::operation (spindle_law's reading and
 //! refusal text, collect_job's door), motion::multiaxis::axis and
-//! axis_robust (the robust fit, via the reading).
+//! axis_robust and axis_consensus (the robust fit, via the reading).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
@@ -41,8 +43,14 @@ fn ring(j: i64, z: f64, dx: f64) -> Point3 {
 /// keyway on +x whose walls meet the ring at +-`half` segments (5
 /// degrees each: half 3 is a 5.18 mm key, half 6 a 10 mm one).
 fn keyed_shaft(half: i64, dx: f64) -> Vec<Triangle> {
+    keyed_shaft_in(half, dx, KEY_Z, FLOOR_X)
+}
+
+/// [`keyed_shaft`] with the keyway over `key_z` and its floor at
+/// x = `floor_x` (about the shaft's own axis).
+fn keyed_shaft_in(half: i64, dx: f64, key_z: (f64, f64), floor_x: f64) -> Vec<Triangle> {
     let mut f = Vec::new();
-    let zs = [Z.0, KEY_Z.0, KEY_Z.1, Z.1];
+    let zs = [Z.0, key_z.0, key_z.1, Z.1];
     let n = SEGS as i64;
     for j in -n / 2..n / 2 {
         let in_key = j >= -half && j < half;
@@ -64,18 +72,18 @@ fn keyed_shaft(half: i64, dx: f64) -> Vec<Triangle> {
     let top = ring(half, 0.0, 0.0);
     let (xt, ys) = (top.x, top.y);
     let q = |x: f64, y: f64, z: f64| Point3::new(x + dx, y, z);
-    let (z0, z1) = KEY_Z;
+    let (z0, z1) = key_z;
     // The floor (+x), the walls (-y at +ys, +y at -ys).
-    f.push(Triangle::new(q(FLOOR_X, -ys, z0), q(FLOOR_X, ys, z0), q(FLOOR_X, ys, z1)));
-    f.push(Triangle::new(q(FLOOR_X, -ys, z0), q(FLOOR_X, ys, z1), q(FLOOR_X, -ys, z1)));
-    f.push(Triangle::new(q(FLOOR_X, ys, z0), q(xt, ys, z0), q(xt, ys, z1)));
-    f.push(Triangle::new(q(FLOOR_X, ys, z0), q(xt, ys, z1), q(FLOOR_X, ys, z1)));
-    f.push(Triangle::new(q(xt, -ys, z0), q(FLOOR_X, -ys, z0), q(FLOOR_X, -ys, z1)));
-    f.push(Triangle::new(q(xt, -ys, z0), q(FLOOR_X, -ys, z1), q(xt, -ys, z1)));
+    f.push(Triangle::new(q(floor_x, -ys, z0), q(floor_x, ys, z0), q(floor_x, ys, z1)));
+    f.push(Triangle::new(q(floor_x, -ys, z0), q(floor_x, ys, z1), q(floor_x, -ys, z1)));
+    f.push(Triangle::new(q(floor_x, ys, z0), q(xt, ys, z0), q(xt, ys, z1)));
+    f.push(Triangle::new(q(floor_x, ys, z0), q(xt, ys, z1), q(floor_x, ys, z1)));
+    f.push(Triangle::new(q(xt, -ys, z0), q(floor_x, -ys, z0), q(floor_x, -ys, z1)));
+    f.push(Triangle::new(q(xt, -ys, z0), q(floor_x, -ys, z1), q(xt, -ys, z1)));
     // The pocket's end faces: +z at the keyway's foot, -z at its head.
-    let mut poly = vec![q(FLOOR_X, -ys, 0.0)];
+    let mut poly = vec![q(floor_x, -ys, 0.0)];
     poly.extend((-half..=half).map(|j| ring(j, 0.0, dx)));
-    poly.push(q(FLOOR_X, ys, 0.0));
+    poly.push(q(floor_x, ys, 0.0));
     let at = |p: Point3, z: f64| Point3::new(p.x, p.y, z);
     for w in poly[1..].windows(2) {
         f.push(Triangle::new(at(poly[0], z0), at(w[0], z0), at(w[1], z0)));
@@ -167,4 +175,52 @@ fn a_keyed_shaft_off_g54_is_refused_as_misplaced_naming_the_set_aside_share() {
         }
         assert!(!e.contains("biased by off-centre features"), "a misplaced part is not a biased fit: {e}");
     }
+}
+
+/// Issue #113: a 10 mm wide, 20 mm long keyway with its floor 6 mm deep
+/// (x = 4) - its walls drag the plain fit past the sagitta band, which
+/// refused the part as not revolved before the robust pass saw it.
+fn deep_keyed(dx: f64) -> Vec<Triangle> {
+    keyed_shaft_in(6, dx, (0.0, 20.0), 4.0)
+}
+
+#[test]
+fn a_deep_twenty_mm_keyway_on_g54_passes_the_spindle_law_and_generates() {
+    let part = deep_keyed(0.0);
+    let r = spindle_reading(&part, [0.0; 3]).expect("a deep-keyed shaft reads as revolved");
+    assert!(r.trusted && r.worst() <= SPINDLE_TOL, "the keyway dragged the fit: {r:?}");
+    assert!(r.outlier_share > 0.0, "the keyway's walls are set aside: {r:?}");
+    let notes = face(part).unwrap_or_else(|e| panic!("a correctly placed deep-keyed shaft must generate: {e}"));
+    let pct = format!("{:.1}% of the turned (non-end-face) surface", (100.0 * r.outlier_share).max(0.1));
+    assert!(notes.iter().any(|n| n.contains(ASIDE) && n.contains(&pct)), "named, never silent: {notes:?}");
+}
+
+#[test]
+fn a_deep_twenty_mm_keyway_off_g54_is_refused_as_misplaced() {
+    let part = deep_keyed(1.0);
+    let r = spindle_reading(&part, [0.0; 3]).expect("reads");
+    assert!((r.offset_mid - 1.0).abs() < 1e-6, "the consensus fit reads the true 1 mm offset: {r:?}");
+    let e = face(part).expect_err("a shaft 1 mm off the spindle never generates");
+    for s in ["lathe spindle", "1.000 mm off", "move the work offset", "% of the part's turned (non-end-face) surface"] {
+        assert!(e.contains(s), "the refusal names '{s}': {e}");
+    }
+    assert!(!e.contains("biased by off-centre features"), "a misplaced part is not a biased fit: {e}");
+}
+
+#[test]
+fn a_shaft_with_a_large_off_axis_lump_is_still_refused_by_name() {
+    // An 8 x 8 x 50 block beside the shaft, off every meridian through
+    // its walls: 30 % of the answering surface revolves about nothing.
+    let mut part = keyed_shaft(0, 0.0);
+    let q = Point3::new;
+    let v = [q(12.0, 6.0, -25.0), q(20.0, 6.0, -25.0), q(20.0, 14.0, -25.0), q(12.0, 14.0, -25.0)];
+    let up = |p: Point3| q(p.x, p.y, 25.0);
+    let w = [v[0], v[1], v[2], v[3], up(v[0]), up(v[1]), up(v[2]), up(v[3])];
+    for [i, j, k, l] in [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]] {
+        part.push(Triangle::new(w[i], w[j], w[k]));
+        part.push(Triangle::new(w[i], w[k], w[l]));
+    }
+    assert!(spindle_reading(&part, [0.0; 3]).is_none(), "no axis is read off a part mostly not revolved");
+    let e = face(part).expect_err("a part mostly not revolved never generates");
+    assert!(e.contains("share no rotation axis"), "refused by name: {e}");
 }
