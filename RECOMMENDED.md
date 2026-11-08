@@ -13595,3 +13595,15 @@ revolved (follow-up material if users hit it with long keyways).
   the user yet. Opening the tool *editor* on a catalog draft instead of
   the library page was dropped: the library shows what is racked and the
   catalog suggestion the reason already names.
+
+## #216 - no stock darkens the Create cells (2026-11-07)
+
+- **Chosen:** every ribbon-made operation machines the active setup's
+  stock (`SrcRef::Stock`), so without one the Create cells darken - tip
+  "No stock yet - set up stock first (Setup > Stock)" - and a click names
+  the same and opens the Stock page (the #191 route). The predicate is the
+  command door's own resolution (`setup::stock_entity_name` + `is_stock`).
+  Gate order: no tool → wrong machine family → no stock → tool law (stock
+  cannot fix a family mismatch, so that is said first).
+- **Dropped:** creating the op against "the models" when stock is missing
+  (it would silently machine a different source than the one shown).
