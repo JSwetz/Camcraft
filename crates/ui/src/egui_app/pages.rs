@@ -1458,7 +1458,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Corner radius");
                         ui.label(format!("{} {}", units::len(state.tool_ui.diameter * 0.5, u, 3), u.suffix()));
                         ui.label("half the diameter - a ball nose's whole tip is its ball");
-                    } else if state.tool_ui.kind != 4 {
+                    } else if state.tool_ui.tool_kind() != tools::ToolKind::Tap {
                         field(ui, "Corner radius");
                         num(ui, u, &mut state.tool_ui.corner_r);
                     }
