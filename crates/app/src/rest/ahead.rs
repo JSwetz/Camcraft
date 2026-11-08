@@ -75,13 +75,19 @@ pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, 
         // says exactly what the program would post today. Cutting
         // nothing - never generated, or an empty path - is what
         // contributes no mask.
-        let (cut, sig, moves) = e
-            .entity_view(world)
-            .try_get::<&crate::schema::Toolpath>(|t| {
-                let cut = !t.path.moves.is_empty();
-                (cut, t.path_sig(), if cut && with_moves { t.path.moves.clone() } else { Vec::new() })
-            })
-            .unwrap_or((false, 0, Vec::new()));
+        // A probe cuts nothing (#108): it contributes no mask, and no
+        // path signature - it is a never-cutting operation here.
+        let probe = tool.as_ref().is_some_and(|t| t.kind == crate::tools::ToolKind::Probe);
+        let (cut, sig, moves) = if probe {
+            (false, 0, Vec::new())
+        } else {
+            e.entity_view(world)
+                .try_get::<&crate::schema::Toolpath>(|t| {
+                    let cut = !t.path.moves.is_empty();
+                    (cut, t.path_sig(), if cut && with_moves { t.path.moves.clone() } else { Vec::new() })
+                })
+                .unwrap_or((false, 0, Vec::new()))
+        };
         out.push(Ahead {
             name: n.clone(),
             kind: op.params.kind(),
@@ -103,7 +109,9 @@ pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, 
                 .and_then(|t| stock_sim::bull_corner(t).ok().flatten()),
             nose: tool
                 .as_ref()
-                .filter(|t| t.kind == crate::tools::ToolKind::Turning)
+                // A boring bar's moves carry its nose centre too (#146
+                // review B1): the feed law credits its whole nose kerf.
+                .filter(|t| matches!(t.kind, crate::tools::ToolKind::Turning | crate::tools::ToolKind::Bore))
                 .map(|t| t.nose_radius)
                 .filter(|n| n.is_finite() && *n > 0.0),
             cut,

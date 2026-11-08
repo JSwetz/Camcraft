@@ -107,6 +107,22 @@ fn count_spindles(parts: Option<&serde_json::Value>) -> usize {
 }
 
 /// First part anywhere in the tree with the given `type`, depth-first.
+/// The spindle's speed ranges (#170): `[{ "min_speed", "max_speed" }]`,
+/// rpm. An entry missing either bound, or with them out of order, is
+/// dropped - a range the file cannot state whole names nothing.
+fn parse_ranges(v: Option<&serde_json::Value>) -> Vec<(f64, f64)> {
+    let Some(arr) = v.and_then(|a| a.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|r| {
+            let lo = rate(r.get("min_speed"))?;
+            let hi = rate(r.get("max_speed"))?;
+            (lo < hi).then_some((lo, hi))
+        })
+        .collect()
+}
+
 fn find_type<'a>(parts: &'a serde_json::Value, ty: &str) -> Option<&'a serde_json::Value> {
     let arr = parts.as_array()?;
     for p in arr {
@@ -160,6 +176,11 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
 
     let kine = v.pointer("/kinematics/default/parts");
     let f = mm_factor(v.pointer("/kinematics/default/units")).unwrap_or(1.0);
+    // #131: keep the stated unit for the posts (the numbers stay mm).
+    let length = v.pointer("/kinematics/default/units/length").and_then(|u| u.as_str());
+    if matches!(length, Some("inch" | "inches")) {
+        m.units = Some("inch".to_owned());
+    }
 
     if let Some(parts) = kine {
         if let Some(head) = find_type(parts, "head") {
@@ -167,6 +188,8 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
             m.spindle_min = rate(sp.and_then(|s| s.get("min_speed")));
             m.spindle_max = rate(sp.and_then(|s| s.get("max_speed")));
             m.spindle_power = rate(sp.and_then(|s| s.get("power")));
+            m.spindle_ranges = parse_ranges(sp.and_then(|s| s.get("ranges")));
+            m.rigid_tapping = sp.and_then(|s| s.get("rigid_tapping")).and_then(|b| b.as_bool());
             let ts = head.get("tool_station");
             m.max_tool_length = scale(rate(ts.and_then(|t| t.get("max_tool_length"))), f);
             m.max_tool_diameter = scale(rate(ts.and_then(|t| t.get("max_tool_diameter"))), f);

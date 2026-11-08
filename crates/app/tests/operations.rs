@@ -761,7 +761,7 @@ fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
     );
     assert_eq!(status(&world, "Slot1"), OpStatus::Ok);
     let before = cache(&world, "Slot1").expect("cached").path;
-    assert!(before.notes.is_empty(), "the wall dive says nothing: {:?}", before.notes);
+    assert!(before.notes.len() == 1 && before.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "no entry fallback, only the independent Top/stock warning: {:?}", before.notes);
     assert_eq!(
         before.moves.iter().filter(|m| m.arc.is_some()).count(),
         0,
@@ -798,7 +798,7 @@ fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
         after.moves.iter().any(|m| m.arc.is_some()),
         "a channel this wide certifies the orbit - it must land"
     );
-    assert!(after.notes.is_empty(), "certified, nothing to say: {:?}", after.notes);
+    assert!(after.notes.len() == 1 && after.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "a certified orbit adds no entry note; only the Top/stock warning remains: {:?}", after.notes);
     assert_ne!(
         before.moves, after.moves,
         "the entry edit changed the path, not just the stamp"
@@ -1635,6 +1635,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_z(&world, None, None, &trace.params), Some(10.0));
     let region = operation::region_of(&world, &trace).expect("a box sections cleanly at 10 mm");
@@ -1673,6 +1674,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_z(&world, None, None, &face.params), Some(19.5));
     assert!(
@@ -1689,6 +1691,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_of(&world, &ghost), None);
 }
@@ -1851,6 +1854,7 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     // Facing a wall: refused, and the message says what to pick instead.
     let face = op(face_sel_params());
@@ -1884,6 +1888,7 @@ fn closed_chain_rims_bound_and_double_picks_collapse_to_one_loop() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     let region = operation::region_of(&world, &op).expect("the rim chain bounds the disc");
     assert_eq!(region.loops().len(), 1);
@@ -1986,6 +1991,7 @@ fn pocket_refuses_an_open_run() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_of(&world, &op), None, "nothing to draw");
     let err = operation::generate(&world, &op, "").expect_err("pocket refuses");
@@ -2287,6 +2293,7 @@ fn two_open_runs_stitch_into_one_boundary() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     // The hand-test's exact failure ("nothing in the selection bounds an
     // area") is gone: two picked runs that spell one loop bound one area.
@@ -2329,6 +2336,7 @@ fn stitching_is_order_independent() {
             stamp: None,
             setup: None,
             area: Default::default(),
+            coolant: Default::default(),
         }
     };
     let ab = operation::region_of(&world, &pick([0, 1])).expect("first, then second");
@@ -2361,6 +2369,7 @@ fn a_single_arc_stays_open() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert!(
         operation::region_of(&world, &op).is_none(),
@@ -2403,6 +2412,7 @@ fn duplicate_seam_points_do_not_break_push_loop() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     let region = operation::region_of(&world, &op).expect("the ring survives the doubled seam");
     assert_eq!(
@@ -2766,6 +2776,7 @@ fn sel_op(world: &World, items: Vec<GeoSel>, params: OpParams) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 
@@ -4109,7 +4120,7 @@ fn ramp_flag_case(bottom_z: f64) {
         GenerateOperation::new(&world, "Ramp1").expect("regen"),
     );
     let t = cache(&world, "Ramp1").expect("cached").path;
-    assert!(t.notes.is_empty(), "a gentle tangent says nothing: {:?}", t.notes);
+    assert!(t.notes.len() == 1 && t.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "a gentle tangent adds no entry note; only the Top/stock warning remains: {:?}", t.notes);
     assert_eq!(t.moves, base.moves, "silent skip means the same path");
 
     // Undo the regen, then the edit: the default flag is a digest
@@ -4180,7 +4191,7 @@ fn ladder_number_case(bottom_z: f64) {
         GenerateOperation::new(&world, "L1").expect("regen"),
     );
     let t = cache(&world, "L1").expect("cached").path;
-    assert!(t.notes.is_empty(), "an inert word says nothing: {:?}", t.notes);
+    assert!(t.notes.len() == 1 && t.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "the inert word adds no note; only the Top/stock warning remains: {:?}", t.notes);
     assert_eq!(t.moves, base.moves, "inert means the same path");
 
     // Two steps back lands on the unstamped digest again.
@@ -7508,7 +7519,7 @@ fn deburr_refuses_a_cone_that_rules_no_chamfer() {
     );
     model::spawn(&world, "FLAT-CONE")
         .entity_view(&world)
-        .set(ToolDef { tool: flat });
+        .set(ToolDef { tool: flat, number: None });
     history.execute(&world, ImportModel::from_mesh("brick", deburr_brick()));
     history.execute(
         &world,

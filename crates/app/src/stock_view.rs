@@ -117,7 +117,14 @@ impl PackedBase {
     /// on the CPU, as before).
     #[must_use]
     pub fn of(stock: &Stock, target: Option<&Stock>) -> Option<(Self, Vec<f32>)> {
-        let lat = stock.field().and_then(pack_field)?;
+        let mut lat = stock.field().and_then(pack_field)?;
+        // #22: one eikonal sweep re-normalizes the band before the
+        // render pass (display only; sign and zero set kept, and later
+        // playback cut layers only lift cells over it). A refusal keeps
+        // the packed lattice as it was - a picture, never a verdict.
+        if let Err(e) = lat.renormalize() {
+            eprintln!("camcraft: stock view kept the un-normalized band: {e}");
+        }
         let target = target.and_then(Stock::field).and_then(pack_target);
         Some((PackedBase { meta: lat.meta, mesh: lat.mesh, target }, lat.cut))
     }
@@ -143,7 +150,7 @@ pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result
         // A turning op's moves revolve about its fitted spindle (#19,
         // `stock_sim::lathe`).
         let cut = match (&p.rotary, &p.lathe) {
-            (_, Some(l)) => stock.simulate_lathe_about(&p.moves, l.nose, &l.axis),
+            (_, Some(l)) => stock.simulate_lathe_profile(&p.moves, &l.profile, &l.axis),
             (Some(ax), None) => crate::stock_sim::simulate_rotary_slice(&mut stock, &op, &p.moves, 0, ax, pose_tol).map(|_| ()),
             (None, None) => stock.simulate_display(std::slice::from_ref(&op)),
         };

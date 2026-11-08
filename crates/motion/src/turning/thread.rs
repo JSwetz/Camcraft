@@ -29,6 +29,10 @@
 //! states it - profile-representation practice, the same law the
 //! turned profile rides.
 //!
+//! Beside the passes the path carries one [`ThreadCycle`] record
+//! (issue #34): the same thread as a lathe control's threading cycle
+//! states it, for a post that writes the cycle instead of the passes.
+//!
 //! Provenance: single-point and V-form thread whirling as a
 //! synchronized helix, full-form and multi-pass infeed ladders,
 //! and the included-angle relation `width = 2 * depth * tan(A/2)`,
@@ -37,7 +41,7 @@
 //! valley-run phase law are our own, on the same silhouette the
 //! blade kinds ride. No vendor strategy consulted.
 
-use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::cl::{MoveKind, PathBuilder, ThreadCycle, Toolpath};
 use crate::geo2d::Point2;
 use crate::geometry::Triangle;
 use crate::machining2d::GenError;
@@ -46,6 +50,7 @@ use crate::verify::Warning;
 use super::blade;
 use super::profile;
 use super::revolve;
+use super::stock::StockEnv;
 
 /// The lean an XY-circle helix can live with: the circles must stand
 /// in planes square to the axis, or the pass stops being one turn
@@ -79,6 +84,12 @@ pub struct ThreadParams {
 /// down to the root, one helical pass per rung, each pass a full
 /// turn per pitch across the window's lattice of turns.
 pub fn thread(facets: &[Triangle], p: &ThreadParams) -> Result<Toolpath, GenError> {
+    thread_in(facets, p, None)
+}
+
+/// [`thread`] inside a setup stock (#130): every rapid clears the
+/// bar's OD, not only the part's.
+pub fn thread_in(facets: &[Triangle], p: &ThreadParams, stock: Option<StockEnv>) -> Result<Toolpath, GenError> {
     if p.pitch <= 0.0 {
         return Err(GenError::Invalid("threading needs a positive pitch".into()));
     }
@@ -111,6 +122,7 @@ pub fn thread(facets: &[Triangle], p: &ThreadParams) -> Result<Toolpath, GenErro
         p.tolerance,
         "thread",
         "threading insert",
+        stock,
     )?;
     if f.lean() > LEAN_MAX {
         return Err(GenError::Invalid(format!(
@@ -218,6 +230,7 @@ pub fn thread(facets: &[Triangle], p: &ThreadParams) -> Result<Toolpath, GenErro
     let ax = f.axis_point(c_first);
     let center = Point2::new(ax.x, ax.y);
     let mut b = PathBuilder::new(f.point(rho_clear, s_out));
+    let first = b.moves_len();
     for &t in &tips {
         b.push(MoveKind::Rapid, f.point(rho_clear, c_first), None);
         b.push(MoveKind::Feed, f.point(t, c_first), Some(p.plunge_feed));
@@ -232,8 +245,56 @@ pub fn thread(facets: &[Triangle], p: &ThreadParams) -> Result<Toolpath, GenErro
         }
         b.push(MoveKind::Rapid, f.point(rho_clear, c_last), None);
     }
+    let last = b.moves_len().saturating_sub(1);
     b.push(MoveKind::Rapid, f.point(rho_clear, s_out), None);
-    Ok(b.finish())
+    let mut path = b.finish();
+    let first_depth = tips.first().map_or(p.depth, |&t| ref_top - t);
+    attach_cycle(&mut path, first, last, ref_top, root, p, first_depth);
+    Ok(path)
+}
+
+/// The thread-cycle record over the passes just laid (issue #34): the
+/// numbers a control's threading cycle needs, read off the built path
+/// so its points are the lattice the moves keep. This ladder plunges
+/// radially (infeed angle 0) in equal rungs of `infeed` to the root -
+/// first depth and minimum depth both the rung, no finish allowance,
+/// no spring pass, a square retract. A span the builder did not lay
+/// as planned gets no record and says so; the passes still post.
+fn attach_cycle(
+    path: &mut Toolpath,
+    first: usize,
+    last: usize,
+    ref_top: f64,
+    root: f64,
+    p: &ThreadParams,
+    first_depth: f64,
+) {
+    let (Some(m0), Some(end)) = (path.moves.get(first), last.checked_sub(1).and_then(|i| path.moves.get(i)))
+    else {
+        path.notes.push("threading: the passes did not lay as planned - no thread cycle record".into());
+        return;
+    };
+    let rec = ThreadCycle {
+        start: m0.to,
+        end: end.to,
+        major_diameter: 2.0 * ref_top,
+        minor_diameter: 2.0 * root,
+        lead: p.pitch,
+        height: ref_top - root,
+        first_depth,
+        min_depth: p.infeed.min(ref_top - root),
+        finish_allowance: 0.0,
+        infeed_angle: 0.0,
+        spring_passes: 0,
+        pull_out: 0.0,
+        first,
+        last,
+    };
+    if m0.kind == MoveKind::Rapid && rec.is_sane(&path.moves) {
+        path.threads.push(rec);
+    } else {
+        path.notes.push("threading: the passes did not lay as planned - no thread cycle record".into());
+    }
 }
 
 /// The threading verdict over a generated path: the path's own

@@ -2269,11 +2269,13 @@ fn the_authored_ladder_spaces_the_rings_and_says_nothing_elsewhere() {
         )
         .expect("box split")
     };
-    let (n_none, n_two, n_eight) = (at(None), at(Some(2.0)), at(Some(8.0)));
+    let (n_none, n_two, n_five) = (at(None), at(Some(2.0)), at(Some(5.0)));
     let n_p = |t: &Toolpath| n_kind(t, MoveKind::Plunge);
+    // (5, not 8: a flank spacing at or past the 6 mm ball diameter is
+    // refused by the scallop ceiling, #37.)
     assert!(n_p(&n_none) > n_p(&n_two), "Some(2.0) did not coarsen the ladder");
-    assert!(n_p(&n_two) > n_p(&n_eight), "Some(8.0) did not coarsen the ladder");
-    assert!(n_p(&n_eight) > 0, "the ladder vanished with a coarse authoring");
+    assert!(n_p(&n_two) > n_p(&n_five), "Some(5.0) did not coarsen the ladder");
+    assert!(n_p(&n_five) > 0, "the ladder vanished with a coarse authoring");
     // None rides the scallop law - which is Parallel's ladder number:
     // the twin of test one, counted.
     let par = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Parallel)).expect("box parallel");

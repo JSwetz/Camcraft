@@ -24,6 +24,7 @@ camcraft-cli - CamCraft headless batch lane (clean-room)
 USAGE:
     camcraft-cli script   <job.js>
     camcraft-cli process  <job.camproj> [-o <out.nc>] [--cps <name|file.cps>]
+    camcraft-cli mcp
     camcraft-cli help
     camcraft-cli version
 
@@ -32,6 +33,8 @@ COMMANDS:
               cam.d.ts types them; every world write rides the commands)
     process   headless project processing: load, generate, and - with
               -o - post; verify's verdict is the exit code
+    mcp       a Model Context Protocol server on stdio (JSON-RPC 2.0):
+              an AI agent drives one headless document through tools
 
 A clean run prints its logs, then the last verb's JSON answer on
 stdout; refusals print on stderr. Exit: 0 stood, 1 refused, 2 usage.
@@ -99,6 +102,7 @@ pub fn run(args: &[String]) -> i32 {
         }
         "script" => lane_script(&args[1..]),
         "process" => lane_process(&args[1..]),
+        "mcp" => lane_mcp(&args[1..]),
         other => {
             eprintln!("camcraft-cli: unknown command {other:?} (try help)");
             2
@@ -174,4 +178,22 @@ fn lane_process(args: &[String]) -> i32 {
     }
     let source = process_script(&path, out.as_deref(), cps.as_deref());
     report(&script::run(&source), out.is_some())
+}
+
+/// The MCP lane (#128): stdin/stdout are the protocol, so nothing else
+/// may print on stdout; a broken pipe or unreadable input ends the
+/// session with exit 1 and the reason on stderr.
+fn lane_mcp(args: &[String]) -> i32 {
+    if !args.is_empty() {
+        eprintln!("camcraft-cli: mcp takes no arguments");
+        return 2;
+    }
+    let stdin = std::io::stdin();
+    match crate::mcp::serve(stdin.lock(), std::io::stdout().lock()) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("camcraft-cli: mcp session ended: {e}");
+            1
+        }
+    }
 }

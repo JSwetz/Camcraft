@@ -35,6 +35,8 @@ pub(crate) enum Icon {
     Slot,
     Trace,
     Drill,
+    /// The touch probe (#108): original artwork, a stylus over its ball.
+    Probe,
     Finish3D,
     Contour5D,
     Parallel5D,
@@ -77,6 +79,7 @@ impl Icon {
         Icon::Slot,
         Icon::Trace,
         Icon::Drill,
+        Icon::Probe,
         Icon::Finish3D,
         Icon::Contour5D,
         Icon::Parallel5D,
@@ -122,6 +125,7 @@ impl Icon {
             // drill - shank, shouldered body, one helix wrap, cone
             // point - in the set's stroke weight. Ours to give.
             Icon::Drill => include_bytes!("../../../../assets/ui/drill.png"),
+            Icon::Probe => include_bytes!("../../../../assets/ui/probe.png"),
             // Original drawing (no Tabler waterline glyph exists): nested
             // contour rings tightening toward the high point - the map
             // reading of a waterline finish. Ours to give.
@@ -202,6 +206,7 @@ impl Icon {
             Icon::Slot => "icon-slot",
             Icon::Trace => "icon-trace",
             Icon::Drill => "icon-drill",
+            Icon::Probe => "icon-probe",
             Icon::Finish3D => "icon-finish3d",
             Icon::Contour5D => "icon-contour5d",
             Icon::Parallel5D => "icon-parallel5d",

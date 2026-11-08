@@ -155,6 +155,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             stamp: None,
             setup: op_ctx.clone(),
             area: Default::default(),
+            coolant: Default::default(),
         };
         operation::circular_fit_of(&state.world, &draft)
     } else {
@@ -176,6 +177,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     super::mill2d_page::fields(ui, world, params, &mut cx);
     super::mill2d_more_page::fields(ui, world, params, &mut cx);
     super::holes_page::fields(ui, world, params, &mut cx);
+    super::probe_page::fields(ui, world, params, &mut cx);
     super::mill3d_page::fields(ui, world, params, &mut cx);
     super::multiaxis_page::fields(ui, world, params, &mut cx);
     super::rotary_page::fields(ui, world, params, &mut cx);
