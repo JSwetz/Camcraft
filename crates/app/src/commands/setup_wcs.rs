@@ -40,7 +40,7 @@ impl SetSetupWorkOffset {
         if prev == slot {
             return Err(CommandError::Invalid(format!(
                 "setup '{setup}' already posts at {}",
-                slot.and_then(|i| WCS_SLOTS.get(i)).copied().unwrap_or("the default G54")
+                slot.and_then(|i| WCS_SLOTS.get(i)).copied().unwrap_or("G54")
             )));
         }
         Ok(SetSetupWorkOffset {
