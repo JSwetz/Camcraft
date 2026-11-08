@@ -186,9 +186,8 @@ kernel): research and decisions come first, and the outcome is a set of
 smaller, concrete issues, each with its own `P*`, `area:*` and a "Done means"
 line. Nobody claims a `needs-research` issue to write code. Its work is
 answering the open questions in comments and filing the sub-issues; once
-every sub-issue is filed and linked from it, it is closed (or kept as a
-tracking umbrella without the label) and the sub-issues are picked up like
-any other issue.
+every sub-issue is filed and linked from it, it is closed, and the
+sub-issues are picked up like any other issue.
 
 1. **Claim before you code.** Comment
    `claimed: <name> · <UTC time> · branch <name> · plan: <one line>`. The

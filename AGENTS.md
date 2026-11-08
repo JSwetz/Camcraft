@@ -151,14 +151,15 @@ go to `CHANGELOG.md`.
   to be broken down into issues and closed, before work can be picked up").
   An issue labelled `needs-research` is a large idea with open questions
   (e.g. #290 Wire/Sinker EDM, #291 documentation site). Pick never takes it
-  for code. Working it means: answer the open questions in issue comments
+  for code. Researching it is claimed like any issue ("Claim before any
+  code", with `plan: research`), but takes no branch, no PR and no lane
+  slot. Working it means: answer the open questions in issue comments
   (research, recorded decisions), then file the concrete sub-issues it
   lists - each with one `P*`, `area:*`, `source:agent` when an agent files
   it, a "Done means" line and "Part of #N" - and link them back from the
   umbrella. When every sub-issue is filed, drop `needs-research` and close
-  the umbrella with a comment naming them (or keep it open as a tracking
-  issue without the label if the user wants one). Only the sub-issues are
-  picked for code.
+  the umbrella with a comment naming them - it is not kept open, so Pick
+  can never take it for code. Only the sub-issues are picked for code.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
