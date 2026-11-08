@@ -114,6 +114,7 @@ fn refuse(world: &World, tool_name: &str, params: OpParams) -> String {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     match operation::generate(world, &op, "") {
         Ok((path, _)) => panic!("a door was meant to refuse, got {} moves", path.moves.len()),
@@ -184,7 +185,10 @@ fn registry_rows_seat_the_pair_in_their_runs() {
     // the thread mill at its tail.
     let drilling = camcraft_app::operation::Section::Drilling.kinds();
     assert_eq!(KindInfo::ALL[drilling[0]].ty, OpType::Drill);
-    assert_eq!(KindInfo::ALL[*drilling.last().unwrap()].ty, OpType::Bore);
+    // #108 seats the probe behind the boring ride: Probe closes the
+    // run now, Bore stands just before it.
+    assert_eq!(KindInfo::ALL[*drilling.last().unwrap()].ty, OpType::Probe);
+    assert_eq!(KindInfo::ALL[drilling[drilling.len() - 2]].ty, OpType::Bore);
 }
 
 #[test]

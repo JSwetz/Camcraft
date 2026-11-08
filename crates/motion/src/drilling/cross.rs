@@ -81,6 +81,16 @@ fn along(h: &CrossHole, d: f64) -> Point3 {
     )
 }
 
+/// Reuse the cursor for roundoff-only travel, but still let the builder
+/// record a changed station pose. Exact float equality otherwise leaves
+/// an extra rapid when a measured bar radius differs by a few ULPs (#151).
+/// This is local to radial rapids, not a change to the CL builder's law.
+fn rapid(b: &mut PathBuilder, to: Point3) {
+    let delta = to - b.at();
+    let to = if delta.dot(delta) <= 1e-18 { b.at() } else { to };
+    b.push(MoveKind::Rapid, to, None);
+}
+
 /// The dominant axis of an axis-aligned unit plunge direction.
 fn plunge_axis(dir: Point3) -> Option<usize> {
     let mut hit = None;
@@ -182,8 +192,8 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
             // tool swings to the new station after it arrives -
             // except on the detour, where the index happens above
             // the bar's end face (stage G).
-            match traverse_s(hs[i - 1].dir, h.dir, hop_s) {
-                Some(s) => b.push(MoveKind::Rapid, along(h, start_d(h, s)), None),
+            match traverse_s(&hs[i - 1], h, hop_s) {
+                Some(s) => rapid(&mut b, along(h, start_d(h, s))),
                 None => {
                     let z_top = p.stock_z_max.map(|z| z + p.clearance_d.max(margin));
                     let Some(z_top) = z_top else {
@@ -204,7 +214,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
         // previous hole's pose, so this sign is what makes the
         // traverse leave the way the tool came in.
         b.set_axis(Some([-h.dir.x, -h.dir.y, -h.dir.z]));
-        b.push(MoveKind::Rapid, along(h, p.r_d), None);
+        rapid(&mut b, along(h, p.r_d));
         let floor_bottom = h.floor_d - if h.through { THROUGH_CLEAR } else { 0.0 };
         // In d-space the entry plane is d = 0 (the mouth; `r_d` is
         // only where the rapids stop outside), so the dimple law
@@ -238,7 +248,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
         match kind {
             CycleKind::Spot | CycleKind::Drill => {
                 b.push(MoveKind::Plunge, along(h, bottom), Some(p.plunge_feed));
-                b.push(MoveKind::Rapid, along(h, p.r_d), None);
+                rapid(&mut b, along(h, p.r_d));
             }
             CycleKind::Peck | CycleKind::Deep => {
                 let auto = if kind == CycleKind::Peck { 3.0 * d } else { d };
@@ -257,10 +267,10 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
                     } else {
                         p.r_d
                     };
-                    b.push(MoveKind::Rapid, along(h, up), None);
+                    rapid(&mut b, along(h, up));
                     t = (t - step).max(bottom);
                 }
-                b.push(MoveKind::Rapid, along(h, p.r_d), None);
+                rapid(&mut b, along(h, p.r_d));
             }
             _ => {}
         }
@@ -270,12 +280,12 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
             // has no inflation factor - stand on the plain plane;
             // the next round's traverse branch takes the axial
             // detour, or refuses if the bar's Z top is unknown.
-            let s = traverse_s(h.dir, hs[i + 1].dir, hop_s).unwrap_or(hop_s);
-            b.push(MoveKind::Rapid, along(h, start_d(h, s)), None);
+            let s = traverse_s(h, &hs[i + 1], hop_s).unwrap_or(hop_s);
+            rapid(&mut b, along(h, start_d(h, s)));
         }
     }
     let last = hs[hs.len() - 1];
-    b.push(MoveKind::Rapid, along(&last, start_d(&last, end_s)), None);
+    rapid(&mut b, along(&last, start_d(&last, end_s)));
     let t = b.finish();
     if !t.is_chained() || !t.all_finite() {
         return Err(GenError::Invalid("cross-drill chain self-check failed".into()));
@@ -284,21 +294,66 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
 }
 
 /// The hop radius for a traverse from one station's hole to
-/// another's: a straight chord between points at equal radius `s`
-/// whose stations stand at angle dtheta never closer than
-/// `s * cos(dtheta/2)` to the spindle axis - for a quarter turn
-/// that is `0.707 s`, so the plane inflates by sqrt(2) to keep the
-/// chord's closest approach at the stock-clear radius. Same
-/// station: factor 1, and the chord is the pure-Z slide between
-/// two mouths. Opposite stations: no finite plane saves the chord -
-/// it crosses the spindle at ANY radius - so `None` says "take the
-/// detour". `from.dot(to)` on unit XY plunges is cos(dtheta).
-fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
-    let dot = from.x * to.x + from.y * to.y;
+/// another's: the smallest plane `s >= hop_s` whose chord between the
+/// two hop points (`along(h, start_d(h, s))`, one on each hole's own
+/// column) never comes closer than `hop_s` to the spindle axis. For
+/// mouths ON their stations' centre lines a quarter turn apart this is
+/// the closed form `hop_s * sqrt(2 / (1 + cos dtheta))` (the chord's
+/// closest approach is `s * cos(dtheta/2)`); a mouth OFF its centre
+/// line (#81) moves the columns, so the chord is measured, not
+/// assumed: the plane grows from that closed form until the chord
+/// clears, then bisects back to the smallest clear plane. Same
+/// station: the chord is the slide between two mouths on one column,
+/// clear at `hop_s`. Opposite stations: no finite plane saves the
+/// chord - it crosses the spindle at ANY radius - so `None` says
+/// "take the detour". `from.dot(to)` on unit XY plunges is cos(dtheta).
+fn traverse_s(from: &CrossHole, to: &CrossHole, hop_s: f64) -> Option<f64> {
+    let dot = from.dir.x * to.dir.x + from.dir.y * to.dir.y;
     if dot < -0.9 {
         return None;
     }
-    Some(hop_s * (2.0 / (1.0 + dot)).sqrt())
+    let guess = hop_s * (2.0 / (1.0 + dot)).sqrt();
+    let clear = |s: f64| chord_reach(from, to, s) >= hop_s - 1e-9;
+    if clear(guess) {
+        // Never below the closed form: on-centre holes keep their
+        // proven plane exactly (no drift in existing chains).
+        return Some(guess);
+    }
+    let mut lo = guess;
+    let mut hi = guess;
+    for _ in 0..64 {
+        hi *= 2.0;
+        if clear(hi) {
+            break;
+        }
+        lo = hi;
+    }
+    if !clear(hi) {
+        return None; // no plane clears it: the detour (or its refusal) speaks
+    }
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        if clear(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+/// The closest the straight chord between the two holes' hop points at
+/// plane `s` comes to the spindle (the world Z axis), in XY - the
+/// segment-to-origin distance, endpoints included.
+fn chord_reach(from: &CrossHole, to: &CrossHole, s: f64) -> f64 {
+    let a = along(from, start_d(from, s));
+    let b = along(to, start_d(to, s));
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0.0 { (-(a.x * dx + a.y * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    let (px, py) = (a.x + t * dx, a.y + t * dy);
+    let r = (px * px + py * py).sqrt();
+    if r.is_finite() { r } else { 0.0 }
 }
 
 /// The axial detour between opposite stations (M5.2 G): lift on the
@@ -312,13 +367,13 @@ fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
 /// (`d/2` below the tip line) off the end face.
 fn detour(b: &mut PathBuilder, prev: &CrossHole, h: &CrossHole, hop_s: f64, z_top: f64) {
     let p0 = along(prev, start_d(prev, hop_s));
-    b.push(MoveKind::Rapid, Point3::new(p0.x, p0.y, z_top), None);
+    rapid(b, Point3::new(p0.x, p0.y, z_top));
     // The index: the pose flips to the NEW plunge, shank behind
     // the tip, while the tool hangs above the bar.
     b.set_axis(Some([-h.dir.x, -h.dir.y, -h.dir.z]));
     let p1 = along(h, start_d(h, hop_s));
-    b.push(MoveKind::Rapid, Point3::new(p1.x, p1.y, z_top), None);
-    b.push(MoveKind::Rapid, p1, None);
+    rapid(b, Point3::new(p1.x, p1.y, z_top));
+    rapid(b, p1);
 }
 
 /// The travel `d` at which the hole's point reaches radial distance

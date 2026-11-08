@@ -46,7 +46,7 @@ fn mv(kind: MoveKind, from: Point3, to: Point3) -> Move {
 }
 
 fn path(moves: Vec<Move>) -> Toolpath {
-    Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() }
+    Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() }
 }
 
 /// A post X/Y [-5, 5], Z [0, 10] carrying a ledge X [-5, 15], Y [-5, 5],
@@ -311,4 +311,98 @@ fn the_same_rapid_after_the_clearing_pass_is_clean() {
     moves.extend(rapid_under_moves(5.0));
     let w = judge(&path(moves), &part(true), &necked());
     assert!(w.is_empty(), "{w:?}");
+}
+
+/// A ball end mill r6 on a long flute - the tip whose rim the march
+/// lifts (#106) while the hidden-stock backstop reads the tool disc at
+/// the tip plane.
+fn ball6() -> ToolGeom {
+    ToolGeom {
+        radius: 6.0,
+        nose_radius: 6.0,
+        flute_len: 25.0,
+        shank_radius: 6.0,
+        shank_len: 20.0,
+        holder_radius: 6.0,
+        holder_len: 10.0,
+    }
+}
+
+/// [`judge`] with the judged cutter stated as the ball itself.
+fn judge_ball(p: &Toolpath, facets: &[Triangle]) -> Vec<Warning> {
+    let tool = ball6();
+    let region = rect(-40.0, -40.0, 60.0, 60.0);
+    let cutter = camcraft_sim::verify::Cutter {
+        radius: 6.0,
+        corner_r: 6.0,
+        tip_angle: 0.0,
+        flute_len: tool.flute_len,
+        shank_radius: tool.shank_radius,
+        shank_len: tool.shank_len,
+        holder_radius: tool.holder_radius,
+        holder_len: tool.holder_len,
+    };
+    let cx = VerifyContext {
+        region: &region,
+        stock: Some(&region),
+        model: Some(facets),
+        tool: &tool,
+        cutter: Some(cutter),
+        mode: Mode::Area,
+        stock_top_z: 20.0,
+        clearance_z: 30.0,
+        stock_to_leave: 0.0,
+        gouge_tol: 0.01,
+        z_tol: 1e-3,
+        finish_tol: None,
+        fixtures: &[],
+        spindle: None,
+    };
+    verify(p, &cx)
+}
+
+/// The judged lateral rapid's index in [`ball_rim_over_the_ledge`].
+const BALL_RAPID: usize = 6;
+
+/// Issue #206's program for [`ball6`]: a floor pass along X 21 (disc
+/// X [15, 27] - it stops at the ledge's edge), a pass at Z 12 along X 15
+/// (the ledge top: columns X [9, 21] cleared down to 12, nothing under
+/// the ledge cleared - a chord clears the hidden stock only from its own
+/// plane up), then a lateral rapid at Z 9.5 along X 20.5. Its footprint
+/// reaches X 14.51; only the march's rim ring (radius 5.99, judged at
+/// the 7th ring's lift 3.08) stands over X < 15.26, where the columns
+/// read 12 - and 9.5 + 3.08 clears them, so the march is silent. The
+/// tip plane Z 9.5 under the ledge (X (5, 15], Z [10, 12]) still holds
+/// the uncut hidden band X [14.51, 15): only `hidden_along` sees it.
+fn ball_rim_over_the_ledge() -> Toolpath {
+    path(vec![
+        mv(MoveKind::Feed, Point3::new(21.0, -40.0, 0.0), Point3::new(21.0, 60.0, 0.0)),
+        mv(MoveKind::Rapid, Point3::new(21.0, 60.0, 0.0), Point3::new(21.0, 60.0, 30.0)),
+        mv(MoveKind::Rapid, Point3::new(21.0, 60.0, 30.0), Point3::new(15.0, 60.0, 30.0)),
+        mv(MoveKind::Feed, Point3::new(15.0, 60.0, 30.0), Point3::new(15.0, 60.0, 12.0)),
+        mv(MoveKind::Feed, Point3::new(15.0, 60.0, 12.0), Point3::new(15.0, -40.0, 12.0)),
+        mv(MoveKind::Feed, Point3::new(15.0, -40.0, 12.0), Point3::new(20.5, -40.0, 9.5)),
+        mv(MoveKind::Rapid, Point3::new(20.5, -40.0, 9.5), Point3::new(20.5, 60.0, 9.5)),
+    ])
+}
+
+#[test]
+fn a_ball_rim_the_march_lifts_clear_is_still_convicted_through_hidden_stock() {
+    // Issue #206: since #140 the march subsumes the hidden-stock arm for a
+    // flat tool on a straight lateral rapid; this ball rapid is the case
+    // only `Rest::hidden_along` convicts - deleting that call in
+    // verify/rapids.rs turns this test red. (The arm reads the disc at
+    // the tip plane - conservative for a ball, whose rim stands higher;
+    // it can only over-report, which is the backstop's stated posture.)
+    let w = judge_ball(&ball_rim_over_the_ledge(), &part(true));
+    assert!(w.contains(&Warning::RapidInStock { at: BALL_RAPID }), "{w:?}");
+}
+
+#[test]
+fn the_same_ball_rapid_beside_a_bare_post_is_clean() {
+    // No ledge, no hidden stock: the same moves leave the march as the
+    // only reader, and it acquits the lifted rim - so the conviction above
+    // is the hidden-stock arm's alone.
+    let w = judge_ball(&ball_rim_over_the_ledge(), &part(false));
+    assert!(!w.iter().any(|w| matches!(w, Warning::RapidInStock { .. })), "{w:?}");
 }

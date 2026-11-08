@@ -1,0 +1,5 @@
+## Comment claims - a comment is a claim, the label mirrors it
+
+- **Chosen:** anyone claims an issue by commenting a line starting `claimed:` or `/claim`. Agents check comments before claiming, mirror an unlabelled comment claim as `claimed` plus the assignee, and remove the label and assignment when the claim comment is deleted or the claimant comments `unclaim`. A contributor's claim does not go stale on a timer; it stands while the comment exists. Agent claims keep the 4 h stale rule. `/review-prs` step 4 does the two-way sync on every run.
+- **Why:** user, 2026-11-08: "a comment should suffice ... if we come across a claimed issue thru comment we should just label it as such - and vice versa if they remove their comment, remove their claim label for em as part of maintenance.. Otherwise the comment stands as claimed." Only collaborators can set labels; this lets anyone claim without elevated access.
+- **Dropped:** a `/claim` GitHub Action on `issue_comment` (adds a workflow trigger and Actions minutes; the user preferred the comment alone); applying the 4 h stale rule to contributor claims (the user said the comment stands).

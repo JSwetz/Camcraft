@@ -39,6 +39,8 @@ pub struct GenJob {
     pub(super) hs: ResolvedHeights,
     pub(super) stock_facets: Option<Vec<Triangle>>,
     pub(super) stock_aabb: Option<(Point3, Point3)>,
+    // Sampled mesh stock can miss narrow features; only analytic stock credits this advisory.
+    pub(super) analytic_stock: bool,
     pub(super) section_z: Option<Result<f64, GenError>>,
     pub(super) picked_region: Option<Result<Region, GenError>>,
     pub(super) contour_sel:
@@ -129,6 +131,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         }
     };
     let stock_aabb = model::stock_world_aabb_for(world, setup).map(|b| (b.min, b.max));
+    let analytic_stock = model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
+        .and_then(|e| model::stock_def_of(world, &e))
+        .is_some_and(|s| matches!(s, crate::stock::StockShape::Box { .. } | crate::stock::StockShape::Cylinder { .. }));
 
     // The height seam, refused by name before anything else (as the old
     // head refused it, `resolve_params` being the first fallible read
@@ -265,6 +270,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         hs,
         stock_facets,
         stock_aabb,
+        analytic_stock,
         section_z,
         picked_region,
         contour_sel,

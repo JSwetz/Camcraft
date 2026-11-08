@@ -20,9 +20,11 @@
 //! 2π low) when they straddle the ±π branch, so the same mesh vertex
 //! keeps one developed coordinate in every facet that shares it.
 //! The mesh is then duplicated one full period (+2πR_ref in `s`) so
-//! every chord chain runs into its own copy at the seam, and the
-//! meridian's cross-section stands as a WALL at each end of the
-//! cover, closing the chain's two far ends. The wrap is a
+//! every chord chain runs into its own copy at the seam, and each
+//! free seam edge left at the cover's two ends hangs a CURTAIN down
+//! to the floor radius ([`super::rotary_seam`]: the meridian wall on
+//! a revolve, the ragged seam column on a flatted bar), closing the
+//! chain's two far ends. An open mesh is refused by name. The wrap is a
 //! closed solid exactly when the model was: a revolve's ring slices
 //! to a closed contour at every level the way block work expects,
 //! and a pass running most of a lap rewraps to a closed ring
@@ -65,6 +67,7 @@ use crate::machining2d::GenError;
 use crate::machining3d::{self, Pocket3DParams};
 
 use super::axis;
+use super::rotary_seam::{self, DevEdge};
 use super::tilt::AxisControl;
 use super::wrap_exit;
 
@@ -150,6 +153,7 @@ fn develop(
     if facets.is_empty() {
         return Err(GenError::Invalid("no facets to wrap".into()));
     }
+    rotary_seam::refuse_open(facets)?;
     let ax = axis::fit(facets)?;
     let u = ax.dir;
     // The axis.rs basis law, verbatim: any vector off the axis, then
@@ -229,14 +233,15 @@ fn develop(
     // turn below instead, so a mesh vertex keeps ONE developed
     // coordinate in every facet sharing it. The mesh is then
     // duplicated a full period so the seam's chords meet their own
-    // copy's ends.
+    // copy's ends, and the seam's two free ends hang curtains
+    // (`rotary_seam`).
     let r = p.tool_diameter * 0.5;
     let period = TAU * rho_ref;
     let rho_eps = 1e-12 * rho_max;
-    let v_eps = 1e-9 * rho_max.max(1.0);
     let mut wrap: Vec<Triangle> = Vec::with_capacity(facets.len() * 3);
     let (mut s_lo, mut s_hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    let mut stations: Vec<(f64, f64)> = Vec::new(); // (v, widest rho there)
+    let mut edges: Vec<DevEdge> = Vec::with_capacity(facets.len() * 3);
+    let mut seam_cols: Vec<(f64, f64, f64)> = Vec::new(); // straddlers' vertices
     let dev = |q0: Point3| -> (f64, f64, f64) {
         let d = q0 - ax.origin;
         let v = d.dot(u);
@@ -249,12 +254,6 @@ fn develop(
         };
         (th, v, rho)
     };
-    for t in facets {
-        for q in [t.a, t.b, t.c] {
-            let (_, v, rho) = dev(q);
-            stations.push((v, rho));
-        }
-    }
     for shift in [0.0, period] {
         for t in facets {
             let (ta, va, ra) = dev(t.a);
@@ -267,6 +266,13 @@ fn develop(
             } else {
                 mn
             };
+            if shift == 0.0 && mx - mn > std::f64::consts::PI {
+                for (th, v, rho) in [(ta, va, ra), (tb, vb, rb), (tc, vc, rc)] {
+                    if rho > rho_eps {
+                        seam_cols.push((th, v, rho));
+                    }
+                }
+            }
             let s = |th: f64| -> f64 {
                 // Measured (Pi - x).rem_euclid so a column exactly
                 // half a turn off the base rides +Pi, never its -Pi
@@ -298,50 +304,45 @@ fn develop(
                 let (pb, pc) = (Point3::new(b.0, b.1, b.2), Point3::new(c.0, c.1, c.2));
                 wrap.push(Triangle::new(a0, a1, pc));
                 wrap.push(Triangle::new(a0, pc, pb));
+                if shift == 0.0 {
+                    // The axis vertex stands at a0 under b, at a1 under c.
+                    let (w0, wb, wc) = if ra <= rho_eps {
+                        (t.a, t.b, t.c)
+                    } else if rb <= rho_eps {
+                        (t.b, t.a, t.c)
+                    } else {
+                        (t.c, t.a, t.b)
+                    };
+                    edges.push(DevEdge::new(w0, wb, a0, pb));
+                    edges.push(DevEdge::new(wb, wc, pb, pc));
+                    edges.push(DevEdge::new(wc, w0, pc, a1));
+                }
                 s_lo = s_lo.min(b.0).min(c.0);
                 s_hi = s_hi.max(b.0).max(c.0);
             } else {
                 let pt = |th: f64, v: f64, rho: f64| Point3::new(s(th), v, rho);
-                wrap.push(Triangle::new(pt(ta, va, ra), pt(tb, vb, rb), pt(tc, vc, rc)));
+                let (da, db, dc) = (pt(ta, va, ra), pt(tb, vb, rb), pt(tc, vc, rc));
+                wrap.push(Triangle::new(da, db, dc));
+                if shift == 0.0 {
+                    edges.push(DevEdge::new(t.a, t.b, da, db));
+                    edges.push(DevEdge::new(t.b, t.c, db, dc));
+                    edges.push(DevEdge::new(t.c, t.a, dc, da));
+                }
                 s_lo = s_lo.min(s(ta)).min(s(tb)).min(s(tc));
                 s_hi = s_hi.max(s(ta)).max(s(tb)).max(s(tc));
             }
         }
     }
 
-    // The cover's two ends are the chain's loose ends: the meridian's
-    // cross-section (its stations, widest rho at each, floored at the
-    // axis where the profile dips inside it) stands as a WALL at s_lo
-    // and s_hi, so every level's chord chain runs into a closed wall
-    // at each end and its contour is a ring, not a loose thread.
-    stations.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let mut st: Vec<(f64, f64)> = Vec::new();
-    for (v, rho) in stations {
-        match st.last_mut() {
-            Some(l) if (l.0 - v).abs() <= v_eps => l.1 = l.1.max(rho),
-            _ => st.push((v, rho)),
-        }
-    }
-    if st.len() >= 2 {
-        let floor = rho_min.max(0.0);
-        for w in [s_lo, s_hi] {
-            for pr in st.windows(2) {
-                let (v0, r0) = pr[0];
-                let (v1, r1) = pr[1];
-                let wall = |v: f64, rho: f64| Point3::new(w, v, rho);
-                wrap.push(Triangle::new(
-                    wall(v0, floor),
-                    wall(v1, floor),
-                    wall(v1, r1),
-                ));
-                wrap.push(Triangle::new(
-                    wall(v0, floor),
-                    wall(v1, r1),
-                    wall(v0, r0),
-                ));
-            }
-        }
-    }
+    // Only a turned seam is wrapped (#54; `rotary_seam` says why).
+    rotary_seam::refuse_feature_on_seam(&seam_cols, rho_max)?;
+
+    // The cover's two ends are the chain's loose ends: a curtain hangs
+    // from each free seam edge down to the floor radius, so every
+    // level's chord chain closes at each end of the cover into a ring,
+    // not a loose thread - on a revolve the meridian wall at the end
+    // column, on a flatted bar the ragged column its seam really is.
+    wrap.extend(rotary_seam::curtains(&edges, period, rho_min.max(0.0)));
 
     // The ladder in wrap space, run by pocket3d's own entry guards.
     let mut q = *p;

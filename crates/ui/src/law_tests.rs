@@ -17,7 +17,7 @@ use crate::interact::{
     CLEARANCE_RGB, CUT_RGB, FEED_RGB, MAX_OVERLAY_VERTICES, PICK_EDGE_PX, PLUNGE_RGB, RAPID_RGB,
     REGION_RGB, RETRACT_RGB, anchor_hit, anchor_points, anchor_reference, capped, chevrons,
     collect_overlay, edge_nearest, feature_of_facet, ftoz, height_plane_lines, height_planes,
-    hover_features, overlay_labels, plane_corner, plane_rect, project_uv, queue_feature_pick,
+    gizmo_segments, hover_features, is_axis_label, overlay_labels, plane_corner, plane_rect, project_uv, queue_feature_pick,
     region_lines, selection_feature_lines, shown_regions, toolpath_lines,
 };
 use crate::state::{CommandKind, HoverHit, State};
@@ -54,7 +54,25 @@ mod gizmo_tests {
         let state = State::new();
         let lines = collect_overlay(&state);
         assert_eq!(lines.len(), 6, "three dimmed axes");
-        assert!(lines[0][3] < 0.5, "world axes are dimmed");
+        // #195: dimmed less than before (0.8 of the triad's 0.9 red), but dimmed.
+        assert!(lines[0][3] < 0.8, "world axes are dimmed");
+    }
+
+    /// #195: the origin triads are stroked again in screen space (a wgpu
+    /// line is 1 px): one segment per axis that the overlay draws, none
+    /// when the axes are hidden, and the axis letters are told apart from
+    /// the other overlay labels so they can be drawn larger.
+    #[test]
+    fn the_origin_triad_is_also_stroked_in_screen_space() {
+        let mut state = State::new();
+        let segs = gizmo_segments(&state, 1.0);
+        assert_eq!(segs.len(), 3, "the world axes, one stroke each: {segs:?}");
+        assert!(segs.iter().all(|(a, b, _)| a != b), "each stroke has length on screen");
+        let blue = segs[2].2;
+        assert!(blue[2] >= 0.75, "Z is a readable blue on the dark ground: {blue:?}");
+        state.show_world_axes = false;
+        assert!(gizmo_segments(&state, 1.0).is_empty(), "hidden axes stroke nothing");
+        assert!(is_axis_label("Z") && !is_axis_label("Operation1 · Top 30.00"));
     }
 
     #[test]
@@ -85,7 +103,7 @@ mod gizmo_tests {
             .map(|(_, rgb, _)| rgb[0])
             .collect();
         assert!(
-            xs.iter().any(|r| *r > 0.8) && xs.iter().any(|r| *r < 0.6),
+            xs.iter().any(|r| *r > 0.85) && xs.iter().any(|r| *r < 0.8), // #195: dimmed to 0.8
             "one bright and one dimmed X: {xs:?}"
         );
     }

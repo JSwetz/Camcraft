@@ -50,6 +50,18 @@ fn dot(a: V3, b: V3) -> f64 {
 /// covers everything nearer). A full ball diameter was tried and read
 /// the cone apex and the box corner as scallop - unreached by any
 /// spacing, other laws' ground.
+///
+/// Validity range (#37): on flat ground the law reads a cusp only to
+/// `s ≈ 2·sqrt(reach² − r²)` (2.9 on an r3 ball at tol 0.1, a reading
+/// of `4·tol`); a wider spacing is NOT read here and no other scan law
+/// claims it. The generator closes the nonsensical half - a stated
+/// spacing at or past the ball diameter is refused by name
+/// (`finishing3d::params::scallop_ceiling`) - while widening this
+/// window to `2r` was measured on 2026-11-08 and convicts the cone
+/// apex (1.68 mm), the box walls (0.42) and the dome waterline's crown
+/// (1.10): one-pass ground the distinct-rings rule does not excuse.
+/// It grows only behind a crown/corner exclusion (owed, RECOMMENDED
+/// "#37").
 pub(super) fn reach(band: f64, tol: f64) -> f64 {
     band + 3.0 * tol
 }

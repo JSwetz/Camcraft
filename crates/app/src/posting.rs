@@ -18,7 +18,7 @@
 use crate::model;
 use crate::operation::{self, Height, HeightReference, OpStatus, OpParams};
 use crate::post::{self, cnc, engine, Dump};
-use crate::schema::{PostRef, WCS_SLOTS};
+use crate::schema::{PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
 use flecs_ecs::prelude::*;
 use serde_json::Value;
 use std::path::Path;
@@ -36,6 +36,7 @@ pub const BUILTINS: &[(&str, &str)] = &[
     ("Siemens 840D", include_str!("../../../assets/posts/sinumerik.cps")),
     ("Heidenhain", include_str!("../../../assets/posts/heidenhain.cps")),
     ("Mazak", include_str!("../../../assets/posts/mazak.cps")),
+    ("Tormach PathPilot", include_str!("../../../assets/posts/tormach.cps")),
     ("Fanuc Lathe", include_str!("../../../assets/posts/fanuc-lathe.cps")),
 ];
 
@@ -123,6 +124,14 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tilt-head 5-axis", include_str!("../../../assets/machines/tilthead.mch")),
     ("Mill-turn", include_str!("../../../assets/machines/millturn.mch")),
     ("Lathe", include_str!("../../../assets/machines/lathe.mch")),
+    // #131: an inch machine; pairs with the "Tormach PathPilot" post.
+    ("Tormach 770MX", include_str!("../../../assets/machines/tormach-770mx.mch")),
+    // #170: the other Tormach mills, each from its own operator's manual.
+    ("Tormach 770MX (ML)", include_str!("../../../assets/machines/tormach-770mx-ml.mch")),
+    ("Tormach 770M", include_str!("../../../assets/machines/tormach-770m.mch")),
+    ("Tormach 1100MX", include_str!("../../../assets/machines/tormach-1100mx.mch")),
+    ("Tormach 1500MX", include_str!("../../../assets/machines/tormach-1500mx.mch")),
+    ("Tormach PCNC 440", include_str!("../../../assets/machines/tormach-pcnc440.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
@@ -164,6 +173,30 @@ pub fn post_of(world: &World) -> PostRef {
 /// reader only.
 pub fn post_set(world: &World, next: &PostRef) {
     world.set(next.clone());
+}
+
+/// The document's post options (issue #34), from the `PostOptions`
+/// singleton; the default when none was ever set.
+#[must_use]
+pub fn post_options(world: &World) -> PostOptions {
+    world.try_get::<&PostOptions>(|p| *p).unwrap_or_default()
+}
+
+/// Write the options singleton. For `SetPostOptions` and the project
+/// reader only.
+pub fn post_options_set(world: &World, next: PostOptions) {
+    world.set(next);
+}
+
+/// The options as the script's `postOptions` object: the words a
+/// script compares against (`Threading`: `"G32"` or `"G76"`).
+#[must_use]
+pub fn options_value(o: PostOptions) -> Value {
+    let threading = match o.threading {
+        ThreadingOutput::G32Passes => "G32",
+        ThreadingOutput::G76Cycle => "G76",
+    };
+    serde_json::json!({ "Threading": threading })
 }
 
 /// The document's post for display: built-in name, or the file path
@@ -294,7 +327,7 @@ fn post_script_body(world: &World, out_path: &Path, cps: &str) -> Result<Posted,
         return Err(format!("post blocked - {}", report.problems.join("; ")));
     }
     let stream = cnc::serialize(&records);
-    let out = engine::run(cps, &machine_value(world), &stream)
+    let out = engine::run_with(cps, &machine_value(world), &stream, &options_value(post_options(world)))
         .map_err(|e| format!("post engine: {e}"))?;
     if !out.warnings.is_empty() {
         return Err(format!(
@@ -336,6 +369,9 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
         .iter()
         .filter_map(|r| match r {
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
+            // Probing (#108): each touch and retreat stands for one move.
+            cnc::Record::Touch(t) => Some(t.expect),
+            cnc::Record::Retreat(t) => Some(t.expect),
             _ => None,
         })
         .collect();
@@ -346,6 +382,8 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
         };
         let pos = match &records[rec] {
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
+            cnc::Record::Touch(t) => Some(t.expect),
+            cnc::Record::Retreat(t) => Some(t.expect),
             cnc::Record::Cycle(c) => moves.get(c.first_move).copied(),
             _ => None,
         };
@@ -550,13 +588,17 @@ fn fixture_problems(world: &World) -> Vec<String> {
 pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
     let ops = program_ops(world)?;
 
-    // Tool library rank, the T../H.. law: 1-based position among the
-    // named tools in document order.
-    let tool_ranks: Vec<String> = model::named_entities(world)
-        .into_iter()
-        .filter(|(_, e)| model::is_tool(world, e))
-        .map(|(n, _)| n)
+    // The T../H.. law (#221): a tool's own number when it has one, else
+    // its 1-based position among the named tools in document order - and
+    // two tools of one program posting the same number refuse by name.
+    let tool_numbers = crate::tool_numbers::numbers(world);
+    let used: Vec<String> = ops
+        .iter()
+        .filter_map(|(_, e)| model::operation_of(world, e).map(|op| op.tool))
         .collect();
+    if let Some(msg) = crate::tool_numbers::clash(world, &used) {
+        return Err(msg);
+    }
 
     let mut records: Vec<cnc::Record> = Vec::new();
     let mut moved = 0usize; // cycle AT anchors are stream-global
@@ -571,10 +613,10 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         let setup = op.setup.as_deref();
         let hs = operation::resolve_params(world, setup, Some(&op.src), &op.params)
             .map_err(|err| format!("{name}: {err}"))?;
-        let tool_number = tool_ranks
+        let tool_number = tool_numbers
             .iter()
-            .position(|n| *n == op.tool)
-            .map_or(0, |i| i as u32 + 1);
+            .find(|(n, _)| *n == op.tool)
+            .map_or(0, |(_, t)| *t);
         let (wcs, origin) = wcs_context(world, setup, &op.params);
         // The stock box is THIS operation's setup context (M3.2 A): a
         // later setup's block is where and how tall its own stock says.
@@ -610,16 +652,28 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             _ => (None, false, false, None),
         };
         let display_name = model::operation_label(world, name, e);
+        // The probe (#108): its result rides the section, and a touch
+        // probe states no spindle (the preamble writes none for 0).
+        let probe_result = match &op.params {
+            OpParams::Probe { set_wcs, tolerance, .. } => Some(post::probe_rec::ProbeResult {
+                set_wcs: *set_wcs,
+                tol_mm: *tolerance,
+            }),
+            _ => None,
+        };
+        let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
         let d = Dump {
+            probe_result,
             op_name: &display_name,
             part_load,
             part_unload,
             part_transfer,
             probe_tol,
+            coolant: op.coolant,
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,
-            rpm: tool.rpm,
+            rpm,
             clearance_z: hs.clearance,
             retract_z: hs.retract.unwrap_or(hs.clearance),
             top_z: stock_top_z, // the TopOfStock PARAM: the stock, not the cut
@@ -648,7 +702,10 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         // The emitted motion records, not the path's moves: a
         // control-compensated span (M13.11) writes its programmed
         // contour in place of its centre moves.
-        moved += recs.iter().filter(|r| matches!(r, cnc::Record::Move(_))).count();
+        moved += recs
+            .iter()
+            .filter(|r| matches!(r, cnc::Record::Move(_) | cnc::Record::Touch(_) | cnc::Record::Retreat(_)))
+            .count();
         records.extend(recs);
     }
     Ok(records)
@@ -693,6 +750,7 @@ pub trait HeightRefs {
 impl HeightRefs for OpParams {
     fn heights(&self) -> Vec<&Height> {
         match self {
+            OpParams::Probe { clearance_z, .. } => vec![clearance_z],
             OpParams::Face {
                 clearance_z,
                 cut_z,
