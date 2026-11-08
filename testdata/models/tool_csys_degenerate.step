@@ -1,0 +1,30 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('CamCraft test fixture, hand-written'), '2;1');
+FILE_NAME('tool_csys_degenerate.step', '2026-11-08T00:00:00', (''), (''), 'camcraft', '', '');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#10 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#12, #13, #14)) REPRESENTATION_CONTEXT('', '') );
+#12 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+#13 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );
+#14 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );
+#20 = SHAPE_REPRESENTATION('tool', (#30, #40, #50, #51, #60), #10);
+/* PCS whose axis has no length */
+#30 = AXIS2_PLACEMENT_3D('PCS', #31, #32, #33);
+#31 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+#32 = DIRECTION('', (0.0, 0.0, 0.0));
+#33 = DIRECTION('', (1.0, 0.0, 0.0));
+/* MCS whose origin overflows to infinity */
+#40 = AXIS2_PLACEMENT_3D('MCS', #41, #34, #33);
+#41 = CARTESIAN_POINT('', (0.0, 0.0, 1.0E400));
+#34 = DIRECTION('', (0.0, 0.0, 1.0));
+/* CIP written at two different placements */
+#50 = AXIS2_PLACEMENT_3D('CIP', #31, #34, #33);
+#51 = AXIS2_PLACEMENT_3D('CIP', #52, #34, #33);
+#52 = CARTESIAN_POINT('', (0.0, 0.0, -75.0));
+/* CSW whose ref direction lies along its axis */
+#60 = AXIS2_PLACEMENT_3D('CSW', #31, #34, #61);
+#61 = DIRECTION('', (0.0, 0.0, -3.0));
+ENDSEC;
+END-ISO-10303-21;
