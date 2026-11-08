@@ -111,9 +111,10 @@ fn face_posts_g38_2_and_sets_z_on_the_770mx() {
     assert_eq!(count(&prog, "G38.2 "), 2, "a seek and a measure");
     assert!(prog.contains("#100=#5061\n#101=#5062\n#102=#5063\n"), "the measured trip is kept");
     assert!(prog.contains("G91 G1 X0 Y0 Z0.0394 F11.81\nG90\n"), "the back-off is incremental, in inches:\n{prog}");
-    assert!(prog.contains("#190=#102-0.7874\no901 if [ABS[#190] GT 0.0197]\n(MSG, PROBE Z OUT OF TOLERANCE)\nM2\no901 endif\n"), "{prog}");
+    assert!(prog.contains("#190=[#102-0.7874]\no901 if [ABS[#190] GT 0.0197]\n(MSG, PROBE Z OUT OF TOLERANCE)\nM2\no901 endif\n"), "{prog}");
     assert!(prog.contains("G10 L20 P2 Z[#5422-#190]"), "the result sets G55 Z: {prog}");
     o_blocks_pair_uniquely(&prog);
+    assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_face.nc", &prog);
 }
 
@@ -123,6 +124,7 @@ fn edge_posts_g38_2_and_sets_x_on_the_770mx() {
     assert_eq!(count(&prog, "G38.2 "), 2, "a seek and a measure");
     assert!(prog.contains("G10 L20 P2 X[#5420-#190]\n"), "the result sets G55 X: {prog}");
     o_blocks_pair_uniquely(&prog);
+    assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_edge.nc", &prog);
 }
 
@@ -133,6 +135,7 @@ fn corner_posts_g38_2_and_sets_x_and_y_on_the_770mx() {
     assert!(prog.contains("G10 L20 P2 X[#5420-#190] Y[#5421-#191]\n"), "{prog}");
     assert_eq!(count(&prog, "(MSG, PROBE "), 2, "one tolerance test per axis");
     o_blocks_pair_uniquely(&prog);
+    assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_corner.nc", &prog);
 }
 
@@ -140,9 +143,10 @@ fn corner_posts_g38_2_and_sets_x_and_y_on_the_770mx() {
 fn bore_posts_g38_2_and_sets_the_centre_on_the_770mx() {
     let prog = post_ok(&mx770(), &stream(&mode("bore"), Some(1)));
     assert_eq!(count(&prog, "G38.2 "), 8, "four touches, seek + measure");
-    assert!(prog.contains("#190=[[#100+#103]/2]-1.1811\n"), "the centre is the mean of opposite trips: {prog}");
+    assert!(prog.contains("#190=[[[#100+#103]/2]-1.1811]\n"), "the centre is the mean of opposite trips: {prog}");
     assert!(prog.contains("G10 L20 P2 X[#5420-#190] Y[#5421-#191]\n"), "{prog}");
     o_blocks_pair_uniquely(&prog);
+    assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_bore_centre.nc", &prog);
 }
 
@@ -152,6 +156,7 @@ fn boss_posts_g38_2_and_sets_the_centre_on_the_770mx() {
     assert_eq!(count(&prog, "G38.2 "), 8, "four touches, seek + measure");
     assert!(prog.contains("G10 L20 P2 X[#5420-#190] Y[#5421-#191]\n"), "{prog}");
     o_blocks_pair_uniquely(&prog);
+    assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_boss_centre.nc", &prog);
 }
 
@@ -165,6 +170,7 @@ fn bore_posts_in_mm_on_a_metric_machine() {
     assert!(prog.contains("G91 G1 X-1 Y0 Z0 F300\nG90\n"), "{prog}");
     assert!(prog.contains("o901 if [ABS[#190] GT 0.5]\n"), "{prog}");
     assert!(prog.contains("G10 L20 P2 X[#5420-#190] Y[#5421-#191]\n"), "{prog}");
+    assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_bore_centre_mm.nc", &prog);
 }
 
@@ -173,4 +179,17 @@ fn without_an_offset_to_set_it_stops_for_the_operator() {
     let prog = post_ok(&mx770(), &stream(&mode("bore"), None));
     assert!(!prog.contains("G10"), "nothing is set");
     assert!(prog.contains("(MSG, CHECK PROBE RESULT #190..)\nM0\n"), "{prog}");
+}
+
+/// LinuxCNC evaluates arithmetic only inside brackets: a parameter
+/// assignment is `#n=#m` or `#n=[expr]`, never a bare `#n=#m-0.7874`
+/// (PathPilot Hub 2.14.4 refused that with "Bad character '-' used"),
+/// and no `--` / `+-` is ever written.
+fn assignments_are_bracketed(prog: &str) {
+    for l in prog.lines().filter(|l| l.starts_with('#')) {
+        let Some((_, rhs)) = l.split_once('=') else { panic!("an assignment without '=': {l}") };
+        let plain = rhs.starts_with('#') && rhs[1..].chars().all(|c| c.is_ascii_digit());
+        assert!(plain || (rhs.starts_with('[') && rhs.ends_with(']')), "unbracketed expression: {l}");
+        assert!(!rhs.contains("--") && !rhs.contains("+-"), "a doubled sign: {l}");
+    }
 }

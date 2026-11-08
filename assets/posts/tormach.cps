@@ -460,7 +460,12 @@ function onProbeResult() {
     var sum = [];
     for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
     var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
-    block(["#" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    // LinuxCNC evaluates arithmetic only inside brackets: an assignment
+    // is `#n=[expr]` (PathPilot Hub refused the bare `#190=#102-0.7874`
+    // with "Bad character '-'"). The sign is folded so no `--` is written.
+    var ex = a.Expected - org[ai];
+    var op = ex < 0 ? "+" : "-";
+    block(["#" + (dev + i) + "=[" + mean + op + fu(Math.abs(ex)) + "]"]);
     var o = nextO();
     block([o, "if", "[ABS[#" + (dev + i) + "] GT " + fu(p.Tolerance) + "]"]);
     block(["(MSG, PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
