@@ -51,6 +51,7 @@ fn the_sampler_reads_both_stock_engines_alike() {
     let block = |b| Stock::block(b, 0.0, 0.0, 12.0, 12.0, 0.0, 1.0).unwrap();
     let (mut c, mut f) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
     let pass = [Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from: Point3::new(4.0, 2.0, -2.0),
         to: Point3::new(4.0, 10.0, -2.0),

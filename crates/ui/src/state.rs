@@ -736,23 +736,34 @@ impl ToolUi {
         }
     }
 
+    /// The draft's kind as the app names it: the inverse of the numbering
+    /// [`ToolUi::from_tool`] writes (anything unknown reads as an end mill).
+    #[must_use]
+    pub fn tool_kind(&self) -> ToolKind {
+        match self.kind {
+            1 => ToolKind::BallNose,
+            2 => ToolKind::BullNose,
+            3 => ToolKind::Drill,
+            4 => ToolKind::Tap,
+            5 => ToolKind::Bore,
+            6 => ToolKind::Turning,
+            7 => ToolKind::Groove,
+            8 => ToolKind::Thread,
+            9 => ToolKind::Form,
+            10 => ToolKind::Taper,
+            11 => ToolKind::Probe,
+            _ => ToolKind::EndMill,
+        }
+    }
+
+    /// The tool this draft states. A ball's corner is saved as its ball
+    /// (#263, [`Tool::tip_corner_r`]), so the document holds the radius
+    /// the readers cut with, not whatever the draft carried over from
+    /// another kind.
     #[must_use]
     pub fn to_tool(&self) -> Tool {
-        Tool {
-            kind: match self.kind {
-                1 => ToolKind::BallNose,
-                2 => ToolKind::BullNose,
-                3 => ToolKind::Drill,
-                4 => ToolKind::Tap,
-                5 => ToolKind::Bore,
-                6 => ToolKind::Turning,
-                7 => ToolKind::Groove,
-                8 => ToolKind::Thread,
-                9 => ToolKind::Form,
-                10 => ToolKind::Taper,
-                11 => ToolKind::Probe,
-                _ => ToolKind::EndMill,
-            },
+        let mut tool = Tool {
+            kind: self.tool_kind(),
             diameter: self.diameter,
             corner_r: self.corner_r,
             tip_angle: self.tip_angle,
@@ -770,7 +781,9 @@ impl ToolUi {
             tool_material: self.tool_material,
             flutes: self.flutes,
             center_cutting: self.center_cutting,
-        }
+        };
+        tool.corner_r = tool.tip_corner_r();
+        tool
     }
 }
 
@@ -1000,6 +1013,9 @@ pub struct State {
     pub status: String,
     /// Last successfully opened or saved project in this window.
     pub project_path: Option<PathBuf>,
+    /// #225: the Feeds tab shows the spindle speed as surface (cutting)
+    /// speed instead of rpm. View state - never a command, never saved.
+    pub spindle_as_vc: bool,
     /// Bumped whenever documents changed; drives GPU re-upload of meshes.
     pub doc_version: u64,
     /// Bumped whenever selection changed; re-sends the vertex stream (the
@@ -1015,6 +1031,10 @@ pub struct State {
     /// pointer leaves the viewport). View state like the camera and the
     /// drag - not undoable, not saved.
     pub hover: Option<HoverHit>,
+    /// The machined mesh's facet under the pointer (#25), world space:
+    /// set with `hover` when the mesh answers a stock hover, cleared on
+    /// every hover refresh. View state - not undoable, not saved.
+    pub hover_mesh: Option<camcraft_app::geometry::Triangle>,
     /// True when the viewport panel was under the pointer last frame (the
     /// shell writes it, and gates pointer drags on it - a click on a menu
     /// or popup over the image must never orbit).
@@ -1065,6 +1085,12 @@ pub struct State {
     /// document is switched. The status line says it too, but the next
     /// click or command writes over that line; this keeps the reason.
     pub post_refusal: Option<crate::egui_app::post_refusal::PostRefusal>,
+    /// #157: the Debug info window is open. View state - never a
+    /// command, never saved.
+    pub debug_info_open: bool,
+    /// #157: the GPU the window came up on (`gpu::describe`'s line),
+    /// set once by the windowed shell; `None` headless.
+    pub gpu_line: Option<String>,
     /// M2.3 program material sim: None while the Deviate cell is dark,
     /// `Some` while its sheet paints the stock's place. Frozen evidence
     /// of one program state, exactly like [`PostView`]'s text - never a
@@ -1310,11 +1336,15 @@ impl State {
             history: History::default(),
             status,
             project_path: None,
+            debug_info_open: false,
+            gpu_line: None,
+            spindle_as_vc: false,
             doc_version: 0,
             selection_version: 0,
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
             hover: None,
+            hover_mesh: None,
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             boundary_pick: None,
@@ -2470,7 +2500,12 @@ impl State {
                     return;
                 };
                 let fitted = if radio == 1 {
-                    stock::fit_cylinder(&bounds, margin)
+                    // #230: snug about the part - the models' largest
+                    // radius from the fit's axis plus the margin, not the
+                    // footprint's diagonal (1.41 R for a round part).
+                    let c = [(bounds.min.x + bounds.max.x) * 0.5, (bounds.min.y + bounds.max.y) * 0.5];
+                    model::solid_world_radius_about(&self.world, c)
+                        .and_then(|r| stock::fit_cylinder_about(&bounds, r, margin))
                 } else {
                     stock::fit_box(&bounds, margin)
                 };

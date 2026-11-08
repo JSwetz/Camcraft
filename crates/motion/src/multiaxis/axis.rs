@@ -165,11 +165,12 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
     // The eigen direction is exact only on an even tessellation; the
     // concurrency rows refine it (axis_refine.rs) and the refined line
     // replaces it only past the noise floor and when the fit's own
-    // residual does not grow - an even revolve keeps its bits. On an
+    // residual does not grow - an even revolve keeps its bits, and an
+    // eigen line already concurrent to rounding is not refined (#228). On an
     // isotropic part a pole axis IS its face normal (the moment names
     // no direction to refine toward), and is never tilted off it (#208).
     let best = best.map(|((r, ax), pole)| {
-        if pole && iso {
+        if (pole && iso) || !super::axis_refine::worth_refining(&data, ax, r, a_total) {
             return (r, ax);
         }
         let Some(v) = super::axis_refine::refine_dir(&data, ax.dir, ax.origin) else {

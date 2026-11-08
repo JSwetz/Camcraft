@@ -93,6 +93,15 @@ pub struct Move {
     /// direction. Conversion to and from the RS-274 letter angles the
     /// stream commands is stated once, in [`super::pose`].
     pub axis: Option<[f64; 3]>,
+    /// The spindle's stated C angle through this move (issue #33,
+    /// [`super::rotary`]): degrees, UNWRAPPED (a part turned three
+    /// times reads 1080, never 0), or None - every move but a
+    /// continuous C-axis live-tool cut. Some means the part turns on
+    /// the machine's C line so that `to` and `axis`, both stated in
+    /// the PART frame as always, land on the fixed live-tool station;
+    /// the angle is the generator's statement, never re-derived from
+    /// the point (an atan2 cannot carry the winding count).
+    pub rotary: Option<f64>,
 }
 
 impl Move {
@@ -104,6 +113,7 @@ impl Move {
             feed,
             arc: None,
             axis: None,
+            rotary: None,
         }
     }
 
@@ -153,6 +163,22 @@ impl Move {
                 .arc
                 .is_none_or(|a| a.center.x.is_finite() && a.center.y.is_finite())
             && self.axis.is_none_or(|a| a.iter().all(|x| x.is_finite()))
+            && self.rotary.is_none_or(f64::is_finite)
+    }
+
+    /// This move stating the spindle's C angle `deg` (unwrapped
+    /// degrees; see [`Move::rotary`]). A non-finite angle states no
+    /// rotation: refused LOUDLY and the move keeps no C - the same
+    /// law [`Move::with_axis`] holds for a garbage pose.
+    #[must_use]
+    pub fn with_rotary(mut self, deg: f64) -> Self {
+        if deg.is_finite() {
+            self.rotary = Some(deg);
+        } else {
+            eprintln!("cl: refusing a C angle of {deg}: not an angle");
+            self.rotary = None;
+        }
+        self
     }
 
     /// Attach a pose VERBATIM - no normalization, no refusal. The

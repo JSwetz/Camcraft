@@ -32,6 +32,9 @@ pub(crate) mod gpu_select;
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
 pub mod contrast;
 mod boundary;
+mod debug_info;
+mod status_alert;
+
 mod stock_info;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
@@ -47,6 +50,7 @@ pub(crate) mod machine_editor;
 // pub(crate) for the same reason: `State::post_refusal` names its type.
 pub(crate) mod post_refusal;
 mod feeds_page;
+mod spindle_row;
 mod approach_page;
 mod lead_page;
 mod op_tabs;
@@ -105,9 +109,15 @@ mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
 #[cfg(test)]
+mod ribbon_icon_tests;
+#[cfg(test)]
+mod debug_info_tests;
+#[cfg(test)]
 mod fresh_op_tests;
 #[cfg(test)]
 mod tool_number_tests;
+#[cfg(test)]
+mod ball_corner_tests;
 #[cfg(test)]
 mod gate_route_tests;
 

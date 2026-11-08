@@ -21,6 +21,12 @@ pub struct MoveDto {
     /// pre-seam self, and the field skips serialization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis: Option<[f64; 3]>,
+    /// Added with issue #33 (no version bump - the axis-v22 additive
+    /// precedent): the spindle's stated C angle, unwrapped degrees on
+    /// the lattice. Absent on every move but a C-axis live-tool cut,
+    /// so every document without one saves byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotary: Option<f64>,
 }
 
 /// An arc move's center with direction. `kind` stays the motion class
@@ -346,6 +352,7 @@ impl MoveDto {
             axis: m
                 .axis
                 .map(|a| [lattice(a[0]), lattice(a[1]), lattice(a[2])]),
+            rotary: m.rotary.map(lattice),
         }
     }
 
@@ -372,7 +379,10 @@ impl MoveDto {
         // re-normalizing on load would move a saved axis by bits and
         // break the save-load-save byte identity (the lattice snap in
         // from_move is already the normalization gate at write time).
-        m.attach_axis(self.axis)
+        let mut m = m.attach_axis(self.axis);
+        // Verbatim too: the stored angle is already on the lattice.
+        m.rotary = self.rotary.filter(|c| c.is_finite());
+        m
     }
 }
 

@@ -143,6 +143,10 @@ pub struct Script {
     /// The `coolantModes = true` manifest flag (#150): the script reads
     /// `PARAM Coolant`. Without it a non-Flood ask is refused by name.
     coolant_modes: bool,
+    /// The `liveTooling = true` manifest flag (issue #33): the script
+    /// voices C-axis live-tool sections. Without it a `PARAM LiveTool`
+    /// section is refused by name.
+    live_tooling: bool,
 }
 
 impl Script {
@@ -158,6 +162,7 @@ impl Script {
             ctx,
             present: Vec::new(),
             coolant_modes: false,
+            live_tooling: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -170,6 +175,10 @@ impl Script {
         s.present = present;
         s.coolant_modes = s
             .eval("typeof coolantModes !== \"undefined\" && coolantModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.live_tooling = s
+            .eval("typeof liveTooling !== \"undefined\" && liveTooling === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         Ok(s)
@@ -238,6 +247,12 @@ impl Script {
     /// the section's `PARAM Coolant` (#150).
     pub fn reads_coolant(&self) -> bool {
         self.coolant_modes
+    }
+
+    /// True when the script declares `liveTooling = true` - it voices
+    /// a C-axis live-tool section (issue #33).
+    pub fn voices_live_tooling(&self) -> bool {
+        self.live_tooling
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

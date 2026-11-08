@@ -34,7 +34,7 @@ const BAR_H: f64 = 30.0;
 const STEP: f64 = CELL / 20.0;
 
 fn feed(from: Point3, to: Point3) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(60.0), arc: None, axis: None }
+    Move { kind: MoveKind::Feed, from, to, feed: Some(60.0), arc: None, axis: None, rotary: None }
 }
 
 fn bar() -> Stock {

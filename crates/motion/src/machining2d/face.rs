@@ -193,9 +193,9 @@ pub fn face_over(
     // band a wide stepover leaves - visible, never silent.
     let mut unfaced = None;
     if !forbidden.is_empty() {
-        if let Some((y, gap)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces) {
+        if let Some((y, gap)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces, p.tool_diameter) {
             return Err(GenError::Invalid(format!(
-                "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, narrower than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
+                "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, no wider than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
                 p.tool_diameter
             )));
         }

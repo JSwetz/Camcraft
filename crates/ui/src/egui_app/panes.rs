@@ -589,7 +589,7 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
 /// Command to bundled glyph: the same table the retired imgui icons.rs
 /// store keyed (and ribbon.rs's `Item.icon` chose per cell), so the ribbon,
 /// the browser's `spec.icon` slots and the store name one set of pixels.
-fn icon_of(c: Cmd) -> Option<Icon> {
+pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
     match c {
         Cmd::New => Some(Icon::New),
         Cmd::Model => Some(Icon::OpenModel),
@@ -613,14 +613,27 @@ fn icon_of(c: Cmd) -> Option<Icon> {
                 Some(Icon::Generate)
             }
         },
-        // The overflow button carries no glyph (M6.2): the ellipsis in
-        // its label is the whole affordance, so no asset is minted for
-        // it and no font subset is trusted with a chevron.
-        Cmd::More(_) => None,
-        // The machine door carries no glyph either (the no-new-asset
-        // law): its caption *is* the machine, and every word of it
-        // names a workspace - an icon would repeat the cell's own text.
-        Cmd::Machine => None,
+        // A section door wears its family's signature glyph (#207: with
+        // no pins, glyph-less doors left every Create cell of a fresh
+        // install text-only - users read it as missing icons). No new
+        // asset: an op glyph that says what the family makes, distinct
+        // from the machine door's beside it; the caption still names
+        // the section.
+        Cmd::More(s) => Some(match s {
+            operation::Section::Mill2D => Icon::Pocket,
+            operation::Section::Mill3D => Icon::Finish3D,
+            operation::Section::Drilling => Icon::Drill,
+            operation::Section::MultiAxis => Icon::MultiAxisRough,
+            operation::Section::Turning => Icon::Face,
+        }),
+        // The machine door wears its workspace's glyph (#207), from the
+        // existing set: the face mill for Milling, the turned bar for
+        // Turning, the rotary bar for Mill-turning.
+        Cmd::Machine => Some(match camcraft_app::machine::kind_of(&state.world) {
+            camcraft_app::machine::Kind::Lathe => Icon::RotaryContour,
+            camcraft_app::machine::Kind::MillTurn => Icon::RotaryParallel,
+            camcraft_app::machine::Kind::Mill => Icon::Face,
+        }),
         Cmd::Undo => Some(Icon::Undo),
         Cmd::Redo => Some(Icon::Redo),
         Cmd::Run => Some(Icon::Generate),
@@ -1030,7 +1043,7 @@ pub fn ribbon(
             pal,
             enabled(c, state),
             toggled(c, state),
-            icon_of(c).and_then(|i| icons.and_then(|s| s.texture(i))),
+            icon_of(c, state).and_then(|i| icons.and_then(|s| s.texture(i))),
         );
         // The pin gesture lives at the cell, not in a command: the
         // right-click that answers it names itself in every live tip
@@ -1306,7 +1319,7 @@ pub(super) fn view_rows_of(
 /// writes them all), while command refusals read twice by design: here for
 /// everyone, and on their own pane through `error_for` (M-c). Startup is a
 /// plain empty document; an untouched status reads "ready".
-pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
+pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconSet>) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     // Owned so the button below can reborrow `state` mutably while the
@@ -1326,16 +1339,30 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 && operation::status_of(&state.world, e) == operation::OpStatus::Stale
         })
         .count();
+    // #192: a refusal on the status line must not read like any other
+    // status - error ink, bold, a "!" marker, on an error-tinted band.
+    let alert = super::status_alert::is_alert(state);
+    let line = if alert {
+        let ink = super::colorvision::text_inks(ui, &state.world).error;
+        ui.painter().rect_filled(rect, 0.0, ink.gamma_multiply(0.16));
+        RichText::new(format!("! {text}")).color(ink).strong()
+    } else {
+        // #215: routine status in the body text ink, not egui's "weak"
+        // grey - that read as near-invisible on the dark strip.
+        RichText::new(text.as_str()).color(ui.visuals().text_color())
+    };
     ui.horizontal(|ui| {
-        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(true))
-            .on_hover_text(text.as_str())
-            .context_menu(|ui| {
-                if ui.button("Copy message").clicked() {
-                    ui.ctx().copy_text(text.clone());
-                    ui.close();
-                }
-            });
+        // The right-hand widgets are laid out first so a long status line
+        // can never push them off the strip (#157: the Debug info door
+        // must stay reachable); the line takes what is left, truncated,
+        // with the full text on hover and in "Copy message".
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // #157: the Debug info door, rightmost - the glyph when the
+            // icon set is up, its name when it is not (headless frames
+            // and a failed decode degrade to text, never to nothing).
+            if super::debug_info::button(ui, icons).clicked() {
+                state.debug_info_open = !state.debug_info_open;
+            }
             ui.label(
                 RichText::new("egui shell (M-g) - imgui retired")
                     .color(pal.text_faint)
@@ -1347,6 +1374,16 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                     state.pending.push_back(CommandKind::RegenerateAll);
                 }
             }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(Label::new(line).selectable(true).truncate())
+                    .on_hover_text(text.as_str())
+                    .context_menu(|ui| {
+                        if ui.button("Copy message").clicked() {
+                            ui.ctx().copy_text(text.clone());
+                            ui.close();
+                        }
+                    });
+            });
         });
     });
     ui.allocate_rect(rect, Sense::hover());

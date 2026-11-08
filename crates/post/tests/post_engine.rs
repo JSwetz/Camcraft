@@ -349,6 +349,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
     for i in 0..4 {
         let (kind, z) = if i % 2 == 0 { (MoveKind::Rapid, 10.0) } else { (MoveKind::Plunge, -5.0) };
         t.moves.push(camcraft_post::cl::Move {
+            rotary: None,
             kind,
             from: Point3 { x: 0.0, y: 0.0, z: 10.0 },
             to: Point3 { x: i as f64, y: 0.0, z },

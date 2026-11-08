@@ -248,7 +248,9 @@ impl Shell {
                     return;
                 }
             };
-        println!("{}", gpu::describe(&adapter).log_line());
+        let gpu_line = gpu::describe(&adapter).log_line();
+        println!("{gpu_line}");
+        self.state.gpu_line = Some(gpu_line);
 
         let mut renderer = Renderer::new(&device, config.format, RendererOptions::default());
         let scene = world::collect(&self.state);
@@ -616,7 +618,7 @@ pub(crate) fn shell_layout(
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panes::status(ui, &mut *state, &pal);
+            panes::status(ui, &mut *state, &pal, icons);
         });
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
@@ -650,6 +652,9 @@ pub(crate) fn shell_layout(
     // (in-app egui::Window over the dock, None on a fresh State, so
     // snapshots never move until the Setup pane opens it).
     machine_editor::window(ui.ctx(), state);
+    // #157: the Debug info window - same window law (closed on a fresh
+    // State, opened from the status strip's bug button).
+    super::debug_info::window(ui.ctx(), state);
     // #107: the unsaved-changes prompt, last so it sits over everything.
     unsaved_prompt::window(ui.ctx(), state);
 }
@@ -1238,6 +1243,16 @@ fn viewport_panel(
                 ],
                 egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)),
             );
+        }
+        // The machined mesh's hovered facet (#25): the hover ink's yellow,
+        // a veil over the class colour and its outline.
+        if let Some(tri) = crate::machined::hover_facet_uv(state, aspect) {
+            let ink = egui::Color32::from_rgb(255, 217, 102);
+            ui.painter().add(egui::Shape::convex_polygon(
+                tri.iter().map(|uv| to_px(*uv)).collect(),
+                egui::Color32::from_rgba_unmultiplied(255, 217, 102, 90),
+                egui::Stroke::new(1.5, ink),
+            ));
         }
         // The Boundary group's marks (M11.5 UX): role-coloured picked
         // edges, the edge a click would take, chain ends, machined side.

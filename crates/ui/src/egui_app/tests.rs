@@ -76,6 +76,7 @@ fn empty_egui_meshes_are_filtered_before_gpu_submission() {
 }
 
 mod face_origin;
+mod spindle_row;
 mod stock_size;
 mod stock_fit_sides;
 mod layout;

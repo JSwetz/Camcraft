@@ -312,6 +312,31 @@ pub fn entity_world_aabb(world: &World, entity: &Entity) -> Option<Aabb> {
     })
 }
 
+/// The models' largest horizontal distance from the vertical line through
+/// `c` (world XY) - for a turned part standing on its axis there, its
+/// revolved max radius (#230's snug cylinder fit). Stock and WCS are
+/// excluded as in [`solid_world_aabb`]; `None` with no model geometry.
+#[must_use]
+pub fn solid_world_radius_about(world: &World, c: [f64; 2]) -> Option<f64> {
+    let mut r_max: Option<f64> = None;
+    for (_, entity) in model_entities(world) {
+        let Some(tris) = facets_of(world, &entity) else {
+            continue;
+        };
+        let loc = transform_of(world, &entity).unwrap_or_default();
+        for t in tris.iter() {
+            for p in [t.a, t.b, t.c] {
+                let p = transform_point(p, loc.pos, loc.rot);
+                let r = (p.x - c[0]).hypot(p.y - c[1]);
+                if r.is_finite() {
+                    r_max = Some(r_max.map_or(r, |m| m.max(r)));
+                }
+            }
+        }
+    }
+    r_max
+}
+
 /// World-space bounding box of all model geometry. Stock and WCS are excluded
 /// on purpose: fitting stock to a set that contains the stock would grow
 /// forever on repeated Fit.

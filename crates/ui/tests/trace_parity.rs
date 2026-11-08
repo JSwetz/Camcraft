@@ -43,6 +43,7 @@ fn field_stock(lo: Point3, hi: Point3) -> Stock {
 fn pocketed(floor: f64) -> Stock {
     let mut s = field_stock(p(0.0, 0.0, 0.0), p(10.0, 10.0, 5.0));
     let mv = vec![Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from: p(5.0, 5.0, 6.0),
         to: p(5.0, 5.0, floor),

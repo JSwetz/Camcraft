@@ -88,7 +88,7 @@ pub fn parse_cl(text: &str) -> Result<Vec<Move>, String> {
             None
         };
         let from = at.unwrap_or(to);
-        out.push(Move { kind, from, to, feed, arc, axis: None });
+        out.push(Move { rotary: None, kind, from, to, feed, arc, axis: None });
         at = Some(to);
     }
     Ok(out)
