@@ -3034,6 +3034,9 @@ fn a_create_cell_darkens_with_the_tool_laws_reason() {
         let st = &harness.state().state;
         assert!(model::find_by_name(&st.world, "Drill1").is_none(), "a dark cell creates nothing");
         assert!(st.status.contains(&reason), "the click answers with the reason: {}", st.status);
+        // #191: and takes the user to the fix - the tool library.
+        assert_eq!(st.ui_target, UiTarget::Tool(String::new()), "the click opens the tool library");
+        assert!(st.status.ends_with("opened the tool library"), "{}", st.status);
     }
     rack(&mut harness.state_mut().state, &["DR-0400"]);
     harness.run();

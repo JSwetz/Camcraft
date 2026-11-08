@@ -484,6 +484,54 @@ fn gate_note(c: Cmd, state: &State) -> Option<String> {
     }
 }
 
+/// Where a refused Create click leads (#191): the place that fixes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GateRoute {
+    /// No tool, or none that fits the kind: the Tool library page.
+    Tools,
+    /// The mounted machine cannot run the kind's family: the machine
+    /// door's workspace list.
+    Machine,
+}
+
+/// The fix for a dark Create cell, when it has one ([`gate_note`]'s
+/// cases, in its order).
+pub(super) fn gate_route(c: Cmd, state: &State) -> Option<GateRoute> {
+    let Cmd::Create(i) = c else { return None };
+    if enabled(c, state) {
+        return None;
+    }
+    if state.tool_names().is_empty() {
+        return Some(GateRoute::Tools);
+    }
+    let machine = camcraft_app::machine::kind_of(&state.world);
+    if camcraft_app::operation::KindInfo::ALL.get(i).is_some_and(|k| !k.admits(machine)) {
+        return Some(GateRoute::Machine);
+    }
+    tool_law_note(i, state).map(|_| GateRoute::Tools)
+}
+
+/// A dark Create cell was clicked anyway (#191): say why on the status
+/// line, then take the user to the fix rather than leave them at the
+/// error - the Tool library, or the machine door opened on its list.
+/// View state only; nothing is created or queued.
+pub(super) fn follow_gate(c: Cmd, state: &mut State) {
+    let Some(why) = gate_note(c, state) else { return };
+    match gate_route(c, state) {
+        Some(GateRoute::Tools) => {
+            actions::target(state, UiTarget::Tool(String::new()));
+            state.status = format!("{why} - opened the tool library");
+        }
+        Some(GateRoute::Machine) => {
+            state.ribbon_more = None;
+            state.ribbon_view_open = false;
+            state.ribbon_mode_open = true;
+            state.status = format!("{why} - pick a workspace");
+        }
+        None => state.status = why,
+    }
+}
+
 /// The tool law's darkening (M10.1 B): the app's own refusal sentence
 /// for creating kind `i` against the active setup's tools, or `None`
 /// when a fitting tool is there. The predicate lives in app (the same
@@ -971,10 +1019,8 @@ pub fn ribbon(
         if fired {
             run_cmd(c, state);
         }
-        if gated
-            && let Some(why) = gate_note(c, state)
-        {
-            state.status = why;
+        if gated {
+            follow_gate(c, state);
         }
         if let (Cmd::Create(i), true) = (c, pin) {
             toggle_pin(state, i);
@@ -1085,10 +1131,8 @@ pub fn ribbon(
                     // click into silence is what made the folded
                     // ribbon read as dead - this branch is why it
                     // never is.
-                    if let Some(why) = gate_note(c, state) {
-                        state.status = why;
-                    }
                     state.ribbon_more = None;
+                    follow_gate(c, state);
                 } else if state.ribbon_more == before {
                     // Primary press anywhere outside the door and its
                     // rows closes it (egui's popup law, hand-drawn
