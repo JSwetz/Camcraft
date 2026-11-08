@@ -46,6 +46,7 @@ pub mod stock_export;
 pub mod stock_play;
 pub mod stock_play_worker;
 pub mod stock_view;
+pub mod tool_library;
 pub mod tool_list;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
