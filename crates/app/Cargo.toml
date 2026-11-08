@@ -23,6 +23,7 @@ truck-meshalgo = { workspace = true }
 ruststep = { workspace = true }
 clipper2-rust = { workspace = true }
 rayon = { workspace = true }
+png = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 # The job-script host (M5.3 F): the batch lane runs the tree's single
