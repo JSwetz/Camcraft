@@ -230,16 +230,24 @@ pub(super) fn selection_geometry_in(
     let mut envelope = None;
     let mut chain_only = false;
     if facing {
-        let material = material_of(world, setup, &SrcRef::Selection(items.to_vec()))?;
         chain_only = items.iter().all(|g| !matches!(g.feature, FeatureSel::Face(_)));
-        let sil = silhouette(&material.facets);
-        let stock_name = crate::setup::stock_entity_name(world, setup);
-        envelope = model::find_by_name(world, &stock_name)
-            .and_then(|e| model::world_facets(world, &e))
-            .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
-            .filter(|r| !r.is_empty())
-            .or_else(|| sil.clone());
-        material_sil = sil;
+        // A picked face supplies its own closed boundary. The material and
+        // stock silhouettes are only needed to extend an open chain or to
+        // decide which side of a chain-only selection is metal. Projecting
+        // both entire solids here made a face click on a rotated part spend
+        // its time in 16 full-mesh sections before it could even check the
+        // face's orientation.
+        if chain_only || items.iter().any(|g| matches!(g.feature, FeatureSel::Chain(_))) {
+            let material = material_of(world, setup, &SrcRef::Selection(items.to_vec()))?;
+            let sil = silhouette(&material.facets);
+            let stock_name = crate::setup::stock_entity_name(world, setup);
+            envelope = model::find_by_name(world, &stock_name)
+                .and_then(|e| model::world_facets(world, &e))
+                .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
+                .filter(|r| !r.is_empty())
+                .or_else(|| sil.clone());
+            material_sil = sil;
+        }
     }
     let mut loops: Vec<Loop> = Vec::new();
     let mut chains: Vec<Vec<Point2>> = Vec::new();

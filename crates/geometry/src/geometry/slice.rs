@@ -36,7 +36,40 @@ const WELD: f64 = 1e6;
 /// Cap on `project`'s Z samples - a silhouette converges on far fewer.
 pub const MAX_SAMPLES: usize = 64;
 
-#[derive(Error, Debug, PartialEq)]
+// The editor reads the same source and stock silhouette several times per
+// frame (selection notes, outline, fill). Keep a few exact-input results so
+// an unchanged edge pick does not repeat the full multi-slice union.
+const PROJECT_CACHE_ENTRIES: usize = 4;
+const PROJECT_CACHE_FACET_LIMIT: usize = 50_000;
+type ProjectEntry = (usize, Vec<Triangle>, Result<Region, SliceError>);
+thread_local! {
+    static PROJECT_CACHE: std::cell::RefCell<Vec<ProjectEntry>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static PROJECT_CACHE_HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn profile_projection() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CAMCRAFT_PROFILE_PROJECTION").is_some())
+}
+
+fn project_timed(facets: &[Triangle], samples: usize, cacheable: bool) -> Result<Region, SliceError> {
+    let started = std::time::Instant::now();
+    let result = project_uncached(facets, samples);
+    if profile_projection() {
+        eprintln!(
+            "profile: projection {} facets={} samples={} elapsed={} ms result={}",
+            if cacheable { "cache miss" } else { "uncached large mesh" },
+            facets.len(),
+            samples,
+            started.elapsed().as_millis(),
+            if result.is_ok() { "ok" } else { "error" },
+        );
+    }
+    result
+}
+
+#[derive(Clone, Error, Debug, PartialEq)]
 pub enum SliceError {
     #[error("invalid slice input: {0}")]
     Invalid(String),
@@ -178,6 +211,40 @@ pub fn slice(facets: &[Triangle], z: f64) -> Result<Region, SliceError> {
 /// to [`MAX_SAMPLES`]; a slice that fails on a tangential coincidence is
 /// retried once at a nudge - if it fails again the error is real.
 pub fn project(facets: &[Triangle], samples: usize) -> Result<Region, SliceError> {
+    if facets.len() > PROJECT_CACHE_FACET_LIMIT {
+        return project_timed(facets, samples, false);
+    }
+    if let Some(hit) = PROJECT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let i = cache.iter().position(|(n, old, _)| *n == samples && old.as_slice() == facets)?;
+        let entry = cache.remove(i);
+        let result = entry.2.clone();
+        cache.push(entry);
+        Some(result)
+    }) {
+        if profile_projection() {
+            PROJECT_CACHE_HITS.with(|hits| {
+                let count = hits.get().saturating_add(1);
+                hits.set(count);
+                if count == 1 || count % 100 == 0 {
+                    eprintln!("profile: projection cache hits={count}");
+                }
+            });
+        }
+        return hit;
+    }
+    let result = project_timed(facets, samples, true);
+    PROJECT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() == PROJECT_CACHE_ENTRIES {
+            cache.remove(0);
+        }
+        cache.push((samples, facets.to_vec(), result.clone()));
+    });
+    result
+}
+
+fn project_uncached(facets: &[Triangle], samples: usize) -> Result<Region, SliceError> {
     if facets.is_empty() {
         return Ok(Region::empty());
     }

@@ -13301,3 +13301,25 @@ revolved (follow-up material if users hit it with long keyways).
 - Dropped: refitting stock to the new world-axis bounding box on every model
   move. A refit would discard the stock orientation and placement the user
   already chose.
+
+## Facing pick on a rotated part
+
+- A picked face already gives the facing boundary. Only open chains and
+  chain-only selections need whole-model and stock silhouettes, so skip
+  their sixteen-section projections for face-only picks. A steep face is
+  refused at the pick with the existing horizontal-face guidance.
+- Canonicalize face boundary rings in linear time with minimum-rotation
+  scans in both directions. The previous comparison rebuilt every rotated
+  copy of the ring, quadratic work repeated by the Geometry panel.
+- Dropped: a UI-only cache of the selection account. It would hide the
+  repeated work but leave the same expensive path in command validation
+  and generation.
+- Follow-up from the edge-pick hand test: a Face operation can use an open
+  chain, so its panel and viewport legitimately need the model and stock
+  silhouettes. Cache the exact input/output of the shared sixteen-section
+  projection for meshes up to 50,000 facets. Exact facet comparison avoids
+  a digest collision becoming a wrong machining preview; a four-entry
+  bound keeps the memory cost finite. Larger meshes use the original path.
+- `CAMCRAFT_PROFILE_PROJECTION=1` reports projection cache misses with
+  elapsed time and occasional hit counts. It is opt-in so a normal window
+  does not spend time printing diagnostics on every read.
