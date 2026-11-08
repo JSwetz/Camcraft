@@ -38,16 +38,22 @@ impl SetWcsOrigin {
             )));
         }
         let mut location = location;
+        // #327: every refusal names the slot, so a script or the pane
+        // reports which offset was refused.
         if !location.rot.iter().all(|v| v.is_finite()) {
-            return Err(CommandError::Invalid(
-                "work offset rotation must be finite (check the angle inputs)".into(),
-            ));
+            return Err(CommandError::Invalid(format!(
+                "work offset {slot}: rotation must be finite (check the angle inputs)"
+            )));
         }
         location.rot = normalize_quat(location.rot).ok_or_else(|| {
-            CommandError::Invalid("work offset rotation is degenerate (zero norm)".into())
+            CommandError::Invalid(format!(
+                "work offset {slot}: rotation is degenerate (zero norm)"
+            ))
         })?;
         if !location.pos.is_finite() {
-            return Err(CommandError::Invalid("work offset placement must be finite".into()));
+            return Err(CommandError::Invalid(format!(
+                "work offset {slot}: origin must be finite"
+            )));
         }
         let active = crate::setup::active(world);
         let slot_ix = WCS_SLOTS

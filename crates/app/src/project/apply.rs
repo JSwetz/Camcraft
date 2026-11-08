@@ -650,6 +650,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         .ok_or_else(|| corrupt("stock mesh regeneration failed"))?,
                 };
                 model::set_facets(world, &entity, facets.into());
+                // The same UNCONDITIONAL pin as the Model arm (#340): every
+                // SetStock lands facets and moves the counter, the save
+                // writes it, so the load must end where the file left it.
+                // An absent key (0) puts back what that file remembered.
+                model::set_rev(world, &entity, dto.rev);
                 entity.entity_view(world).set(StockDef {
                     shape: shape.clone(),
                 });

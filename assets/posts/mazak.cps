@@ -161,6 +161,51 @@ function oWord() {
   return "O" + t;
 }
 
+// ------------------------------------------------------------ comments
+// Program commentary (#257): the setup, the operation and the tool, for
+// the operator reading the program - never a word the control moves on.
+// The stream's PARAMs OperationName / OperationKind / SetupName /
+// ToolDiameter / ToolKind / ToolCornerRadius and the TOOL record's name
+// feed it; a stream without them (a legacy .cl) writes none. User text
+// is cleaned for this dialect: a parenthesis would end the comment
+// early, % is the tape's end mark and ; opens a comment on some
+// controls, so all three become spaces; printable ASCII only, capped at
+// 40 characters.
+var setupName = "", setupSaid = "", opName = "", opKind = "";
+var toolName = "", toolKind = "", toolDia = 0, toolCr = 0;
+function clean(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  t = t.replace(/[()%;]/g, " ").replace(/[^\x20-\x7E]/g, "?").replace(/\s+/g, " ").trim();
+  return t.length > 40 ? t.substring(0, 40).trim() : t;
+}
+function joinDash(parts) {  // the non-empty parts, " - " between
+  var a = [];
+  for (var i = 0; i < parts.length; i++) if (parts[i]) a.push(parts[i]);
+  return a.join(" - ");
+}
+function note(s) { block(["(" + s + ")"]); }
+function commentParam(name, value) {
+  if (name === "SetupName") setupName = clean(value);
+  else if (name === "OperationName") opName = clean(value);
+  else if (name === "OperationKind") opKind = clean(value).toUpperCase();
+  else if (name === "ToolKind") toolKind = clean(value).toUpperCase();
+  else if (name === "ToolDiameter" && has(value)) toolDia = Number(value);
+  else if (name === "ToolCornerRadius" && has(value)) toolCr = Number(value);
+}
+function opNotes() {  // at the section's preamble: the setup once, the op each time
+  if (setupName && setupName !== setupSaid) { note("SETUP: " + setupName); setupSaid = setupName; }
+  if (opName) note("OPERATION: " + joinDash([opName, opKind, wcsWord]));
+  opName = ""; opKind = "";
+}
+function toolNote() {  // just before the tool change it describes
+  var desc = [];
+  if (toolKind) desc.push(toolKind);
+  if (toolDia > 0) desc.push("D" + fu(toolDia));
+  if (toolCr > 0) desc.push("R" + fu(toolCr));
+  note(joinDash(["T" + ni(tNo) + (toolName ? " " + toolName : ""), desc.join(" ")]));
+  toolKind = ""; toolCr = 0;
+}
+
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
@@ -204,6 +249,7 @@ function compRefuse(what) {
 }
 
 function onParameter(name, value) {
+  commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
@@ -222,6 +268,7 @@ function onSpindleSpeed() {
 }
 
 function onToolChange(number, name) {
+  toolName = clean(name);
   tNo = number;
   toolWait = true;
 }
@@ -232,9 +279,11 @@ function onToolChange(number, name) {
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
+  opNotes();
   block(["G17", "G90", wcsWord, "G40", "G49", "G80"]);
   planeG = 17;              // the preamble states the plane
   if (toolWait) {
+    toolNote();
     block(["T" + ni(tNo), "M6"]);
     block(["G43", "H" + ni(tNo)]);
     toolWait = false;
