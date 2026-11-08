@@ -206,7 +206,10 @@ pub(crate) fn build_stock(stock_facets: &[Triangle], cell: f64) -> Result<Stock,
 
 /// The model as a field at `cell`, or why it cannot be one.
 pub(crate) fn display_target(world: &flecs_ecs::prelude::World, cell: f64) -> (Option<Stock>, Option<String>) {
-    build_target(&part_facets(world), cell)
+    match part_facets(world) {
+        Ok(part) => build_target(&part, cell),
+        Err(why) => (None, Some(why)),
+    }
 }
 
 /// `display_target`'s build half, from the model's world facets.

@@ -253,7 +253,7 @@ impl CycleDto {
 /// exactly what a missing `G55` entity has always meant. `datum_from` is
 /// clone provenance for the setup sheet (stage D); every stamp ignores
 /// it, so it defaults and rides along for the reader, not the machinery.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct SetupDto {
     pub stock: String,
     #[serde(default)]
@@ -265,6 +265,39 @@ pub struct SetupDto {
     /// is the inferred per-operation law, so the key is the migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_offset: Option<String>,
+    /// v53 (#326): how the part sits in this setup, document -> setup
+    /// frame. Absent - every older file, and a setup holding the part as
+    /// modelled - is the identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_alignment: Option<AlignmentDto>,
+}
+
+/// A setup's part alignment as files hold it (#326): the same
+/// translation + unit quaternion (x, y, z, w) an entity's placement uses.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AlignmentDto {
+    pub translation: [f64; 3],
+    pub rotation: [f64; 4],
+}
+
+impl AlignmentDto {
+    #[must_use]
+    pub fn from_location(l: &crate::schema::Location) -> Self {
+        AlignmentDto { translation: [l.pos.x, l.pos.y, l.pos.z], rotation: l.rot }
+    }
+
+    /// The stored transform, or `None` when it is not rigid (a non-finite
+    /// number, a quaternion off unit length by more than float noise).
+    #[must_use]
+    pub fn to_location(&self) -> Option<crate::schema::Location> {
+        let [x, y, z] = self.translation;
+        let q = self.rotation;
+        let n2 = q.iter().map(|v| v * v).sum::<f64>();
+        if !(x.is_finite() && y.is_finite() && z.is_finite()) || !n2.is_finite() || (n2 - 1.0).abs() > 1e-9 {
+            return None;
+        }
+        Some(crate::schema::Location { pos: crate::geometry::Point3::new(x, y, z), rot: q })
+    }
 }
 
 /// The fixture marker as files hold it (M3.2 stage B): a tag on a model

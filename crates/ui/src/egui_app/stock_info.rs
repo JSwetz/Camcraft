@@ -3,14 +3,14 @@
 //! Models" wraps - so stock can be sized against it by hand.
 //! Provenance: our own UI; the box is `model::solid_world_aabb`.
 
-use camcraft_app::model;
 use camcraft_app::units::{self, Unit};
 use flecs_ecs::prelude::World;
 
 /// The two readout lines - size, then extents - or `None` with no model
 /// geometry in the document.
 pub(super) fn part_size_lines(world: &World, u: Unit) -> Option<[String; 2]> {
-    let b = model::solid_world_aabb(world)?;
+    // #326: the part as the active setup holds it.
+    let b = camcraft_app::setup_align::solid_aabb_in(world, camcraft_app::setup::active(world).as_deref())?;
     let (lo, hi) = (b.min, b.max);
     let s = |v: f64| units::len(v, u, 3);
     let size = format!(

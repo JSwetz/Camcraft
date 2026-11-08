@@ -45,8 +45,8 @@ impl Height {
 /// `setup` is the declared setup of the asking operation (`None` = the
 /// first setup, which in a document without setups is the old global
 /// lookup exactly - the implicit-setup law of [`crate::setup`]). The
-/// model bounds are document-wide: the part is the part whatever setup
-/// holds it; only the stock box and the offset planes follow the setup.
+/// model bounds are the parts as the setup holds them (#326's part
+/// alignment; as modelled, they are the document bounds).
 /// `src` is the asking operation's own source, which the Selection
 /// references read ([`selection_z_range`], M11.3 A); None = no op in
 /// hand, and a Selection reference is then unresolved, never guessed.
@@ -61,8 +61,11 @@ pub fn resolve_height(
         HeightReference::Fixed => return (h.offset.is_finite()).then_some(h.offset),
         HeightReference::TopOfStock => model::stock_world_aabb_for(world, setup)?.max.z,
         HeightReference::BottomOfStock => model::stock_world_aabb_for(world, setup)?.min.z,
-        HeightReference::TopOfModel => model::solid_world_aabb(world)?.max.z,
-        HeightReference::BottomOfModel => model::solid_world_aabb(world)?.min.z,
+        // #326: the model bounds in the setup's frame - a flipped part's
+        // top is its former bottom (identical to the document bounds
+        // when the setup holds the part as modelled).
+        HeightReference::TopOfModel => crate::setup_align::solid_aabb_in(world, setup)?.max.z,
+        HeightReference::BottomOfModel => crate::setup_align::solid_aabb_in(world, setup)?.min.z,
         HeightReference::WorkOffset => {
             // #329: the setup's offset, never the height's own.
             let slot = crate::setup::wcs_slot(world, setup);

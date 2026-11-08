@@ -72,6 +72,7 @@ pub fn collect(world: &World) -> ProjectFile {
                             .work_offset
                             .and_then(|i| crate::schema::WCS_SLOTS.get(i))
                             .map(|w| (*w).to_string()),
+                        part_alignment: d.part_alignment.as_ref().map(AlignmentDto::from_location),
                     })
             } else {
                 None
