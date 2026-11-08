@@ -107,6 +107,8 @@ mod fresh_op_tests;
 #[cfg(test)]
 mod tool_number_tests;
 #[cfg(test)]
+mod ball_corner_tests;
+#[cfg(test)]
 mod gate_route_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`

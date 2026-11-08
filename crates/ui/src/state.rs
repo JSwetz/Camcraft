@@ -736,23 +736,34 @@ impl ToolUi {
         }
     }
 
+    /// The draft's kind as the app names it: the inverse of the numbering
+    /// [`ToolUi::from_tool`] writes (anything unknown reads as an end mill).
+    #[must_use]
+    pub fn tool_kind(&self) -> ToolKind {
+        match self.kind {
+            1 => ToolKind::BallNose,
+            2 => ToolKind::BullNose,
+            3 => ToolKind::Drill,
+            4 => ToolKind::Tap,
+            5 => ToolKind::Bore,
+            6 => ToolKind::Turning,
+            7 => ToolKind::Groove,
+            8 => ToolKind::Thread,
+            9 => ToolKind::Form,
+            10 => ToolKind::Taper,
+            11 => ToolKind::Probe,
+            _ => ToolKind::EndMill,
+        }
+    }
+
+    /// The tool this draft states. A ball's corner is saved as its ball
+    /// (#263, [`Tool::tip_corner_r`]), so the document holds the radius
+    /// the readers cut with, not whatever the draft carried over from
+    /// another kind.
     #[must_use]
     pub fn to_tool(&self) -> Tool {
-        Tool {
-            kind: match self.kind {
-                1 => ToolKind::BallNose,
-                2 => ToolKind::BullNose,
-                3 => ToolKind::Drill,
-                4 => ToolKind::Tap,
-                5 => ToolKind::Bore,
-                6 => ToolKind::Turning,
-                7 => ToolKind::Groove,
-                8 => ToolKind::Thread,
-                9 => ToolKind::Form,
-                10 => ToolKind::Taper,
-                11 => ToolKind::Probe,
-                _ => ToolKind::EndMill,
-            },
+        let mut tool = Tool {
+            kind: self.tool_kind(),
             diameter: self.diameter,
             corner_r: self.corner_r,
             tip_angle: self.tip_angle,
@@ -770,7 +781,9 @@ impl ToolUi {
             tool_material: self.tool_material,
             flutes: self.flutes,
             center_cutting: self.center_cutting,
-        }
+        };
+        tool.corner_r = tool.tip_corner_r();
+        tool
     }
 }
 
