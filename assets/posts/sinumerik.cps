@@ -14,6 +14,7 @@ extension = "nc";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -27,6 +28,7 @@ var tNo = 0;
 var inCycle = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
 var compG = "";            // G41/G42/G40 pending for the next straight block (#39)
@@ -198,6 +200,7 @@ function compRefuse(what) {
 function onParameter(name, value) {
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -238,6 +241,24 @@ function startPreamble() {
   if (coolant) block([coolant]);
 }
 
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M1"]); return; }
+  if (ask === "stop") { block(["M0"]); return; }
+  if (ask === "home") {
+    block(["G0", "G53", "Z0"]);   // machine coordinates, Z first (onClose's law)
+    block(["G0", "G53", "X0", "Y0"]);
+    return;
+  }
+  msg(coolantWho() + "unknown after-operation ask " + ask);
+}
+
 function endPreamble() {
   if (!sectionOpen) return;
   restorePlane();            // M11.2 A: the plane never leaks past its section
@@ -253,6 +274,7 @@ function endPreamble() {
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
+  afterOp();
 }
 
 function onSection() { startPreamble(); }

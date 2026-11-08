@@ -19,7 +19,7 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`, `coolantModes`, `liveTooling`. All but the last two are
+`capabilities`, `coolantModes`, `liveTooling`, `afterModes`. All but the last three are
 text the engine reads none of; `liveTooling = true` (issue #33) says the
 script voices a `PARAM LiveTool` section - C-axis live-tool work, the
 stream's X Y Z the part-frame tip and C the stated spindle angle - and
@@ -27,7 +27,11 @@ without it the engine refuses such a section by name (only
 fanuc-lathe.cps sets it); `coolantModes = true` says the script reads `PARAM
 Coolant` (#150) - without it the engine refuses a section asking Off,
 Mist or Through tool by name, since the script would post its own
-flood. Every shipped post sets it. The file-viewer's about box reads
+flood. Every shipped post sets it. `afterModes = true` says the script
+reads `PARAM AfterOperation` (#110) - without it the engine refuses a
+section asking Optional stop, Program stop or Go home by name, since
+the script would run straight on into the next tool. The six posts
+that write it set it. The file-viewer's about box reads
 the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
@@ -39,7 +43,7 @@ argument semantics in `docs/CNC-INTERMEDIATE.md`):
 
 | hook | fires |
 |---|---|
-| `onOpen` | once, before all records (write the header here) |
+| `onOpen` | once, before all records (write the header here; the global `programNumber` is the program's number - 1 for a whole job, 1, 2, 3... per file when posting one file per operation (#111) - for a dialect with an O-word) |
 | `onParameter(name, value)` | per `PARAM`; `onSpindleSpeed` follows the `SpindleSpeed` one |
 | `onToolChange(number, name)` | per `TOOL` |
 | `onSection` / `onSectionEnd` | per operation span (preamble bookends) |
@@ -71,7 +75,13 @@ write (the gate), so the released program never carries one.
   end; a flood ask on a machine whose list states only other kinds is
   refused the same way, and every coolant refusal names the section's
   `OperationName` (#150); names compare case-blind, spaces and
-  underscores read as hyphens), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  underscores read as hyphens; a section's `PARAM AfterOperation` -
+  `optional-stop`, `stop`, `home` (#110) - is written after its
+  spindle stop in the dialect's own words, a home the dialect cannot
+  trust is refused by `message()` naming the operation, and the ask
+  resets there too; a script that writes it declares
+  `afterModes = true`, and the engine refuses any stop or home ask,
+  by operation name, for a script that does not), `machine.rtcp` and `machine.rotaries` (RTCP may be
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.

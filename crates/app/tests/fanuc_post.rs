@@ -109,6 +109,7 @@ fn a_dumped_lean_posts_the_same_program_as_a_tilted_stream() {
         stock_top_z: 0.0,
         warnings: vec![],
         coolant: Default::default(),
+        after: Default::default(),
     };
     let stream = cnc::serialize(&camcraft_app::post::dump(&path, &d));
     // The seam wrote the letters onto the stream it dumped - the

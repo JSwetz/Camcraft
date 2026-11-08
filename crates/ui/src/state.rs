@@ -34,6 +34,9 @@ use camcraft_app::stock::{self, StockShape};
 use camcraft_app::tools::{Tool, ToolKind, catalog};
 use camcraft_app::units::{self, Unit};
 use camcraft_app::{machine, model, posting, project, world::new_world};
+
+#[path = "state_per_op.rs"]
+mod per_op;
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -54,6 +57,9 @@ pub enum CommandKind {
     PostProgramDialog,
     /// The same post at a known path - what the headless tests run.
     PostProgramFile(PathBuf),
+    /// One file per operation into a known folder (#111) - the
+    /// headless twin of the folder dialog.
+    PostProgramFolder(PathBuf),
     Undo,
     Redo,
     DeleteSelected,
@@ -192,6 +198,19 @@ pub enum CommandKind {
         name: String,
         coolant: camcraft_app::operation::CoolantMode,
     },
+    /// The op menu's "After this operation" rows (#110): continue, an
+    /// optional or program stop, or a trip home - one undo unit.
+    EditOperationAfter {
+        name: String,
+        after: camcraft_app::operation::AfterOperation,
+    },
+    /// The op menu's Suppress / Unsuppress row (#110): left out of the
+    /// posted program, toolpath kept - one undo unit.
+    SuppressOperation { name: String, suppressed: bool },
+    /// The post page's "Skip pauses and homes" switch (#110).
+    SetSkipStops(bool),
+    /// The post page's Output choice (#111): `true` = one file per op.
+    SetPerOpOutput(bool),
     /// The op's context-menu retype (M9.1): change the operation's kind
     /// in place, numbers carried by the one retype law, one undo unit.
     ChangeOperationKind {
@@ -2303,12 +2322,9 @@ impl State {
                 }
             }
             CommandKind::SaveProjectFile(path) => self.save_project_path(path),
-            CommandKind::PostProgramDialog => {
-                if let Some(path) = post_program_dialog() {
-                    self.post_program_path(path);
-                }
-            }
+            CommandKind::PostProgramDialog => self.post_program_dialog(),
             CommandKind::PostProgramFile(path) => self.post_program_path(path),
+            CommandKind::PostProgramFolder(dir) => self.post_program_folder(dir),
             CommandKind::Undo => {
                 self.status = if self.history.undo(&self.world) {
                     self.doc_version += 1;
@@ -2677,6 +2693,46 @@ impl State {
                         self.status = format!("coolant set to {} for {name}", coolant.label());
                     }
                     Err(err) => self.refuse(ErrorScope::Operation, format!("coolant not changed: {err}")),
+                }
+            }
+            CommandKind::EditOperationAfter { name, after } => {
+                match EditOperationParams::with_after(&self.world, &name, after) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("after {name}: {}", after.label());
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("after-action not changed: {err}")),
+                }
+            }
+            CommandKind::SuppressOperation { name, suppressed } => {
+                match EditOperationParams::with_suppressed(&self.world, &name, suppressed) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = if suppressed {
+                            format!("{name} suppressed: left out of the posted program")
+                        } else {
+                            format!("{name} back in the posted program")
+                        };
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("suppression not changed: {err}")),
+                }
+            }
+            CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
+            CommandKind::SetSkipStops(skip) => {
+                let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
+                match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = if skip {
+                            "post skips every pause and home".to_owned()
+                        } else {
+                            "post writes the operations' pauses and homes".to_owned()
+                        };
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("post options not changed: {err}")),
                 }
             }
             CommandKind::ChangeOperationKind { name, kind } => {

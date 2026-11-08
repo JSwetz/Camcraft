@@ -26,6 +26,7 @@
 //! `COMP` record arrives - the one way a compensated stream could post
 //! as an undersize part.
 
+mod after_op;
 pub mod cnc;
 pub mod cnc_thread;
 mod coolant;
@@ -35,6 +36,7 @@ pub mod machine;
 pub mod probe_rec;
 mod program;
 
+pub use after_op::AfterOperation;
 pub use coolant::CoolantMode;
 pub use engine::{LineInfo, PostOutput, TraceBlock};
 
@@ -111,6 +113,10 @@ pub struct Dump<'a> {
     /// The cutting fluid the op asks for (#112). Flood is the stream's
     /// silent default; any other ask rides a `PARAM Coolant`.
     pub coolant: CoolantMode,
+    /// What the machine does once this op is done (#110). Carrying on
+    /// is the stream's silent default; any other choice rides a
+    /// `PARAM AfterOperation`.
+    pub after: AfterOperation,
     /// The probing result (#108): `Some` for a Probe op, whose path
     /// carries touches - the stream then closes the section with a
     /// `FOUND` record built from the touches. None for every cutting op.
@@ -138,6 +144,7 @@ impl<'a> Default for Dump<'a> {
             part_transfer: false,
             probe_tol: None,
             coolant: CoolantMode::Flood,
+            after: AfterOperation::None,
             probe_result: None,
         }
     }
@@ -173,6 +180,9 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     out.push(Record::Param { name: "StockZTop".into(), value: json!(d.stock_top_z) });
     if let Some(word) = d.coolant.param_word() {
         out.push(Record::Param { name: "Coolant".into(), value: json!(word) });
+    }
+    if let Some(word) = d.after.param_word() {
+        out.push(Record::Param { name: "AfterOperation".into(), value: json!(word) });
     }
     // A path stating spindle C angles (issue #33) is live-tool work on
     // a C turn: the section says so before it opens, so a script can

@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AfterOperation, AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -180,6 +180,13 @@ pub struct Operation {
     /// The cutting fluid the post switches on for this operation
     /// (#112). Flood by default - what every post emitted before.
     pub coolant: CoolantMode,
+    /// What the machine does once this operation is done (#110):
+    /// carry on by default - what every post emitted before.
+    pub after: AfterOperation,
+    /// Left out of the posted program (#110), toolpath and all kept:
+    /// the post (and the program sim that judges it) skip it; it still
+    /// generates, and un-suppressing restores it as it was.
+    pub suppressed: bool,
 }
 
 /// User-facing operation label and explicit position within its setup.
@@ -267,12 +274,20 @@ pub enum PostRef {
 /// `SetPostOptions` (undoable) or a document load. A script reads the
 /// ones it knows from its `postOptions` global and ignores the rest;
 /// the default is every post's own default, so a document that never
-/// chose writes no key.
+/// chose writes no key. `skip_stops` (#110) posts the program without
+/// any operation's after-action (no M0 / M1, no trips home) - a
+/// debugged program runs straight through, the ops keep their choices.
+/// `per_op` (#111) is the Output choice: off (the default) posts one
+/// combined program, on writes one standalone program per operation.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PostOptions {
     /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
     /// default, or the two-block G76 cycle from the thread record).
     pub threading: ThreadingOutput,
+    /// Post without any operation's stop or trip home (#110).
+    pub skip_stops: bool,
+    /// One standalone program per operation (#111).
+    pub per_op: bool,
 }
 
 /// The thread-output choice of [`PostOptions`].
@@ -386,6 +401,7 @@ pub fn register_schema(world: &World) {
     world.component::<PostRef>();
     world.component::<PostOptions>();
     world.component::<ThemeRef>();
+    world.component::<PostOptions>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();
     world.component::<RibbonPins>();

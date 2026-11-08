@@ -26,6 +26,10 @@ var LINE = "";
 var properties = {};
 var W = properties;
 var currentPosition = { X: 0, Y: 0, Z: 0 };
+// The program's number (#111): 1 for a whole-job program; one file
+// per operation counts 1, 2, 3... in program order. A dialect that
+// writes an O-word reads it at onOpen.
+var programNumber = 1;
 var postOptions = {};
 var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm", spindleRanges: [], rigidTapping: true };
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
@@ -147,6 +151,10 @@ pub struct Script {
     /// voices C-axis live-tool sections. Without it a `PARAM LiveTool`
     /// section is refused by name.
     live_tooling: bool,
+    /// The `afterModes = true` manifest flag (#110): the script reads
+    /// `PARAM AfterOperation`. Without it a section asking a stop or a
+    /// trip home is refused by name - the script would run straight on.
+    after_modes: bool,
 }
 
 impl Script {
@@ -163,6 +171,7 @@ impl Script {
             present: Vec::new(),
             coolant_modes: false,
             live_tooling: false,
+            after_modes: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -179,6 +188,10 @@ impl Script {
             .unwrap_or(false);
         s.live_tooling = s
             .eval("typeof liveTooling !== \"undefined\" && liveTooling === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.after_modes = s
+            .eval("typeof afterModes !== \"undefined\" && afterModes === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         Ok(s)
@@ -198,6 +211,19 @@ impl Script {
     pub fn set_machine(&mut self, m: &Value) -> Result<(), PostError> {
         self.eval(&format!("machine = {m};"))?;
         Ok(())
+    }
+
+    /// Publish the program's number (#111) before `onOpen` reads it.
+    pub fn set_program_number(&mut self, n: u32) -> Result<(), PostError> {
+        self.eval(&format!("programNumber = {n};"))?;
+        Ok(())
+    }
+
+    /// A top-level string the script states (a manifest entry such as
+    /// `extension`), or `None` when it states none.
+    pub fn string_global(&mut self, name: &str) -> Result<Option<String>, PostError> {
+        let v = self.eval(&format!("(typeof {name} === \"string\") ? {name} : null"))?;
+        Ok(v.as_string().map(|s| s.to_std_string_escaped()))
     }
 
     /// Publish the document's post options once (issue #34).
@@ -253,6 +279,12 @@ impl Script {
     /// a C-axis live-tool section (issue #33).
     pub fn voices_live_tooling(&self) -> bool {
         self.live_tooling
+    }
+
+    /// True when the script declares `afterModes = true` - it reads
+    /// `PARAM AfterOperation` and writes the stop or home (#110).
+    pub fn reads_after_operation(&self) -> bool {
+        self.after_modes
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

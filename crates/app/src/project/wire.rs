@@ -108,6 +108,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 cache: model::toolpath_of(world, &entity).map(|c| PathDto::from_cache(&c)),
                 area: AreaDto::from_controls(&op.area),
                 coolant: op.coolant,
+                after: op.after,
+                suppressed: op.suppressed,
                 setup: op.setup,
             });
             // Parametric stock regenerates its facets on load; offsets, tools,
@@ -168,10 +170,11 @@ pub fn collect(world: &World) -> ProjectFile {
         active_setup: crate::setup::stored_active(world),
         // The default post matches every pre-v23 document, so it
         // writes no key (the mute-machine law, worn in the post's clothes).
-        // The default options write no key (issue #34, the post's law).
+        // The default options write no key (issue #34, the post's law);
+        // the #110 / #111 switches ride their own top-level keys below.
         post_options: {
             let o = crate::posting::post_options(world);
-            (o != crate::schema::PostOptions::default()).then(|| PostOptionsDto {
+            (o.threading != crate::schema::ThreadingOutput::default()).then(|| PostOptionsDto {
                 threading: match o.threading {
                     crate::schema::ThreadingOutput::G32Passes => None,
                     crate::schema::ThreadingOutput::G76Cycle => Some("g76".into()),
@@ -196,6 +199,10 @@ pub fn collect(world: &World) -> ProjectFile {
         pinned: crate::ribbon::pinned_of(world),
         // No stated material writes no key (the theme's law again).
         material: crate::cutting::material_of(world).map(|m| m.word().to_owned()),
+        // Off writes no key (the material's law, #110).
+        skip_stops: crate::posting::post_options(world).skip_stops,
+        // One combined program writes no key (#111).
+        per_op_files: crate::posting::post_options(world).per_op,
         entities,
     }
 }

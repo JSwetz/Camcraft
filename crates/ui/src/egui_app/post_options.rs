@@ -37,6 +37,6 @@ pub(super) fn threading_picker(ui: &mut Ui, state: &mut State) {
             .on_hover_text("How a thread posts: one G76 multi-pass cycle the control runs, or every pass as G32 moves");
     });
     if let Some(t) = pick {
-        state.pending.push_back(CommandKind::SetPostOptions(PostOptions { threading: t }));
+        state.pending.push_back(CommandKind::SetPostOptions(PostOptions { threading: t, ..now }));
     }
 }

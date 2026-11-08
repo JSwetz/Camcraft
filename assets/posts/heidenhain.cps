@@ -20,6 +20,7 @@ extension = "I";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -32,6 +33,7 @@ var toolWait = false;
 var tNo = 0;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
 var modalWait = false;  // G40 G90 rides the section's first motion block
@@ -177,6 +179,7 @@ function onRadiusCompensation() {
 function onParameter(name, value) {
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) {
     wcsWord = String(value);
     if (wcsWord !== "G54") {
@@ -227,6 +230,26 @@ function startPreamble() {
   if (coolant) block([coolant]);
 }
 
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M1"]); return; }
+  if (ask === "stop") { block(["M0"]); return; }
+  if (ask === "home") {
+    // #50: this dialect has no home move it can trust - G53 is a
+    // datum-table shift and M91 rides a builder-set datum - so a
+    // trip home is refused by name, never guessed.
+    msg(coolantWho() + "the Heidenhain post cannot go home after an operation (no machine-referenced home it can trust) - choose a stop instead");
+    return;
+  }
+  msg(coolantWho() + "unknown after-operation ask " + ask);
+}
+
 function endPreamble() {
   if (!sectionOpen) return;
   sectionOpen = false;
@@ -235,6 +258,7 @@ function endPreamble() {
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
+  afterOp();
 }
 
 function onSection() { startPreamble(); }

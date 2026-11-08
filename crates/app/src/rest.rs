@@ -82,6 +82,27 @@ pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u6
     (!ahead.is_empty()).then(|| digest_of(&ahead))
 }
 
+/// The suppressed operations (#110) ahead of `name` in its setup that
+/// cut something: the program `name` was generated against holds their
+/// cut (this walk has no suppressed filter - by design, the mask is
+/// what WAS planned), so posting `name` without them would rapid and
+/// slot into stock nothing judged. Never-cutting ones (never
+/// generated, an empty path, a probe) are not named: they removed no
+/// material `name` could have assumed gone.
+#[must_use]
+pub fn suppressed_cuts_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<String> {
+    ahead_of(world, name, setup, false)
+        .into_iter()
+        .filter(|a| a.cut)
+        .filter(|a| {
+            crate::model::find_by_name(world, &a.name)
+                .and_then(|e| crate::model::operation_of(world, &e))
+                .is_some_and(|op| op.suppressed)
+        })
+        .map(|a| a.name)
+        .collect()
+}
+
 /// The grid the previous operations leave standing, and the digest it
 /// came from. `tool_r` is the consumer's own radius: the lattice must
 /// resolve its passes, and the predecessors' atoms can only make it

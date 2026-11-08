@@ -1621,9 +1621,22 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
                 1 => "  1 warning".to_owned(),
                 n => format!("  {n} warnings"),
             };
+            // #110: a suppressed op and a stop / home after it say so
+            // on the row; the default says nothing.
+            let flow = model::operation_of(&state.world, &entity).map_or_else(String::new, |op| {
+                let mut s = String::new();
+                if op.suppressed {
+                    s.push_str("  SUPPRESSED");
+                }
+                if !op.after.is_default() {
+                    s.push_str("  then ");
+                    s.push_str(op.after.label());
+                }
+                s
+            });
             let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
-                Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
-                None => format!("{kind}  {tag}{warn_text}"),
+                Some(why) => format!("{kind}  BLOCKED{warn_text}{flow}  {why}"),
+                None => format!("{kind}  {tag}{warn_text}{flow}"),
             };
             let hidden = state.hidden_paths.contains(&name);
             push_row(
@@ -1786,6 +1799,20 @@ const MENU_DELETE: usize = usize::MAX - 1;
 const MENU_RENAME: usize = usize::MAX - 2;
 const MENU_COPY: usize = usize::MAX - 3;
 const MENU_PASTE: usize = usize::MAX - 4;
+/// #110: suppress / unsuppress, and the after-action row that steps
+/// through `AfterOperation::ALL`.
+const MENU_SUPPRESS: usize = usize::MAX - 5;
+const MENU_AFTER: usize = usize::MAX - 6;
+
+/// The after-action row's text: what happens now; a click steps on.
+fn after_row_label(a: operation::AfterOperation) -> &'static str {
+    match a {
+        operation::AfterOperation::None => "After: continue (click to change)",
+        operation::AfterOperation::OptionalStop => "After: optional stop (M1)",
+        operation::AfterOperation::ProgramStop => "After: program stop (M0)",
+        operation::AfterOperation::GoHome => "After: go home",
+    }
+}
 
 /// The operation's retype menu (M9.1): what replaced the page's Type
 /// combo. Grouping is the retired combo's law restated once -
@@ -1833,6 +1860,10 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     let here = name.and_then(|name| model::find_by_name(&state.world, name))
         .and_then(|entity| model::operation_of(&state.world, &entity))
         .map(|op| op.params.kind().ordinal());
+    // #110: the op's suppression and after-action, for the menu rows.
+    let flow = name.and_then(|name| model::find_by_name(&state.world, name))
+        .and_then(|entity| model::operation_of(&state.world, &entity))
+        .map(|op| (op.suppressed, op.after));
     let machine = camcraft_app::machine::kind_of(&state.world);
     // The rows: section headers and kinds, in registry order, read
     // from the same taxonomy as the ribbon's cells - never a list.
@@ -1849,6 +1880,13 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     if name.is_some() {
         lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
         lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
+        // #110: beside the verbs, so they stay on screen however long
+        // the kind list below runs.
+        let suppressed = flow.is_some_and(|(s, _)| s);
+        lines.push((if suppressed { "Unsuppress operation" } else { "Suppress operation" }, true, Some(MENU_SUPPRESS)));
+        // One row that steps through the after-actions (a click is one
+        // undoable edit), so the menu grows by two rows, not six.
+        lines.push((after_row_label(flow.map_or(operation::AfterOperation::None, |(_, a)| a)), true, Some(MENU_AFTER)));
     }
     let here_section = here.and_then(|index| operation::KindInfo::ALL.get(index).map(|k| k.section));
     for s in operation::Section::ORDER.into_iter().filter(|_| name.is_some()) {
@@ -1955,6 +1993,15 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
                 state.pending.push_back(CommandKind::ClearToolpath(name.to_owned()));
             } else if i == MENU_DELETE {
                 state.pending.push_back(CommandKind::DeleteOperation(name.to_owned()));
+            } else if i == MENU_SUPPRESS {
+                let suppressed = !flow.is_some_and(|(s, _)| s);
+                state.pending.push_back(CommandKind::SuppressOperation { name: name.to_owned(), suppressed });
+            } else if i == MENU_AFTER {
+                let all = operation::AfterOperation::ALL;
+                let now = flow.map_or(operation::AfterOperation::None, |(_, a)| a);
+                let k = all.iter().position(|a| *a == now).unwrap_or(0);
+                let after = all.get((k + 1) % all.len()).copied().unwrap_or_default();
+                state.pending.push_back(CommandKind::EditOperationAfter { name: name.to_owned(), after });
             } else if Some(i) != here {
                 let choice = (name.to_owned(), i);
                 if state.retype_confirm.as_ref() == Some(&choice) {

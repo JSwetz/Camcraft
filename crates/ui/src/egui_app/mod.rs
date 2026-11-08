@@ -103,6 +103,8 @@ mod dialog_tests;
 #[cfg(test)]
 mod coolant_tests;
 #[cfg(test)]
+mod after_op_tests;
+#[cfg(test)]
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;

@@ -15,6 +15,7 @@ extension = "nc";
 setCodePage = "utf-8";
 capabilities = 2; // reference contract: integer feature mask (bit 2 = turning)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine refuses them for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
@@ -88,6 +89,7 @@ var inCycle = false;       // a cycle group is open; its chain is suppressed
 var sectionOpen = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (world -> program)
 var clampDone = false;     // G50 once per program
@@ -206,10 +208,20 @@ function coolantFor(ask) {
 }
 
 // -------------------------------------------------------------- header
+// The program's O-word (#111): O0001 for the whole job, and one file
+// per operation counts up (the engine's programNumber); a host that
+// publishes none posts O0001.
+function oWord() {
+  var n = typeof programNumber !== "undefined" ? Math.round(Number(programNumber) || 1) : 1;
+  var t = String(Math.max(1, Math.min(n, 9999)));
+  while (t.length < 4) t = "0" + t;
+  return "O" + t;
+}
+
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block(["O0001", "(" + nm + ")"]);
+  block([oWord(), "(" + nm + ")"]);
   block(["G21", "G18", "G40", "G80", "G99"]);   // mm, ZX plane, no nose comp, feed/rev
 }
 
@@ -225,6 +237,7 @@ function onParameter(name, value) {
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "LiveTool") { liveAsk = true; return; }
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -270,6 +283,24 @@ function startPreamble() {
   if (coolant) block([coolant]);
 }
 
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M01"]); return; }
+  if (ask === "stop") { block(["M00"]); return; }
+  if (ask === "home") {
+    block(["G28", "U0"]);         // X clear of the part first, then Z
+    block(["G28", "W0"]);
+    return;
+  }
+  msg(coolantWho() + "unknown after-operation ask " + ask);
+}
+
 function endPreamble() {
   if (!sectionOpen) return;
   sectionOpen = false;
@@ -289,6 +320,7 @@ function endPreamble() {
     return;
   }
   block(["M05"]);
+  afterOp();
 }
 
 // --------------------------------------------- C-axis live tooling (#33)

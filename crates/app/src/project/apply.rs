@@ -494,6 +494,9 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             Some("g76") => crate::schema::ThreadingOutput::G76Cycle,
             Some(other) => return Err(corrupt(format!("unknown threading output {other:?}"))),
         },
+        // The top-level switches (#110, #111): an absent key is off.
+        skip_stops: file.skip_stops,
+        per_op: file.per_op_files,
     };
     let doc_units = match file.units.as_deref() {
         None | Some("mm") => Unit::Millimeters,
@@ -675,6 +678,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     setup: odto.setup,
                     area: odto.area.to_controls(),
                     coolant: odto.coolant,
+                    after: odto.after,
+                    suppressed: odto.suppressed,
                 });
                 if odto.label.is_some() || odto.order.is_some() {
                     entity.entity_view(world).set(OperationMeta {

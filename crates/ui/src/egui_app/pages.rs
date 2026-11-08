@@ -422,6 +422,34 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+    // #110: post the program straight through - every operation keeps
+    // its stop or trip home, the post leaves them all out. A command.
+    let skip = posting::post_options(&state.world).skip_stops;
+    let mut want = skip;
+    ui.checkbox(&mut want, "Skip pauses and homes").on_hover_text(
+        "post without any operation's optional stop, program stop or trip home - the operations keep their choices",
+    );
+    if want != skip {
+        state.pending.push_back(CommandKind::SetSkipStops(want));
+    }
+    // #111: one combined program, or one standalone file per operation
+    // (a folder at post time). A command, like the switch above.
+    let per_op = posting::post_options(&state.world).per_op;
+    let mut pick = per_op;
+    ui.horizontal(|ui| {
+        ui.label("Output");
+        egui::ComboBox::from_id_salt("post_output")
+            .selected_text(if per_op { "One file per operation" } else { "One program" })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut pick, false, "One program");
+                ui.selectable_value(&mut pick, true, "One file per operation");
+            })
+            .response
+            .on_hover_text("one file per operation writes each operation as its own standalone program into a folder, so it can be rerun on its own");
+    });
+    if pick != per_op {
+        state.pending.push_back(CommandKind::SetPerOpOutput(pick));
+    }
     super::post_options::threading_picker(ui, state);
 }
 

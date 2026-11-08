@@ -87,6 +87,7 @@ behavior only):
 | `WorkOffset` `OriginX` `OriginY` `OriginZ` | WCS slot + machine origin (PARAMs) |
 | `StockXYLeft/Right/Front/Back` `StockZTop` | stock bounds (PARAMs) |
 | `Coolant` | `off` / `mist` / `through-tool` (PARAM, #112) - absent means flood; the post picks the machine's code of that family, refusing by operation name when it states none; a script without `coolantModes = true` is refused any non-flood ask (#150) |
+| `AfterOperation` | `optional-stop` / `stop` / `home` (PARAM, #110) - absent means carry on; the post writes its dialect's M1 / M0 / home move after the section's spindle stop, or refuses by name; a script without `afterModes = true` is refused any stop or home ask by operation name |
 | `LiveTool` | `radial` (PARAM, issue #33): the section is C-axis live-tool work - every move carries `A 0 B 0 C <c>` with C the stated spindle angle (unwrapped) that turns the part-frame tip onto the live tool's +X station; a script without `liveTooling = true` is refused the section by name |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
