@@ -13578,3 +13578,28 @@ revolved (follow-up material if users hit it with long keyways).
   states the OD assumption (an internal blade must flip it or pass None).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
+
+## #38: G41/G42 wear compensation - the centre path under the register's wear delta (2026-11-08)
+
+**`Compensation::Wear` joins Computer and Control on the contour's
+`Approach`** (default Computer: every golden byte-identical; the project
+file gains an additive `wear_comp` key, the digest a byte only when on).
+Wear walks the SAME centre path Control does - same mid-run seam, same
+straight leads at least a radius long, same doors (tabs, blends, overlap,
+keep-down links, open contours and runs, 3+2 tilt), refused under the name
+"wear compensation" - and its `CompSpan` (flag `wear`) programs those
+centre moves verbatim under G41/G42 Dn / G40: the machine-tool handbooks'
+wear-offset practice, where the register holds only the wear delta (zero
+on a new cutter). The stream marks it `COMP LEFT|RIGHT <µm> WEAR`, the
+engine publishes `CompensationType` ("wear" / "control"), and Fanuc writes
+the same words plus one comment per section saying the D register holds
+the wear delta only - a full radius there would cut the part a radius
+undersize, and that is the one wrong set-up wear invites. Haas/Mazak/
+Sinumerik/Heidenhain and the lathe keep refusing any COMP by name.
+Considered and dropped: keeping the lead law only for Control (a wear
+delta is small, but the control still builds the vector over the engage
+block - a zero-length or arc engage is still a misread program), skipping
+the room law for wear (the centre path is already proved; the room law
+judges the part offset by a full radius, which wear never asks - so it is
+skipped, not reused), and a separate wear register number (the library
+carries none; D = tool number, as Control).
