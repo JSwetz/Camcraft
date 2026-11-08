@@ -60,7 +60,7 @@ go to `CHANGELOG.md`.
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review"`
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research"`
   (then drop any whose comments hold a live contributor claim - "A claim
   comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
@@ -146,6 +146,19 @@ go to `CHANGELOG.md`.
     claims, and drop the label where the only claim comment behind it is
     gone. A `claimed` label backed by an agent's claim comment follows the
     4 h rule above instead.
+- **`needs-research` is research, not code** (user, 2026-11-08: "the new
+  label needs-research ... covers larger open questioned issues that needs
+  to be broken down into issues and closed, before work can be picked up").
+  An issue labelled `needs-research` is a large idea with open questions
+  (e.g. #290 Wire/Sinker EDM, #291 documentation site). Pick never takes it
+  for code. Working it means: answer the open questions in issue comments
+  (research, recorded decisions), then file the concrete sub-issues it
+  lists - each with one `P*`, `area:*`, `source:agent` when an agent files
+  it, a "Done means" line and "Part of #N" - and link them back from the
+  umbrella. When every sub-issue is filed, drop `needs-research` and close
+  the umbrella with a comment naming them (or keep it open as a tracking
+  issue without the label if the user wants one). Only the sub-issues are
+  picked for code.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
