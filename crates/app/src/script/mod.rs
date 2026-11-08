@@ -26,7 +26,7 @@
 //! `run` declares the `Rc<RefCell<Env>>` before the `Context`, so the
 //! context and every function registered inside it is dropped first.
 
-mod api;
+pub(crate) mod api;
 mod report;
 
 use crate::commands::History;
@@ -103,6 +103,22 @@ pub(crate) struct Verb {
     pub f: VerbFn,
 }
 
+impl Env {
+    /// A fresh document and an empty history - one per run, or one per
+    /// MCP session (#128), which drives the same verbs without a script.
+    pub(crate) fn fresh() -> Self {
+        Self {
+            world: world::new_world(),
+            history: History::default(),
+            logs: Vec::new(),
+            errors: Vec::new(),
+            doc_path: None,
+            posted: None,
+            last_value: Value::Null,
+        }
+    }
+}
+
 impl Verb {
     pub(crate) const fn new(name: &'static str, arity: i32, f: VerbFn, ts: &'static str) -> Self {
         Self { name, arity, ts, f }
@@ -116,15 +132,7 @@ impl Verb {
 pub fn run(source: &str) -> ScriptOutcome {
     // Declaration order IS the lifetime law: env outlives ctx, so the
     // raw pointer the host closure carries is never dangling.
-    let env = Rc::new(RefCell::new(Env {
-        world: world::new_world(),
-        history: History::default(),
-        logs: Vec::new(),
-        errors: Vec::new(),
-        doc_path: None,
-        posted: None,
-        last_value: Value::Null,
-    }));
+    let env = Rc::new(RefCell::new(Env::fresh()));
     let raw = Rc::as_ptr(&env);
     let mut ctx = match boot(raw) {
         Ok(ctx) => ctx,
@@ -327,7 +335,7 @@ interface PostOptions {
   /** The .nc (or .cnc) file to write. Required. */
   to: string;
   /** A built-in post name - "Fanuc", "Haas", "Siemens 840D",
-   *  "Heidenhain", "Mazak" - or the path of a .cps file.
+   *  "Heidenhain", "Mazak", "Tormach PathPilot" - or the path of a .cps file.
    *  Omitted means the document's own post. */
   cps?: string;
   /** Also return the program text in the result. */

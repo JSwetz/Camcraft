@@ -321,7 +321,13 @@ impl TiltedFrame {
             }
             Vec::new()
         };
-        Toolpath { moves, cycles: local.cycles.clone(), notes, comps }
+        // Threading records (issue #34) are turning intent - a lathe
+        // never runs a tilted work plane; a tilted frame drops them
+        // and says so, and the passes post as themselves (G32 form).
+        if !local.threads.is_empty() {
+            notes.push("threading: a thread cycle does not ride a tilted frame - this path posts its explicit passes".into());
+        }
+        Toolpath { moves, cycles: local.cycles.clone(), notes, comps, threads: Vec::new() }
     }
 
     /// A local planar region (the cut's footprint at local height

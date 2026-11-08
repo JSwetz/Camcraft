@@ -320,7 +320,14 @@ pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<
     use super::axis_point::{borne_out, skip_budget, widest_skip};
     // Only the facets that MEET the axis may vouch for its roundness:
     // an outlier boss lent its bearings to a prism (review of PR #223).
-    let meets = data.iter().filter(|d| super::axis_robust::dist(d, ax).is_some_and(|e| e <= tol));
+    // #246: a flat that faces the axis squarely (a D-flat) meets it too -
+    // its centroid's line may miss by part of the flat's own width, but
+    // the foot of the axis lies on the face. Admitted: a facet square to
+    // the axis whose line misses by less than half its own size. An
+    // off-axis boss's facets miss by far more than their size.
+    let meets = data.iter().filter(|d| {
+        super::axis_robust::dist(d, ax).is_some_and(|e| e <= tol) || super::axis_point::faces_axis(d, ax)
+    });
     if widest_skip(meets.map(|d| d.n), u)? > skip_budget() {
         return None;
     }

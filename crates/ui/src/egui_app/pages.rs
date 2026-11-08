@@ -50,7 +50,7 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
     Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
@@ -188,6 +188,17 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             {}
         }
     });
+    // #197: the models' size, right above the numbers it informs.
+    match super::stock_info::part_size_lines(&state.world, u) {
+        Some([size, extents]) => {
+            ui.label(size).on_hover_text("The models' bounding box - what Fit to Models wraps, plus the fit margin");
+            ui.label(RichText::new(extents).weak());
+        }
+        None => {
+            ui.label(RichText::new("No models yet - load one to see its size.").weak());
+        }
+    }
+    ui.add_space(3.0);
     let shape = state.stock_ui.shape;
     if shape == 1 {
         field(ui, "Diameter");
@@ -233,8 +244,22 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     field(ui, "Rotation (yaw deg)");
     num_plain(ui, &mut state.stock_ui.yaw_deg);
     ui.add_space(6.0);
-    field(ui, "Fit margin");
-    num(ui, u, &mut state.stock_ui.fit_margin);
+    // #198: a box can be fitted by a separate allowance on each side.
+    let per_side = state.stock_ui.shape == 0 && {
+        ui.checkbox(&mut state.stock_ui.fit_per_side, "Per side")
+            .on_hover_text("Fit to Models pads each face of the box by its own allowance");
+        state.stock_ui.fit_per_side
+    };
+    if per_side {
+        for (i, name) in ["-X", "+X", "-Y", "+Y", "Bottom", "Top"].iter().enumerate() {
+            field(ui, &format!("Fit margin {name}"));
+            num(ui, u, &mut state.stock_ui.fit_sides[i]);
+        }
+    } else {
+        field(ui, "Fit margin");
+        num(ui, u, &mut state.stock_ui.fit_margin);
+    }
+    let sides = state.stock_ui.fit_sides;
     let shape = state.stock_ui.shape;
     let (dx, dy, dz) = (state.stock_ui.dx, state.stock_ui.dy, state.stock_ui.dz);
     let (diameter, height) = (state.stock_ui.diameter, state.stock_ui.height);
@@ -271,9 +296,12 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             });
         }
         if ui.button("Fit to Models").clicked() {
-            state
-                .pending
-                .push_back(CommandKind::StockFit { margin, shape });
+            let cmd = if per_side {
+                CommandKind::StockFitSides { sides }
+            } else {
+                CommandKind::StockFit { margin, shape }
+            };
+            state.pending.push_back(cmd);
         }
         if has_stock && ui.button("Delete").clicked() {
             state
@@ -394,6 +422,7 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+    super::post_options::threading_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not
@@ -1449,6 +1478,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     // centre-cutting tool; otherwise it helixes, ramps,
                     // or the operation is refused by name.
                     ui.checkbox(&mut state.tool_ui.center_cutting, "Centre cutting (may plunge into solid)");
+                    // #221: the machine's tool-table number - the post's
+                    // T and H words. 0 leaves it to the list position.
+                    field(ui, "Tool number (0 = list position)");
+                    ui.add(egui::DragValue::new(&mut state.tool_ui.number).range(0..=camcraft_app::tool_numbers::MAX));
                 });
                 ui.vertical(|ui| {
                     draw_tool_preview(ui, &preview_tool, u);
@@ -1469,6 +1502,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         name: name_now.clone(),
                         tool: state.tool_ui.to_tool(),
                     });
+                    push_number_if_changed(state, &name_now);
                 }
             } else {
                 let add = ui.add_enabled(block.is_empty(), egui::Button::new("Add tool"));
@@ -1477,6 +1511,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         name: name_now.trim().to_owned(),
                         tool: state.tool_ui.to_tool(),
                     });
+                    push_number_if_changed(state, name_now.trim());
                 }
                 if !block.is_empty() {
                     ui.label(block);
@@ -1489,6 +1524,17 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
         });
     if !open || close_clicked {
         state.close_tool_editor_window();
+    }
+}
+
+/// #221: queue a `SetToolNumber` when the editor's number differs from the
+/// tool's own (a new tool has none). Rides the same Apply / Add click as
+/// the geometry, but as its own undoable command.
+fn push_number_if_changed(state: &mut State, name: &str) {
+    let want = (state.tool_ui.number > 0).then_some(state.tool_ui.number);
+    let have = model::find_by_name(&state.world, name).and_then(|e| model::tool_number_of(&state.world, &e));
+    if want != have {
+        state.pending.push_back(CommandKind::SetToolNumber { name: name.to_owned(), number: want });
     }
 }
 

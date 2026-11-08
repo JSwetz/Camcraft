@@ -20,6 +20,7 @@ pub use camcraft_motion::machining3d;
 pub use camcraft_motion::multiaxis;
 pub use camcraft_motion::turning;
 pub mod machine;
+pub mod mcp;
 pub mod model;
 pub mod operation;
 pub mod pick;
@@ -42,6 +43,8 @@ pub mod stock_play;
 pub mod stock_play_worker;
 pub mod stock_view;
 pub mod tool_list;
+// #221: the number a tool posts as, and the clash law.
+pub mod tool_numbers;
 pub use camcraft_tools::tools;
 pub mod units;
 pub use camcraft_sim::verify;

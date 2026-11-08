@@ -192,7 +192,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
             // tool swings to the new station after it arrives -
             // except on the detour, where the index happens above
             // the bar's end face (stage G).
-            match traverse_s(hs[i - 1].dir, h.dir, hop_s) {
+            match traverse_s(&hs[i - 1], h, hop_s) {
                 Some(s) => rapid(&mut b, along(h, start_d(h, s))),
                 None => {
                     let z_top = p.stock_z_max.map(|z| z + p.clearance_d.max(margin));
@@ -280,7 +280,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
             // has no inflation factor - stand on the plain plane;
             // the next round's traverse branch takes the axial
             // detour, or refuses if the bar's Z top is unknown.
-            let s = traverse_s(h.dir, hs[i + 1].dir, hop_s).unwrap_or(hop_s);
+            let s = traverse_s(h, &hs[i + 1], hop_s).unwrap_or(hop_s);
             rapid(&mut b, along(h, start_d(h, s)));
         }
     }
@@ -294,21 +294,66 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
 }
 
 /// The hop radius for a traverse from one station's hole to
-/// another's: a straight chord between points at equal radius `s`
-/// whose stations stand at angle dtheta never closer than
-/// `s * cos(dtheta/2)` to the spindle axis - for a quarter turn
-/// that is `0.707 s`, so the plane inflates by sqrt(2) to keep the
-/// chord's closest approach at the stock-clear radius. Same
-/// station: factor 1, and the chord is the pure-Z slide between
-/// two mouths. Opposite stations: no finite plane saves the chord -
-/// it crosses the spindle at ANY radius - so `None` says "take the
-/// detour". `from.dot(to)` on unit XY plunges is cos(dtheta).
-fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
-    let dot = from.x * to.x + from.y * to.y;
+/// another's: the smallest plane `s >= hop_s` whose chord between the
+/// two hop points (`along(h, start_d(h, s))`, one on each hole's own
+/// column) never comes closer than `hop_s` to the spindle axis. For
+/// mouths ON their stations' centre lines a quarter turn apart this is
+/// the closed form `hop_s * sqrt(2 / (1 + cos dtheta))` (the chord's
+/// closest approach is `s * cos(dtheta/2)`); a mouth OFF its centre
+/// line (#81) moves the columns, so the chord is measured, not
+/// assumed: the plane grows from that closed form until the chord
+/// clears, then bisects back to the smallest clear plane. Same
+/// station: the chord is the slide between two mouths on one column,
+/// clear at `hop_s`. Opposite stations: no finite plane saves the
+/// chord - it crosses the spindle at ANY radius - so `None` says
+/// "take the detour". `from.dot(to)` on unit XY plunges is cos(dtheta).
+fn traverse_s(from: &CrossHole, to: &CrossHole, hop_s: f64) -> Option<f64> {
+    let dot = from.dir.x * to.dir.x + from.dir.y * to.dir.y;
     if dot < -0.9 {
         return None;
     }
-    Some(hop_s * (2.0 / (1.0 + dot)).sqrt())
+    let guess = hop_s * (2.0 / (1.0 + dot)).sqrt();
+    let clear = |s: f64| chord_reach(from, to, s) >= hop_s - 1e-9;
+    if clear(guess) {
+        // Never below the closed form: on-centre holes keep their
+        // proven plane exactly (no drift in existing chains).
+        return Some(guess);
+    }
+    let mut lo = guess;
+    let mut hi = guess;
+    for _ in 0..64 {
+        hi *= 2.0;
+        if clear(hi) {
+            break;
+        }
+        lo = hi;
+    }
+    if !clear(hi) {
+        return None; // no plane clears it: the detour (or its refusal) speaks
+    }
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        if clear(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+/// The closest the straight chord between the two holes' hop points at
+/// plane `s` comes to the spindle (the world Z axis), in XY - the
+/// segment-to-origin distance, endpoints included.
+fn chord_reach(from: &CrossHole, to: &CrossHole, s: f64) -> f64 {
+    let a = along(from, start_d(from, s));
+    let b = along(to, start_d(to, s));
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0.0 { (-(a.x * dx + a.y * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    let (px, py) = (a.x + t * dx, a.y + t * dy);
+    let r = (px * px + py * py).sqrt();
+    if r.is_finite() { r } else { 0.0 }
 }
 
 /// The axial detour between opposite stations (M5.2 G): lift on the

@@ -36,6 +36,7 @@ use crate::viewport::View3D;
 use super::icons;
 use super::layout;
 use super::machine_editor;
+use super::unsaved_prompt;
 use super::frame_watch::FrameWatch;
 use super::gpu;
 use super::gpu_init;
@@ -601,6 +602,8 @@ pub(crate) fn shell_layout(
     // (in-app egui::Window over the dock, None on a fresh State, so
     // snapshots never move until the Setup pane opens it).
     machine_editor::window(ui.ctx(), state);
+    // #107: the unsaved-changes prompt, last so it sits over everything.
+    unsaved_prompt::window(ui.ctx(), state);
 }
 
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
@@ -648,11 +651,15 @@ impl winit::application::ApplicationHandler for Shell {
             let _response = winit_state.on_window_event(window, &event);
         }
         match &event {
-            WindowEvent::CloseRequested => el.exit(),
+            // #107: the window X is a Quit like Ctrl+Q, so unsaved changes
+            // ask first. A shell whose GPU failed draws (and drains)
+            // nothing, so it closes at once.
+            WindowEvent::CloseRequested if self.failed => el.exit(),
+            WindowEvent::CloseRequested => crate::actions::quit(&mut self.state),
             WindowEvent::Resized(size) => self.on_resize(*size),
             WindowEvent::RedrawRequested => {
                 self.draw();
-                if self.exit_requested {
+                if self.exit_requested || self.state.request_quit {
                     el.exit();
                 }
             }
@@ -1017,18 +1024,34 @@ fn viewport_panel(
             .get(&egui::TextStyle::Small)
             .cloned()
             .unwrap_or_else(|| egui::FontId::proportional(11.0));
+        let to_px = |uv: [f32; 2]| egui::pos2(rx0 + uv[0] * rw, ry0 + uv[1] * rh);
+        let rgb8 = |rgb: [f32; 3]| {
+            egui::Color32::from_rgb(
+                (rgb[0] * 255.0).clamp(0.0, 255.0) as u8,
+                (rgb[1] * 255.0).clamp(0.0, 255.0) as u8,
+                (rgb[2] * 255.0).clamp(0.0, 255.0) as u8,
+            )
+        };
+        // #195: the origin triads, chunky - a dark outline, then the axis
+        // colour - over the 1 px GPU lines (a wgpu line has no width).
+        let shade = egui::Color32::from_black_alpha(170);
+        let segs = interact::gizmo_segments(state, aspect);
+        for (a, b, _) in &segs {
+            ui.painter().line_segment([to_px(*a), to_px(*b)], egui::Stroke::new(interact::GIZMO_OUTLINE_PX, shade));
+        }
+        for (a, b, rgb) in &segs {
+            ui.painter().line_segment([to_px(*a), to_px(*b)], egui::Stroke::new(interact::GIZMO_STROKE_PX, rgb8(*rgb)));
+        }
+        let axis_font = egui::FontId::proportional((font.size * 1.4).max(14.0));
         for (uv, rgb, text) in interact::overlay_labels(state, aspect) {
-            ui.painter().text(
-                egui::pos2(rx0 + uv[0] * rw, ry0 + uv[1] * rh),
-                egui::Align2::LEFT_TOP,
-                text,
-                font.clone(),
-                egui::Color32::from_rgb(
-                    (rgb[0] * 255.0).clamp(0.0, 255.0) as u8,
-                    (rgb[1] * 255.0).clamp(0.0, 255.0) as u8,
-                    (rgb[2] * 255.0).clamp(0.0, 255.0) as u8,
-                ),
-            );
+            let at = to_px(uv);
+            if interact::is_axis_label(&text) {
+                // Bigger, with a shadow, so a letter reads on any ground.
+                ui.painter().text(at + egui::vec2(1.0, 1.0), egui::Align2::LEFT_TOP, &text, axis_font.clone(), shade);
+                ui.painter().text(at, egui::Align2::LEFT_TOP, text, axis_font.clone(), rgb8(rgb));
+            } else {
+                ui.painter().text(at, egui::Align2::LEFT_TOP, text, font.clone(), rgb8(rgb));
+            }
         }
         for (a, b) in interact::hover_features(state, aspect) {
             ui.painter().line_segment(

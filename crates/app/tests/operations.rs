@@ -1635,6 +1635,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_z(&world, None, None, &trace.params), Some(10.0));
     let region = operation::region_of(&world, &trace).expect("a box sections cleanly at 10 mm");
@@ -1673,6 +1674,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_z(&world, None, None, &face.params), Some(19.5));
     assert!(
@@ -1689,6 +1691,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_of(&world, &ghost), None);
 }
@@ -1851,6 +1854,7 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     // Facing a wall: refused, and the message says what to pick instead.
     let face = op(face_sel_params());
@@ -1884,6 +1888,7 @@ fn closed_chain_rims_bound_and_double_picks_collapse_to_one_loop() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     let region = operation::region_of(&world, &op).expect("the rim chain bounds the disc");
     assert_eq!(region.loops().len(), 1);
@@ -1986,6 +1991,7 @@ fn pocket_refuses_an_open_run() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert_eq!(operation::region_of(&world, &op), None, "nothing to draw");
     let err = operation::generate(&world, &op, "").expect_err("pocket refuses");
@@ -2287,6 +2293,7 @@ fn two_open_runs_stitch_into_one_boundary() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     // The hand-test's exact failure ("nothing in the selection bounds an
     // area") is gone: two picked runs that spell one loop bound one area.
@@ -2329,6 +2336,7 @@ fn stitching_is_order_independent() {
             stamp: None,
             setup: None,
             area: Default::default(),
+            coolant: Default::default(),
         }
     };
     let ab = operation::region_of(&world, &pick([0, 1])).expect("first, then second");
@@ -2361,6 +2369,7 @@ fn a_single_arc_stays_open() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     assert!(
         operation::region_of(&world, &op).is_none(),
@@ -2403,6 +2412,7 @@ fn duplicate_seam_points_do_not_break_push_loop() {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     };
     let region = operation::region_of(&world, &op).expect("the ring survives the doubled seam");
     assert_eq!(
@@ -2766,6 +2776,7 @@ fn sel_op(world: &World, items: Vec<GeoSel>, params: OpParams) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 
@@ -7508,7 +7519,7 @@ fn deburr_refuses_a_cone_that_rules_no_chamfer() {
     );
     model::spawn(&world, "FLAT-CONE")
         .entity_view(&world)
-        .set(ToolDef { tool: flat });
+        .set(ToolDef { tool: flat, number: None });
     history.execute(&world, ImportModel::from_mesh("brick", deburr_brick()));
     history.execute(
         &world,
