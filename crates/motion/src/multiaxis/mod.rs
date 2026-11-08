@@ -36,6 +36,8 @@ mod stamp_pose;
 #[cfg(test)]
 mod stamp_tests;
 pub mod axis;
+mod axis_point;
+mod axis_poles;
 mod axis_refine;
 mod axis_robust;
 pub mod contour5d;
@@ -45,6 +47,7 @@ pub mod parallel5d;
 pub mod rough;
 pub mod rotary;
 pub mod rotary_offset;
+mod rotary_seam;
 pub mod rotary_bar;
 mod rotary_links;
 mod wrap_exit;

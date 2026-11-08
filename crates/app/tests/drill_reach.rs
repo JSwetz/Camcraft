@@ -9,6 +9,8 @@
 //! cross_spindle call, the Z arm of generate's Drill).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod punched_bar;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{AddTool, History, ImportModel, LoadMachine, SetStock};
@@ -25,9 +27,11 @@ use camcraft_app::world::new_world;
 const TAU: f64 = std::f64::consts::TAU;
 const PART_R: f64 = 10.0;
 
-/// A closed bar of radius `r`, z in [-20, 20], revolved about world Z.
+/// The finished bar of radius `r`, z in [-80, 20] (`punched_bar::FOOT`), revolved about world
+/// Z, with this suite's cross holes modelled (issue #117: the part law
+/// refuses a hole the model lacks): +X 6 deep, -X 3 deep, both at z0.
 fn bar(r: f64) -> Mesh {
-    revolve(&[(0.0, -20.0), (r, -20.0), (r, 20.0), (0.0, 20.0)])
+    punched_bar::punched_bar(r, punched_bar::FOOT, punched_bar::TOP, &[cross_hole(r, -1.0, -6.0), cross_hole(-r, 1.0, -3.0)])
 }
 
 /// A closed solid of revolution about world Z from its (r, z) meridian.
@@ -170,7 +174,7 @@ fn a_holder_that_would_sweep_the_end_face_on_the_swing_is_refused_by_name() {
         let (world, _h) = turret_world(word, false, |t| t.shank_len = 2.0);
         let e = operation::generate(&world, &drill_op("bar", 20.0, 5.0, vec![], pair.clone()), "").err();
         let e = e.map(|e| e.to_string()).unwrap_or_else(|| panic!("{word}: the holder swept the end face"));
-        for s in ["DR-0400's holder", "dia. 44.000", "14.000 mm behind the tip", "inside the stock's radius"] {
+        for s in ["DR-0400's holder", "dia. 44.000", "14.000 mm behind the tip", "inside material"] {
             assert!(e.contains(s), "{word}: the refusal names '{s}': {e}");
         }
         // The swing raised by the user clears it: z45, the holder's
@@ -233,7 +237,13 @@ fn an_axial_hole_deeper_than_the_flute_from_the_stock_top_is_refused_by_name() {
 /// refused by name.
 #[test]
 fn a_holder_is_judged_against_the_stock_in_its_own_z_band() {
-    let shaft = || revolve(&[(0.0, -20.0), (30.0, -20.0), (30.0, -10.0), (10.0, -10.0), (10.0, 40.0), (0.0, 40.0)]);
+    // The r10 shaft carries the z20 hole modelled (issue #117); the
+    // flange is its own shell, 0.5 mm below it.
+    let shaft = || {
+        let mut f = punched_bar::punched_bar(PART_R, -10.0, 40.0, &[cross_hole_at(Point3::new(PART_R, 0.0, 20.0), -1.0, -3.0)]).facets.to_vec();
+        f.extend(revolve(&[(0.0, -20.0), (30.0, -20.0), (30.0, -10.5), (0.0, -10.5)]).facets.iter().copied());
+        Mesh::from_facets(f)
+    };
     let op = |z: f64| drill_op("bar", 40.0, 5.0, vec![], vec![cross_hole_at(Point3::new(PART_R, 0.0, z), -1.0, -3.0)]);
     for word in ["lathe", "mill-turn"] {
         let (world, _h) = turret_world_on(word, false, shaft(), dr0400(|t| t.shank_len = 2.0));
@@ -241,7 +251,7 @@ fn a_holder_is_judged_against_the_stock_in_its_own_z_band() {
         assert!(r.is_ok(), "{word}: the flange is far below the holder: {:?}", r.err());
         let e = operation::generate(&world, &op(0.0), "").err().map(|e| e.to_string());
         let e = e.unwrap_or_else(|| panic!("{word}: the holder swept the flange"));
-        for s in ["DR-0400's holder", "inside the stock's radius 30.000"] {
+        for s in ["DR-0400's holder", "inside material 30.000 mm out"] {
             assert!(e.contains(s), "{word}: the refusal names '{s}': {e}");
         }
     }
@@ -262,7 +272,7 @@ fn an_off_centre_hole_measures_reach_from_where_a_wider_shank_meets_the_raw_bar(
     let mut hole = cross_hole_at(Point3::new(10.0, 15.0, 0.0), -1.0, floor);
     hole.radius = 1.5;
     let op = drill_op("bar", 20.0, 5.0, vec![], vec![hole]);
-    let part = || revolve(&[(0.0, -20.0), (18.0, -20.0), (18.0, 20.0), (0.0, 20.0)]);
+    let part = || punched_bar::punched_bar(18.0, punched_bar::FOOT, punched_bar::TOP, &[hole]);
     for word in ["mill-turn"] {
         let (world, _h) = turret_world_on(word, true, part(), grind(6.0));
         let e = operation::generate(&world, &op, "").err().map(|e| e.to_string());

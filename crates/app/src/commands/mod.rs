@@ -14,6 +14,8 @@ pub mod operation;
 pub mod post;
 // M13.11: mesh repair (weld + fill holes) as one undo unit over UpdateModel.
 pub mod repair_model;
+// Issue #143: ribbon pins are saved with the project, so they are a command.
+pub mod ribbon_pins;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
@@ -43,6 +45,7 @@ pub use operation::{
 };
 pub use post::SelectPost;
 pub use repair_model::RepairModel;
+pub use ribbon_pins::SetRibbonPins;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};

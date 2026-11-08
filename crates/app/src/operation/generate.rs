@@ -55,6 +55,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         mut drive_chains,
         mut prior,
         verify_prior,
+        drills_ahead,
+        turned_ahead,
         is_mill,
         machine_kind,
         machine_rotaries,
@@ -163,6 +165,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // M11.3: the tool says whether an entry may plunge into solid - laid
     // over the generation's copy only, never stored in the op.
     lk.approach.center_cutting = tool.center_cutting;
+    // The bar the turning kinds approach from (#130), read once.
+    let (turn_stock, turn_note) = super::turning_stock::read(&params, &material.facets, stock_facets.as_deref());
     let (region, path) = match &params {
         OpParams::Face {
             stepover,
@@ -2032,7 +2036,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::profile_rough(
+            let path = crate::turning::profile_rough_in(
                 &material.facets,
                 &crate::turning::ProfileRoughParams {
                     clearance_z: hl.clearance,
@@ -2045,6 +2049,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2068,7 +2073,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::profile_finish(
+            let path = crate::turning::profile_finish_in(
                 &material.facets,
                 &crate::turning::ProfileFinishParams {
                     clearance_z: hl.clearance,
@@ -2079,6 +2084,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2111,7 +2117,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::groove_rough(
+            let path = crate::turning::groove_rough_in(
                 &material.facets,
                 &crate::turning::GrooveRoughParams {
                     clearance_z: hl.clearance,
@@ -2124,6 +2130,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blade_width: tool.width,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2147,7 +2154,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::groove_finish(
+            let path = crate::turning::groove_finish_in(
                 &material.facets,
                 &crate::turning::GrooveFinishParams {
                     clearance_z: hl.clearance,
@@ -2158,6 +2165,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blade_width: tool.width,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2182,7 +2190,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::part(
+            let path = crate::turning::part_in(
                 &material.facets,
                 &crate::turning::PartParams {
                     clearance_z: hl.clearance,
@@ -2194,6 +2202,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blade_width: tool.width,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2227,7 +2236,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::thread(
+            let path = crate::turning::thread_in(
                 &material.facets,
                 &crate::turning::ThreadParams {
                     tolerance: *tolerance,
@@ -2242,6 +2251,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     insert_width: tool.width,
                     form_angle: tool.tip_angle,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2395,7 +2405,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::form(
+            let path = crate::turning::form_in(
                 &material.facets,
                 &crate::turning::FormParams {
                     tolerance: *tolerance,
@@ -2407,6 +2417,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     band_width: tool.width,
                     crown_radius: tool.nose_radius,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2446,11 +2457,16 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     nose_radius: tool.nose_radius,
+                    // The bar's body, centred on the spindle in its
+                    // approach and retract (#103).
+                    head_d: tool.diameter,
+                    shank_d: tool.shank_d,
                 },
             )?;
             (region, path)
         }
     };
+    let path = super::turning_stock::noted(path, turn_note);
 
     // M3.2 stage B: what the program clamps to. The op's setup context
     // decides - user fixtures bound to it (tagged models, implicit-
@@ -2712,10 +2728,6 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // (M13.11); empty for one body.
                 &material.bodies,
             );
-            // A turned path's axial rapids are the lathe's traverse,
-            // not a column dive (#96): the column law's word on them
-            // is dropped for the turned family only.
-            super::turning_rapids::drop_axial_rapids(&params, &path, Z_TOL, &mut warns);
             // The program ahead cut too (#96 review): a dive the column
             // convicted against the raw block is re-read against what
             // the setup's earlier operations left standing.
@@ -2726,6 +2738,52 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             {
                 verify::acquit_by_prior(&path, dex, geom.radius, Z_TOL, &mut warns);
             }
+            // A turned path's axial rapids are judged in the meridian
+            // plane, not by the column (#96, #103): the revolved stock
+            // less what the program ahead faced and this path cut.
+            let meridian = super::turning_rapids::Meridian {
+                part: &material.facets,
+                stock: stock_facets.as_deref(),
+                // Only an insert's moves carry a nose CENTRE; a
+                // blade, thread or form gauge's carry its tip, the
+                // body standing outward (a form's `nose_radius` is
+                // its crown arc, not a ball round the tip).
+                nose: if matches!(tool.kind, crate::tools::ToolKind::Turning | crate::tools::ToolKind::Bore) {
+                    tool.nose_radius
+                } else {
+                    0.0
+                },
+                margin: GOUGE_TOL,
+                z_tol: Z_TOL,
+                drills: &drills_ahead,
+                ahead: &turned_ahead,
+                outward: match tool.kind {
+                    crate::tools::ToolKind::Groove => Some(f64::INFINITY),
+                    crate::tools::ToolKind::Thread => Some((tool.tip_angle.to_radians() * 0.5).tan()).filter(|k| k.is_finite() && *k > 0.0),
+                    _ => None,
+                },
+                // A blade's move is its band's centre (a thread's,
+                // its crest's): the edge spans half the width.
+                band: if matches!(
+                    tool.kind,
+                    crate::tools::ToolKind::Groove | crate::tools::ToolKind::Thread | crate::tools::ToolKind::Form
+                ) {
+                    tool.width * 0.5
+                } else {
+                    0.0
+                },
+                // A boring bar's body round its nose, up its reach.
+                body: (tool.kind == crate::tools::ToolKind::Bore).then_some(super::turning_rapids::BarBody {
+                    head_d: tool.diameter,
+                    shank_d: tool.shank_d,
+                    flute_len: tool.flute_len,
+                    shank_len: tool.shank_len,
+                }),
+            };
+            super::turning_rapids::judge_axial_rapids(&params, &path, &meridian, &mut verify_prior, &mut warns);
+            // ...and a boring bar's head and shank on its FEEDS (#146),
+            // against the same revolved material at each instant.
+            super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
             warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
