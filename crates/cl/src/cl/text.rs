@@ -4,7 +4,7 @@
 //! app. Provenance: our own line grammar (docs/CNC-INTERMEDIATE.md and
 //! the golden writer in crates/app/tests/common), RS-274 move words
 //! and arc-center letters; microns for lengths, millidegrees for pose
-//! letters, mm/min x1000 for feeds.
+//! letters and the spindle C, mm/min x1000 for feeds.
 
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
@@ -17,6 +17,11 @@ use super::pose::{angles_to_axis, axis_to_angles, is_vertical};
 
 /// The dump's fixed-point unit: one micron, in millimetres.
 pub const TEXT_SCALE: f64 = 0.001;
+
+/// The word that states a move's spindle C angle (issue #33), in
+/// millidegrees, unwrapped: the golden writer's spelling. Two letters,
+/// so it can't be read as the arc sense `S`.
+const SPINDLE_C_WORD: &str = "SC";
 
 /// A line the reader could not take, by 1-based line number.
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +94,11 @@ pub fn to_text(t: &Toolpath) -> Result<String, String> {
             let [da, db, dc] = axis_to_angles(a);
             let md = |d: f64| (d * 1000.0).round() as i64;
             s.push_str(&format!(" A{} B{} C{}", md(da), md(db), md(dc)));
+        }
+        // The stated spindle C (#295): a C-live cut that dumped without
+        // it would read back as a 3-axis path cutting somewhere else.
+        if let Some(c) = m.rotary {
+            s.push_str(&format!(" {SPINDLE_C_WORD}{}", (c * 1000.0).round() as i64));
         }
         s.push('\n');
     }
@@ -203,7 +213,12 @@ pub fn from_text(text: &str) -> Result<Toolpath, TextError> {
             return Err(fail("a move before any START position".into()));
         };
         let (mut feed, mut centre, mut sense, mut ang) = (None, Vec::new(), None, [None; 3]);
+        let mut spindle_c = None;
         for w in words.iter().skip(3) {
+            if let Some(v) = w.strip_prefix(SPINDLE_C_WORD) {
+                spindle_c = Some(num(v).map_err(fail)?);
+                continue;
+            }
             let (k, v) = w.split_at(w.chars().next().map_or(0, char::len_utf8));
             let k = k.chars().next().unwrap_or(' ');
             let n = num(v).map_err(fail)?;
@@ -233,6 +248,9 @@ pub fn from_text(text: &str) -> Result<Toolpath, TextError> {
             m = m.attach_axis(angles_to_axis([a, b, c]));
         } else if ang.iter().any(Option::is_some) {
             return Err(fail("a pose needs all of A, B and C".into()));
+        }
+        if let Some(c) = spindle_c {
+            m = m.with_rotary(c);
         }
         moves.push(m);
         at = Some(to);
