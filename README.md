@@ -211,6 +211,46 @@ more `area:*` labels. Issues opened by an agent also carry `source:agent`.
   refuse bad input by name), every UI change as an undoable command, files
   under about 400 lines, and a provenance line on new modules.
 
+### Draft first, then ready for review: the gates
+
+Every pull request opens as a **draft** (`gh pr create --draft`) and stays a
+draft while work, testing and fixes land on it. A draft is never reviewed
+and never merged. It is flagged **ready for review** (`gh pr ready <N>`)
+only when one of these holds:
+
+1. **The maintainer says so**, or
+2. **Its own gates pass:**
+   - **Mergeable** - it merges cleanly with current `main` (merge `main`
+     in and re-test if not);
+   - **Tested** - the quick gate is green on its final commit
+     (`scripts/gate.ps1 -Tier quick` / `scripts/gate.sh quick`), with the
+     pinning tests named in the description;
+   - **Complete description** - what changed, how it was tested, what was
+     *not* exercised, a `Changelog:` line, and `Fixes #N` / `Refs #N`;
+   - **Laws** - the `AGENTS.md` rules above (clean-room, no panics,
+     commands for UI changes, ~400-line files; post scripts
+     `assets/posts/*.cps` are exempt from the line limit).
+
+   A quick pass over these points, without building, is enough to flag a
+   PR ready; the full review comes after.
+
+**Once ready, the branch takes no more pushes.** A late fix, a needed merge
+of `main` or any other change first turns it back into a draft
+(`gh pr ready <N> --undo`), says why in a PR comment, is pushed and
+re-tested, and only then is flagged ready again.
+
+**Review labels.** The review of a ready PR sets one colour:
+
+| Label | Meaning | What happens |
+|---|---|---|
+| `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
+| `needs-rework` (red) | review found blockers | back to draft; fix and push |
+| `conflicts` (orange) | no longer merges with `main` | back to draft; merge `main`, re-test |
+
+A new push after a review gets a fresh review; the marker
+`<!-- pr-reviewer: <commit> -->` in the review comment ties each verdict to
+the commit it judged.
+
 ### Review and merge: a manual gate
 
 `main` is protected. Every change reaches it through a pull request, admins
@@ -224,9 +264,11 @@ be resolved; only merge commits are allowed.
   gets a fresh review. A PR that touches build scripts, CI workflows,
   scripts or dependencies is not built by the reviewer; it is flagged for
   the maintainer instead.
-- **Review of the maintainers' own PRs.** Issue PRs are reviewed at the
-  release cut by a subagent that did not write them; findings are fixed on
-  the branch before it merges.
+- **Review of the maintainers' own PRs.** Once flagged ready, an owner PR
+  is reviewed by a subagent that did not write it (the same `PR-reviewer`,
+  one review at a time) and labelled as above; findings are fixed on the
+  branch (back to draft first) before it merges - a `fix` once clean, a
+  `feat` at the release cut.
 - **Approval is manual.** GitHub requires 0 approvals (the agents and the
   maintainer share one account, which cannot approve its own PR), so the
   gate is the maintainer's manual merge: the maintainer reads the review and
