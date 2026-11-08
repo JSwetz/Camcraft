@@ -1,8 +1,8 @@
 //! Issue #103: a turned path's axial rapids judged in the meridian
-//! plane against the revolved stock. A profile rough whose approach
-//! along the spindle axis stands inside a bar wider than the part is
-//! named at generation and refused at the post; the same approach
-//! beside a bar the part's own size is clean.
+//! plane against the revolved stock; issue #130: the rough reads that
+//! stock, so in a bar wider than the part it approaches from the bar
+//! and posts clean, as it does beside a bar the part's own size. The
+//! law's own convictions are pinned in turning_rapids_tests.
 //!
 //! Gate map (M4.4): covers app::operation (turning_rapids, generate's
 //! rapid law wiring, job's prior plan for the turned family),
@@ -100,19 +100,31 @@ fn tmp_nc(tag: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn an_axial_approach_inside_a_wider_bar_is_named_and_blocks_the_post() {
-    // The rough approaches at r 6.85 from Z 25 down to Z 2: a 20 mm bar
-    // stands there from Z 16 down - 14 mm of uncut stock.
+fn a_rough_in_a_wider_bar_approaches_from_the_bar_and_posts_clean() {
+    // Issue #130 (was #103's refusal pin): a 20 mm bar roughed down to
+    // the 12 mm flanged part. The kernel reads the revolved stock: the
+    // approach stands clear of the bar's r 10 by the retract clearance,
+    // the ladder starts at the bar's skin - a pass over the flange whose
+    // nose bites the outermost stepdown of the bar - and steps down to
+    // the part plus the leave. The meridian law then has nothing to
+    // name and the post writes the program.
     let (world, warns, moves) = rough_in_bar(20.0);
+    let (nose, stepdown, leave) = (0.8, 0.8, 0.25);
+    let rho = |q: Point3| q.x.hypot(q.y);
     let m0 = moves.first().expect("a path");
-    assert!(m0.kind == MoveKind::Rapid && m0.from.x == m0.to.x && m0.to.z < 16.0, "the fixture's approach: {m0:?}");
-    assert!(warns.contains(&Warning::RapidInStock { at: 0 }), "the approach into the bar went unnamed: {warns:?}");
-    let out = tmp_nc("wide");
-    match posting::post_setup(&world, &out) {
-        Ok(_) => panic!("a program rapiding into the bar posted"),
-        Err(e) => assert!(e.contains("post blocked") && e.contains("rapid move 0 "), "refused, but not by the rapid law: {e}"),
+    assert!(m0.kind == MoveKind::Rapid && rho(m0.to) >= 10.0 + nose + 1.0 - 1e-9, "the approach clears the bar's OD: {m0:?}");
+    for m in moves.iter().filter(|m| m.kind == MoveKind::Rapid && (m.from.z - m.to.z).abs() > 1e-9) {
+        assert!(rho(m.from) >= 10.0 + nose + 1.0 - 1e-9, "an axial rapid inside the bar: {m:?}");
     }
-    assert!(!out.exists(), "a refused post writes nothing");
+    let flange: Vec<f64> = moves.iter().filter(|m| m.kind == MoveKind::Feed && m.to.z < 1.0).map(|m| rho(m.to) - nose).collect();
+    assert!(flange.iter().any(|&r| r < 10.0 && r >= 10.0 - stepdown - 1e-6), "no pass starts at the bar's skin: {flange:?}");
+    let floor = flange.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!((floor - (6.0 + leave)).abs() < 0.05, "the ladder ends at the part plus the leave: {floor}");
+    assert!(!warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. })), "{warns:?}");
+    let out = tmp_nc("wide");
+    let posted = posting::post_setup(&world, &out);
+    let _ = std::fs::remove_file(&out);
+    assert!(posted.is_ok(), "{posted:?}");
 }
 
 #[test]

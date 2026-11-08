@@ -15,6 +15,7 @@ use camcraft_app::stock::StockShape;
 use camcraft_app::tools::catalog;
 use camcraft_ui::actions;
 use camcraft_ui::state::{CommandKind, ErrorScope, State};
+use camcraft_ui::unsaved::UnsavedChoice;
 
 fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog()
@@ -147,6 +148,8 @@ fn new_document_retires_the_machine_with_the_rest() {
     state.drain_actions();
     assert!(machine::of(&state.world).1.is_some());
     state.pending.push_back(CommandKind::NewDocument);
+    // The mount is unsaved work: New waits for the prompt's answer (#107).
+    state.pending.push_back(CommandKind::ResolveUnsaved(UnsavedChoice::DontSave));
     state.drain_actions();
     assert!(
         machine::of(&state.world).1.is_none(),

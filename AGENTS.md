@@ -122,8 +122,8 @@ design context, never add work to them. Decisions still go to
   minor/major cut; docs/process/CI-only PRs merge once reviewed. The fixing commit ends its body with `Fixes #N` (`Refs #N` for
   partial work, which never closes). When its gate is green:
   `git push -u origin issue/N-<slug>`, then
-  `gh pr create --base main --head issue/N-<slug> --title "<conventional
-  subject>" --body-file <file>` - the body says what changed, the readings,
+  `gh pr create --draft --base main --head issue/N-<slug> --title
+  "<conventional subject>" --body-file <file>` - the body says what changed, the readings,
   the pinning test(s), a `Changelog:` line (the one-line row text, or
   `none` for docs/test-only) and ends `Fixes #N`. Then, in the same step:
   swap `claimed` for `in-review`, and comment `fix on issue/N-<slug> · PR #M
@@ -136,6 +136,19 @@ design context, never add work to them. Decisions still go to
   (dropped, or held by the user with a PR comment) swaps `in-review` for
   `blocked` (held, say on what) or for nothing (dropped, say why), with an
   issue comment - an issue never sits in `in-review` without an open PR.
+- **Every PR opens as a draft** (user, 2026-11-08: "All PR's should be done
+  as drafts to start with. And not flagged ready to review until either
+  user saids its ok or the tests are done. Once its been flagged ready to
+  review no more pushes should be performed"). A PR is created with
+  `--draft` and stays a draft while work, gating and review fixes land on
+  it. It is flagged ready (`gh pr ready <M>`) only when the user says so,
+  or when its gate tier is green on its final head and its independent
+  review is clean. Once ready, its branch takes **no more pushes**: a late
+  finding, a needed `git merge origin/main` or any other change first turns
+  it back into a draft (`gh pr ready <M> --undo`), says why in a PR
+  comment, is pushed and re-gated, and only then is flagged ready again.
+  Merging (by the main session for fix/docs PRs, at the cut for `feat`)
+  takes only a ready PR, never a draft.
 - **Never close by hand without a commit**, except: a duplicate (link the
   original), already done (name the commit that did it), or a decided
   won't-do (label `wontfix`, give the reason). Each needs that comment.

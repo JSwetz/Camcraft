@@ -36,6 +36,9 @@ use crate::machining2d::GenError;
 
 use super::profile;
 use super::revolve;
+use super::stock::StockEnv;
+
+pub use super::parting::{part, part_in};
 
 /// Grooving roughing: a band window on the bar, eaten to a floor
 /// with a leave of stock for the finish, rung by rung.
@@ -111,6 +114,7 @@ pub(crate) fn setup(
     tol: f64,
     what: &str,
     tool_word: &str,
+    stock: Option<StockEnv>,
 ) -> Result<Blade, GenError> {
     if facets.is_empty() {
         return Err(GenError::Invalid(format!("no facets to {what}")));
@@ -145,7 +149,9 @@ pub(crate) fn setup(
             "nothing to {what} - the height window holds no length of the bar"
         )));
     }
-    let rho_clear = prof.r_max + tol;
+    // A blade's move carries its tip, its body outward of it: the tip
+    // clear of the bar's OD clears the blade (#130).
+    let rho_clear = StockEnv::rapid_radius(stock, prof.r_max, prof.r_max + tol, 0.0);
     let sg = revolve::segs(&pts);
     Ok((f, pts, sg, (s_lo, s_hi), (d_lo, d_hi), rho_clear))
 }
@@ -190,7 +196,7 @@ fn centers(
 
 /// One center's plunge: rapid in over it, feed down to `tips`
 /// rung by rung, rapid clear again.
-fn plunge(
+pub(crate) fn plunge(
     b: &mut PathBuilder,
     f: &profile::Frame,
     s: f64,
@@ -211,7 +217,7 @@ fn plunge(
 /// the snap the ladder's `ceil` counts a rung the noise pushed a
 /// hair off the floor, and the feed count flips on the same
 /// coincidence the meridian law refuses to judge by (M5.2 C).
-fn rung(v: f64, floor: f64) -> f64 {
+pub(crate) fn rung(v: f64, floor: f64) -> f64 {
     if v <= floor + revolve::HAIR {
         floor
     } else {
@@ -251,6 +257,16 @@ pub fn groove_rough(
     facets: &[Triangle],
     p: &GrooveRoughParams,
 ) -> Result<Toolpath, GenError> {
+    groove_rough_in(facets, p, None)
+}
+
+/// [`groove_rough`] inside a setup stock (#130): each center's ladder
+/// steps down from the bar's OD, every rapid clears it.
+pub fn groove_rough_in(
+    facets: &[Triangle],
+    p: &GrooveRoughParams,
+    stock: Option<StockEnv>,
+) -> Result<Toolpath, GenError> {
     let (f, _, sg, win, dom, rho_clear) = setup(
         facets,
         p.clearance_z,
@@ -260,6 +276,7 @@ pub fn groove_rough(
         p.tolerance,
         "groove",
         "grooving blade",
+        stock,
     )?;
     if p.stepdown <= 0.0 {
         return Err(GenError::Invalid(
@@ -274,7 +291,8 @@ pub fn groove_rough(
         )));
     }
     let cs = centers(win, dom, p.blade_width * 0.5)?;
-    let ref_top = revolve::span_max(&sg, win.0, win.1);
+    let part_r = profile::profile_of(facets, &f)?.r_max;
+    let ref_top = StockEnv::top(stock, part_r, revolve::span_max(&sg, win.0, win.1));
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
     for &s in &cs {
         let base = revolve::span_max(&sg, s - p.blade_width * 0.5, s + p.blade_width * 0.5);
@@ -296,6 +314,16 @@ pub fn groove_finish(
     facets: &[Triangle],
     p: &GrooveFinishParams,
 ) -> Result<Toolpath, GenError> {
+    groove_finish_in(facets, p, None)
+}
+
+/// [`groove_finish`] inside a setup stock (#130): every rapid clears
+/// the bar's OD.
+pub fn groove_finish_in(
+    facets: &[Triangle],
+    p: &GrooveFinishParams,
+    stock: Option<StockEnv>,
+) -> Result<Toolpath, GenError> {
     let (f, _, sg, win, dom, rho_clear) = setup(
         facets,
         p.clearance_z,
@@ -305,6 +333,7 @@ pub fn groove_finish(
         p.tolerance,
         "groove",
         "grooving blade",
+        stock,
     )?;
     let cs = centers(win, dom, p.blade_width * 0.5)?;
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
@@ -312,101 +341,6 @@ pub fn groove_finish(
         let base = revolve::span_max(&sg, s - p.blade_width * 0.5, s + p.blade_width * 0.5);
         plunge(&mut b, &f, s, rho_clear, &[base], p.plunge_feed);
     }
-    b.push(
-        MoveKind::Rapid,
-        f.point(rho_clear, f.station_of(p.clearance_z)),
-        None,
-    );
-    Ok(b.finish())
-}
-
-/// Parting: one center at the parting plane, a depth ladder down
-/// through the bar's full column, and the through-axis rung that
-/// severs it. The column is the model's own (its top is the span
-/// over the kerf band, its bottom the axis); `top_z` shapes
-/// nothing here - it rides the trio to keep the heights law
-/// uniform, and stands only for the finite-number check.
-pub fn part(facets: &[Triangle], p: &PartParams) -> Result<Toolpath, GenError> {
-    if facets.is_empty() {
-        return Err(GenError::Invalid("no facets to part".into()));
-    }
-    if ![
-        p.tolerance,
-        p.clearance_z,
-        p.top_z,
-        p.parting_z,
-        p.stepdown,
-        p.feed,
-        p.plunge_feed,
-        p.blade_width,
-    ]
-    .iter()
-    .all(|v| v.is_finite())
-    {
-        return Err(GenError::Invalid(
-            "parting was asked with a number that is not one".into(),
-        ));
-    }
-    if p.blade_width <= 0.0 {
-        return Err(GenError::Invalid(format!(
-            "a blade of width {:.3} cuts no band - the kerf's width IS the tool; \
-             mount a grooving blade with a real width",
-            p.blade_width
-        )));
-    }
-    if p.tolerance <= 0.0 {
-        return Err(GenError::Invalid(format!(
-            "the tolerance must be a positive size, not {}",
-            p.tolerance
-        )));
-    }
-    if p.stepdown <= 0.0 {
-        return Err(GenError::Invalid("parting needs a positive stepdown".into()));
-    }
-    let f = profile::Frame::about(facets)?;
-    let pts = profile::silhouette(facets, &f, p.tolerance * 0.25)?;
-    let prof = profile::profile_of(facets, &f)?;
-    let sg = revolve::segs(&pts);
-    let (d_lo, d_hi) = (pts[0].0, pts[pts.len() - 1].0);
-    let s_c = f.station_of(p.parting_z);
-    let half = p.blade_width * 0.5;
-    let (lo, hi) = ((s_c - half).max(d_lo), (s_c + half).min(d_hi));
-    if hi <= lo {
-        return Err(GenError::Empty(
-            "nothing to part - the parting plane stands off the end of the bar".into(),
-        ));
-    }
-    // The column the kerf must fall through: the model's own top
-    // across the band (its limits ride the chords' clipped ends)
-    // and at the plane itself.
-    let ref_top =
-        revolve::span_max(&sg, s_c - half, s_c + half).max(revolve::material(&sg, s_c));
-    if ref_top <= 0.0 {
-        return Err(GenError::Empty(
-            "nothing to part - the parting plane stands in the air past the bar's top".into(),
-        ));
-    }
-    let rho_clear = prof.r_max + p.tolerance;
-    let n = (ref_top / p.stepdown).ceil();
-    if n > MAX_RUNGS {
-        return Err(GenError::Invalid(format!(
-            "the parting ladder would run {:.0} rungs - the stepdown is far too fine \
-             for the bar's column",
-            n
-        )));
-    }
-    let mut tips: Vec<f64> = (1..=n as usize)
-        .map(|j| rung(ref_top - (j as f64) * p.stepdown, 0.0))
-        .collect();
-    // The through-axis rung: the blade tip stands ON the axis, the
-    // kerf's whole column is above it, and the verdict reads the
-    // separation.
-    if tips.last().is_none_or(|&t| t > 0.0) {
-        tips.push(0.0);
-    }
-    tips.dedup();
-    let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
-    plunge(&mut b, &f, s_c, rho_clear, &tips, p.plunge_feed);
     b.push(
         MoveKind::Rapid,
         f.point(rho_clear, f.station_of(p.clearance_z)),
