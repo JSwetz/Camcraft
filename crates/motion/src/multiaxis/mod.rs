@@ -47,6 +47,7 @@ pub mod parallel5d;
 pub mod rough;
 pub mod rotary;
 pub mod rotary_offset;
+mod rotary_seam;
 pub mod rotary_bar;
 mod rotary_links;
 mod wrap_exit;

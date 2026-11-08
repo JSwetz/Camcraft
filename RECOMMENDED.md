@@ -13747,3 +13747,84 @@ revolved (follow-up material if users hit it with long keyways).
   which is harmless at that angle. A finely meshed dome whose latitude
   steps are under 0.01 is one wide class, judged by the off-cone share
   alone.
+
+## Issue #130 - turning kinds approach from the stock
+
+- **Envelope = one radius.** The kernels get `StockEnv { r_out, clearance }`:
+  the stock's widest radius about the part's fitted axis (vertex max, the
+  same reading the meridian law's outline starts from). Chosen over a
+  per-station outline: a scalar is conservative for every rapid, and the
+  extra rungs it adds over a pre-turned blank are air cuts, never gouges.
+- **Only a bar wider than the part counts** (`r_out > part r_max + 1e-6`).
+  A bar-sized stock keeps today's part-based program bit for bit, so the
+  lathe goldens did not move. Dropped: always adding the clearance, which
+  would have moved every snug-bar program by a millimetre for no safety.
+- **Retract clearance = 1.0 mm on radius** (`turning_stock::STOCK_CLEARANCE`),
+  a constant for now. It belongs as a per-op parameter with that default
+  (CAM choices are user parameters); a follow-up issue should expose it.
+- **Profile rough** counts its rungs from the bar's OD down to the part
+  plus leave, and drops a rung whose nose never reaches under the OD
+  (pure air). Groove rough and parting peck from the OD. Profile finish,
+  groove finish, threading and form only move their rapids out.
+- **Not touched:** Facing (#122, claimed by an outside contributor), the
+  contour rides (chamfer, taper, multi-pass - not in the issue), and the
+  boring bar, whose approach is already centred on the spindle - the most
+  room any stock ID allows; a stock hole too small for the bar stays the
+  meridian law's refusal.
+- **No stock readable** (no setup stock, an empty mesh, an axis fit that
+  fails): the part-based path stands and carries the note "no setup stock
+  could be read about the spindle ...".
+- **Fixture:** `turning_profile.rs` moved from a 40 mm box to bar-sized
+  stock (as #103 did for the other lathe fixtures): with #130 the box's
+  28 mm revolved corner made its ladder-count pins a 30-rung job.
+
+
+## #54: the rotary wrap closes a flatted bar's seam with curtains, and refuses an open mesh up front (2026-11-08)
+
+**Chosen:** the developed sheet's two free seam ends are closed by a CURTAIN per free
+seam edge (`multiaxis::rotary_seam`): the vertical quad from the developed edge down to
+the floor radius. A seam edge is an edge the two facets sharing it develop one period
+apart; its lower version (first copy) and its upper version (second copy) are the
+cover's ends. This replaces the meridian wall that stood in the plane of the cover's
+extreme column. On a revolve the curtain is that wall, split on the same diagonal (the
+OffsetRings digest is unchanged). On a D-flat across the seam the seam column is ragged
+(the flat's vertices sit at their own azimuths), and the plane wall met none of its
+edges: the "mesh is open, 4/8/16 dangling chord ends" of #9 round 2.
+
+**Also chosen:** the wrap refuses an open mesh by name before it develops it ("the
+rotary wrap needs a closed solid, but the mesh is open: N edges bound one facet only").
+On main a hole in the skin that no ladder level slices through wrapped silently.
+
+**Dropped:**
+- Widening the plane wall to the ragged column (a skirt from each seam edge to the
+  s_lo plane): two surfaces where one does, and the wall's profile had to stay a single
+  valued function of the station.
+- Curtaining every free edge: it would close a real hole silently.
+- Putting the seam end-to-end test in `rotary_adaptive.rs` (the issue's "Done means"):
+  that file sits at the 400-line budget, so the D-flat suite `rotary_dflat.rs` carries it.
+
+
+### PR #210 review: a flat across the seam is refused by name, not wrapped
+
+**Chosen:** the wrap refuses by name any work whose seam is not turned
+(`rotary_seam::refuse_feature_on_seam`). The off-axis vertices of the facets that
+straddle the ±π branch must stand on exactly two meridian columns with one profile. A
+flat, keyway or cross hole across the seam breaks that, and the refusal says to rotate
+the work clear of it.
+
+**Why:** the review probe (a 3.5 deep flat off its centre across the seam) wrapped and
+put 12 to 1606 cut tips inside the part, down to the axis. Clipping the cover to the
+ragged seam chains' inner columns removed the reviewer's strip gouge. A second gouge
+was left, though: a whole-lap band at the flat's end stations, at the shoulder plus the
+pad. It showed even with the flat centred on the seam (n=64, D2: 245 tips), so a
+cover-shape fix was not enough. Gouge-free beats coverage. The placements clear of the
+seam were checked against the true cross-section polygon (n 16/64, D2/D0.8) with 0 tips
+inside, and they wrap as before.
+
+**Dropped:**
+- The ragged-cover clip (it only removed the strip gouge).
+- The #9 seam-law end-to-end pin under Adaptive: its fixture is a flat across the seam,
+  which is now refused. The seam law stays unit-pinned. The pin now asserts the named
+  refusal under Adaptive and Offset rings.
+- Not done (follow-up worth an issue): rotate the development's branch to an azimuth
+  where the work is turned, so a D-flat bar wraps whatever its placement.
