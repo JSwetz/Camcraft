@@ -120,6 +120,8 @@ pub use links::*;
 pub use entity::*;
 mod wire;
 pub use wire::*;
+mod json;
+pub use json::*;
 mod apply;
 use apply::*;
 mod validate;

@@ -112,6 +112,10 @@ pub struct PathDto {
 pub struct CompSpanDto {
     pub side: CompSideDto,
     pub radius: f64,
+    /// Wear compensation (#38): written only when on; absent is the
+    /// control variant, every cache before the option.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wear: bool,
     pub first: u64,
     pub last: u64,
     pub programmed: Vec<MoveDto>,
@@ -132,6 +136,7 @@ impl CompSpanDto {
                 crate::cl::CompSide::Right => CompSideDto::Right,
             },
             radius: crate::cl::lattice(c.radius),
+            wear: c.wear,
             first: c.first as u64,
             last: c.last as u64,
             programmed: c.programmed.iter().map(MoveDto::from_move).collect(),
@@ -145,6 +150,7 @@ impl CompSpanDto {
                 CompSideDto::Right => crate::cl::CompSide::Right,
             },
             radius: self.radius,
+            wear: self.wear,
             first: usize::try_from(self.first).unwrap_or(usize::MAX),
             last: usize::try_from(self.last).unwrap_or(usize::MAX),
             programmed: self.programmed.iter().map(|m| m.to_move()).collect(),
@@ -289,6 +295,12 @@ pub struct OperationDto {
     /// no version bump (the v22 `axis` precedent).
     #[serde(default, skip_serializing_if = "AreaDto::is_default")]
     pub area: AreaDto,
+    /// The op's coolant (#112), `off` / `flood` / `mist` /
+    /// `through-tool`. Absent reads flood - every earlier file's post -
+    /// and flood writes no key, so older files round-trip byte for byte
+    /// with no version bump (the `area` precedent).
+    #[serde(default, skip_serializing_if = "crate::operation::CoolantMode::is_default")]
+    pub coolant: crate::operation::CoolantMode,
 }
 
 impl MoveDto {
