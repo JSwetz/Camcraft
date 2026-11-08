@@ -15,7 +15,8 @@
 //! generate, the envelope verdict wiring, the global nose_radius row),
 //! camcraft_app::commands (Create/GenerateOperation, ChangeTool,
 //! EditOperationParams undo), camcraft_app::operation::stamp (#109: the
-//! pilot ahead in the stamp).
+//! pilot ahead in the stamp). The bar's body on its feeds (#146) is
+//! turning_bore_feeds.rs.
 //! Lane shape (M4.4): all tests here run in seconds.
 
 mod common;
@@ -299,3 +300,4 @@ fn a_pilot_deleted_or_made_shallower_after_the_bore_marks_it_stale() {
         assert!(!out.exists(), "a refused post writes nothing");
     }
 }
+

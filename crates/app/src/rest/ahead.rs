@@ -103,7 +103,9 @@ pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, 
                 .and_then(|t| stock_sim::bull_corner(t).ok().flatten()),
             nose: tool
                 .as_ref()
-                .filter(|t| t.kind == crate::tools::ToolKind::Turning)
+                // A boring bar's moves carry its nose centre too (#146
+                // review B1): the feed law credits its whole nose kerf.
+                .filter(|t| matches!(t.kind, crate::tools::ToolKind::Turning | crate::tools::ToolKind::Bore))
                 .map(|t| t.nose_radius)
                 .filter(|n| n.is_finite() && *n > 0.0),
             cut,

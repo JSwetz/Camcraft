@@ -11,8 +11,12 @@
 //! surface, so each facet is read as the slab its true surface can
 //! occupy: thickened by its sagitta allowance either side (from the
 //! dihedral angle to its edge neighbours and its width across that
-//! edge, `sag_of`). A facet meeting its neighbours only at sharp edges
+//! edge, `cross_sag::sag_of`, edge neighbours found within a weld
+//! tolerance so a non-conforming STL reads as a welded one). A facet meeting its neighbours only at sharp edges
 //! (a box face, a hex flat) or flat is read exactly.
+//!
+//! Issue #119: the same reading, over a rectangular tube, is the cross
+//! drill's holder footprint on one station (`tube_reach`).
 //!
 //! Provenance: Sutherland-Hodgman polygon clipping against slab
 //! half-spaces, the first-contact point of a prism swept along its
@@ -20,15 +24,9 @@
 //! polygon are textbook computational geometry. Our own design notes;
 //! no vendor material consulted.
 
-use std::collections::HashMap;
-
 use crate::geometry::{Point3, Triangle};
 
-/// A dihedral angle above this between edge neighbours is a real edge
-/// (a box's 90, a hex bar's 60 degrees), not a tessellated round's
-/// crease; at or below it the facet carries a sagitta allowance (an
-/// octagon reads as a coarse round: air, never metal).
-const SHARP: f64 = std::f64::consts::FRAC_PI_4;
+use super::cross_sag::{sag_of, unit_normal};
 
 /// Stock facets in the spindle frame, each with the sagitta allowance
 /// its true surface may stand beyond the facet plane (0: read exactly).
@@ -52,69 +50,6 @@ impl StockMesh {
     }
 }
 
-fn unit_normal(t: &Triangle) -> Option<Point3> {
-    let n = (t.b - t.a).cross(t.c - t.a);
-    let l = n.dot(n).sqrt();
-    (l.is_finite() && l > 1e-12).then(|| Point3::new(n.x / l, n.y / l, n.z / l))
-}
-
-/// Distance of `p` from the line through `a` and `b`.
-fn off_line(p: Point3, a: Point3, b: Point3) -> f64 {
-    let e = b - a;
-    let l = e.dot(e).sqrt();
-    if !(l.is_finite() && l > 1e-12) {
-        return 0.0;
-    }
-    let c = (p - a).cross(e);
-    c.dot(c).sqrt() / l
-}
-
-/// An edge by its two quantised (1e-6 mm) endpoints, smaller first.
-type EdgeKey = ([i64; 3], [i64; 3]);
-
-/// Each facet's sagitta allowance. Across an edge shared with a facet
-/// whose normal turns by `theta` (0 < theta <= SHARP; |cos| read, so a
-/// flipped winding never hides a crease), the true round through the
-/// shared vertices bulges at most `(h/2) tan(theta/2)` past the facet,
-/// `h` the facet's width across that edge - the inscribed polygon's
-/// `(h/2) tan(theta/4)` doubled, which stays an upper bound however
-/// narrow the neighbour is. A facet's allowance is its largest.
-fn sag_of(tris: &[Triangle]) -> Vec<f64> {
-    let q = |p: Point3| [p.x, p.y, p.z].map(|c| (c * 1e6).round() as i64);
-    let normals: Vec<Option<Point3>> = tris.iter().map(unit_normal).collect();
-    let mut edges: HashMap<EdgeKey, Vec<(usize, usize)>> = HashMap::new();
-    for (i, t) in tris.iter().enumerate() {
-        if normals[i].is_none() || !(t.a.is_finite() && t.b.is_finite() && t.c.is_finite()) {
-            continue;
-        }
-        let v = [t.a, t.b, t.c];
-        for k in 0..3 {
-            let (a, b) = (q(v[k]), q(v[(k + 1) % 3]));
-            edges.entry(if a <= b { (a, b) } else { (b, a) }).or_default().push((i, k));
-        }
-    }
-    let mut sag = vec![0.0_f64; tris.len()];
-    let width = |i: usize, k: usize| {
-        let v = [tris[i].a, tris[i].b, tris[i].c];
-        off_line(v[(k + 2) % 3], v[k], v[(k + 1) % 3])
-    };
-    for side in edges.values() {
-        for (x, &(i, ki)) in side.iter().enumerate() {
-            for &(j, kj) in &side[x + 1..] {
-                let (Some(ni), Some(nj)) = (normals[i], normals[j]) else { continue };
-                let theta = ni.dot(nj).abs().min(1.0).acos();
-                if !(theta > 1e-9 && theta <= SHARP) {
-                    continue;
-                }
-                let tn = (0.5 * theta).tan();
-                sag[i] = sag[i].max(0.5 * width(i, ki) * tn);
-                sag[j] = sag[j].max(0.5 * width(j, kj) * tn);
-            }
-        }
-    }
-    sag
-}
-
 /// A hole line in the spindle frame: `a` the XY axis it plunges on
 /// (0 X, 1 Y), `out` the outward sign along it (+1: outward is +a), and
 /// the line's transverse XY coordinate `t` and its Z.
@@ -136,18 +71,31 @@ impl Line {
     }
 }
 
+/// A rectangular tube along a hole line, unbounded along it: `hw`
+/// either side of the line's transverse coordinate `line.t` across it
+/// in XY, `hz` either side of `line.z` in Z. A body's square tube is
+/// `hw == hz`, its half-width; a holder sliding across its line or in
+/// Z on one station (issue #119) widens the side it sweeps.
+#[derive(Clone, Copy)]
+pub(super) struct Tube {
+    pub line: Line,
+    pub hw: f64,
+    pub hz: f64,
+}
+
 /// The outermost outward coordinate of the planar polygon `pts` inside
-/// the square tube of half-width `half` about `line`.
-fn poly_max(pts: &[Point3], line: Line, half: f64) -> Option<f64> {
+/// `tube`.
+fn poly_max(pts: &[Point3], tube: Tube) -> Option<f64> {
+    let line = tube.line;
     let mut poly: Vec<(f64, f64, f64)> =
         pts.iter().filter(|p| p.is_finite()).map(|&p| (line.u(p), line.w(p) - line.t, p.z - line.z)).collect();
     if poly.len() < 3 {
         return None;
     }
-    // Four slabs: |w| <= half and |z| <= half, each as two halves
+    // Four slabs: |w| <= hw and |z| <= hz, each as two halves
     // (`k` picks w or z, `sg` the side).
     for (k, sg) in [(1, 1.0), (1, -1.0), (2, 1.0), (2, -1.0)] {
-        poly = clip(&poly, |p| half - sg * if k == 1 { p.1 } else { p.2 });
+        poly = clip(&poly, |p| if k == 1 { tube.hw - sg * p.1 } else { tube.hz - sg * p.2 });
         if poly.is_empty() {
             return None;
         }
@@ -156,11 +104,11 @@ fn poly_max(pts: &[Point3], line: Line, half: f64) -> Option<f64> {
 }
 
 /// The outermost outward coordinate of any stock facet - a curved one
-/// as its sagitta slab - inside the square tube of half-width `half`
-/// about `line`, or `None` when the tube meets no facet. A slab's
+/// as its sagitta slab - inside `tube`, or `None` when the tube meets
+/// no facet. A slab's
 /// outermost point in the tube lies on one of its five faces (the tube
 /// is unbounded along the line), so clipping them suffices.
-fn tube_max(mesh: &StockMesh, line: Line, half: f64) -> Option<f64> {
+fn tube_max(mesh: &StockMesh, tube: Tube) -> Option<f64> {
     let mut best: Option<f64> = None;
     let mut take = |m: Option<f64>| {
         if let Some(m) = m {
@@ -171,16 +119,16 @@ fn tube_max(mesh: &StockMesh, line: Line, half: f64) -> Option<f64> {
         let v = [tri.a, tri.b, tri.c];
         let n = if s > 0.0 && s.is_finite() { unit_normal(tri) } else { None };
         let Some(n) = n else {
-            take(poly_max(&v, line, half));
+            take(poly_max(&v, tube));
             continue;
         };
         let off = |p: Point3, k: f64| Point3::new(p.x + k * n.x, p.y + k * n.y, p.z + k * n.z);
         let (lo, hi) = (v.map(|p| off(p, -s)), v.map(|p| off(p, s)));
-        take(poly_max(&lo, line, half));
-        take(poly_max(&hi, line, half));
+        take(poly_max(&lo, tube));
+        take(poly_max(&hi, tube));
         for k in 0..3 {
             let j = (k + 1) % 3;
-            take(poly_max(&[lo[k], lo[j], hi[j], hi[k]], line, half));
+            take(poly_max(&[lo[k], lo[j], hi[j], hi[k]], tube));
         }
     }
     best
@@ -222,10 +170,38 @@ fn clip(poly: &[(f64, f64, f64)], inside: impl Fn(&(f64, f64, f64)) -> f64) -> V
 pub(super) fn entry(mesh: &StockMesh, raw: f64, line: Line, half: f64) -> Option<f64> {
     let edge = (line.t.abs() - half).max(0.0);
     let circ = (edge < raw).then(|| (raw * raw - edge * edge).max(0.0).sqrt())?;
-    let Some(m) = tube_max(mesh, line, half) else { return Some(circ) };
+    let Some(m) = tube_max(mesh, Tube { line, hw: half, hz: half }) else { return Some(circ) };
+    Some(face_or_circ(m, circ, raw, edge))
+}
+
+/// The mesh's crossing `m` when it is a flat (more than a turned bar's
+/// tessellation inside `raw` at the edge offset `edge`), else the
+/// circumscribed reading `circ` - `entry`'s choice.
+fn face_or_circ(m: f64, circ: f64, raw: f64, edge: f64) -> f64 {
     let band = raw * (1.0 - (std::f64::consts::PI / 16.0).cos());
     let flat = m.is_finite() && m < circ && raw - m.hypot(edge) > band;
-    Some(if flat { m } else { circ })
+    if flat { m } else { circ }
+}
+
+/// The outermost outward coordinate of material inside `tube` (issue
+/// #119: a holder's footprint on one station), read as `entry` reads a
+/// body's: a flat at its face, a turned round at its circumscribed
+/// reading at the tube's edge nearest the axis. `None` when the tube
+/// meets no facet - the tube is unbounded along its line, so a solid
+/// it entered would cross its wall: nothing is there. A non-finite
+/// reading is `NaN`, which no holder clears.
+pub(super) fn tube_reach(mesh: &StockMesh, raw: f64, tube: Tube) -> Option<f64> {
+    let m = tube_max(mesh, tube)?;
+    if !(m.is_finite() && raw.is_finite()) {
+        return Some(f64::NAN);
+    }
+    let edge = (tube.line.t.abs() - tube.hw).max(0.0);
+    // A crossing outside the circumscribed circle (only by rounding)
+    // stands as read.
+    if edge >= raw {
+        return Some(m);
+    }
+    Some(face_or_circ(m, (raw * raw - edge * edge).max(0.0).sqrt(), raw, edge))
 }
 
 #[cfg(test)]
@@ -315,6 +291,45 @@ mod tests {
             assert!(got >= 20.0 - 1e-9, "{n} facets: entry {got:.3} inside the true round (20)");
             let back = entry(&st, raw, Line { out: -1.0, ..line(22.0) }, 2.0).unwrap_or(f64::NAN);
             assert!(back >= 10.0 - 1e-9, "{n} facets, -X side: entry {back:.3} inside the true round (10)");
+        }
+    }
+
+    /// The same round as a non-conforming STL (#121): every side quad
+    /// carries its own copies of its corners, moved 5e-6 mm along Z
+    /// (alternately up and down, so neighbours' copies never coincide -
+    /// the facet planes, and so the true surface, unchanged). Its
+    /// entry and its shank reach (#84, the wider body) are the welded
+    /// mesh's, not its bare chords'.
+    #[test]
+    fn an_unwelded_round_is_entered_and_reached_as_the_welded_one() {
+        let unweld = |tris: Vec<Triangle>| -> Vec<Triangle> {
+            let dz = |i: usize| if (i / 4).is_multiple_of(2) { 5e-6 } else { -5e-6 };
+            let up = |p: Point3, d: f64| Point3::new(p.x, p.y, p.z + d);
+            let side = |i: usize| i % 4 < 2;
+            tris.iter()
+                .enumerate()
+                .map(|(i, t)| if side(i) { Triangle::new(up(t.a, dz(i)), up(t.b, dz(i)), up(t.c, dz(i))) } else { *t })
+                .collect()
+        };
+        let truth = (400.0_f64 - 19.5 * 19.5).sqrt();
+        for n in [32, 16] {
+            let mut tris = prism(n, 20.0, (0.0, 0.0), (-20.0, 0.0), 0.0);
+            tris.extend(prism(n, 30.0, (0.0, 0.0), (0.0, 20.0), 0.0));
+            let (welded, loose) = (StockMesh::new(tris.clone()), StockMesh::new(unweld(tris)));
+            let off = StockMesh::new(prism(n, 25.0, (5.0, 0.0), (-20.0, 20.0), 0.0));
+            let off_loose = StockMesh::new(unweld(prism(n, 25.0, (5.0, 0.0), (-20.0, 20.0), 0.0)));
+            for half in [2.0, 3.0] {
+                let l = Line { a: 0, out: 1.0, t: 19.5 + half, z: -10.0 };
+                let (w, u) = (entry(&welded, 30.0, l, half), entry(&loose, 30.0, l, half));
+                let (w, u) = (w.unwrap_or(f64::NAN), u.unwrap_or(f64::NAN));
+                assert!((w - u).abs() < 1e-9, "{n} facets, half {half}: unwelded {u:.6} vs welded {w:.6}");
+                assert!(u >= truth - 1e-9, "{n} facets, half {half}: unwelded {u:.3} inside the true d40 ({truth:.3})");
+                let l = line(20.0 + half);
+                let (w, u) = (entry(&off, 30.0, l, half), entry(&off_loose, 30.0, l, half));
+                let (w, u) = (w.unwrap_or(f64::NAN), u.unwrap_or(f64::NAN));
+                assert!((w - u).abs() < 1e-9, "{n} facets off-axis, half {half}: unwelded {u:.6} vs welded {w:.6}");
+                assert!(u >= 20.0 - 1e-9, "{n} facets off-axis, half {half}: unwelded {u:.3} inside the true round (20)");
+            }
         }
     }
 }
