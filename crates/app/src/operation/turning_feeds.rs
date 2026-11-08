@@ -131,19 +131,28 @@ fn rubs(a: (f64, f64), b: (f64, f64), i: usize, pieces: &[(f64, f64, Vec<f64>); 
         for (h0, h1, offs) in pieces {
             // Stations on one global grid: the part's hole is read once
             // per station (its ray parity is cached by station).
+            // A piece past MAX_SAMPLES pitches is read at a coarser
+            // pitch, never cut short (#146 review N2).
             let (lo, hi) = (at.0 + h0, at.0 + h1);
-            let first = (lo / STEP).ceil();
-            let m = ((hi / STEP).floor() - first).clamp(0.0, MAX_SAMPLES) as usize;
+            let pitch = STEP.max((h1 - h0) / MAX_SAMPLES);
+            let first = (lo / pitch).ceil();
+            let m = ((hi / pitch).floor() - first).clamp(0.0, MAX_SAMPLES + 1.0) as usize;
             for j in 0..=m {
-                let s = (first + j as f64) * STEP;
+                let s = (first + j as f64) * pitch;
                 if s > hi {
                     break;
                 }
                 for dr in offs {
                     let rho = at.1 + toward * dr;
+                    // The credits are asked once, and only of material
+                    // that can still change the verdict (review N3).
                     match material(s, rho, sc, cap) {
-                        Some(true) if !cut(s, rho, i, a, at, sc) => return Some(true),
-                        Some(false) if !stock_hit && !cut(s, rho, i, a, at, sc) => stock_hit = true,
+                        Some(part) if (part || !stock_hit) && !cut(s, rho, i, a, at, sc) => {
+                            if part {
+                                return Some(true);
+                            }
+                            stock_hit = true;
+                        }
                         _ => {}
                     }
                 }
@@ -169,8 +178,11 @@ fn material(s: f64, rho: f64, sc: &Scene, cap: Option<f64>) -> Option<bool> {
 /// the turning ops and drills ahead.
 fn cut(s: f64, rho: f64, i: usize, start: (f64, f64), now: (f64, f64), sc: &Scene) -> bool {
     let near = |p: (f64, f64), q: (f64, f64), reach: f64| seg_dist((s, rho), p, q) <= reach || seg_dist((s, -rho), p, q) <= reach;
+    // This feed's own trail credits only when its kerf is a straight
+    // or spindle-turn sweep (#146 review N1): an arc's chord is not.
+    let mine = sc.own.get(i).is_some_and(Option::is_some);
     sc.pilots.iter().any(|p| p.removed(s, rho.abs()))
-        || near(start, now, sc.reach)
+        || (mine && near(start, now, sc.reach))
         || sc.own.iter().take(i).flatten().any(|&(p, q)| near(p, q, sc.reach))
         || sc.ahead.iter().any(|&((p, q), reach)| near(p, q, reach))
 }
