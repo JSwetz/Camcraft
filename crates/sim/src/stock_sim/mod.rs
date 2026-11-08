@@ -80,6 +80,7 @@ pub mod preview;
 mod ridge;
 mod scan;
 mod scan_hidden;
+mod scan_near;
 mod tiles;
 
 pub use backend::{Backend, Stock, FIELD_BAND, FIELD_VERDICT_EPS, LATHE_COLUMN_REFUSAL};
