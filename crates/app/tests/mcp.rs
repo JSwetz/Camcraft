@@ -5,7 +5,9 @@
 //! never a panic.
 //!
 //! Gate map (M4.4): covers app::mcp, app::script, app::project::json,
-//! app::cli.
+//! app::cli, app::operation (detect_holes, #312).
+
+mod common;
 
 use camcraft_app::mcp::{self, Server};
 
@@ -104,6 +106,7 @@ fn handshake_and_tool_list() {
     for want in [
         "open_project", "import_model", "save_project", "get_job", "list_operation_types", "add_operation",
         "edit_operation", "delete_operation", "set_tool", "undo", "redo", "generate", "verify", "post",
+        "detect_holes",
     ] {
         assert!(names.contains(&want), "missing tool {want}: {names:?}");
     }
@@ -244,4 +247,53 @@ fn the_stdio_loop_answers_line_for_line() {
     assert_eq!(lines[0]["result"]["protocolVersion"], json!("2025-03-26"));
     assert_eq!(lines[1]["result"]["isError"], json!(false));
     assert_eq!(lines[1]["result"]["structuredContent"]["operations"], json!([]));
+}
+
+/// A 20 mm disc, 10 tall, with a 6 mm blind bore 6 deep from its top,
+/// written as ASCII STL (the bore suites' 16-sided revolve).
+fn write_bored_disc_stl(path: &std::path::Path) {
+    let m = common::bore::revolve(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (3.0, 10.0), (3.0, 4.0), (0.0, 4.0)]);
+    let mut s = String::from("solid disc\n");
+    for t in m.facets.iter() {
+        s.push_str(" facet normal 0 0 0\n  outer loop\n");
+        for p in [t.a, t.b, t.c] {
+            s.push_str(&format!("   vertex {} {} {}\n", p.x, p.y, p.z));
+        }
+        s.push_str("  endloop\n endfacet\n");
+    }
+    s.push_str("endsolid disc\n");
+    std::fs::write(path, s).expect("write stl");
+}
+
+#[test]
+fn detect_holes_fills_a_drill_from_its_model_and_undo_empties_it() {
+    // #312: a drill machines only the holes in its parameters, which the
+    // app fills from its Detect holes button - over MCP this is the tool.
+    let dir = tmp_dir("holes");
+    let stl = dir.join("disc.stl");
+    write_bored_disc_stl(&stl);
+    let mut c = Client::new();
+    c.request("initialize", json!({ "protocolVersion": "2025-06-18" }));
+    c.ok("import_model", json!({ "path": stl.display().to_string() }));
+    c.ok("set_stock", json!({ "box": { "dx": 30.0, "dy": 30.0, "dz": 10.0 } }));
+    c.ok("add_tool", json!({ "catalog": "DR-0400" }));
+    c.ok("add_operation", json!({ "kind": "drill", "tool": "DR-0400", "source": "disc", "name": "D1" }));
+    let before = c.refused("generate", json!({ "name": "D1" }));
+    assert!(before.contains("no holes"), "an undetected drill has nothing to machine: {before}");
+
+    let got = c.ok("detect_holes", json!({ "name": "D1" }));
+    assert_eq!((got["holes"].clone(), got["radial_holes"].clone()), (json!(1), json!(0)), "{got}");
+    let holes = |c: &mut Client| c.ok("get_job", json!({}))["operations"][0]["params"]["drill"]["holes"].as_array().map(Vec::len);
+    assert_eq!(holes(&mut c), Some(1), "the bore is stored in the drill's list");
+    c.ok("generate", json!({ "name": "D1" }));
+
+    // Undo walks back the generation, then the detection.
+    c.ok("undo", json!({}));
+    c.ok("undo", json!({}));
+    assert_eq!(holes(&mut c), Some(0), "undo empties the list again");
+
+    c.ok("add_tool", json!({ "catalog": "EM-0400-2FL" }));
+    c.ok("add_operation", json!({ "kind": "face", "tool": "EM-0400-2FL", "name": "F1" }));
+    let e = c.refused("detect_holes", json!({ "name": "F1" }));
+    assert!(e.contains("not a drilling operation"), "{e}");
 }
