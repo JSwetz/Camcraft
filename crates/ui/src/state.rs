@@ -2383,7 +2383,12 @@ impl State {
                     return;
                 };
                 let Some((shape, pos)) = (if radio == 1 {
-                    stock::fit_cylinder(&bounds, margin)
+                    // #230: snug about the part - the models' largest
+                    // radius from the fit's axis plus the margin, not the
+                    // footprint's diagonal (1.41 R for a round part).
+                    let c = [(bounds.min.x + bounds.max.x) * 0.5, (bounds.min.y + bounds.max.y) * 0.5];
+                    model::solid_world_radius_about(&self.world, c)
+                        .and_then(|r| stock::fit_cylinder_about(&bounds, r, margin))
                 } else {
                     stock::fit_box(&bounds, margin)
                 }) else {
