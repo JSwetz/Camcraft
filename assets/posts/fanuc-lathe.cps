@@ -159,10 +159,20 @@ function coolantFor(ask) {
 }
 
 // -------------------------------------------------------------- header
+// The program's O-word (#111): O0001 for the whole job, and one file
+// per operation counts up (the engine's programNumber); a host that
+// publishes none posts O0001.
+function oWord() {
+  var n = typeof programNumber !== "undefined" ? Math.round(Number(programNumber) || 1) : 1;
+  var t = String(Math.max(1, Math.min(n, 9999)));
+  while (t.length < 4) t = "0" + t;
+  return "O" + t;
+}
+
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block(["O0001", "(" + nm + ")"]);
+  block([oWord(), "(" + nm + ")"]);
   block(["G21", "G18", "G40", "G80", "G99"]);   // mm, ZX plane, no nose comp, feed/rev
 }
 

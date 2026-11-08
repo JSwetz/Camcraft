@@ -255,6 +255,9 @@ pub struct Posted {
 
 #[path = "posting_sim.rs"]
 mod sim_clause_impl;
+#[path = "posting_per_op.rs"]
+mod per_op;
+pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
 /// The verification gate's whole answer: the blocking problems, and
@@ -555,6 +558,29 @@ fn fixture_problems(world: &World) -> Vec<String> {
 /// through one script without the verification gate, which the
 /// posting suites lock separately - the golden locks the translation.
 pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
+    let mut records: Vec<cnc::Record> = Vec::new();
+    let mut moved = 0usize; // cycle AT anchors are stream-global
+    for (_name, mut recs) in op_streams(world)? {
+        if moved > 0 {
+            for r in &mut recs {
+                if let cnc::Record::Cycle(c) = r {
+                    c.first_move += moved;
+                }
+            }
+        }
+        // The emitted motion records, not the path's moves: a
+        // control-compensated span (M13.11) writes its programmed
+        // contour in place of its centre moves.
+        moved += recs.iter().filter(|r| matches!(r, cnc::Record::Move(_))).count();
+        records.extend(recs);
+    }
+    Ok(records)
+}
+
+/// Each program operation's own records (op entity name, records), in
+/// program order, cycle anchors local to the op - the unit one file per
+/// operation (#111) posts on its own, and [`stream_records`] joins.
+pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, String> {
     let ops = program_ops(world)?;
 
     // Tool library rank, the T../H.. law: 1-based position among the
@@ -566,8 +592,7 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         .collect();
 
     let skip_stops = post_options_of(world).skip_stops;
-    let mut records: Vec<cnc::Record> = Vec::new();
-    let mut moved = 0usize; // cycle AT anchors are stream-global
+    let mut streams = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
             .ok_or_else(|| format!("{name}: lost its operation"))?;
@@ -649,21 +674,9 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
                 .map(|w| format!("{name}: {w}"))
                 .collect(),
         };
-        let mut recs = post::dump(&cache.path, &d);
-        if moved > 0 {
-            for r in &mut recs {
-                if let cnc::Record::Cycle(c) = r {
-                    c.first_move += moved;
-                }
-            }
-        }
-        // The emitted motion records, not the path's moves: a
-        // control-compensated span (M13.11) writes its programmed
-        // contour in place of its centre moves.
-        moved += recs.iter().filter(|r| matches!(r, cnc::Record::Move(_))).count();
-        records.extend(recs);
+        streams.push((name.clone(), post::dump(&cache.path, &d)));
     }
-    Ok(records)
+    Ok(streams)
 }
 
 /// The work offset this operation posts to: the first WCS slot its

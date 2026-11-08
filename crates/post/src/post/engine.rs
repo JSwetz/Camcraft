@@ -60,9 +60,24 @@ pub struct PostOutput {
 /// Post a stream text with one script. The machine value is the raw
 /// `.mch` JSON (flattened here); pass `Value::Null` for none.
 pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError> {
+    run_numbered(cps, mch, stream, 1)
+}
+
+/// The file extension the script's manifest states (`extension`), or
+/// `nc` when it states none - what a program written by it is named.
+pub fn extension_of(cps: &str) -> Result<String, PostError> {
+    let mut s = Script::load(cps)?;
+    Ok(s.string_global("extension")?.filter(|e| !e.is_empty()).unwrap_or_else(|| "nc".to_owned()))
+}
+
+/// [`run`] as program number `program` (#111): one file per operation
+/// numbers its programs 1, 2, 3..., and a dialect with an O-word
+/// writes it; everything else posts exactly as [`run`].
+pub fn run_numbered(cps: &str, mch: &Value, stream: &str, program: u32) -> Result<PostOutput, PostError> {
     let records = super::normalize_program_order(cnc::parse(stream)?);
     let mut s = Script::load(cps)?;
     s.set_machine(&machine::script_props(mch))?;
+    s.set_program_number(program)?;
     s.call("onOpen", "")?;
     let head = s.out_len()?;
 
