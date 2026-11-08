@@ -280,8 +280,8 @@ fn two_setups_on_one_word_from_different_placements_refuse_one_file() {
 fn the_setup_sheet_names_the_program_offset() {
     let (world, mut h) = faced_block();
     let sheet = setup_sheet::render(&world, Some("Setup1")).expect("sheet");
-    assert!(sheet.contains("program offset: G54 (the default - not picked)"), "{sheet}");
+    assert!(sheet.contains("program offset: G54\n"), "{sheet}");
     pick(&world, &mut h, "Setup1", Some(4));
     let sheet = setup_sheet::render(&world, Some("Setup1")).expect("sheet");
-    assert!(sheet.contains("program offset: G58 (picked for this setup)"), "{sheet}");
+    assert!(sheet.contains("program offset: G58\n"), "{sheet}");
 }

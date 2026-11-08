@@ -85,14 +85,12 @@ pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
         out.push_str("  (none placed)\n");
     }
     // #196, #329: the one word the setup's program runs in and its
-    // work-offset heights measure from - the pick, else G54.
-    match ctx.and_then(|s| setup::work_offset(world, s)) {
-        Some(slot) => out.push_str(&format!(
-            "  program offset: {} (picked for this setup)\n",
-            WCS_SLOTS.get(slot).copied().unwrap_or("G54")
-        )),
-        None => out.push_str("  program offset: G54 (the default - not picked)\n"),
-    }
+    // work-offset heights measure from: the setup's word, G54 when unset.
+    let slot = ctx.and_then(|s| setup::work_offset(world, s)).unwrap_or(0);
+    out.push_str(&format!(
+        "  program offset: {}\n",
+        WCS_SLOTS.get(slot).copied().unwrap_or("G54")
+    ));
     out.push('\n');
 }
 

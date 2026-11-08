@@ -59,7 +59,7 @@ fn the_picker_sets_the_setups_work_offset_through_the_command() {
     assert_eq!(pick(h.state()), Some(1), "the drain lands G55");
     assert_eq!(h.state().status, "Setup1 work offset: G55");
     key(&mut h, Key::Z);
-    assert_eq!(pick(h.state()), None, "undo restores Auto");
+    assert_eq!(pick(h.state()), None, "undo restores G54 (unset)");
     key(&mut h, Key::Y);
     assert_eq!(pick(h.state()), Some(1), "redo restores G55");
 }
@@ -69,7 +69,7 @@ fn a_refused_pick_changes_nothing_and_says_why() {
     let mut state = with_setup();
     run(&mut state, CommandKind::SetSetupWorkOffset { setup: "Setup1".into(), slot: Some(9) });
     assert_eq!(pick(&state), None);
-    assert!(state.status.contains("work offset not picked"), "{}", state.status);
+    assert!(state.status.contains("work offset not changed"), "{}", state.status);
     // The refusal pushed nothing: the one undo unit is the CreateSetup.
     run(&mut state, CommandKind::Undo);
     assert!(camcraft_app::setup::names(&state.world).is_empty());

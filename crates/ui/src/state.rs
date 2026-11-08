@@ -2926,7 +2926,7 @@ impl State {
                         self.status = format!("{setup} work offset: {word}");
                     }
                     Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("work offset not picked: {err}"));
+                        self.refuse(ErrorScope::Setup, format!("work offset not changed: {err}"));
                     }
                 }
             }
