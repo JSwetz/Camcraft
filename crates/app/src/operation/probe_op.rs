@@ -89,17 +89,20 @@ pub(super) fn generate_probe(
 
 /// The protected-move law: every move of the stylus, the touches
 /// included, keeps the ball at least its radius (less the slack) off
-/// every facet. One warning per offending move.
+/// every facet. The moves state the TIP (`probing::probe_cycle`), so
+/// the swept ball's centre is each point raised by the radius. One
+/// warning per offending move.
 #[must_use]
 pub fn stylus_hits(path: &Toolpath, ball_r: f64, facets: &[Triangle]) -> Vec<Warning> {
     let floor = ball_r - STYLUS_SLACK;
+    let centre = |q: Point3| Point3::new(q.x, q.y, q.z + ball_r);
     path.moves
         .iter()
         .enumerate()
         .filter(|(_, m)| {
             facets
                 .iter()
-                .any(|t| crate::stock_sim::dist_seg_tri(m.from, m.to, t) < floor)
+                .any(|t| crate::stock_sim::dist_seg_tri(centre(m.from), centre(m.to), t) < floor)
         })
         .map(|(at, _)| Warning::Gouge { at })
         .collect()

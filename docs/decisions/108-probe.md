@@ -69,3 +69,39 @@
   law (the ball alone is judged); probing hooks for the Haas, Mazak,
   Siemens and Heidenhain dialects (they refuse by name now);
   protected positioning moves (G38.3-style) for the approach descent.
+
+
+## #108 - the probe programs the stylus TIP, not the ball centre (2026-11-08, review of 0beeec4)
+
+- **Chosen:** the probe path states the stylus TIP - the ball centre
+  less the ball radius along +Z - exactly as every ball tool in this
+  codebase does (the pivot law: centre = tip + r along the axis; the
+  3-D finishing generators and `sim::verify::contact` read the move
+  point as the tip). `motion::probing::probe_cycle` still plans on the
+  ball centre (contact - r along the travel, the edge / corner / bore
+  `depth` is still the CENTRE's depth below the feature) and shifts
+  every move point and probe target down by r when it lays them down.
+  The safe plane is a tip height like every tool's (the ball centre
+  rides at clearance + r). The protected-move law
+  (`operation::probe_op::stylus_hits`) sweeps the ball about each
+  point raised by r, so the judged geometry is unchanged.
+- **Why:** a spindle probe's length register is gauged to the ball's
+  bottom (the trigger point) like a ball mill's. Posting the centre
+  read every -Z face r high: the default face op (tolerance 0.5,
+  r = 2) alarmed on every run, and with a looser tolerance `G10 L2`
+  moved the work zero r into the part - every following op cut r too
+  deep, a gouge the verifier cannot see. XY touches also landed r
+  higher than asked, so an edge touch at `depth` 3 met a chamfer.
+  After the fix a -Z touch on a face at Z 20 posts `G31 ... Z15`
+  (overtravel 5) and expects its trip at Z 20; XY expectations stay
+  the spindle axis (contact - r along the travel), which is what
+  `#5061`/`#5062` read.
+- **Dropped:** (b) keep the centre and state "gauge H to the ball
+  centre" in the NC header and the setup sheet - an operator note is
+  the weaker guard, and it breaks the one convention every other tool
+  follows; correcting only in the post (the pivot law dropped that
+  too: the CLFile and the verifier would disagree with the G-code).
+- **Pinned by:** `probe_op::the_posted_g31_z_is_the_tip_at_the_expected_contact`
+  (face and bore-centre G31 Z against the expected contact) and the
+  regenerated `nc/fanuc/probe_bore_centre.nc` golden (every Z exactly
+  2 mm lower except the safe plane, which is now the tip at 50).

@@ -16,8 +16,9 @@ use crate::geometry::Point3;
 use super::moves::{Move, MoveKind};
 
 /// One probing move of a path: `moves[index]` is the straight feed
-/// from the approach point to the EXPECTED trip (the stylus ball
-/// centre on contact with a part exactly where the model says), and
+/// from the approach point to the EXPECTED trip (the stylus TIP - ball
+/// centre less its radius along +Z, the point every ball tool states -
+/// on contact with a part exactly where the model says), and
 /// `target` is the point the control is told to probe toward - the
 /// expected trip plus the overtravel, on the same line. The control
 /// stops wherever the stylus trips; the moves state the nominal.

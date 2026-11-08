@@ -216,7 +216,16 @@ pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
         .ok_or_else(|| GenError::Empty("no touch to make".into()))?;
     let bore = p.mode == ProbeMode::Bore;
     let centre = Point3::new(p.target.x, p.target.y, p.target.z - p.depth);
-    let home = |q: Point3| Point3::new(q.x, q.y, p.clearance_z);
+    // The plan runs on the ball CENTRE (contact - r along the travel);
+    // the path states the TIP, as every ball tool's does (the pivot
+    // law: centre = tip + r along the axis, here +Z). A spindle probe's
+    // length register is gauged to the ball's bottom like a ball
+    // mill's, so the posted G31 Z for a -Z face is the face itself -
+    // programming the centre would read every face r high, and a set
+    // offset would move the work zero r into the part (review of
+    // 0beeec4). The safe plane is a tip height, as for every tool.
+    let home = |q: Point3| Point3::new(q.x, q.y, p.clearance_z + r);
+    let tip = |c: Point3| Point3::new(c.x, c.y, c.z - r);
     let entry = if bore { centre } else { first_start };
     // The rapid plane: the ball the approach clearance over the probed
     // feature's top. The safe plane must stand above it, so the path
@@ -234,7 +243,7 @@ pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
     // stands above its start) is not laid down: the chain stays gapless.
     let mut go = |kind: MoveKind, to: Point3, feed: Option<f64>, moves: &mut Vec<Move>| {
         if to != at {
-            moves.push(Move::new(kind, at, to, feed));
+            moves.push(Move::new(kind, tip(at), tip(to), feed));
             at = to;
         }
     };
@@ -255,13 +264,13 @@ pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
             }
             go(MoveKind::Feed, start, Some(p.fast_feed), &mut moves);
         }
-        probes.push(ProbeTouch { index: moves.len(), measure: None, target });
+        probes.push(ProbeTouch { index: moves.len(), measure: None, target: tip(target) });
         go(MoveKind::Feed, expect, Some(p.fast_feed), &mut moves);
         go(MoveKind::Feed, back, Some(p.fast_feed), &mut moves);
         probes.push(ProbeTouch {
             index: moves.len(),
             measure: Some(u32::try_from(k).unwrap_or(u32::MAX)),
-            target,
+            target: tip(target),
         });
         go(MoveKind::Feed, expect, Some(p.slow_feed), &mut moves);
         go(MoveKind::Feed, start, Some(p.fast_feed), &mut moves);
