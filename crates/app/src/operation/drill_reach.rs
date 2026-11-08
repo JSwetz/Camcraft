@@ -37,6 +37,8 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::tools::Tool;
 
+#[path = "drill_station.rs"]
+mod station;
 #[path = "drill_top.rs"]
 mod top;
 #[cfg(test)]
@@ -242,7 +244,10 @@ fn band_r(facets: &[Triangle], o: (f64, f64), z0: f64, z1: f64) -> Option<f64> {
 /// footprint sweeps must stay outside that radius. Anything else is
 /// refused by name - the swing is not raised to make room (a holder
 /// that wide wants a clearance the user sets, not one the kernel
-/// invents).
+/// invents). Issue #119: that corner-radius reading is kept for the
+/// swings round the bar; a move on one station (along its hole line,
+/// across it, or in Z) reads the material in the tube its holder sweeps
+/// (`station`), so a box is met at its face, not its corner circle.
 pub(super) fn cross_holder(
     t: &Toolpath,
     part: &[Triangle],
@@ -253,6 +258,7 @@ pub(super) fn cross_holder(
 ) -> Result<(), GenError> {
     let Some((reach, hr)) = holder(tool, name)? else { return Ok(()) };
     let hl = finite_or_zero(tool.holder_len);
+    let mat = station::material(part, stock, origin);
     for (i, m) in t.moves.iter().enumerate() {
         let axis = m.axis.unwrap_or([0.0, 0.0, 1.0]);
         let az = axis[2].clamp(-1.0, 1.0);
@@ -264,6 +270,20 @@ pub(super) fn cross_holder(
             return Err(GenError::Invalid(format!(
                 "cross-drill move {i}: tool {name}'s holder position is not finite - its clearance cannot be proven"
             )));
+        }
+        if let Some((tube, face)) = station::on_station(m.from, m.to, axis, reach, hr) {
+            let Some(need) = station::reach_in(&mat, tube) else { continue };
+            if face.is_nan() || need.is_nan() || face < need - TOL {
+                let (zl, zh) = (tube.line.z - tube.hz, tube.line.z + tube.hz);
+                return Err(GenError::Invalid(format!(
+                    "cross-drill move {i}: tool {name}'s holder (dia. {:.3}, {reach:.3} mm behind the tip) stands \
+                     {face:.3} mm out along its hole's line, inside material {need:.3} mm out on that line at Z \
+                     {zl:.3} to {zh:.3} - the holder feeds into the stock or part (a collision); use a tool with a \
+                     longer reach, or turn or face the material back first",
+                    2.0 * hr
+                )));
+            }
+            continue;
         }
         let bands = [Some(part), stock].into_iter().flatten();
         let Some(wide) = bands.filter_map(|f| band_r(f, origin, z0, z1)).reduce(f64::max) else { continue };
