@@ -202,16 +202,34 @@ pub fn collect(world: &World) -> ProjectFile {
 
 pub fn save(world: &World, path: &Path) -> Result<(), ProjectError> {
     let file = collect(world);
-    let text = serde_json::to_string_pretty(&file).map_err(|e| corrupt(e.to_string()))?;
-    std::fs::write(path, text)?;
+    let text = serde_json::to_string_pretty(&file).map_err(|e| {
+        tracing::warn!(file = %crate::logging::file_name(path), "project not saved: {e}");
+        corrupt(e.to_string())
+    })?;
+    if let Err(e) = std::fs::write(path, &text) {
+        tracing::warn!(file = %crate::logging::file_name(path), "project not saved: {e}");
+        return Err(e.into());
+    }
+    tracing::info!(file = %crate::logging::file_name(path), bytes = text.len(), entities = file.entities.len(), "project saved");
     Ok(())
 }
 
 /// Rebuild world content from a project file. Not a command: opening a
 /// project replaces the document and clears the history (M1.2 wires that).
 pub fn load(world: &World, path: &Path) -> Result<(), ProjectError> {
-    let text = std::fs::read_to_string(path)?;
-    open(world, &text)
+    let text = std::fs::read_to_string(path).inspect_err(|e| {
+        tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
+    })?;
+    match open(world, &text) {
+        Ok(()) => {
+            tracing::info!(file = %crate::logging::file_name(path), bytes = text.len(), "project opened");
+            Ok(())
+        }
+        Err(e) => {
+            tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
+            Err(e)
+        }
+    }
 }
 
 pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
