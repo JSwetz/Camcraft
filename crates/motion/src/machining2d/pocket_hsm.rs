@@ -171,7 +171,7 @@ pub(super) fn triangle_about(c: Point2, inr: f64) -> Result<Region, GenError> {
 /// least geodesic eccentricity (round 3: where the growth rings finish
 /// soonest);
 /// the helix narrowed to fit. `None` leaves the ladder's own choice.
-fn choose_entry(center: &Region, p: &PocketParams, notes: &mut Vec<String>) -> Result<Option<EntryRoom>, GenError> {
+pub(crate) fn choose_entry(center: &Region, p: &PocketParams, notes: &mut Vec<String>) -> Result<Option<EntryRoom>, GenError> {
     let helix = p.entry == Entry3D::Helix;
     if !(helix || p.entry == Entry3D::Plunge) {
         return Ok(None);
