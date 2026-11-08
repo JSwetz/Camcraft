@@ -20,7 +20,8 @@ text, assets or post processors were used.
 - **Import** STL, OBJ and STEP models; repair meshes (weld vertices, fill
   holes).
 - **Set up** stock, work offsets (G54–G59), fixtures and machines (mill,
-  5-axis, lathe, mill-turn).
+  5-axis, lathe, mill-turn, and the Tormach 770MX, 770MX (ML), 770M,
+  1100MX, 1500MX and PCNC 440 mills).
 - **2D milling:** face, contour (with G41/G42 compensation), pocket,
   adaptive clearing, slot, trace, engrave, chamfer, circular, bore and
   thread milling.
@@ -37,9 +38,11 @@ text, assets or post processors were used.
   has an area.
 - **Verify and simulate:** a solid-law verifier (gouge, rest, rapid and
   fixture checks), stock simulation with playback, and a deviation view.
-- **Post:** Fanuc, Haas, Mazak, Sinumerik, Heidenhain and Fanuc Lathe,
-  written as scriptable `.cps` post processors. The setup sheet and tool
-  list print alongside.
+- **Post:** Fanuc, Haas, Mazak, Sinumerik, Heidenhain, Tormach PathPilot
+  and Fanuc Lathe, written as scriptable `.cps` post processors.
+- **Setup sheets:** the Setups page lists each setup's tools in change
+  order with cut and rapid lengths and estimated time, and **Export setup
+  sheets…** writes one text page per setup. Posting does not write them.
 
 ## Download
 
