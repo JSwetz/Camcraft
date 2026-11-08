@@ -744,6 +744,12 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                         corrupt(format!("setup '{}' holds the part at a placement that is not a rigid transform", dto.name))
                     })?),
                 };
+                // #343: the setup's own machine, sanity-checked like the
+                // document's - a corrupt file, never a guessed limit.
+                let machine = match &sdto.machine {
+                    None => None,
+                    Some(m) => Some(m.to_def(&dto.name).map_err(corrupt)?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     // `wcs_one` left exactly one name on every setup.
@@ -756,6 +762,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     datum_from: sdto.datum_from,
                     work_offset,
                     part_alignment,
+                    machine,
+                    post: sdto.post.as_ref().map(SetupPostDto::to_ref),
                 });
             }
         }

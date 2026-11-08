@@ -58,7 +58,11 @@ use super::*;
 /// posted; slots no setup posted are dropped with a load note
 /// (`wcs_one`). An old reader must refuse a v54 file rather than read a
 /// string where it expects a slot list.
-pub const PROJECT_VERSION: u32 = 54;
+/// v55 (#343): a setup may own its machine and post (`SetupDto::machine`
+/// / `SetupDto::post`); absent follows the document's, so a v54 file
+/// steps up unchanged. An old reader must refuse a v55 file rather than
+/// post every setup on the document's machine.
+pub const PROJECT_VERSION: u32 = 55;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
