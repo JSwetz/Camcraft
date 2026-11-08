@@ -123,11 +123,16 @@ as the owner):
 ```bash
 since=$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
 gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
-  --jq '.[] | select((.body|test("^ *(claimed:|/claim)"; "i")) and (.user.login != "NeoTech"))
+  --jq '.[] | select((.body|test("(^|
+) *(claimed:|/claim)"; "i")) and (.user.login != "NeoTech"))
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 
 For each line `<N> <login> <time>`:
+- **withdrawn** - `<login>` commented `unclaim` (or `/unclaim`) after
+  `<time>`: skip silently. A withdrawn claim's old comment is never
+  mirrored again (without this the Withdraw pass and this one would flip
+  the label every run);
 - **closed issue**, or **already mirrored** (`claimed` set and `<login>`
   assigned, or `claimed` set and a "Claim recorded for @<login>" reply
   exists): skip silently;

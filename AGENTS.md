@@ -58,7 +58,8 @@ go to `CHANGELOG.md`.
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
 - **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review"`
-  and take the highest priority first: `P0` (wrong output, gouge, crash,
+  (then drop any whose comments hold a live contributor claim - "A claim
+  comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
@@ -103,9 +104,11 @@ go to `CHANGELOG.md`.
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
   worktree/branch <name> · plan: <one line>"`. Never work an issue that
-  carries `claimed` unless its last claim comment is older than 4 hours with
-  no newer comment from the claimant - then it is stale: comment "reclaimed
-  from <old claimant> (stale)" and take it.
+  carries `claimed` unless its last claim comment is an agent's and older
+  than 4 hours with no newer comment from the claimant - then it is stale:
+  comment "reclaimed from <old claimant> (stale)" and take it. A
+  contributor's claim comment never goes stale on a timer ("A claim comment
+  is a claim", below).
 - **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
   an Agent should have the tag source:agent"). Every issue an agent opens
   carries the `source:agent` label alongside its `P*` and `area:*` labels -
@@ -123,7 +126,8 @@ go to `CHANGELOG.md`.
   - **Check before claiming.** Before `Claim before any code`, read the
     issue's comments (`gh issue view N --comments`). A claim comment by
     anyone other than the owner account (agents post as the owner) means
-    the issue is taken: do not work it, even if it has no `claimed` label.
+    the issue is taken: do not work it, even if it has no `claimed` label -
+    unless that same person later commented `unclaim` (a withdrawn claim).
   - **Mirror it.** An issue found with such a comment but without the
     label gets `claimed` and the claimant as assignee (if GitHub refuses
     the assignee, the label alone), plus one reply: "Claim recorded for
