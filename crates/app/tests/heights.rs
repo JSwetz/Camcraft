@@ -130,32 +130,31 @@ fn work_offset_reference_reads_the_slots_plane() {
         .contains("no origin yet"));
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, -2.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, -2.0)).expect("place G54"),
     );
     assert_eq!(g54.z(&world), Some(-2.0));
     assert_eq!(h(HeightReference::WorkOffset, 0.5).z(&world), Some(-1.5));
-    // #329: the slot is the SETUP's - a setup picking G55 measures every
-    // work-offset height from G55's plane; a slot placed at the origin
-    // reads the origin ("placed at 0" is a real placement).
+    // #342: the WCS is the SETUP's, one per setup - relabelling it G55 or
+    // G59 changes the word the post writes, never the plane a height
+    // reads; placing it at the origin reads the origin ("placed at 0" is
+    // a real placement).
     history.execute(&world, CreateSetup::new(&world, None, None).expect("materialize Setup1"));
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(1)).expect("label G55"));
+    assert_eq!(g54.z(&world), Some(-2.0), "the label moved nothing");
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G55", at(0.0, 0.0, 0.0)).expect("place G55"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 7.0)).expect("re-place the WCS"),
     );
-    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(1)).expect("pick G55"));
-    assert_eq!(g54.z(&world), Some(0.0), "the setup's G55, not G54");
-    history.execute(
-        &world,
-        SetWcsOrigin::new(&world, "G59", at(0.0, 0.0, 7.0)).expect("place G59"),
-    );
-    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(5)).expect("pick G59"));
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(5)).expect("label G59"));
     assert_eq!(g54.z(&world), Some(7.0));
-    // Back to the default: G54 again.
-    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", None).expect("unpick"));
+    history.execute(&world, SetWcsOrigin::new(&world, at(0.0, 0.0, 0.0)).expect("WCS to 0"));
+    assert_eq!(g54.z(&world), Some(0.0));
+    // Back to the default word: the same WCS.
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", None).expect("unlabel"));
     // Only the plane's z feeds a height: XY and rotations stay outside.
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(99.0, 99.0, -2.0)).expect("slide G54"),
+        SetWcsOrigin::new(&world, at(99.0, 99.0, -2.0)).expect("slide G54"),
     );
     assert_eq!(g54.z(&world), Some(-2.0), "a Z reference reads the plane's height");
 }
@@ -168,7 +167,7 @@ fn resolve_params_agrees_with_resolving_heights_one_by_one() {
     let (world, mut history) = stock_and_block();
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, -1.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, -1.0)).expect("place G54"),
     );
     let params = pocket(
         h(HeightReference::TopOfStock, 5.0),
@@ -198,7 +197,7 @@ fn missing_sources_are_an_honest_mixed_state() {
     let mut history = History::default();
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 0.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 0.0)).expect("place G54"),
     );
     let clearance = h(HeightReference::TopOfStock, 25.0);
     let top = h(HeightReference::TopOfModel, 0.0);
@@ -317,7 +316,7 @@ fn moving_a_source_stales_an_operation_that_references_it() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 4.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 4.0)).expect("place G54"),
     );
     let params = pocket(
         h(HeightReference::TopOfStock, 5.0),
@@ -334,7 +333,7 @@ fn moving_a_source_stales_an_operation_that_references_it() {
     assert_eq!(operation::status_of(&world, &op), OpStatus::Ok);
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 3.0)).expect("drop G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 3.0)).expect("drop G54"),
     );
     assert_eq!(
         operation::status_of(&world, &op),
@@ -410,7 +409,7 @@ fn references_and_placements_survive_a_project_roundtrip() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 4.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 4.0)).expect("place G54"),
     );
     let params = pocket(
         h(HeightReference::TopOfStock, 5.0),

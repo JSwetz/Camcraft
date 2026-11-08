@@ -152,7 +152,7 @@ fn world_for(kind: Kind, dia: f64, clearance: f64) -> World {
     let asset = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/machines/tilthead.mch");
     h.execute(&world, LoadMachine::from_file(&world, &asset).expect("mount"));
     let g54 = Location { pos: Point3::new(0.0, 0.0, 60.0), rot: IDENTITY_Q };
-    h.execute(&world, SetWcsOrigin::new(&world, "G54", g54).expect("G54"));
+    h.execute(&world, SetWcsOrigin::new(&world, g54).expect("G54"));
     world
 }
 

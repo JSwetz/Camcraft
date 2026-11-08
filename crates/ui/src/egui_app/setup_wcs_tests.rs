@@ -57,7 +57,7 @@ fn the_picker_sets_the_setups_work_offset_through_the_command() {
     h.get_by_label("G55").click();
     h.run();
     assert_eq!(pick(h.state()), Some(1), "the drain lands G55");
-    assert_eq!(h.state().status, "Setup1 work offset: G55");
+    assert_eq!(h.state().status, "Setup1 WCS posts as G55");
     key(&mut h, Key::Z);
     assert_eq!(pick(h.state()), None, "undo restores G54 (unset)");
     key(&mut h, Key::Y);
@@ -103,11 +103,11 @@ fn the_heights_page_shows_the_setups_offset_with_no_wcs_choice() {
         .build_ui_state(frame, (with_setup(), height));
     h.run();
     assert_eq!(combos(&h), 1, "only the From combo - no per-height WCS choice");
-    assert!(shown(&h, "G54  (from setup Setup1)"), "an unset setup reads G54");
+    assert!(shown(&h, "WCS (G54)  (from setup Setup1)"), "an unset setup reads G54");
     run(&mut h.state_mut().0, CommandKind::SetSetupWorkOffset { setup: "Setup1".into(), slot: Some(1) });
     h.run();
     assert_eq!(combos(&h), 1);
-    assert!(shown(&h, "G55  (from setup Setup1)"), "follows the setup's pick");
+    assert!(shown(&h, "WCS (G55)  (from setup Setup1)"), "follows the setup's pick");
     assert_eq!(h.state().1, Height::of(HeightReference::WorkOffset, 0.0), "the height is untouched");
 }
 

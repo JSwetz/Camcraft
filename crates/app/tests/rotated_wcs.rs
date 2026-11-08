@@ -18,7 +18,8 @@
 use flecs_ecs::prelude::*;
 
 use camcraft_app::commands::{
-    AddTool, CreateOperation, CreateSetup, GenerateOperation, History, SetStock, SetWcsOrigin,
+    AddTool, CreateOperation, CreateSetup, GenerateOperation, History, SetSetupWorkOffset, SetStock,
+    SetWcsOrigin,
 };
 use camcraft_app::geometry::{IDENTITY_Q, Point3, quat_from_euler};
 use camcraft_app::operation::{Height, OpParams, SrcRef};
@@ -65,7 +66,7 @@ fn faced_block() -> (World, History) {
 
 fn place_g54(world: &World, h: &mut History, rot: [f64; 4]) {
     let loc = Location { pos: Point3::new(10.0, 5.0, 1.0), rot };
-    h.execute(world, SetWcsOrigin::new(world, "G54", loc).expect("place G54"));
+    h.execute(world, SetWcsOrigin::new(world, loc).expect("place G54"));
 }
 
 fn tmp_nc(tag: &str) -> std::path::PathBuf {
@@ -100,7 +101,7 @@ fn a_rotated_work_offset_is_refused_by_name() {
     let err = posting::post_setup(&world, &path).expect_err("a turned G54 must not post");
     assert!(!path.exists(), "a refusal leaves no file");
     assert!(
-        err.contains("work offset G54 is rotated 90.000 deg about Z")
+        err.contains("the WCS (G54) is rotated 90.000 deg about Z")
             && err.contains("posting a rotated work offset is not supported yet")
             && err.contains("re-align it without rotation or post from an unrotated setup")
             && err.contains("(operations: Face1)"),
@@ -117,7 +118,7 @@ fn a_setups_rotated_offset_names_the_setup() {
     place_g54(&world, &mut h, quat_from_euler(30f64.to_radians(), 0.0, 0.0));
     let err = posting::post_setup(&world, &tmp_nc("setup")).expect_err("refused");
     assert!(
-        err.contains("setup Setup1: its work offset G54 is rotated 30.000 deg about X"),
+        err.contains("setup Setup1: its WCS (G54) is rotated 30.000 deg about X"),
         "names the setup and the axis, got: {err}"
     );
 }
@@ -154,8 +155,13 @@ fn poke_g54(world: &World, loc: Location) {
 }
 
 #[test]
-fn set_wcs_origin_refuses_a_non_finite_placement_by_slot() {
+fn set_wcs_origin_refuses_a_non_finite_placement_by_its_label() {
+    // #342: the one WCS of the active setup, labelled G55 - the refusal
+    // names it by its label, "WCS (G55)".
     let world = new_world();
+    let mut h = History::default();
+    h.execute(&world, CreateSetup::new(&world, None, None).expect("materialize Setup1"));
+    h.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(1)).expect("label G55"));
     let cases = [
         ([f64::NAN, 0.0, 0.0, 1.0], Point3::new(0.0, 0.0, 0.0), "rotation must be finite"),
         ([0.0, f64::INFINITY, 0.0, 1.0], Point3::new(0.0, 0.0, 0.0), "rotation must be finite"),
@@ -164,11 +170,11 @@ fn set_wcs_origin_refuses_a_non_finite_placement_by_slot() {
         (IDENTITY_Q, Point3::new(0.0, 0.0, f64::NEG_INFINITY), "origin must be finite"),
     ];
     for (rot, pos, why) in cases {
-        let err = SetWcsOrigin::new(&world, "G55", Location { pos, rot })
+        let err = SetWcsOrigin::new(&world, Location { pos, rot })
             .err()
             .expect("a non-finite placement must be refused");
         let msg = err.to_string();
-        assert!(msg.contains("work offset G55") && msg.contains(why), "{rot:?} {pos:?}: {msg}");
+        assert!(msg.contains("WCS (G55)") && msg.contains(why), "{rot:?} {pos:?}: {msg}");
     }
 }
 
@@ -182,7 +188,7 @@ fn a_non_finite_offset_rotation_is_refused_by_the_post_gate() {
         let err = posting::post_setup(&world, &path).expect_err("a NaN rotation must not post");
         assert!(!path.exists(), "a refusal leaves no file");
         assert!(
-            err.contains("work offset G54 has a non-finite placement (origin or rotation)")
+            err.contains("the WCS (G54) has a non-finite placement (origin or rotation)")
                 && err.contains("(operations: Face1)"),
             "{rot:?}: named refusal, got: {err}"
         );
@@ -196,7 +202,7 @@ fn a_non_finite_offset_origin_is_refused_by_the_post_gate() {
     poke_g54(&world, Location { pos: Point3::new(f64::INFINITY, 5.0, 1.0), rot: IDENTITY_Q });
     let report = posting::verification_report(&world);
     assert!(
-        report.problems.iter().any(|p| p.contains("work offset G54 has a non-finite placement")),
+        report.problems.iter().any(|p| p.contains("the WCS (G54) has a non-finite placement")),
         "named refusal, got: {:?}",
         report.problems
     );
@@ -219,7 +225,7 @@ fn project_load_refuses_a_degenerate_offset_rotation() {
     let fresh = new_world();
     let err = project::open(&fresh, &bad).expect_err("a zero-norm offset rotation must not load");
     assert!(
-        err.to_string().contains("work offset 'G54' has a non-finite or degenerate placement"),
+        err.to_string().contains("WCS 'G54' has a non-finite or degenerate placement"),
         "named refusal, got: {err}"
     );
     // The unedited file still loads: the check is the offset's, not a
