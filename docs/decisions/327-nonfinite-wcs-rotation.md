@@ -5,13 +5,14 @@
 1. **Post gate.** `posting_wcs_rotation.rs` now classifies every used
    offset with `offset_frame` into `Square` / `Rotated` / `NonFinite`. A
    NaN or infinite origin or rotation, or a zero-norm quaternion, is
-   `NonFinite` and is refused with its own line: "work offset G54 has a
+   `NonFinite` and is refused with its own line: "the WCS (G54) has a
    non-finite placement (origin or rotation) - re-place the offset before
    posting (operations: ...)". Before, `angle_axis` returned angle 0 for
    a non-finite xyz and the offset posted as unrotated.
 2. **`SetWcsOrigin`.** It already refused a non-finite rotation, a
    zero-norm rotation and a non-finite origin; the messages now name the
-   slot (`work offset G55: rotation must be finite ...`). No behaviour
+   setup's WCS by its label (`WCS (G55): rotation must be finite ...`;
+   wording ported to the one-WCS law of #342 at the merge). No behaviour
    change beyond the wording.
 3. **3-2-1 align.** No code change: `align_321` already refuses a
    non-finite frame, and the pane sends its result through `SetWcsOrigin`,

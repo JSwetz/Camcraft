@@ -112,7 +112,7 @@ fn a_turned_block_aligns_to_its_own_edge_and_the_angles_round_trip() {
     // And the existing command takes them.
     let mut h = History::default();
     let loc = Location { pos: Point3::new(a.pos[0], a.pos[1], a.pos[2]), rot: q };
-    h.execute(&w, SetWcsOrigin::new(&w, "G54", loc).expect("SetWcsOrigin takes the frame"));
+    h.execute(&w, SetWcsOrigin::new(&w, loc).expect("SetWcsOrigin takes the frame"));
     let g54 = model::find_by_name(&w, "G54").and_then(|e| model::transform_of(&w, &e)).expect("G54 placed");
     assert!(near([g54.pos.x, g54.pos.y, g54.pos.z], a.pos));
 }
