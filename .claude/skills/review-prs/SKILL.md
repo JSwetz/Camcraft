@@ -123,8 +123,7 @@ as the owner):
 ```bash
 since=$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
 gh api "repos/NeoTech/Camcraft/issues/comments?since=$since&per_page=100" --paginate \
-  --jq '.[] | select((.body|test("(^|
-) *(claimed:|/claim)"; "i")) and (.user.login != "NeoTech"))
+  --jq '.[] | select((.body|test("(^|\n) *(claimed:|/claim)"; "i")) and (.user.login != "NeoTech"))
         | "\(.issue_url|split("/")|last) \(.user.login) \(.created_at)"'
 ```
 
