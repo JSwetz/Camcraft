@@ -51,6 +51,31 @@ pub(super) fn set_rpm(name: &str, tool: &Tool, rpm: f64) -> Option<CommandKind> 
     Some(CommandKind::ChangeTool { name: name.to_owned(), tool: Tool { rpm, ..tool.clone() } })
 }
 
+/// Why a committed value `v` set no speed, for the status line, or
+/// `None` when it did (or was simply the tool's speed already). In
+/// surface mode a zero / non-finite diameter is the cause, not the speed.
+pub(super) fn refusal(rpm: Option<f64>, as_vc: bool, d_mm: f64) -> Option<&'static str> {
+    if as_vc && !(d_mm.is_finite() && d_mm > 0.0) {
+        return Some("spindle speed not changed: tool diameter must be above zero to show or set surface speed");
+    }
+    match rpm {
+        Some(r) if r.is_finite() && r > 0.0 => None,
+        _ => Some("spindle speed not changed: it must be above zero"),
+    }
+}
+
+/// `rpm` held to the machine's stated `spindle_max`, with the note to show
+/// when it was held (the same hold `cutting::compute` applies to a
+/// suggestion; the machine check refuses an over-limit speed regardless).
+pub(super) fn hold_to_machine(rpm: f64, spindle_max: Option<f64>) -> (f64, Option<String>) {
+    match spindle_max {
+        Some(hi) if hi.is_finite() && hi > 0.0 && rpm > hi => {
+            (hi.floor(), Some(format!("spindle speed {rpm:.0} rpm held to the machine's maximum {hi:.0}")))
+        }
+        _ => (rpm, None),
+    }
+}
+
 /// The row: the speed in the chosen unit, the rpm / surface switch, and
 /// the commit law above.
 pub(super) fn row(ui: &mut Ui, state: &mut State, name: &str, tool: &Tool) {
@@ -62,7 +87,11 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, name: &str, tool: &Tool) {
         (true, Unit::Millimeters) => " m/min",
         (true, Unit::Inches) => " SFM",
     };
-    let help = format!("edits tool '{name}' - every operation using it");
+    let spindle_max = camcraft_app::machine::of(&state.world).1.and_then(|m| m.spindle_max);
+    let help = match spindle_max {
+        Some(hi) => format!("edits tool '{name}' - every operation using it; the machine's maximum is {hi:.0} rpm"),
+        None => format!("edits tool '{name}' - every operation using it"),
+    };
     let mut flip = false;
     let mut commit = None;
     prop_row_hint(ui, "Spindle speed", &help, |ui| {
@@ -88,12 +117,16 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, name: &str, tool: &Tool) {
     }
     if let Some(v) = commit {
         let rpm = if as_vc { rpm_for(v, tool.diameter, u) } else { Some(v) };
-        match rpm.and_then(|r| set_rpm(name, tool, r)) {
-            Some(cmd) => state.pending.push_back(cmd),
-            None if rpm.is_none_or(|r| r.is_nan() || r <= 0.0) => {
-                state.status = String::from("spindle speed not changed: it must be above zero");
+        if let Some(why) = refusal(rpm, as_vc, tool.diameter) {
+            state.status = String::from(why);
+        } else if let Some(r) = rpm {
+            let (r, held) = hold_to_machine(r, spindle_max);
+            if let Some(cmd) = set_rpm(name, tool, r) {
+                state.pending.push_back(cmd);
             }
-            None => {}
+            if let Some(note) = held {
+                state.status = note;
+            }
         }
     }
 }
@@ -131,5 +164,23 @@ mod tests {
         }
         assert!(set_rpm(name, &tool, tool.rpm).is_none(), "the same speed is no command");
         assert!(set_rpm(name, &tool, 0.0).is_none() && set_rpm(name, &tool, f64::NAN).is_none());
+    }
+
+    #[test]
+    fn a_zero_diameter_is_named_as_the_cause_in_surface_mode() {
+        let why = refusal(rpm_for(100.0, 0.0, Unit::Millimeters), true, 0.0).expect("refused");
+        assert!(why.contains("tool diameter"), "{why}");
+        let why = refusal(Some(0.0), false, 0.0).expect("refused");
+        assert!(why.contains("must be above zero") && !why.contains("diameter"), "{why}");
+        assert!(refusal(Some(3000.0), true, 6.0).is_none());
+    }
+
+    #[test]
+    fn a_speed_over_the_machine_maximum_is_held_to_it() {
+        let (r, note) = hold_to_machine(12_000.0, Some(10_000.0));
+        assert_eq!(r, 10_000.0);
+        assert!(note.is_some_and(|n| n.contains("10000")));
+        assert_eq!(hold_to_machine(8_000.0, Some(10_000.0)), (8_000.0, None));
+        assert_eq!(hold_to_machine(12_000.0, None), (12_000.0, None));
     }
 }
