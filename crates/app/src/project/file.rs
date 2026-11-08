@@ -87,6 +87,10 @@ pub struct ProjectFile {
     /// falling back (`script_source`'s law).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post: Option<PostDto>,
+    /// The post options (issue #34): absent is every default - what
+    /// every earlier document means - so the default writes no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_options: Option<PostOptionsDto>,
     /// The document's theme (M6.1 C), same law as `post`: an absent key
     /// is the built-in `dark` - what every earlier document wears - so
     /// the default writes nothing. `{"named": ...}` is a built-in by
@@ -128,6 +132,15 @@ pub struct ProjectFile {
 pub enum ThemeDto {
     Named(String),
     File(String),
+}
+
+/// The file mirror of the `PostOptions` singleton (issue #34): each
+/// choice spelled by its word, absent when it is the default.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct PostOptionsDto {
+    /// `"g76"` for the cycle; absent is the G32 passes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threading: Option<String>,
 }
 
 /// The file mirror of the `PostRef` singleton (M3.3): exactly the two
@@ -252,6 +265,11 @@ pub struct ToolDto {
     /// earlier tool was taken to be - no version step.
     #[serde(default = "centre_cutting", skip_serializing_if = "is_centre_cutting")]
     pub center_cutting: bool,
+    /// #221 addition, additive (no version step): the controller's tool
+    /// number. Absent from every older file and written only when set;
+    /// absent means "post by list position", what every older tool did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
 }
 
 fn centre_cutting() -> bool {
@@ -342,6 +360,7 @@ impl ToolDto {
             }),
             flutes: t.flutes,
             center_cutting: t.center_cutting,
+            number: None,
         }
     }
 

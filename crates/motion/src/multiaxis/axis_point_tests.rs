@@ -285,3 +285,52 @@ fn a_square_plate_with_a_centred_bore_reads_its_axis() {
         assert!((ax.origin.x.powi(2) + ax.origin.y.powi(2)).sqrt() < 1e-6, "bore r{r} t{t}: {ax:?}");
     }
 }
+
+/// A single-band bar of radius 6 over z -20..20, 64 round, with a D-flat
+/// ground through both ends at depth `d` along `phi` (ring points past
+/// the flat's plane pushed onto it), capped by fans.
+fn dflat_bar(phi: f64, d: f64) -> Vec<Triangle> {
+    let ring = |z: f64| -> Vec<Point3> {
+        (0..64)
+            .map(|j| {
+                let th = std::f64::consts::TAU * j as f64 / 64.0;
+                let (mut x, mut y) = (6.0 * th.cos(), 6.0 * th.sin());
+                let over = x * phi.cos() + y * phi.sin() - d;
+                if over > 0.0 {
+                    x -= over * phi.cos();
+                    y -= over * phi.sin();
+                }
+                Point3::new(x, y, z)
+            })
+            .collect()
+    };
+    let (a, b) = (ring(-20.0), ring(20.0));
+    let same = |p: Point3, q: Point3| (p - q).dot(p - q) < 1e-24;
+    let mut f = Vec::new();
+    let mut tri = |p: Point3, q: Point3, r: Point3| {
+        if !(same(p, q) || same(q, r) || same(r, p)) {
+            f.push(Triangle::new(p, q, r));
+        }
+    };
+    for j in 0..64 {
+        let k = (j + 1) % 64;
+        tri(a[j], a[k], b[k]);
+        tri(a[j], b[k], b[j]);
+        tri(Point3::new(0.0, 0.0, -20.0), a[k], a[j]);
+        tri(Point3::new(0.0, 0.0, 20.0), b[j], b[k]);
+    }
+    f
+}
+
+#[test]
+fn a_single_band_d_flat_bar_reads_its_axis() {
+    // Issue #246: the flat's facets miss the axis by part of the flat's
+    // width, so #223's coarseness readings set them aside and the single
+    // wall pencil's skip at the flat (~39 degrees) refused the true axis.
+    // A flat that faces the axis squarely is a bearing of the envelope.
+    for phi in [0.0, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 2.3] {
+        let r = fit_report(&dflat_bar(phi, 5.8)).unwrap_or_else(|e| panic!("phi {phi}: {e}"));
+        let d = r.axis.dir;
+        assert!(d.x.abs() < 1e-6 && d.y.abs() < 1e-6, "phi {phi}: {r:?}");
+    }
+}

@@ -73,6 +73,13 @@ pub struct Coolant {
     pub m_code: String,
 }
 
+/// The coolant names the shipped posts read (#150), in editor order:
+/// `Flood` serves a Flood op, `Mist` a Mist op, `Through-spindle` or
+/// `Through-tool` a Through-tool op. The posts compare case-blind with
+/// spaces and underscores read as hyphens ("Through spindle" reads); any
+/// other name is a shop's own flood (the first coded one serves).
+pub const COOLANT_KINDS: [&str; 4] = ["Flood", "Mist", "Through-spindle", "Through-tool"];
+
 /// A machine, as parsed from a `.mch` file. The identity strings are
 /// display data; every limit is optional by the unstated-limits law.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -130,6 +137,13 @@ pub struct Machine {
     /// claims no inventory of steel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spindles: Option<usize>,
+    /// The length unit the file states (#131): `Some("inch")` when its
+    /// kinematics are in inches, `None` for mm (the default). Every
+    /// number above is mm whatever this says - the parser scales on the
+    /// way in - so this only tells a post which unit the machine is
+    /// programmed in (`machine.units`, G20 vs G21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<String>,
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -
