@@ -112,6 +112,25 @@ pub struct ToolDef {
     pub number: Option<u32>,
 }
 
+/// A tool's modelled body (#368): a holder or assembly mesh (a vendor
+/// STEP, an STL) placed in the TOOL frame - tip at the origin, axis +Z
+/// toward the spindle - and its revolved envelope, derived from those
+/// facets at landing and never stored apart from them. A tool without
+/// one judges its `holder_d`/`holder_len` cylinder, as always. Written
+/// only through `SetToolBody` (`crate::tool_body`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ToolBody {
+    /// Where the mesh came from (a file name), for display only.
+    pub source: String,
+    /// The placement it landed with: the model direction that became
+    /// the tool axis, and the model origin's height above the tip.
+    pub axis: [f64; 3],
+    pub offset: f64,
+    /// The placed facets, tool frame.
+    pub facets: std::sync::Arc<[Triangle]>,
+    pub profile: camcraft_tools::holder_profile::HolderProfile,
+}
+
 /// One machine setup (M3.2 stage A): the named context that says WHICH
 /// raw material and WHICH work offsets an operation is machined against.
 /// The strings are entity NAMES, resolved through [`crate::setup`] - the
@@ -411,6 +430,7 @@ pub fn register_schema(world: &World) {
     world.component::<StockDef>();
     world.component::<Wcs>();
     world.component::<ToolDef>();
+    world.component::<ToolBody>();
     world.component::<Operation>();
     world.component::<OperationMeta>();
     world.component::<Toolpath>();

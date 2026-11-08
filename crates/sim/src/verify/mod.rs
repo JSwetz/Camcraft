@@ -184,8 +184,14 @@ pub use crossing::{crossed_pairs, crossed_pairs_all};
 pub use engine::{verify, verify_bodies};
 pub use air::cuts_no_material;
 pub use prior::{acquit_by_prior, prior_surface};
-pub use laws::{bands_vs_fixtures, rapids_vs_fixtures, rapids_vs_fixtures_spindle};
-pub use workholding::{bands_vs_workholding, rapids_vs_workholding, Workholding};
+pub use laws::{
+    bands_vs_fixtures, bands_vs_fixtures_held, rapids_vs_fixtures, rapids_vs_fixtures_held,
+    rapids_vs_fixtures_spindle,
+};
+pub use workholding::{
+    bands_vs_workholding, bands_vs_workholding_held, rapids_vs_workholding,
+    rapids_vs_workholding_held, Workholding,
+};
 pub use probe::Cutter;
 pub use rotary::{rotary_hits, RotaryAxis, RotaryLaw};
 pub use solid::{SolidLaw, solid_hits};

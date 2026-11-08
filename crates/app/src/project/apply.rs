@@ -485,7 +485,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the inferred per-operation law they posted with (#196).
         file.version = 51;
     }
-    if (51..=53).contains(&file.version) {
+    if (51..=54).contains(&file.version) {
         // v51 -> v52 (#329): a work-offset height stops naming its own
         // slot - the setup's is program zero. Agreeing setups take the
         // slot, disagreeing ones refuse by name; a v52+ file is checked
@@ -497,6 +497,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // v52 -> v53 (#326): a setup may hold the part turned. Absent
         // is "as modelled" - what every v52 file machined.
         file.version = 53;
+    }
+    if file.version == 53 {
+        // v53 -> v54 (#368): a tool may carry a modelled body. Absent
+        // is the holder cylinder - what every v53 tool judged.
+        file.version = 54;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
@@ -671,6 +676,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     tool: tdto.to_tool(),
                     number: tdto.number,
                 });
+                // #368: validate_kind already refused a body that is no body.
+                if let Some(b) = &tdto.body {
+                    let body = b.to_body(&dto.name).map_err(corrupt)?;
+                    crate::tool_body::set_body(world, &entity, Some(&body));
+                }
             }
             EntityKind::Operation => {
                 let odto = dto

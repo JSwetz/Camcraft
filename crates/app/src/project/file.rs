@@ -52,7 +52,11 @@ use super::*;
 /// rigid transform document -> setup frame). Absent reads as "as
 /// modelled", so every v52 file loads unchanged; an old reader must
 /// refuse a v53 file rather than machine a flipped setup unflipped.
-pub const PROJECT_VERSION: u32 = 53;
+/// v54 (#368): a tool may carry a modelled body (`body` on the tool,
+/// `tool_body_wire`). Absent is the holder cylinder every v53 file
+/// judged; an old reader must refuse a v54 file rather than drop the
+/// body and judge the smaller cylinder in its place.
+pub const PROJECT_VERSION: u32 = 54;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -299,6 +303,10 @@ pub struct ToolDto {
     /// absent means "post by list position", what every older tool did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
+    /// #368 (v54): the tool's modelled body. Absent is none - the
+    /// holder cylinder, what every older tool judged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<super::tool_body_wire::ToolBodyDto>,
 }
 
 fn centre_cutting() -> bool {
@@ -394,6 +402,7 @@ impl ToolDto {
             flutes: t.flutes,
             center_cutting: t.center_cutting,
             number: None,
+            body: None,
         }
     }
 

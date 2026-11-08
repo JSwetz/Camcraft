@@ -38,8 +38,8 @@ pub fn current_stamp(
     let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
     h.write(tool_name.as_bytes());
     h.write_u8(0xff);
-    let tool = model::find_by_name(world, tool_name)
-        .and_then(|e| model::tool_of(world, &e))?;
+    let tool_entity = model::find_by_name(world, tool_name)?;
+    let tool = model::tool_of(world, &tool_entity)?;
     h.write_u8(match tool.kind {
         crate::tools::ToolKind::EndMill => 0,
         crate::tools::ToolKind::BallNose => 1,
@@ -116,6 +116,9 @@ pub fn current_stamp(
     if !tool.center_cutting {
         h.write_u8(0xCC);
     }
+    // #368: a modelled body's envelope - bytes only when there is one,
+    // so no digest without a body moves.
+    crate::tool_body::digest(world, &tool_entity, &mut h);
     params.stamp_with(world, setup, Some(src), &mut h);
     // #326: the setup's part alignment is a moved input for every op of
     // the setup (the parts it machines, verifies against or measures

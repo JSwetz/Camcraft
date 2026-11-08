@@ -57,6 +57,8 @@ pub fn collect(world: &World) -> ProjectFile {
             let stock = model::stock_def_of(world, &entity).map(|s| StockDto::from_shape(&s));
             let tool = model::tool_of(world, &entity).map(|t| ToolDto {
                 number: model::tool_number_of(world, &entity),
+                body: crate::tool_body::body_of(world, &entity)
+                    .map(|b| super::tool_body_wire::ToolBodyDto::from_body(&b)),
                 ..ToolDto::from_tool(&t)
             });
             // The setup payload only ever rides a setup row (the kind test
