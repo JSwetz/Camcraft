@@ -90,7 +90,7 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, name: &str, tool: &Tool) {
         let rpm = if as_vc { rpm_for(v, tool.diameter, u) } else { Some(v) };
         match rpm.and_then(|r| set_rpm(name, tool, r)) {
             Some(cmd) => state.pending.push_back(cmd),
-            None if rpm.is_none_or(|r| !(r > 0.0)) => {
+            None if rpm.is_none_or(|r| r.is_nan() || r <= 0.0) => {
                 state.status = String::from("spindle speed not changed: it must be above zero");
             }
             None => {}
