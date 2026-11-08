@@ -276,7 +276,10 @@ pub(super) fn cross_holder(
             if face.is_nan() || need.is_nan() || face < need - TOL {
                 let (zl, zh) = (tube.line.z - tube.hz, tube.line.z + tube.hz);
                 return Err(GenError::Invalid(format!(
-                    "cross-drill move {i}: tool {name}'s holder (dia. {:.3}, {reach:.3} mm behind the tip) stands                      {face:.3} mm out along its hole's line, inside the stock's radius {need:.3} on that line at Z                      {zl:.3} to {zh:.3} - the holder feeds into the stock (a collision); use a longer tool, raise                      the clearance above the end face, or turn the bar to size first",
+                    "cross-drill move {i}: tool {name}'s holder (dia. {:.3}, {reach:.3} mm behind the tip) stands \
+                     {face:.3} mm out along its hole's line, inside material {need:.3} mm out on that line at Z \
+                     {zl:.3} to {zh:.3} - the holder feeds into the stock or part (a collision); use a tool with a \
+                     longer reach, or turn or face the material back first",
                     2.0 * hr
                 )));
             }

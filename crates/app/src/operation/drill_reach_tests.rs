@@ -116,7 +116,7 @@ fn an_on_station_holder_reads_the_box_at_its_face_not_its_corner_circle() {
     assert!(r.is_ok(), "the holder clears the face: {:?}", r.err());
     let e = cross_holder(&t, &[], Some(&b), (0.0, 0.0), &holder_tool(20.0), "T1").err().map(|e| e.to_string());
     let e = e.unwrap_or_else(|| panic!("a holder face at x27 sank into the r30 box face"));
-    for s in ["T1's holder", "27.000 mm out along its hole's line", "inside the stock's radius 30.000 on that line"] {
+    for s in ["T1's holder", "27.000 mm out along its hole's line", "inside material 30.000 mm out on that line", "stands 27.000 mm out"] {
         assert!(e.contains(s), "the refusal names '{s}': {e}");
     }
     // A slide in Z on the station (a column, the holder's face at x32)

@@ -131,5 +131,5 @@ fn a_holder_meeting_material_in_its_footprint_on_box_stock_is_refused_by_name() 
     for s in ["DR-0400's holder", "dia. 44.000", "30.000 mm behind the tip", "37.000 mm out along its hole's line"] {
         assert!(e.contains(s), "the refusal names '{s}': {e}");
     }
-    assert!(e.contains("inside the stock's radius 40.000 on that line"), "read at the block, not a corner: {e}");
+    assert!(e.contains("inside material 40.000 mm out on that line"), "read at the block, not a corner: {e}");
 }
