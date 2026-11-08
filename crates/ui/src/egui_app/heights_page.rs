@@ -116,8 +116,8 @@ pub(crate) fn setup_offset_text(world: &flecs_ecs::prelude::World, setup: Option
         .copied()
         .unwrap_or("G54");
     match camcraft_app::setup::effective(world, setup) {
-        Some(s) => format!("{word} (setup {s} - set on the Setups page)"),
-        None => format!("{word} (no setup - add one on the Setups page to pick another)"),
+        Some(s) => format!("{word}  (from setup {s})"),
+        None => word.to_owned(),
     }
 }
 

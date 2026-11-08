@@ -797,7 +797,7 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                     // the setup context `height_planes` resolved it in.
                     let source = match p.src.reference {
                         camcraft_app::operation::HeightReference::WorkOffset => camcraft_app::schema::WCS_SLOTS
-                            .get(camcraft_app::setup::wcs_slot(&state.world, None))
+                            .get(camcraft_app::setup::wcs_slot(&state.world, shown_setup(state).as_deref()))
                             .copied()
                             .unwrap_or("G54")
                             .to_owned(),
@@ -1226,6 +1226,19 @@ pub(crate) struct HeightPlane {
     pub skip_rect: bool,
 }
 
+/// The setup context the viewport's height planes and their work-offset
+/// chip resolve in (#329): the shown operation's own declared setup; with
+/// no such operation (a draft name), the ACTIVE setup - what
+/// CreateOperation would declare - never a locally chosen default.
+pub(crate) fn shown_setup(state: &State) -> Option<String> {
+    match model::find_by_name(&state.world, &state.op_ui.name)
+        .and_then(|e| model::operation_of(&state.world, &e))
+    {
+        Some(op) => op.setup,
+        None => camcraft_app::setup::active(&state.world),
+    }
+}
+
 /// The open operation's height planes, read from the draft parameters -
 /// what the spinboxes point at right now, not what was last applied, so
 /// spinning Clearance visibly walks the plane before Apply commits it.
@@ -1250,12 +1263,15 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     // an unavailable source drops its plane (never a rectangle at a
     // guessed z) - the panel says why, and generation refuses by name.
     let world = &state.world;
+    // A work-offset height measures from the shown op's OWN setup (#329).
+    let ctx = shown_setup(state);
+    let setup = ctx.as_deref();
     // A From: Selection height reads the open op's own source (M11.3 A).
     let src_owned = state.op_ui.src();
     let src = Some(&src_owned);
     let mut out = Vec::new();
     let clr = draft.clearance();
-    if let Some(z) = clr.z_in(world, None, src) {
+    if let Some(z) = clr.z_in(world, setup, src) {
         out.push(HeightPlane {
             z,
             src: clr,
@@ -1349,7 +1365,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Probe { .. } => None,
     };
     if let Some(hop) = hop
-        && let (Some(r), Some(c)) = (hop.z_in(world, None, src), draft.clearance().z_in(world, None, src))
+        && let (Some(r), Some(c)) = (hop.z_in(world, setup, src), draft.clearance().z_in(world, setup, src))
     {
         out.push(HeightPlane {
             z: r.min(c),
@@ -1366,9 +1382,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // stages: then its Top is the first level, drawn like the depth
         // kinds' Top, with the finished Cut below it.
         operation::OpParams::Face { top_z, cut_z, .. } => {
-            let cut = cut_z.z_in(world, None, src);
+            let cut = cut_z.z_in(world, setup, src);
             if let (Some(t), Some(c)) = ((*top_z).to_owned(), cut)
-                && let Some(tz) = t.z_in(world, None, src)
+                && let Some(tz) = t.z_in(world, setup, src)
                 && tz != c
             {
                 out.push(HeightPlane {
@@ -1472,7 +1488,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // loci are clipped by (M2.5 E B).
         | operation::OpParams::BoringTurning { top_z, bottom_z, .. }
         | operation::OpParams::Deburr { top_z, bottom_z, .. } => {
-            if let Some(z) = top_z.z_in(world, None, src) {
+            if let Some(z) = top_z.z_in(world, setup, src) {
                 out.push(HeightPlane {
                     z,
                     src: *top_z,
@@ -1482,7 +1498,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                     skip_rect: stands(z),
                 });
             }
-            if let Some(z) = bottom_z.z_in(world, None, src) {
+            if let Some(z) = bottom_z.z_in(world, setup, src) {
                 out.push(HeightPlane {
                     z,
                     src: *bottom_z,
@@ -1502,7 +1518,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // blade severs comes from the model, so painting a Top the
         // path never walks to would advertise a window it cuts past.
         operation::OpParams::Part { bottom_z, .. } => {
-            if let Some(z) = bottom_z.z_in(world, None, src) {
+            if let Some(z) = bottom_z.z_in(world, setup, src) {
                 out.push(HeightPlane {
                     z,
                     src: *bottom_z,
@@ -1521,7 +1537,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // measured against is not. The corner Z rides the pane's read
         // of the same two numbers.
         operation::OpParams::Chamfer2D { top_z, .. } => {
-            if let Some(z) = top_z.z_in(world, None, src) {
+            if let Some(z) = top_z.z_in(world, setup, src) {
                 out.push(HeightPlane {
                     z,
                     src: *top_z,
@@ -1541,7 +1557,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         operation::OpParams::Drill { top_z, bottom_z, .. }
         | operation::OpParams::Bore { top_z, bottom_z, .. }
         | operation::OpParams::Thread { top_z, bottom_z, .. } => {
-            if let Some(z) = top_z.z_in(world, None, src) {
+            if let Some(z) = top_z.z_in(world, setup, src) {
                 out.push(HeightPlane {
                     z,
                     src: *top_z,
@@ -1552,7 +1568,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                 });
             }
             if let Some(b) = bottom_z
-                && let Some(z) = b.z_in(world, None, src)
+                && let Some(z) = b.z_in(world, setup, src)
             {
                 out.push(HeightPlane {
                     z,

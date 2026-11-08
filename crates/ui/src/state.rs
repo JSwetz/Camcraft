@@ -255,8 +255,8 @@ pub enum CommandKind {
     /// where NEW things join, never what already cuts.
     ActivateSetup(Option<String>),
     /// Pick the program offset a setup posts at (#196): `Some(i)` is
-    /// `WCS_SLOTS[i]`, `None` clears the pick back to the per-operation
-    /// law. Undoable (`SetSetupWorkOffset`).
+    /// `WCS_SLOTS[i]`, `None` clears the pick - an unset setup is `G54`.
+    /// Undoable (`SetSetupWorkOffset`).
     SetSetupWorkOffset {
         setup: String,
         slot: Option<usize>,
@@ -2922,10 +2922,8 @@ impl State {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
-                        self.status = match slot.and_then(|i| WCS_SLOTS.get(i)) {
-                            Some(w) => format!("setup {setup} posts at {w}"),
-                            None => format!("setup {setup} posts at each operation's inferred offset"),
-                        };
+                        let word = WCS_SLOTS.get(slot.unwrap_or(0)).copied().unwrap_or("G54");
+                        self.status = format!("{setup} work offset: {word}");
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("work offset not picked: {err}"));

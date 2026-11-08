@@ -49,7 +49,7 @@ fn the_picker_sets_the_setups_work_offset_through_the_command() {
         .with_size(Vec2::new(500.0, 400.0))
         .build_ui_state(frame, with_setup());
     h.run();
-    assert_eq!(pick(h.state()), None, "a fresh setup picks nothing (Auto)");
+    assert_eq!(pick(h.state()), None, "a fresh setup is unset - it reads G54");
     assert!(h.state().pending.is_empty(), "drawing the picker queues nothing");
     let auto = super::setup_wcs_pick::pick_text(None);
     h.get_by(|n| n.role() == Role::ComboBox && n.value().as_deref() == Some(auto)).click();
@@ -57,7 +57,7 @@ fn the_picker_sets_the_setups_work_offset_through_the_command() {
     h.get_by_label("G55").click();
     h.run();
     assert_eq!(pick(h.state()), Some(1), "the drain lands G55");
-    assert_eq!(h.state().status, "setup Setup1 posts at G55");
+    assert_eq!(h.state().status, "Setup1 work offset: G55");
     key(&mut h, Key::Z);
     assert_eq!(pick(h.state()), None, "undo restores Auto");
     key(&mut h, Key::Y);
@@ -103,10 +103,19 @@ fn the_heights_page_shows_the_setups_offset_with_no_wcs_choice() {
         .build_ui_state(frame, (with_setup(), height));
     h.run();
     assert_eq!(combos(&h), 1, "only the From combo - no per-height WCS choice");
-    assert!(shown(&h, "G54 (setup Setup1 - set on the Setups page)"), "the setup's default");
+    assert!(shown(&h, "G54  (from setup Setup1)"), "an unset setup reads G54");
     run(&mut h.state_mut().0, CommandKind::SetSetupWorkOffset { setup: "Setup1".into(), slot: Some(1) });
     h.run();
     assert_eq!(combos(&h), 1);
-    assert!(shown(&h, "G55 (setup Setup1 - set on the Setups page)"), "follows the setup's pick");
+    assert!(shown(&h, "G55  (from setup Setup1)"), "follows the setup's pick");
     assert_eq!(h.state().1, Height::of(HeightReference::WorkOffset, 0.0), "the height is untouched");
+}
+
+/// #329: unset and an explicit G54 are one entry, spelled plainly.
+#[test]
+fn an_unset_setup_reads_plain_g54() {
+    use super::setup_wcs_pick::pick_text;
+    assert_eq!(pick_text(None), "G54");
+    assert_eq!(pick_text(Some(0)), "G54");
+    assert_eq!(pick_text(Some(1)), "G55");
 }
