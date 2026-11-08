@@ -283,6 +283,7 @@ mod suppressed;
 mod wcs_rotation;
 #[path = "posting_wcs_slot.rs"]
 mod wcs_slot;
+pub(crate) use wcs_rotation::{offset_frame, OffsetFrame};
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 

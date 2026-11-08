@@ -69,9 +69,8 @@ pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
     for (slot, word) in WCS_SLOTS.iter().enumerate() {
         if let Some(entity) = setup::wcs_entity(world, ctx, slot) {
             any = true;
-            let pos = model::transform_of(world, &entity)
-                .unwrap_or_default()
-                .pos;
+            let loc = model::transform_of(world, &entity).unwrap_or_default();
+            let pos = loc.pos;
             let entity_name = model::name_of(world, &entity).unwrap_or_default();
             out.push_str(&format!(
                 "  {word}  X {}  Y {}  Z {}   (entity {entity_name})\n",
@@ -79,6 +78,16 @@ pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
                 mm(pos.y),
                 mm(pos.z)
             ));
+            // #327: the rotation the translation line cannot show.
+            match crate::posting::offset_frame(&loc) {
+                crate::posting::OffsetFrame::Square => {}
+                crate::posting::OffsetFrame::Rotated { deg, axis } => out.push_str(&format!(
+                    "       rotated {deg:.3} deg about {axis} - the post refuses a rotated offset\n"
+                )),
+                crate::posting::OffsetFrame::NonFinite => out.push_str(
+                    "       placement is not finite - the post refuses this offset\n",
+                ),
+            }
         }
     }
     if !any {
