@@ -62,7 +62,10 @@ impl Carried {
             stepover: stepover_of(p).unwrap_or(3.0),
             stepdown: stepdown_of(p).unwrap_or(5.0),
             top: top_of(p).unwrap_or_else(|| Height::of(HeightReference::TopOfModel, 0.0)),
-            bottom: bottom_of(p).unwrap_or_else(|| Height::of(HeightReference::WorkOffset(0), 0.0)),
+            // #214: the part's own floor, not the G54 plane - a shop that
+            // zeroes G54 Z on the part top would otherwise get a zero-depth
+            // operation that CreateOperation refuses before it can be edited.
+            bottom: bottom_of(p).unwrap_or_else(|| Height::of(HeightReference::BottomOfModel, 0.0)),
             retract: retract_of(p).unwrap_or_else(|| Height::of(HeightReference::TopOfStock, 10.0)),
             tilt: p.tilt(),
         }

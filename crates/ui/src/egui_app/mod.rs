@@ -95,6 +95,8 @@ mod dialog_tests;
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
+#[cfg(test)]
+mod fresh_op_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
 /// selects the no-window proof (seeded document, fallback adapter, View3D
