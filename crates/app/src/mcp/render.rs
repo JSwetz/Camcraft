@@ -72,11 +72,11 @@ pub(super) fn render_stock(env: &mut Env, a: &Map<String, Value>) -> Result<Valu
     };
     let w = &env.world;
     let sim = crate::stock_sim::simulate_document(w).map_err(|e| format!("no stock simulation to render: {e}"))?;
-    if sim.surface.tris.is_empty() {
-        return Err("the simulated stock has no surface to render (no material stands)".into());
-    }
     let floor = crate::model::stock_world_aabb_for(w, crate::setup::active(w).as_deref()).map(|b| b.min.z);
     let tris = scene(&sim.surface, floor, sim.dev.cell);
+    if tris.is_empty() {
+        return Err("the simulated stock has no surface to render (no material stands above the stock floor)".into());
+    }
     let moves = if toolpath { overlay_moves(w)? } else { Vec::new() };
 
     let pts = tris.iter().flat_map(|(t, _)| t.iter().copied()).chain(moves.iter().flat_map(|(a, b, _)| [*a, *b]));
@@ -145,25 +145,40 @@ fn class_of(s: &SimSurface, t: &[u32; 3]) -> f32 {
     s.vcls.get(t[0] as usize).copied().unwrap_or(3.0)
 }
 
-/// The sheet's triangles plus a skirt: the sheet stores column tops and
-/// the steps between them, never the block's outer sides, so a
-/// horizontal edge no other facet shares (a column beside air) is
-/// walled down to the stock's floor - a picture of a solid, not a
-/// floating lid. Shared edges are matched on a lattice a hundredth of
-/// a cell fine, so float noise in neighbouring corners still pairs.
+/// The sheet's triangles, clipped to the stock's floor, plus a skirt.
+/// The column grid reaches below the block (a semi-infinite column), so
+/// a column cut to or through the floor is air here: its top is dropped
+/// and walls stop at the floor. The sheet stores column tops and the
+/// steps between them, never the block's outer sides, so a horizontal
+/// edge no other facet shares (a column beside air) is walled down to
+/// the floor - a picture of a solid, not a floating lid. Shared edges
+/// are matched on a lattice a hundredth of a cell fine, so float noise
+/// in neighbouring corners still pairs. Without a stock box to read
+/// (never expected - the sim needs one) the floor sits a cell under
+/// the lowest top.
 fn scene(s: &SimSurface, floor: Option<f64>, cell: f64) -> Vec<([Point3; 3], f32)> {
     let mut out: Vec<([Point3; 3], f32)> = Vec::with_capacity(s.tris.len() * 2);
     let vert = |i: u32| s.verts.get(i as usize).copied();
     let q = if cell.is_finite() && cell > 0.0 { cell * 0.01 } else { 1e-6 };
+    let z_min = s.verts.iter().map(|p| p.z).filter(|z| z.is_finite()).fold(f64::INFINITY, f64::min);
+    let Some(floor) = floor.filter(|f| f.is_finite()).or((z_min - q * 100.0).is_finite().then_some(z_min - q * 100.0))
+    else {
+        return out;
+    };
     let key = |p: Point3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
     let ekey = |a: Point3, b: Point3| {
         let (ka, kb) = (key(a), key(b));
         if ka <= kb { (ka, kb) } else { (kb, ka) }
     };
+    let clip = |p: Point3| Point3::new(p.x, p.y, p.z.max(floor));
     let mut uses: HashMap<_, u32> = HashMap::new();
     let mut flat: Vec<(Point3, Point3, f32)> = Vec::new();
     for t in &s.tris {
         let (Some(a), Some(b), Some(c)) = (vert(t[0]), vert(t[1]), vert(t[2])) else { continue };
+        if a.z <= floor && b.z <= floor && c.z <= floor {
+            continue; // cut to the floor or through it: air
+        }
+        let (a, b, c) = (clip(a), clip(b), clip(c));
         let cls = class_of(s, t);
         out.push(([a, b, c], cls));
         for (p, r) in [(a, b), (b, c), (c, a)] {
@@ -173,12 +188,10 @@ fn scene(s: &SimSurface, floor: Option<f64>, cell: f64) -> Vec<([Point3; 3], f32
             flat.extend([(a, b, cls), (b, c, cls), (c, a, cls)]);
         }
     }
-    let z_min = s.verts.iter().map(|p| p.z).filter(|z| z.is_finite()).fold(f64::INFINITY, f64::min);
-    let Some(floor) = floor.filter(|f| f.is_finite()).or(z_min.is_finite().then_some(z_min)) else { return out };
     // The order of `flat` is the sheet's own: the skirt is as
     // deterministic as the sheet (the map is only counted, never walked).
     for (a, b, cls) in flat {
-        if uses.get(&ekey(a, b)).copied() != Some(1) || a.z <= floor {
+        if uses.get(&ekey(a, b)).copied() != Some(1) {
             continue;
         }
         let (fa, fb) = (Point3::new(a.x, a.y, floor), Point3::new(b.x, b.y, floor));

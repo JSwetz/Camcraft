@@ -1,8 +1,9 @@
 //! The MCP stock render (#182), driven in-process over the JSON-RPC
 //! handler: a generated job renders to a PNG image block that decodes,
 //! has the asked size, shows stock, and is byte-identical run to run;
-//! the summary carries rest volume and bounds; and every refusal (no
-//! program, no stock, bad arguments) is a named tool error.
+//! a real cut repaints the picture and moves the summary's rest volume
+//! and stock top; and every refusal (no program, no stock, nothing left
+//! above the floor, bad arguments) is a named tool error.
 //!
 //! Gate map (M4.4): covers app::mcp::render, app::raster.
 
@@ -159,6 +160,61 @@ fn render_stock_is_a_deterministic_png_of_the_stock() {
     assert!(trgb.chunks(3).any(|p| p == [20, 110, 230]), "feed moves are drawn");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&dir2);
+}
+
+/// Change the Face op's finished height (offset from the stock top) and
+/// regenerate it.
+fn face_to(s: &mut Server, offset: f64) {
+    ok(s, "edit_operation", json!({ "name": "Face1", "params": { "cut_z": { "offset": offset, "reference": "top_of_stock" } } }));
+    ok(s, "generate", json!({ "name": "Face1" }));
+}
+
+#[test]
+fn render_stock_shows_what_the_program_cut() {
+    let dir = tmp_dir("cut");
+    let mut s = faced_job(&dir);
+    // At the stock top the Face pass removes nothing: the baseline.
+    let uncut = ok(&mut s, "render_stock", json!({ "width": 320, "height": 240 }));
+    let (_, _, before, before_data) = decode(&uncut);
+    // Two millimetres off the top: a real layer comes away.
+    face_to(&mut s, -2.0);
+    let cut = ok(&mut s, "render_stock", json!({ "width": 320, "height": 240 }));
+    let after_data = decode(&cut).3;
+    let sc = &cut["structuredContent"];
+    assert_ne!(after_data, before_data, "the cut changes the picture");
+    assert_eq!(uncut["structuredContent"]["stock_bounds"]["max"][2], json!(20.0));
+    assert_eq!(sc["stock_bounds"]["max"][2], json!(18.0), "{sc}");
+    assert!(sc["rest"]["volume"].as_f64().is_some_and(|v| (v - 4800.0).abs() < 1.0), "40 x 40 x 3 of rest: {sc}");
+    assert_eq!(sc["rest"]["top_bounds"]["max"][2], json!(18.0), "{sc}");
+
+    // Down to the part's top: the rest is gone, and the region over the
+    // part repaints from rest amber to clean.
+    face_to(&mut s, -5.0);
+    let done = ok(&mut s, "render_stock", json!({ "width": 320, "height": 240 }));
+    let (_, _, after, _) = decode(&done);
+    let sc = &done["structuredContent"];
+    assert_eq!(sc["stock_bounds"]["max"][2], json!(15.0), "{sc}");
+    assert_eq!(sc["rest"]["cells"], json!(0), "{sc}");
+    assert_eq!(sc["rest"]["volume"], json!(0.0), "{sc}");
+    assert!(sc["rest"]["top_bounds"].is_null(), "{sc}");
+    let amber = |rgb: &[u8]| rgb.chunks(3).filter(|p| p[0] > 150 && p[2] < 80).count();
+    assert!(amber(&before) > 320 * 240 / 10, "the uncut part top reads as rest: {}", amber(&before));
+    assert_eq!(amber(&after), 0, "nothing reads as rest once the part top is faced");
+    let changed = before.chunks(3).zip(after.chunks(3)).filter(|(a, b)| a != b).count();
+    assert!(changed > 320 * 240 / 10, "the faced region repaints: {changed} pixels");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Facing below the stock's floor leaves no material: a named refusal,
+/// never a picture of a sheet hanging under the block.
+#[test]
+fn render_stock_refuses_when_no_material_stands() {
+    let dir = tmp_dir("through");
+    let mut s = faced_job(&dir);
+    face_to(&mut s, -25.0);
+    let msg = refused(&mut s, "render_stock", json!({}));
+    assert!(msg.starts_with("render_stock: the simulated stock has no surface to render"), "{msg}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

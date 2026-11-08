@@ -32,6 +32,12 @@
   judgement pass; a later `quality: "field"` option could add it. Also
   dropped: depth-tested toolpath lines (the tip sits exactly on the cut
   surface, so z-fighting hides most of the path).
+- **Clipped to the stock floor:** the column grid reaches below the
+  block (a semi-infinite column), so a cut to or through the floor would
+  otherwise draw a sheet hanging under the stock. Columns at or below
+  the stock's floor are air in the picture, walls stop there, and a
+  program that leaves nothing above the floor is refused by name ("no
+  surface to render") - pinned by `render_stock_refuses_when_no_material_stands`.
 - **Limits:** posed (5-axis), rotary and lathe programs are refused by
   name, exactly as the column verdict refuses them; the "rest" bounds are
   the bounds of the sheet over rest columns (the rest runs down from
