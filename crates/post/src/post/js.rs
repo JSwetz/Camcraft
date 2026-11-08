@@ -129,6 +129,9 @@ pub const HOOKS: &[&str] = &[
     "onPartUnloading",
     "onPartTransfer",
     "onProbe",
+    "onProbeMove",
+    "onProbeRetreat",
+    "onProbeResult",
     "onComment",
     "onClose",
 ];

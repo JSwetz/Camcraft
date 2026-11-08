@@ -70,7 +70,9 @@ pub(crate) fn has_section(kind: OpType, s: usize) -> bool {
                 | OpType::RotaryOffset
                 | OpType::MultiAxisRough
         ),
-        SEC_MACHINE => matches!(kind, OpType::Part),
+        // The probe's result action - set a work offset or stop for
+        // the operator - is a machine-side act like the feeder's (#108).
+        SEC_MACHINE => matches!(kind, OpType::Part | OpType::Probe),
         _ => false,
     }
 }

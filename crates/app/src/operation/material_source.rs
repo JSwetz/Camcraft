@@ -110,6 +110,8 @@ fn source_region(
         OpParams::Face { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
+        // The probe bounds no area (#108): its generation never asks.
+        OpParams::Probe { .. } => Err(GenError::Invalid("a probe has no machining region".into())),
         // The 3D pocket's machine area is a silhouette, not a section:
         // columns whose surface sits below the first level are still
         // cut, down to that surface - a section would miss them. The

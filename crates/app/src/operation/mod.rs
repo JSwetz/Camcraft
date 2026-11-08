@@ -88,6 +88,8 @@ mod material_source;
 mod footprint;
 pub use footprint::machined_footprint;
 mod probe;
+// #108: the Probe operation's generation and protected-move law.
+pub mod probe_op;
 pub(crate) use probe::*;
 mod selection;
 pub use selection::*;

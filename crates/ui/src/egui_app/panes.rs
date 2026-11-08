@@ -664,6 +664,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Deburr => Icon::Contour,
         OpType::Circular => Icon::Pocket,
         OpType::Drill => Icon::Drill,
+        OpType::Probe => Icon::Probe,
         OpType::Pocket3D => Icon::Pocket,
         OpType::Finish3D => Icon::Finish3D,
         OpType::Contour5D => Icon::Contour5D,
@@ -1435,6 +1436,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Thread => "threading insert",
         ToolKind::Form => "form gauge",
         ToolKind::Taper => "chamfer mill",
+        ToolKind::Probe => "touch probe",
     }
 }
 

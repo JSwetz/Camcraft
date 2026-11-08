@@ -99,6 +99,7 @@ mod tests {
             notes: Vec::new(),
             comps: Vec::new(),
             threads: Vec::new(),
+            probes: Vec::new(),
         }
     }
 

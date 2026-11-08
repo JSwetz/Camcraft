@@ -137,6 +137,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Bore { feed, .. }
         | OpParams::Thread { feed, .. }
         | OpParams::FormTurning { feed, .. } => *feed,
+        // The seek feed is the probe's travel pace (#108).
+        OpParams::Probe { fast_feed, .. } => *fast_feed,
     }
 }
 
@@ -203,6 +205,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Bore { plunge_feed, .. }
         | OpParams::Thread { plunge_feed, .. }
         | OpParams::FormTurning { plunge_feed, .. } => *plunge_feed,
+        // The measuring re-probe is the slow number (#108).
+        OpParams::Probe { slow_feed, .. } => *slow_feed,
     }
 }
 
@@ -275,6 +279,7 @@ fn climb_of(p: &OpParams) -> bool {
         // The wall ride and the helix choose their flank: the climb
         // number says which way the circle runs (M2.4 C).
         OpParams::Bore { climb, .. } | OpParams::Thread { climb, .. } => *climb,
+        OpParams::Probe { .. } => false,
     }
 }
 
@@ -355,6 +360,7 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // One ride per exposed edge is the deburr answer: the model's
         // own edges are the pattern, nothing tiles (M2.5 E B).
         | OpParams::Deburr { .. } => None,
+        OpParams::Probe { .. } => None,
     }
 }
 
@@ -430,6 +436,7 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // between the clearance plane and the edge there is no
         // infeed ladder to step (M2.5 E B).
         OpParams::Deburr { .. } => None,
+        OpParams::Probe { .. } => None,
     }
 }
 
@@ -493,6 +500,7 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         // are clipped there (M2.5 E B).
         | OpParams::Deburr { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
+        OpParams::Probe { .. } => None,
     }
 }
 
@@ -565,6 +573,7 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         // the top plane the cone's apex stands at (M2.4 B).
         OpParams::Chamfer2D { .. } => None,
         OpParams::Face { .. } => None,
+        OpParams::Probe { .. } => None,
     }
 }
 
@@ -640,6 +649,7 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         // The deburr ride hops every run to the clearance plane -
         // the kernel's own word, no between-run plane authored (M2.5 E B).
         | OpParams::Deburr { .. } => None,
+        OpParams::Probe { .. } => None,
     }
 }
 
@@ -932,6 +942,30 @@ fn seed_thread_mill(c: &Carried) -> OpParams {
         plunge_feed: c.plunge,
         climb: true,
         holes: Vec::new(),
+    }
+}
+
+/// The probe's draft (#108): a -Z face touch at the model origin,
+/// setting G54 - the picked geometry re-seats `target`, `mode` and the
+/// directions; the numbers are general touch-probe starting values.
+fn seed_probe(c: &Carried) -> OpParams {
+    use crate::probing::{ProbeDir, ProbeMode};
+    OpParams::Probe {
+        clearance_z: c.clearance,
+        mode: ProbeMode::Face,
+        dir: ProbeDir::ZNeg,
+        dir_y: ProbeDir::YPos,
+        target: [0.0, 0.0, 0.0],
+        radius: 10.0,
+        approach: 5.0,
+        overtravel: 5.0,
+        backoff: 1.0,
+        fast_feed: 300.0,
+        slow_feed: 30.0,
+        depth: 3.0,
+        inset: 5.0,
+        set_wcs: Some(0),
+        tolerance: 0.5,
     }
 }
 
@@ -2157,6 +2191,19 @@ impl KindInfo {
             seed: seed_bore,
             tool_kinds: tk::BAR,
         },
+        KindInfo {
+            ty: OpType::Probe,
+            label: "Probe",
+            caption: "Probe",
+            tag: 38,
+            // A probe cuts nothing: its own protected-move law judges
+            // the stylus path (`operation::probe_op`), the cutting
+            // laws stand down the way they do for the centre-line ride.
+            mode: Mode::Engrave,
+            section: Section::Drilling,
+            seed: seed_probe,
+            tool_kinds: tk::PROBE,
+        },
     ];
 
     /// Whose machine this kind drives - read off the row's section
@@ -2228,6 +2275,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[35].label,
     KindInfo::ALL[36].label,
     KindInfo::ALL[37].label,
+    KindInfo::ALL[38].label,
 ];
 
 impl OpType {
@@ -2281,6 +2329,11 @@ impl OpType {
             OpType::MultiPassTurning => 35,
             OpType::FormTurning => 36,
             OpType::BoringTurning => 37,
+            // #108: the probe APPENDS - stored kind ids never move (pins,
+            // digest tags and files stay valid). The menu still lists it
+            // in the Drilling section: a section's kinds are read by
+            // `Section::kinds` in table order, not as a contiguous run.
+            OpType::Probe => 38,
         }
     }
 
