@@ -13578,3 +13578,20 @@ revolved (follow-up material if users hit it with long keyways).
   states the OD assumption (an internal blade must flip it or pass None).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
+
+## #192 - a refusal on the status line stands out (2026-11-07)
+
+- **Chosen:** the status strip reads its own line: a refusal (the
+  message `State::refuse` recorded, a "cannot …" gate note, or one of the
+  shell's refusal phrasings - "refused", "failed", "not set:", "not
+  changed:", "not aligned:", "no longer", "not generated") is drawn in
+  the palette's error ink (colour-vision aware), bold, behind a "!"
+  marker, on an error-tinted band across the strip - until the next
+  status replaces it. Ordinary status stays dim.
+- **Why:** blocked features seemed to "fail for no reason" because the
+  reason sat in dim text bottom-left (reporter).
+- **Dropped:** a toast/popup (another surface to dismiss, and the strip
+  already holds the line); a timed flash (gone before the user looks);
+  a `status_tone` field on every status write (dozens of writers - the
+  phrasing list is the honest, testable seam until the shell grows a
+  typed status).
