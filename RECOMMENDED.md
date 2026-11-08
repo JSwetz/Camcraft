@@ -13612,48 +13612,60 @@ revolved (follow-up material if users hit it with long keyways).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
 
-## #37 - the scallop law's reach ceiling: the ball diameter at the generator; the scan's reach stays, measured (2026-11-08)
+## #20 - the rotary sweep's flute-rotation bound: stated always, enforced on request (2026-11-08, M13.1)
 
-**What "the reach ceiling" was.** The ridge flank law (`stock_sim/ridge.rs`)
-reads a column only when both feet stand within `reach = band + 3·tol`, so on
-flat ground it sees a cusp only to `4·tol` past the ball (s ≈ 2.9 on an r3
-ball at tol 0.1). A stepover of 4 (floor 0.606 mm outside both balls) stands
-past it and verifies silent on scallop: `rest_mm` needs two band contacts,
-and the "missing-pass law" the comments deferred to does not exist. The
-generator accepted any positive stepover, so the silence was reachable.
+**What "flute rotation" is here.** Not the helical flutes spinning (the
+sim's tool is already its body of revolution, which bounds any flute
+geometry): it is the rotary chord pre-pass (`stock_sim/field_rotary.rs`)
+standing each sub-chord's whole tool on the sub-chord's MID pose while
+the true pose turns through it. A tool point at distance `w` from the
+tool's reference (ball center, flat tip) is off its true-pose place by
+at most `w·2·sin(β/2)`, `β ≤ half_angle` (Craig, "Introduction to
+Robotics", ch. 2 - the chord of a rigid turn). The old chord count only
+bounded the SAG at the farthest reach (second order), so the flank's
+error (first order, `L·α`) was unstated - the "7.9e-4 at tol 1e-4"
+reading of the M13.1 parity.
 
-**Decision (1) - the generator's ceiling is the ball diameter**
-(`finishing3d::params::scallop_ceiling`, in the shared `validate`, so every
-3D finish door): a stated `stepover` or `steep_stepover` at or past the ball
-diameter is refused by name ("reaches the scallop ceiling"); past `s = 2r`
-the cusp formula `h = r − √(r² − (s/2)²)` describes no cusp, only uncut
-ground. A tolerance at or past `r/2` is refused too: there the auto law
-`√(8·r·tol)` itself reaches `2r`. Inputs under the ceiling are untouched.
-No clamp: a silently shrunk stepover is a parameter the user did not write.
-One test moved: the authored-ladder test coarsened with steep_stepover 8 on
-the r3 box; it now uses 5 (still coarser than 2, still under the ceiling).
+**The bound.** `RotaryChordStats::flute_shift = L·2·sin(half_angle/2)`,
+`L` = the farthest corner of the field's bounds from the tip at either
+station (plus `r` for a ball), capped at shank + `r` - only points inside
+the field cut, so nothing farther counts. With `center_sag` it is a
+two-sided Hausdorff bound: every point of the true sweep has a chorded
+point within `center_sag + flute_shift`, and back, so any point farther
+than that from the true skin reads the right steel/air. It is two-sided
+by nature, not one-signed: the chorded solid is neither a superset nor a
+subset of the true one (the brief's "never smaller" is not a property of
+this law, and neither direction would be conservative for every consumer:
+over-removal hides rest material, under-removal invents gouges).
 
-**Decision (2) - the scan's reach stays `band + 3·tol`, and its validity
-range is documented** (`ridge::reach`). A far tier was built and measured:
-columns past the band that the near flank left unflanked asked again within
-`2r`, distinct passes required. It read every flat-raster spacing up to 5.9
-exactly, but over the release verdict lanes it convicted 11 finish3d tests:
-cone apex 1.68 mm, box walls 0.42, dome waterline 1.10, blind pocket 0.16,
-dome scallop/multidirection 0.20, hill contour 0.18, hill radial 0.17, ramp
-hill 0.18 - the same one-pass crown/corner ground the M13.8 full-diameter try
-convicted, which the distinct-rings rule (M13.9) does not excuse (a crown is
-flanked by DIFFERENT rings of the ladder). Shipping it would have redded the
-heavy lane or raised every ratchet on ground no spacing fixes. Reverted.
-Owed: a crown/corner exclusion (a column whose flanking feet all lie BELOW
-its tangent plane on a convex crown, or across a convex edge, is rest's
-ground) before the reach can grow - and then the far tier above, whose
-lattice-slack fix (asking the unflanked columns inside the reach too) made
-s = 3 read 0.354 where today it reads 0.
+**Enforced on request.** `Stock::simulate_rotary_bounded(.., Some(t))`
+(and `ChordLaw::flute_tol`) also counts sub-chords until
+`L·2·sin(half/2) ≤ t`; refused by name past `MAX_SUBCHORDS`, never
+coarsened. `simulate_rotary` keeps today's count (flute tolerance
+`None`): the eye and the slices are unchanged in cost and output. On the
+pinning fixture (flat d6, 30 degrees on a d20 bar, pose_tol 1e-3) the
+unenforced stat reads 0.147 mm at 44 sub-chords; enforcing 0.05 takes
+130.
 
-Dropped: an unbounded far window (two passes on opposite sides of a region a
-boundary excluded would "flank" it); the exact cusp law for the auto
-stepover (`2√(2r·tol − tol²)`, every golden changes for a ≤1% difference at
-sane tolerances); a clamp-with-warning at the generator.
+**Agreement tests** (`crates/sim/tests/stock_rotary_flute.rs`): the field
+against a brute-force reference (the flat tool at 4,001 samples of the
+controller's lerp, its own sampling error added to the margin) at every
+field cell center in the band: 0 sign misses past `center_sag +
+flute_shift` (17,144 points) and 0 past an enforced 0.05 (17,280); and at
+the sag class alone the worst miss is 9.5e-3 > 5.5e-3 - the flute error
+is real and the bound is what covers it.
+
+**Dropped:** (1) enforcing `α ≤ tol/L` at the eye's or verdict's pose
+tolerance by default - 3x-1000x the sub-chords (the eye 2.5 s would go
+to minutes) for a flank class no current consumer reads (the column
+verdict refuses rotary by name); a caller that needs it asks for it.
+(2) a one-signed inflation (cut with `r + flute_shift`) - no consumer is
+conservative in a single direction. (3) a second-order "scallop" law for
+radial poses - true only when the pose's turn is parallel to the tip
+chord, which the straight tip chord itself breaks by up to half a move's
+turn. (4) sampling the reference between field cell centers - the field's
+`distance` reads its cell's value, and that quantization (up to ~0.26 mm
+at cell 0.5) would be charged to the flute.
 
 ## #152 - a short turned bar's axis is read off its facing flats (2026-11-08)
 
