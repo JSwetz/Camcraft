@@ -237,8 +237,9 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
     // full radius at the corner depth); a bull nose sweeps its exact
     // corner-rounded solid (M13.1 - the disc it rode before removed
     // the fillet's ring the real tool leaves); everything whose cut
-    // IS its cylinder - end mills, drills, taps, bores - sweeps the
-    // disc.
+    // IS its cylinder - end mills, drills, bores - sweeps the disc,
+    // and a tap sweeps the disc of its thread's core (#266,
+    // `tool_law::cutting_radius`).
     let mut planned: Vec<Planned> = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
@@ -290,12 +291,16 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // the plan carries the nose and that axis for the field eye's
         // revolved stadium; a blade refuses by name (`lathe`).
         let lathe = lathe::lathe_plan(world, name, &op, &tool)?;
+        // A turning insert's cutting feature is its nose: the display
+        // cell law (`auto_cell`) reads it, not the IC.
+        let radius = match lathe {
+            Some(plan) => plan.nose,
+            None => crate::operation::tool_law::cutting_radius(&tool).map_err(|e| format!("{name}: {e}"))?,
+        };
         planned.push(Planned {
             name: name.clone(),
             moves: cache.path.moves,
-            // A turning insert's cutting feature is its nose: the
-            // display cell law (`auto_cell`) reads it, not the IC.
-            radius: lathe.map_or(tool.diameter / 2.0, |l| l.nose),
+            radius,
             ball: tool.kind == crate::tools::ToolKind::BallNose,
             cone,
             corner,
