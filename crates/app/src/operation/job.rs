@@ -119,6 +119,12 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         return Err(GenError::Invalid(format!("'{}' is not a tool", op.tool)));
     };
     let setup = op.setup.as_deref();
+    // #326: an op this slice has not verified in an aligned setup is
+    // refused by name here, at the one door every generation passes -
+    // never cut in the unaligned frame.
+    if let Some(why) = crate::setup_align::generation_problem(world, op) {
+        return Err(GenError::Invalid(why));
+    }
     let material = material_of(world, setup, &op.src)?;
     let part_solid = part_solid_of(world, setup, &op.src, &material);
     // Setup stock, when it is not the source itself: the swarf column

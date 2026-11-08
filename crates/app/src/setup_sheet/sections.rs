@@ -104,6 +104,15 @@ pub(super) fn render_datum(world: &World, ctx: Option<&str>, out: &mut String) {
             "  transferred from '{from}' - its stock and placed offsets were cloned\n\n"
         ));
     }
+    // #326: the operator must clamp the part the way the program assumes.
+    // As modelled prints nothing (identity is absence - sheets unchanged).
+    if let Some(a) = setup::effective(world, ctx).and_then(|s| crate::setup_align::stored(world, &s)) {
+        out.push_str("PART ALIGNMENT\n");
+        out.push_str(&format!(
+            "  {} - clamp the part this way up; stock, offsets and fixtures above are in this frame\n\n",
+            crate::setup_align::describe(Some(a))
+        ));
+    }
 }
 
 pub(super) fn render_fixtures(world: &World, ctx: Option<&str>, out: &mut String) {

@@ -72,6 +72,7 @@ pub fn collect(world: &World) -> ProjectFile {
                             .work_offset
                             .and_then(|i| crate::schema::WCS_SLOTS.get(i))
                             .map(|w| (*w).to_string()),
+                        part_alignment: d.part_alignment.as_ref().map(AlignmentDto::from_location),
                     })
             } else {
                 None
@@ -139,8 +140,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 translation: [loc.pos.x, loc.pos.y, loc.pos.z],
                 rotation: loc.rot,
                 facets,
-                // The counter is only ever set on models (import/update
-                // commands); everywhere else it reads 0 and omits itself.
+                // The counter moves on models and stocks (every facet
+                // landing); everywhere else it reads 0 and omits itself.
                 rev: model::rev_of(world, &entity),
                 kind,
                 stock,
