@@ -24,7 +24,8 @@
 //! - **The pivot is the parts' centre.** The presets and the numeric
 //!   angles turn the parts about the centre of their bounds, so a flip
 //!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
-//!   takes any rigid transform - the door the face/edge picks (#330) use.
+//!   takes any rigid transform - the door the face/edge picks (#330) use,
+//!   through [`AlignPartToSetup::lay_on_plane`].
 
 use flecs_ecs::prelude::World;
 
@@ -73,6 +74,19 @@ impl AlignPartToSetup {
         }
         let stock = following_stock(world, setup, prev, next)?;
         Ok(AlignPartToSetup { setup: setup.to_string(), prev, next, stock })
+    }
+
+    /// Lay the part on a G17 / G18 / G19 plane from picks (#330): one flat
+    /// face or two straight edges, read by [`crate::pick::lay_on_plane`].
+    /// A refused pick is refused here, by name, before anything is written.
+    pub fn lay_on_plane(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        lay: crate::pick::PlaneLay,
+    ) -> Result<Self, CommandError> {
+        let at = crate::pick::lay_on_plane(world, picks, lay).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some(at))
     }
 
     /// One of the Setups page's quick choices.

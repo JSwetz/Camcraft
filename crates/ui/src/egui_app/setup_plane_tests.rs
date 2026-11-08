@@ -1,0 +1,136 @@
+//! #330 in the surface: the Setups page's "Lay on a plane" row arms the
+//! pick draft, a Face/Edge pick lands in the draft (never in an
+//! operation), Apply queues `LayPartOnPlane` and the drain lands it as one
+//! undo unit; picks that set no plane leave Apply disabled and push
+//! nothing. The work offset is not touched.
+//! Provenance: our own page law; no vendor material consulted.
+
+use egui::accesskit::Role;
+use egui::{Event, Key, Modifiers, Vec2};
+use egui_kittest::kittest::Queryable;
+use egui_kittest::Harness;
+
+use camcraft_app::commands::ImportModel;
+use camcraft_app::geometry::{Point3, cube, feature, quat_rotate_point};
+use camcraft_app::model;
+use camcraft_app::operation::{FeatureSel, GeoSel};
+use camcraft_app::setup_align;
+
+use crate::state::{CommandKind, GeoPick, State};
+
+fn run(state: &mut State, k: CommandKind) {
+    state.pending.push_back(k);
+    state.drain_actions();
+}
+
+fn with_part() -> State {
+    let mut state = State::new();
+    let part = ImportModel::from_mesh("part", cube(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 20.0, 10.0)));
+    state.history.execute(&state.world, part);
+    run(&mut state, CommandKind::CreateSetup { name: None, datum_from: None });
+    state
+}
+
+fn features(state: &State) -> std::sync::Arc<feature::Features> {
+    let e = model::find_by_name(&state.world, "part").expect("part");
+    model::features_of(&state.world, &e).expect("features")
+}
+
+/// The front wall (local y = 0).
+fn front_wall(state: &State) -> GeoSel {
+    let id = features(state)
+        .faces
+        .iter()
+        .find(|f| f.normal[1].abs() > 0.99 && f.offset.abs() < 1e-9)
+        .map(|f| f.id)
+        .expect("the front wall");
+    GeoSel { entity: "part".into(), feature: FeatureSel::Face(id) }
+}
+
+fn top_edge(state: &State, y: f64) -> GeoSel {
+    let f = features(state);
+    let id = feature::chains(&f)
+        .into_iter()
+        .find(|c| {
+            let p = feature::chain_points(&f, c);
+            p.len() == 2 && p.iter().all(|q| q[1] == y && q[2] == 10.0)
+        })
+        .map(|c| c.id)
+        .expect("a top edge");
+    GeoSel { entity: "part".into(), feature: FeatureSel::Chain(id) }
+}
+
+fn frame(ui: &mut egui::Ui, st: &mut State) {
+    super::panes::shortcuts(ui, st);
+    st.drain_actions();
+    super::setup_plane_pick::row(ui, st, "Setup1");
+}
+
+fn key(h: &mut Harness<'static, State>, k: Key) {
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::COMMAND));
+    h.input_mut().events.push(Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    h.run_steps(2);
+}
+
+fn wall_normal(state: &State) -> Option<[f64; 3]> {
+    let a = setup_align::stored(&state.world, "Setup1")?;
+    let v = quat_rotate_point(a.rot, Point3::new(0.0, -1.0, 0.0));
+    Some([v.x, v.y, v.z])
+}
+
+#[test]
+fn the_row_picks_a_face_and_lays_it_on_g17_through_the_command() {
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(700.0, 300.0))
+        .build_ui_state(frame, with_part());
+    h.run();
+    assert!(h.state().pending.is_empty(), "drawing the row queues nothing");
+    h.get_by_label("Pick face or edges").click();
+    h.run();
+    assert!(h.state().plane_pick.is_some(), "the draft is armed");
+    assert_eq!(h.state().geo_pick, GeoPick::Edge, "edges and faces both pick");
+    let wall = front_wall(h.state());
+    crate::plane_pick::take(h.state_mut(), wall);
+    h.run();
+    assert!(h.state().op_ui.geo.is_empty(), "a draft pick is not an operation pick");
+    h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply")).click();
+    h.run();
+    let n = wall_normal(h.state()).expect("Setup1 holds the part laid");
+    assert!(n[2] > 1.0 - 1e-9, "the wall faces up: {n:?}");
+    assert!(h.state().plane_pick.is_none(), "a landed lay ends the pick");
+    assert!(h.state().status.contains("laid on G17 (XY)"), "{}", h.state().status);
+    assert_eq!(camcraft_app::setup::work_offset(&h.state().world, "Setup1"), None, "the work offset is untouched");
+    key(&mut h, Key::Z);
+    assert_eq!(setup_align::stored(&h.state().world, "Setup1"), None, "undo restores as modelled");
+    key(&mut h, Key::Y);
+    assert!(wall_normal(h.state()).is_some(), "redo lays it again");
+}
+
+#[test]
+fn edge_picks_keep_the_last_two_and_parallel_edges_push_nothing() {
+    let mut state = with_part();
+    crate::plane_pick::arm(&mut state, "Setup1");
+    let (front, back) = (top_edge(&state, 0.0), top_edge(&state, 20.0));
+    let wall = front_wall(&state);
+    crate::plane_pick::take(&mut state, wall);
+    crate::plane_pick::take(&mut state, front.clone());
+    crate::plane_pick::take(&mut state, back.clone());
+    let picks = state.plane_pick.as_ref().map(|p| p.picks.clone()).unwrap_or_default();
+    assert_eq!(picks, vec![front.clone(), back.clone()], "an edge drops the face; two edges kept");
+    crate::plane_pick::take(&mut state, back);
+    let picks = state.plane_pick.as_ref().map(|p| p.picks.clone()).unwrap_or_default();
+    assert_eq!(picks, vec![front.clone()], "a second click on an edge drops it");
+    let lay = camcraft_app::pick::PlaneLay { plane: camcraft_app::cl::ArcPlane::Xy, flip: false, place: false };
+    let back = top_edge(&state, 20.0);
+    let parallel = vec![front, back];
+    run(&mut state, CommandKind::LayPartOnPlane { setup: "Setup1".into(), picks: parallel, lay });
+    assert!(state.status.contains("parallel"), "{}", state.status);
+    assert_eq!(setup_align::stored(&state.world, "Setup1"), None, "a refusal writes nothing");
+    assert!(state.plane_pick.is_some(), "a refusal keeps the draft to re-pick");
+}

@@ -820,6 +820,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             }
             ui.label(line);
             super::setup_align_pick::picker(ui, state, name);
+            super::setup_plane_pick::row(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
     }
