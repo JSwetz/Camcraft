@@ -6,7 +6,10 @@
 //! Provenance: our own fixtures over the M7.1 field engine; nothing
 //! from vendor binaries.
 //!
-//! Gate map (M4.4): covers ui::machined, ui::egui_app::world (collect_parts), app::stock_export::MeshCache, app::pick::soup_hit.
+//! #25: the mesh paints its deviation classes (judged once, with the
+//! extraction) and the hovered mesh facet projects for the highlight.
+//!
+//! Gate map (M4.4): covers ui::machined, ui::egui_app::world (collect_parts), app::stock_export::MeshCache, app::pick::soup_hit, app::machined_classes.
 
 use std::sync::Arc;
 
@@ -19,7 +22,7 @@ use camcraft_app::stock_view::field_view_with;
 use camcraft_app::tools::catalog;
 
 use crate::egui_app::world::collect;
-use crate::machined::{filter_hit, mesh, prime};
+use crate::machined::{filter_hit, filter_hit_facet, hover_facet_uv, mesh, prime};
 use crate::state::{Sim, State};
 
 const HALF: f64 = 6.0;
@@ -86,7 +89,30 @@ fn nothing_before_a_view_and_one_extraction_after() {
     let stock: Vec<_> = scene.parts.iter().filter(|p| p.stock).collect();
     assert_eq!(stock.len(), 1, "one stock part");
     assert_eq!(stock[0].verts.len(), a.len() * 3, "the mesh's own facets, three vertices each");
-    assert!(stock[0].classes.is_empty(), "unjudged: plain material");
+    assert_eq!(stock[0].classes.len(), stock[0].verts.len(), "judged: one class per vertex (#25)");
+    let classes = state.stock_mesh.viewed_classes(&match &state.field_view {
+        Some(Ok(fv)) => Arc::clone(fv),
+        _ => panic!("the view stands"),
+    });
+    let classes = classes.expect("judged with the extraction");
+    assert!(Arc::ptr_eq(&classes, &{
+        prime(&mut state);
+        match &state.field_view {
+            Some(Ok(fv)) => state.stock_mesh.viewed_classes(fv).expect("still judged"),
+            _ => panic!("the view stands"),
+        }
+    }), "a second prime never re-judges");
+    assert!(classes.iter().all(|&c| [0.0, 1.0, 2.0, 3.0].contains(&c)), "the four-class vocabulary only");
+    // The faced top sits on the model's top: the up-facing facets at z 18
+    // read clean by the eye's gate, never rest or unjudged.
+    let top: Vec<f32> = a
+        .iter()
+        .zip(classes.iter())
+        .filter(|(t, _)| t.normal().z > 0.9 && t.a.x.abs() < HALF - 2.0 && t.a.y.abs() < HALF - 2.0)
+        .map(|(_, &c)| c)
+        .collect();
+    assert!(!top.is_empty(), "the faced top has facets");
+    assert!(top.iter().all(|&c| c == 0.0), "the faced top is clean: {top:?}");
 
     // The transport up reads nothing here (a playback view changes every frame).
     state.sim = Some(Sim::new());
@@ -121,4 +147,35 @@ fn a_stock_hover_is_asked_of_the_machined_mesh() {
     // A model hit is kept: models win at any depth.
     let model = Some(("part".to_string(), 3usize, [0.0, 0.0, 18.0]));
     assert_eq!(filter_hit(&state, down.0, down.1, model.clone()), model);
+}
+
+#[test]
+fn the_hovered_mesh_facet_is_the_one_the_ray_hit_and_projects() {
+    let mut state = faced_state();
+    let down = ([0.5, 0.5, 40.0], [0.0, 0.0, -1.0]);
+    let stock = Some(("Stock".to_string(), 0usize, [0.5, 0.5, 20.0]));
+    let (_, none) = filter_hit_facet(&state, down.0, down.1, stock.clone());
+    assert!(none.is_none(), "no mesh: no mesh facet");
+    state.hover_mesh = Some(camcraft_app::geometry::Triangle::new(Point3::ZERO, Point3::ZERO, Point3::ZERO));
+    assert!(hover_facet_uv(&state, 1.5).is_none(), "no mesh standing: no highlight");
+
+    view_the_program(&mut state);
+    prime(&mut state);
+    let (hit, facet) = filter_hit_facet(&state, down.0, down.1, stock);
+    let (_, _, p) = hit.expect("material under the ray");
+    let t = facet.expect("the mesh facet the ray landed on");
+    let (lo_x, hi_x) = (t.a.x.min(t.b.x).min(t.c.x), t.a.x.max(t.b.x).max(t.c.x));
+    let (lo_y, hi_y) = (t.a.y.min(t.b.y).min(t.c.y), t.a.y.max(t.b.y).max(t.c.y));
+    assert!(lo_x <= p[0] && p[0] <= hi_x && lo_y <= p[1] && p[1] <= hi_y, "the facet holds the hit {p:?}: {t:?}");
+    // A model hit carries no mesh facet: models win, nothing of the mesh lights.
+    let model = Some(("part".to_string(), 3usize, [0.0, 0.0, 18.0]));
+    assert!(filter_hit_facet(&state, down.0, down.1, model).1.is_none());
+
+    // The highlight projects through the camera, inside the image when framed.
+    state.hover_mesh = Some(t);
+    state.cam.target = [0.0, 0.0, 18.0];
+    let uv = hover_facet_uv(&state, 1.5).expect("a framed facet projects");
+    for c in uv {
+        assert!(c.iter().all(|v| v.is_finite() && (-0.5..=1.5).contains(v)), "uv {uv:?}");
+    }
 }

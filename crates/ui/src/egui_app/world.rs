@@ -216,14 +216,15 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             // The machined stock's extracted mesh (M13.1 owed) takes the
             // slot when the whole-program field view has one: the closed
             // shell the program leaves, through the stock pipeline like the
-            // box it replaces. Unjudged (no classes): it paints as material,
-            // and the GPU eye, when it traces, still paints over the slot.
+            // box it replaces. Judged per facet by the eye's law (#25,
+            // `machined::vertex_classes`; plain material until judged), and
+            // the GPU eye, when it traces, still paints over the slot.
             (_, Some(mesh)) => parts.push(GpuPart {
                 verts: mesh.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect(),
                 selected: false,
                 stock: true,
                 fill: false,
-                classes: Vec::new(),
+                classes: crate::machined::vertex_classes(state, mesh.len()),
             }),
             // The Deviate sheet takes the stock's slot in the draw order:
             // it IS the stock's surface after the program, judged - same

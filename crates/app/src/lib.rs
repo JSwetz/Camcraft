@@ -20,6 +20,8 @@ pub use camcraft_motion::machining3d;
 pub use camcraft_motion::multiaxis;
 pub use camcraft_motion::turning;
 pub mod machine;
+// #25: deviation classes on the machined mesh.
+pub mod machined_classes;
 pub mod mcp;
 pub mod model;
 pub mod operation;

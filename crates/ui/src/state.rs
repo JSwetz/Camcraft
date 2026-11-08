@@ -1015,6 +1015,10 @@ pub struct State {
     /// pointer leaves the viewport). View state like the camera and the
     /// drag - not undoable, not saved.
     pub hover: Option<HoverHit>,
+    /// The machined mesh's facet under the pointer (#25), world space:
+    /// set with `hover` when the mesh answers a stock hover, cleared on
+    /// every hover refresh. View state - not undoable, not saved.
+    pub hover_mesh: Option<camcraft_app::geometry::Triangle>,
     /// True when the viewport panel was under the pointer last frame (the
     /// shell writes it, and gates pointer drags on it - a click on a menu
     /// or popup over the image must never orbit).
@@ -1310,6 +1314,7 @@ impl State {
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
             hover: None,
+            hover_mesh: None,
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             boundary_pick: None,
