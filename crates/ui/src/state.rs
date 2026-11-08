@@ -1060,6 +1060,11 @@ pub struct State {
     /// M1.7d G-code viewer: None after any document switch or refused
     /// post, `Some` while a posted program is being reviewed.
     pub post_view: Option<PostView>,
+    /// #265: the last post's refusal, `Some` from a refused post until
+    /// the user closes its window, a later post succeeds, or the
+    /// document is switched. The status line says it too, but the next
+    /// click or command writes over that line; this keeps the reason.
+    pub post_refusal: Option<crate::egui_app::post_refusal::PostRefusal>,
     /// M2.3 program material sim: None while the Deviate cell is dark,
     /// `Some` while its sheet paints the stock's place. Frozen evidence
     /// of one program state, exactly like [`PostView`]'s text - never a
@@ -1328,6 +1333,7 @@ impl State {
             display: DisplayMode::default(),
             sim: None,
             post_view: None,
+            post_refusal: None,
             program_sim: None,
             field_view: None,
             field_play: None,
@@ -2246,6 +2252,7 @@ impl State {
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
+                self.post_refusal = None;
                 self.program_sim = None;
                 self.field_view = None;
                 self.field_play = None;
@@ -3403,6 +3410,7 @@ impl State {
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
+        self.post_refusal = None; // nor its refused post
         self.program_sim = None; // and neither is its stock verdict
         self.field_view = None; // nor its traced stock
         self.field_play = None; // nor its playback
@@ -3453,6 +3461,9 @@ impl State {
     fn post_program_path(&mut self, path: PathBuf) {
         match posting::post_setup(&self.world, &path) {
             Ok(posted) => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
                 self.status = format!(
                     "posted {} op(s), {} lines to {}",
                     posted.ops,
@@ -3480,8 +3491,18 @@ impl State {
                 });
             }
             // A refused post leaves any previous program (file and viewer)
-            // exactly as it was - the gate writes nothing on refusal.
-            Err(err) => self.status = format!("post refused: {err}"),
+            // exactly as it was - the gate writes nothing on refusal. The
+            // reason also goes to its own window (#265), because the
+            // status line is overwritten by the next click or command.
+            Err(err) => {
+                let reason = err.to_string();
+                self.status = format!("post refused: {reason}");
+                self.post_refusal = Some(crate::egui_app::post_refusal::PostRefusal {
+                    path,
+                    reason,
+                    doc_version: self.doc_version,
+                });
+            }
         }
     }
 

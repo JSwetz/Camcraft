@@ -80,6 +80,7 @@ mod stock_size;
 mod stock_fit_sides;
 mod layout;
 mod unsaved;
+mod post_refusal;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
