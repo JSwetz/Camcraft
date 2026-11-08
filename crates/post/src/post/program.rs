@@ -31,9 +31,9 @@ pub(super) fn program_order<'a>(t: &'a Toolpath, out: &mut Vec<Record>) -> Vec<(
             let n = c.programmed.len();
             for (k, pm) in c.programmed.iter().enumerate() {
                 let pre = if k == 0 {
-                    Some(Record::Comp { side: Some(c.side), radius_mm: c.radius })
+                    Some(Record::Comp { side: Some(c.side), radius_mm: c.radius, wear: c.wear })
                 } else if k + 1 == n {
-                    Some(Record::Comp { side: None, radius_mm: 0.0 })
+                    Some(Record::Comp { side: None, radius_mm: 0.0, wear: false })
                 } else {
                     None
                 };

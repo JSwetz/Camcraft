@@ -265,16 +265,18 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // contour only: an open boundary, an open run and a 3+2
             // tilt are refused by name, never posted as a centre path
             // under a Control op.
-            let control_comp = lk.approach.compensation == crate::links::Compensation::Control;
+            // Wear (#38) rides the same doors under its own name.
+            let control_comp = lk.approach.compensation.in_control();
+            let comp_name = lk.approach.compensation.label();
             if control_comp && contour_open {
-                return Err(GenError::Invalid(
-                    "control compensation does not ride an open contour - choose In computer".into(),
-                ));
+                return Err(GenError::Invalid(format!(
+                    "{comp_name} compensation does not ride an open contour - choose In computer"
+                )));
             }
             if control_comp && matches!(params, OpParams::Contour { tilt: Some(_), .. }) {
-                return Err(GenError::Invalid(
-                    "control compensation does not ride a 3+2 tilt - choose In computer".into(),
-                ));
+                return Err(GenError::Invalid(format!(
+                    "{comp_name} compensation does not ride a 3+2 tilt - choose In computer"
+                )));
             }
             let cp = ContourParams {
                 tool_diameter: d,
@@ -364,9 +366,9 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         machining2d::contour(&region, &cp)?
                     };
                     if control_comp && !runs.is_empty() {
-                        return Err(GenError::Invalid(
-                            "control compensation does not ride open runs - pick closed rings, or choose In computer".into(),
-                        ));
+                        return Err(GenError::Invalid(format!(
+                            "{comp_name} compensation does not ride open runs - pick closed rings, or choose In computer"
+                        )));
                     }
                     for run in &runs {
                         path = stitch(path, machining2d::contour_along_chain(run, &cp)?);

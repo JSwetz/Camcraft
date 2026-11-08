@@ -662,6 +662,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     stamp: odto.stamp.map(GenStamp),
                     setup: odto.setup,
                     area: odto.area.to_controls(),
+                    coolant: odto.coolant,
                 });
                 if odto.label.is_some() || odto.order.is_some() {
                     entity.entity_view(world).set(OperationMeta {

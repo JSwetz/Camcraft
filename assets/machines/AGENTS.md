@@ -77,8 +77,15 @@ unstated capability into existence.
     bare NAME string: a named option with no code rides CODELESS, and
     a post that cannot find the code stays silent rather than invent
     `M8`. The stop pair is the fixed M9, not a per-machine number.
-    The first Flood entry is what posts use. A file that keeps its
-    list at `tooling.coolants` instead of on the station also reads.
+    The names the posts read are `Flood`, `Mist`, `Through-spindle`
+    and `Through-tool` (`machine::COOLANT_KINDS`, the machine editor's
+    pick list; #150) - compared case-blind, spaces and underscores
+    reading as hyphens, so `Through spindle` reads. A Flood op takes
+    the first Flood entry, else the first coded entry of no other known
+    kind (a shop's own `Brine`); a list stating only other kinds has no
+    flood code and a Flood op on it is refused by name. A file that
+    keeps its list at `tooling.coolants` instead of on the station also
+    reads.
 - `controller.synced_configuration.parts` is keyed BY LETTER:
   `{ "coordinate": i, "max_normal_speed": r, "max_rapid_speed": r }`.
   The kinematics tree decides WHICH axes exist; this table says how

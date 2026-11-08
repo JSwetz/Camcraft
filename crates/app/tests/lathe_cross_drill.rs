@@ -112,6 +112,7 @@ fn op(p: OpParams) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 

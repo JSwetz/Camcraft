@@ -13183,6 +13183,39 @@ revolved (follow-up material if users hit it with long keyways).
   nose-lowered path (lowering only the ends would bend them) - dropping a
   cut credits less, never more.
 
+## #107 - unsaved changes: a dirty flag and a save prompt on exit (2026-11-07)
+
+- **Chosen:** the document is dirty when the command history's undo
+  depth differs from the depth recorded at the last save or load
+  (`History::is_dirty` / `History::mark_clean` in `camcraft_app::commands`).
+  Undo back to the saved point is clean again; a redo past it is dirty
+  again; a fresh command while the saved state sits on the redo stack
+  makes the saved point unreachable (`None`), so the same depth on a new
+  branch stays dirty. `History::clear` (New, Open) starts clean. Ephemeral
+  state (selection via `execute_ephemeral`, camera, hover, layout) never
+  touches the history, so it never dirties.
+- **Why on `History`, not `project::is_dirty(world)`:** the history lives
+  in the UI's `State`, not in the world, and the flag is a property of the
+  history position; putting it next to `undo`/`redo` keeps it exact by
+  construction and still in the app layer. Cost to move: a thin
+  `project::is_dirty(&History)` wrapper if a non-UI caller wants one.
+- **UI:** the window title leads with `*` while dirty. New, Open (the
+  dialog arm) and Quit over a dirty document are held in
+  `State::unsaved_prompt` and an egui `Modal` asks Save / Don't Save /
+  Cancel (Escape or the backdrop = Cancel); the answer is a queued
+  `CommandKind::ResolveUnsaved`. Save without a path asks for one; a
+  cancelled or failed save keeps the document and the app open. The
+  window X now queues a Quit like Ctrl+Q (a shell whose GPU failed still
+  closes at once, since it never drains the queue).
+- **The shell is winit, not eframe:** the brief's
+  `viewport().close_requested()` + `CancelClose` does not apply - the
+  shell owns `WindowEvent::CloseRequested`, so it simply does not exit
+  there.
+- **Dropped:** guarding the headless `OpenProjectFile` / `SaveProjectFile`
+  arms (scripts and tests drive them; a prompt there would hang a
+  headless run); a dirty counter bumped per command (cannot know when an
+  undo returns to the saved state); hashing the document (costly, and
+  derived caches such as toolpaths would make it noisy).
 ## #103: a turned path's axial rapids judged in the meridian plane (partial)
 
 - **Law.** `operation/turning_rapids.rs` no longer drops the column law's
@@ -13579,6 +13612,86 @@ revolved (follow-up material if users hit it with long keyways).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
 
+## #38: G41/G42 wear compensation - the centre path under the register's wear delta (2026-11-08)
+
+**`Compensation::Wear` joins Computer and Control on the contour's
+`Approach`** (default Computer: every golden byte-identical; the project
+file gains an additive `wear_comp` key, the digest a byte only when on).
+Wear walks the SAME centre path Control does - same mid-run seam, same
+straight leads at least a radius long, same doors (tabs, blends, overlap,
+keep-down links, open contours and runs, 3+2 tilt), refused under the name
+"wear compensation" - and its `CompSpan` (flag `wear`) programs those
+centre moves verbatim under G41/G42 Dn / G40: the machine-tool handbooks'
+wear-offset practice, where the register holds only the wear delta (zero
+on a new cutter). The stream marks it `COMP LEFT|RIGHT <µm> WEAR`, the
+engine publishes `CompensationType` ("wear" / "control"), and Fanuc writes
+the same words plus one comment per section saying the D register holds
+the wear delta only - a full radius there would cut the part a radius
+undersize, and that is the one wrong set-up wear invites. Haas/Mazak/
+Sinumerik/Heidenhain and the lathe keep refusing any COMP by name.
+Considered and dropped: keeping the lead law only for Control (a wear
+delta is small, but the control still builds the vector over the engage
+block - a zero-length or arc engage is still a misread program), skipping
+the room law for wear (the centre path is already proved; the room law
+judges the part offset by a full radius, which wear never asks - so it is
+skipped, not reused), and a separate wear register number (the library
+carries none; D = tool number, as Control).
+
+## #20 - the rotary sweep's flute-rotation bound: stated always, enforced on request (2026-11-08, M13.1)
+
+**What "flute rotation" is here.** Not the helical flutes spinning (the
+sim's tool is already its body of revolution, which bounds any flute
+geometry): it is the rotary chord pre-pass (`stock_sim/field_rotary.rs`)
+standing each sub-chord's whole tool on the sub-chord's MID pose while
+the true pose turns through it. A tool point at distance `w` from the
+tool's reference (ball center, flat tip) is off its true-pose place by
+at most `w·2·sin(β/2)`, `β ≤ half_angle` (Craig, "Introduction to
+Robotics", ch. 2 - the chord of a rigid turn). The old chord count only
+bounded the SAG at the farthest reach (second order), so the flank's
+error (first order, `L·α`) was unstated - the "7.9e-4 at tol 1e-4"
+reading of the M13.1 parity.
+
+**The bound.** `RotaryChordStats::flute_shift = L·2·sin(half_angle/2)`,
+`L` = the farthest corner of the field's bounds from the tip at either
+station (plus `r` for a ball), capped at shank + `r` - only points inside
+the field cut, so nothing farther counts. With `center_sag` it is a
+two-sided Hausdorff bound: every point of the true sweep has a chorded
+point within `center_sag + flute_shift`, and back, so any point farther
+than that from the true skin reads the right steel/air. It is two-sided
+by nature, not one-signed: the chorded solid is neither a superset nor a
+subset of the true one (the brief's "never smaller" is not a property of
+this law, and neither direction would be conservative for every consumer:
+over-removal hides rest material, under-removal invents gouges).
+
+**Enforced on request.** `Stock::simulate_rotary_bounded(.., Some(t))`
+(and `ChordLaw::flute_tol`) also counts sub-chords until
+`L·2·sin(half/2) ≤ t`; refused by name past `MAX_SUBCHORDS`, never
+coarsened. `simulate_rotary` keeps today's count (flute tolerance
+`None`): the eye and the slices are unchanged in cost and output. On the
+pinning fixture (flat d6, 30 degrees on a d20 bar, pose_tol 1e-3) the
+unenforced stat reads 0.147 mm at 44 sub-chords; enforcing 0.05 takes
+130.
+
+**Agreement tests** (`crates/sim/tests/stock_rotary_flute.rs`): the field
+against a brute-force reference (the flat tool at 4,001 samples of the
+controller's lerp, its own sampling error added to the margin) at every
+field cell center in the band: 0 sign misses past `center_sag +
+flute_shift` (17,144 points) and 0 past an enforced 0.05 (17,280); and at
+the sag class alone the worst miss is 9.5e-3 > 5.5e-3 - the flute error
+is real and the bound is what covers it.
+
+**Dropped:** (1) enforcing `α ≤ tol/L` at the eye's or verdict's pose
+tolerance by default - 3x-1000x the sub-chords (the eye 2.5 s would go
+to minutes) for a flank class no current consumer reads (the column
+verdict refuses rotary by name); a caller that needs it asks for it.
+(2) a one-signed inflation (cut with `r + flute_shift`) - no consumer is
+conservative in a single direction. (3) a second-order "scallop" law for
+radial poses - true only when the pose's turn is parallel to the tip
+chord, which the straight tip chord itself breaks by up to half a move's
+turn. (4) sampling the reference between field cell centers - the field's
+`distance` reads its cell's value, and that quantization (up to ~0.26 mm
+at cell 0.5) would be charged to the flute.
+
 ## #152 - a short turned bar's axis is read off its facing flats (2026-11-08)
 
 - **Chosen:** when the area-weighted normal moment is isotropic (both
@@ -13829,24 +13942,32 @@ inside, and they wrap as before.
 - Not done (follow-up worth an issue): rotate the development's branch to an azimuth
   where the work is turned, so a D-flat bar wraps whatever its placement.
 
-## #237 - flats hiding in a fine ball's wide latitude class (2026-11-07, P0)
+## #197 - the Stock page shows the models' size (2026-11-07)
 
-- **Chosen:** inside each WIDE latitude class of a pencil (a fine dome's
-  continuous latitudes, which `ringless` leaves to `off_cone`), cut the
-  class into 0.02-wide latitude bins and read each bin's bearings: the
-  area-weighted resultant of the 1st to 4th bearing harmonics. A revolve's
-  bin cancels them; a rod's two opposite faces keep nearly all of the
-  2nd, a flat bar's sides and end caps (a quarter turn apart) the 4th. A
-  bin past 0.5 counts its area times that fold; a pencil whose folded
-  area passes 2 % of the inliers does not bear the axis out (refused).
-- **Why the 2 % (not the 10 % bias share):** the 6x6x80 rod's faces are
-  ~7 % of the inliers - under the general bias budget, yet a rod sticking
-  50 mm out of a ball is never a revolve about a cross axis. The fold
-  measure only reads wide classes, which a turned part's narrow rings
-  never are, so the tighter share cannot touch the ring laws.
-- **Known consequence (fail closed):** a square section inside a dome,
-  judged about its true axis, is refused too (4th harmonic); a hex (6th)
-  is not. Refusal is the safe side.
-- **Dropped:** taking large flat faces out of the wide class and running
-  them through the ring check (they then only cost their area against
-  the 10 % budget - the 6x6 rod still read X).
+- **Chosen:** a two-line readout above the stock fields - "Models: X x Y x
+  Z <unit>" and the X/Y/Z extents - from `model::solid_world_aabb`, the
+  very box Fit to Models wraps (its hover says so), in the document's
+  units; with no models, a dim "No models yet" line.
+- **Why:** the reporter wanted the primitive's dimensions in view while
+  typing stock numbers.
+- **Dropped:** the *selected* model's box only (the stock wraps the whole
+  job, and Fit already reads all models); copying the size into the
+  fields on a click (Fit to Models already does it with a margin; the
+  per-side allowance is #198).
+
+## #198 - box stock fitted per side (2026-11-07)
+
+- **Chosen:** for box stock the Stock page offers "Per side": six
+  allowances (-X, +X, -Y, +Y, bottom, top) replace the single fit margin,
+  and Fit to Models sends `StockFitSides`, which wraps the models' box by
+  each side's own amount (`stock::fit_box_sides`: each face its own
+  allowance off the models; refused by name for a negative or
+  non-finite allowance) through the same undoable `SetStock` as the
+  single-margin fit (both now share `State::apply_stock_fit`). Equal
+  sides read exactly as the single-margin fit.
+- **Why:** a blank is rarely padded evenly - a facing allowance on top,
+  nothing under a flat bottom, more on the side a vise jaw grips.
+- **Dropped:** per-side for cylinders (a radial allowance is one number;
+  bottom/top could follow if asked); storing the allowances in the
+  document (they are a fit recipe, not stock - the stock stays the
+  explicit box the fit produced).
