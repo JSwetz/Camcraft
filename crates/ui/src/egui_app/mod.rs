@@ -58,6 +58,8 @@ mod setup_wcs_pick;
 // #326: the Setups page's part-alignment control.
 mod setup_align_pick;
 pub(crate) use setup_align_pick::align_text;
+// #330: the Setups page's lay-on-a-plane row.
+mod setup_plane_pick;
 // The operation dialog, split out of `pages` with the property grid
 // (user review 2026-11-06): the frame, the Geometry pick block, the
 // params dispatcher and its kind-family pages, the shared widgets.
@@ -124,6 +126,8 @@ mod tool_number_tests;
 mod setup_wcs_tests;
 #[cfg(test)]
 mod setup_align_tests;
+#[cfg(test)]
+mod setup_plane_tests;
 #[cfg(test)]
 mod ball_corner_tests;
 #[cfg(test)]

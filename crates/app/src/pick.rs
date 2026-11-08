@@ -6,8 +6,10 @@
 
 pub mod align;
 pub mod face;
+pub mod plane;
 
 pub use align::{Alignment, align_321};
+pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
 
 use flecs_ecs::prelude::World;
