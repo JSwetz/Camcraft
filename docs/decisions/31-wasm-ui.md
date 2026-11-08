@@ -48,7 +48,8 @@
      (34 non-test sites, in app/stock_play_worker, geometry/slice and ui).
      The fix is a `web_time` alias seam. The `std::thread::spawn` sites
      (generate.rs, job.rs, stock_play_worker, state, cpu_eye) need a
-     run-inline fallback. rayon already falls back to the calling thread.
+     run-inline fallback. rayon is expected to run on the calling thread
+     when it cannot spawn (not yet seen at runtime).
   5. **The page.** The linked module imports nine
      `wasi_snapshot_preview1` functions (`clock_time_get`, `fd_close`,
      `fd_fdstat_get`, `fd_prestat_get`, `fd_prestat_dir_name`, `fd_seek`,
