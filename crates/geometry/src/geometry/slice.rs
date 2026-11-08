@@ -237,7 +237,7 @@ pub fn project(facets: &[Triangle], samples: usize) -> Result<Region, SliceError
     PROJECT_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.len() == PROJECT_CACHE_ENTRIES {
-            cache.remove(0);
+            drop(cache.remove(0));
         }
         cache.push((samples, facets.to_vec(), result.clone()));
     });
