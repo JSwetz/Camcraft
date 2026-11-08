@@ -1,7 +1,7 @@
 //! The truck reference impl of the kernel seam (feature `truck`, bench only):
-//! sweep-built primitives, boolean subtract via truck-shapeops `and` with the
-//! tool inverted, measure via truck-meshalgo tessellation. truck has no solid
-//! offset, so `offset` is `Unsupported`.
+//! sweep-built primitives, booleans via truck-shapeops `and` / `or` (subtract
+//! is `and` with the tool inverted), measure via truck-meshalgo tessellation.
+//! truck has no solid offset and no edge blend: both are `Unsupported`.
 //! Provenance: calls truck's public API as shown in its published examples
 //! (truck-shapeops `punched-cube-shapeops`, truck-meshalgo rustdoc); no truck
 //! internals reimplemented.
@@ -12,7 +12,7 @@ use truck_meshalgo::tessellation::{MeshedShape, RobustMeshableShape};
 use truck_modeling::{Point3, Rad, Solid, Vector3, builder};
 
 use crate::{
-    Kernel, KernelError, Measure, P3, finite_point, mesh_signed_volume, positive_len,
+    Blend, Kernel, KernelError, Measure, P3, finite_point, mesh_signed_volume, positive_len,
 };
 
 const NAME: &str = "truck";
@@ -52,6 +52,19 @@ fn contained<T>(op: &'static str, f: impl FnOnce() -> Option<T>) -> Result<T, Ke
             op,
             detail: "engine panicked (contained)".into(),
         }),
+    }
+}
+
+/// A boolean result with no boundary shell is empty: an `Err`, not a solid.
+fn non_empty(op: &'static str, r: Solid) -> Result<Solid, KernelError> {
+    if r.boundaries().is_empty() {
+        Err(KernelError::InvalidResult {
+            kernel: NAME,
+            op,
+            detail: "empty result".into(),
+        })
+    } else {
+        Ok(r)
     }
 }
 
@@ -95,14 +108,32 @@ impl Kernel for TruckKernel {
             b.not();
             truck_shapeops::and(&a, &b, tol)
         })?;
-        if r.boundaries().is_empty() {
-            return Err(KernelError::InvalidResult {
-                kernel: NAME,
-                op: "boolean_subtract",
-                detail: "empty result".into(),
-            });
-        }
-        Ok(r)
+        non_empty("boolean_subtract", r)
+    }
+
+    fn boolean_union(&mut self, a: Solid, b: Solid) -> Result<Solid, KernelError> {
+        let tol = self.boolean_tol;
+        let r = contained("boolean_union", || truck_shapeops::or(&a, &b, tol))?;
+        non_empty("boolean_union", r)
+    }
+
+    fn boolean_intersect(&mut self, a: Solid, b: Solid) -> Result<Solid, KernelError> {
+        let tol = self.boolean_tol;
+        let r = contained("boolean_intersect", || truck_shapeops::and(&a, &b, tol))?;
+        non_empty("boolean_intersect", r)
+    }
+
+    fn blend_edges(
+        &mut self,
+        _s: Solid,
+        _picks: &[P3],
+        _radius: f64,
+        _kind: Blend,
+    ) -> Result<Solid, KernelError> {
+        Err(KernelError::Unsupported {
+            kernel: NAME,
+            op: "blend_edges",
+        })
     }
 
     fn offset(&mut self, _s: &mut Solid, _distance: f64) -> Result<Solid, KernelError> {
