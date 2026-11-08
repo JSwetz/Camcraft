@@ -58,7 +58,8 @@ go to `CHANGELOG.md`.
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
 - **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review"`
-  and take the highest priority first: `P0` (wrong output, gouge, crash,
+  (then drop any whose comments hold a live contributor claim - "A claim
+  comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
@@ -103,19 +104,45 @@ go to `CHANGELOG.md`.
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
   worktree/branch <name> · plan: <one line>"`. Never work an issue that
-  carries `claimed` unless its last claim comment is older than 4 hours with
-  no newer comment from the claimant - then it is stale: comment "reclaimed
-  from <old claimant> (stale)" and take it.
+  carries `claimed` unless its last claim comment is an agent's and older
+  than 4 hours with no newer comment from the claimant - then it is stale:
+  comment "reclaimed from <old claimant> (stale)" and take it. A
+  contributor's claim comment never goes stale on a timer ("A claim comment
+  is a claim", below).
 - **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
   an Agent should have the tag source:agent"). Every issue an agent opens
   carries the `source:agent` label alongside its `P*` and `area:*` labels -
   including a bug the user reported in chat and an agent filed for them.
   An issue a human opens on GitHub never gets it. Agents and the user share
   one GitHub account, so the label, not the author, tells them apart.
-- **Outside contributors' claims count.** A claim comment from a
-  contributor without label rights is a claim: the main session sets
-  `claimed` and the assignee for them and replies, and their issue is not
-  picked while the claim is fresh (4 h rule).
+- **A claim comment is a claim** (user, 2026-11-08: "a comment should
+  suffice ... if we come across a claimed issue thru comment we should
+  just label it as such - and vice versa if they remove their comment,
+  remove their claim label for em as part of maintenance.. Otherwise the
+  comment stands as claimed."). Only collaborators can set labels, so
+  anyone else claims an issue by commenting on it with a line starting
+  `claimed:` (or `/claim`). The comment is the claim; the label only
+  mirrors it.
+  - **Check before claiming.** Before `Claim before any code`, read the
+    issue's comments (`gh issue view N --comments`). A claim comment by
+    anyone other than the owner account (agents post as the owner) means
+    the issue is taken: do not work it, even if it has no `claimed` label -
+    unless that same person later commented `unclaim` (a withdrawn claim).
+  - **Mirror it.** An issue found with such a comment but without the
+    label gets `claimed` and the claimant as assignee (if GitHub refuses
+    the assignee, the label alone), plus one reply: "Claim recorded for
+    @<login> - label and assignee set (only collaborators can set labels;
+    your comment is the claim)."
+  - **Withdrawn = deleted.** A contributor's claim stands for as long as
+    their claim comment exists - the 4 h stale rule is for agent claims
+    only. If the comment is deleted, or the claimant comments `unclaim`,
+    the claim is gone: remove `claimed` and their assignment, and comment
+    "claim by @<login> withdrawn (comment removed) - issue is free again".
+  - **Maintenance.** Every `/review-prs` run (step 4) and every issue pick
+    does this sweep for the issues it touches: label the comment-only
+    claims, and drop the label where the only claim comment behind it is
+    gone. A `claimed` label backed by an agent's claim comment follows the
+    4 h rule above instead.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
