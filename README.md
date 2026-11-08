@@ -15,6 +15,21 @@ text, assets or post processors were used.
 > cannot be proven safe is refused by name. Still, check every program in
 > your machine's own simulation and dry-run it before cutting metal.
 
+> **Experimental work in progress - use with caution.** CamCraft is under
+> heavy, fast-moving development. Features land daily, some are half-built
+> on purpose, and a release can change behaviour you relied on yesterday.
+> Treat every posted program as a first draft: simulate it, dry-run it with
+> the spindle off and the Z raised, and keep a hand on the feed hold. Our
+> unofficial testing philosophy, borrowed from a certain tiny lord with a
+> very large castle:
+>
+> *"Some of you may die, but it's a sacrifice I am willing to make."*
+>
+> Please don't let that be your spindle, your vise or your fingers. Report
+> anything odd as an issue - a crash, a toolpath that looks wrong, or a
+> refusal you think is mistaken - so the next person doesn't find it the
+> hard way.
+
 ## What it does
 
 - **Import** STL, OBJ and STEP models; repair meshes (weld vertices, fill
