@@ -38,9 +38,9 @@ mod gizmo_tests {
     use super::*;
     use crate::state::CommandKind;
 
-    fn set_origin(state: &mut State, slot: &str, pos: [f64; 3], yaw_deg: f64) {
+    /// Place the active setup's one WCS (#342).
+    fn set_origin(state: &mut State, pos: [f64; 3], yaw_deg: f64) {
         state.pending.push_back(CommandKind::SetWcs {
-            slot: slot.to_string(),
             pos,
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -78,7 +78,7 @@ mod gizmo_tests {
     #[test]
     fn an_origin_placed_at_machine_zero_does_not_duplicate_the_gizmo() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [0.0, 0.0, 0.0], 0.0);
         let lines = collect_overlay(&state);
         assert_eq!(lines.len(), 6, "the triad replaces the world axes");
         assert!(lines[0][3] > 0.5, "the single gizmo is the bright triad");
@@ -93,7 +93,7 @@ mod gizmo_tests {
     #[test]
     fn a_moved_origin_shows_axes_and_triad_together() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         assert_eq!(collect_overlay(&state).len(), 12, "both gizmos");
         let labels = overlay_labels(&state, 1.0);
         assert_eq!(labels.len(), 6, "three tips per gizmo, both gizmos");
@@ -111,7 +111,7 @@ mod gizmo_tests {
     #[test]
     fn moved_work_offset_letters_follow_their_axis_tips() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         let lines = collect_overlay(&state);
         let labels = overlay_labels(&state, 1.0);
         for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -137,13 +137,18 @@ mod gizmo_tests {
     #[test]
     fn hidden_work_offset_removes_only_its_gizmo() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 0.0);
-        set_origin(&mut state, "G55", [50.0, 0.0, 0.0], 0.0);
+        // #342: one WCS per setup - two setups, two gizmos.
+        state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        state.drain_actions();
+        set_origin(&mut state, [0.0, 0.0, 0.0], 0.0);
+        state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        state.drain_actions();
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         assert_eq!(collect_overlay(&state).len(), 12);
         State::toggle_visibility(&mut state.hidden_offsets, "G54");
-        assert_eq!(collect_overlay(&state).len(), 12, "G55 and world axes remain");
+        assert_eq!(collect_overlay(&state).len(), 12, "Setup2's WCS and world axes remain");
         assert!(model::find_by_name(&state.world, "G54").is_some());
-        State::toggle_visibility(&mut state.hidden_offsets, "G55");
+        State::toggle_visibility(&mut state.hidden_offsets, "Setup2/WCS");
         assert_eq!(collect_overlay(&state).len(), 6, "only world axes remain");
     }
 
@@ -152,7 +157,7 @@ mod gizmo_tests {
         // Yaw 90 moves the triad axes off X/Y/Z - the coincidence was about
         // lines, not just the origin point.
         let mut state = State::new();
-        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 90.0);
+        set_origin(&mut state, [0.0, 0.0, 0.0], 90.0);
         assert_eq!(collect_overlay(&state).len(), 12, "the triad no longer claims the axes");
     }
 
@@ -162,7 +167,7 @@ mod gizmo_tests {
         state.show_world_axes = false;
         assert!(collect_overlay(&state).is_empty(), "nothing but hidden furniture");
         assert!(overlay_labels(&state, 1.0).is_empty(), "and no labels for it");
-        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         assert_eq!(collect_overlay(&state).len(), 6, "the work offset still shows");
         assert_eq!(overlay_labels(&state, 1.0).len(), 3);
         assert!(
@@ -282,7 +287,6 @@ mod anchor_tests {
         let (_, pos) = anchor_hit(&state, [uv[0] * 800.0, uv[1] * 600.0], 8.0).expect("hit SE");
         assert_eq!(pos, [40.0, -25.0, 20.0]);
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".to_string(),
             pos,
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1609,7 +1613,6 @@ mod height_plane_tests {
         let mut state = state_with("C1", params);
         // G54 at z 3.0: stock top (20) + 5 = 25, G54 - 1 = 2.
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".into(),
             pos: [0.0, 0.0, 3.0],
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1622,7 +1625,7 @@ mod height_plane_tests {
             .collect();
         for want in [
             "C1 · Clearance 25.00 (stock top +5.00)",
-            "C1 · Bottom 2.00 (G54 -1.00)",
+            "C1 · Bottom 2.00 (WCS G54 -1.00)",
             "C1 · Top 10.00",
         ] {
             assert!(texts.iter().any(|t| t == want), "{want} among {texts:?}");
@@ -1630,7 +1633,6 @@ mod height_plane_tests {
         // Slide G54 up: the plane, and the number on it, track the source
         // with no edit to the operation.
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".into(),
             pos: [0.0, 0.0, 6.0],
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1642,7 +1644,7 @@ mod height_plane_tests {
             .map(|(_, _, t)| t)
             .collect();
         assert!(
-            texts.iter().any(|t| t == "C1 · Bottom 5.00 (G54 -1.00)"),
+            texts.iter().any(|t| t == "C1 · Bottom 5.00 (WCS G54 -1.00)"),
             "the chip tracks its source: {texts:?}"
         );
     }

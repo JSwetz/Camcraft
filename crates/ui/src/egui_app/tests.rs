@@ -83,6 +83,7 @@ mod layout;
 mod machines_pane;
 mod unsaved;
 mod first_setup;
+mod one_wcs;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -1625,7 +1626,7 @@ fn anchor_click_queues_setwcs() {
 #[test]
 fn origin_page_shows_the_anchor_grid_and_arms_pick_mode() {
     let mut harness = shell_harness();
-    harness.state_mut().state.ui_target = UiTarget::WcsSlot(0);
+    harness.state_mut().state.ui_target = UiTarget::Wcs;
     harness.run();
     // The draft default highlight is center (anchor_xy 4), so that cell
     // already reads bracketed - imgui's law, pinned here too.
@@ -4635,7 +4636,7 @@ fn close_property_editors_keep_stock_offsets_models_and_tools() {
     let mut harness = shell_harness();
     let targets = [
         UiTarget::Stock,
-        UiTarget::WcsSlot(0),
+        UiTarget::Wcs,
         UiTarget::Model("Block".into()),
         UiTarget::Tool("EM-0600-4FL".into()),
     ];

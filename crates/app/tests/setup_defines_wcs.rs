@@ -43,9 +43,13 @@ fn face(reference: HeightReference) -> OpParams {
     }
 }
 
-/// A 60 x 60 x 20 box with G54 at the origin and G55 / G56 placed off
-/// it, a materialized Setup1 picking `pick`, and one generated face per
-/// entry of `ops` (all measured from the work offset unless `Fixed`).
+/// Where the v51 fixtures' slots sat: G54 at the origin, G55 / G56 off it.
+const SLOTS_AT: [(&str, f64, f64); 3] = [("G54", 0.0, 0.0), ("G55", 10.0, -2.0), ("G56", -5.0, -4.0)];
+
+/// A 60 x 60 x 20 box, a materialized Setup1 labelled `pick` whose one
+/// WCS (#342) sits where that slot sat in [`SLOTS_AT`], and one generated
+/// face per entry of `ops` (all measured from the work offset unless
+/// `Fixed`).
 fn document(pick: Option<usize>, ops: &[(&str, HeightReference)]) -> World {
     let world = new_world();
     let mut h = History::default();
@@ -54,10 +58,9 @@ fn document(pick: Option<usize>, ops: &[(&str, HeightReference)]) -> World {
     let tool = catalog().into_iter().find(|(n, _)| *n == TOOL).map(|(_, t)| t).expect("tool");
     h.execute(&world, AddTool::new(&world, TOOL, tool).expect("add tool"));
     h.execute(&world, CreateSetup::new(&world, None, None).expect("materialize Setup1"));
-    for (slot, x, z) in [("G54", 0.0, 0.0), ("G55", 10.0, -2.0), ("G56", -5.0, -4.0)] {
-        let loc = Location { pos: Point3::new(x, 0.0, z), rot: IDENTITY_Q };
-        h.execute(&world, SetWcsOrigin::new(&world, slot, loc).expect("place"));
-    }
+    let (_, x, z) = SLOTS_AT[pick.unwrap_or(0).min(SLOTS_AT.len() - 1)];
+    let loc = Location { pos: Point3::new(x, 0.0, z), rot: IDENTITY_Q };
+    h.execute(&world, SetWcsOrigin::new(&world, loc).expect("place the WCS"));
     if pick.is_some() {
         h.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", pick).expect("pick"));
     }
@@ -103,13 +106,30 @@ fn name_slots(v: &mut Value, slot: u64) {
     }
 }
 
-/// A v52 save rewritten as the v51 file the old law wrote: version 51,
-/// the setup's pick dropped (`keep_pick` false) and each operation's
-/// work-offset heights naming the slot `slots` gives it.
+/// A current save rewritten as the v51 file the old law wrote: version
+/// 51, the setup's slot list, the one WCS named by its slot and the other
+/// [`SLOTS_AT`] slots placed beside it, the setup's pick dropped
+/// (`keep_pick` false) and each operation's work-offset heights naming
+/// the slot `slots` gives it.
 fn as_v51(text: &str, keep_pick: bool, slots: &[(&str, u64)]) -> String {
     let mut v: Value = serde_json::from_str(text).expect("json");
     v["version"] = json!(51);
     let entities = v["entities"].as_array_mut().expect("entities");
+    let word = entities
+        .iter()
+        .find_map(|e| e["setup"]["work_offset"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| "G54".to_owned());
+    for e in entities.iter_mut() {
+        if e["kind"] == json!("wcs") {
+            e["name"] = json!(word);
+        }
+        if let Some(s) = e.get_mut("setup").and_then(Value::as_object_mut) {
+            s.insert("wcs".into(), json!(["G54", "G55", "G56", "G57", "G58", "G59"]));
+        }
+    }
+    for (slot, x, z) in SLOTS_AT.iter().filter(|(s, _, _)| *s != word) {
+        entities.push(json!({"name": slot, "translation": [x, 0.0, z], "kind": "wcs"}));
+    }
     for e in entities {
         if !keep_pick && let Some(s) = e.get_mut("setup").and_then(Value::as_object_mut) {
             s.remove("work_offset");
@@ -137,7 +157,11 @@ fn a_v51_setup_whose_heights_agreed_takes_their_slot_and_posts_identically() {
     project::open(&w2, &old).expect("an agreeing v51 file opens");
     assert_eq!(setup::work_offset(&w2, "Setup1"), Some(1), "the slot moved onto the setup");
     assert_eq!(post(&w2, "agree-old").expect("posts without regenerating"), expected, "byte-identical post");
-    assert_eq!(saved(&w2, "agree-resave"), now, "and it saves as the v52 document");
+    // #342: the posted slot's entity is the setup's one WCS; the slots
+    // nobody posted were dropped.
+    assert_eq!(setup::wcs_entity_name(&w2, Some("Setup1")), "G55");
+    let resaved = saved(&w2, "agree-resave");
+    assert!(resaved.contains("\"wcs\": \"G55\"") && !resaved.contains("\"name\": \"G56\""), "{resaved}");
 
     // A G54-only setup migrates to the default: nothing written.
     let g54 = document(None, &[("Face1", HeightReference::WorkOffset)]);

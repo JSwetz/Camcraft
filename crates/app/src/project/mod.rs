@@ -1,4 +1,4 @@
-//! Project save/load: `.camproj`, JSON, version 52 (see `PROJECT_VERSION`).
+//! Project save/load: `.camproj`, JSON, version 54 (see `PROJECT_VERSION`).
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -134,3 +134,5 @@ use apply::*;
 mod validate;
 use validate::*;
 mod wcs_migrate;
+// #342: the v53 -> v54 one-WCS-per-setup rung.
+mod wcs_one;

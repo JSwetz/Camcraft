@@ -289,7 +289,7 @@ fn the_alignment_round_trips_and_older_files_load_as_modelled() {
     assert_eq!(setup_align::stored(&w, "Setup1"), None);
     let bad = old.replace("\"version\": 52", &format!("\"version\": {}", project::PROJECT_VERSION)).replace(
         "\"wcs\": [\"G54\"]",
-        "\"wcs\": [\"G54\"], \"part_alignment\": {\"translation\": [0.0, 0.0, 0.0], \"rotation\": [2.0, 0.0, 0.0, 0.0]}",
+        "\"wcs\": \"G54\", \"part_alignment\": {\"translation\": [0.0, 0.0, 0.0], \"rotation\": [2.0, 0.0, 0.0, 0.0]}",
     );
     let err = project::open(&new_world(), &bad).expect_err("a stretched rotation is no rigid transform");
     assert!(err.to_string().contains("rigid"), "{err}");

@@ -1,11 +1,11 @@
-//! #196: a setup picks the work offset (G54..G59) its program runs in.
-//! The pick is an undoable command, saved with the project (old files
-//! read the inferred per-operation law), and posting reads it for every
-//! operation of the setup: the G-word changes and every coordinate moves
-//! by exactly the offset's placement, nothing else. A height measured
-//! from the work offset reads the setup's slot (#329), so it follows the
-//! pick and its undo. Two setups of one program posting one word from
-//! different placements refuse by name.
+//! #196, #342: a setup has one WCS, and the work offset (G54..G59) is
+//! only the word its post writes for it. The label is an undoable
+//! command, saved with the project, and posting reads it for every
+//! operation of the setup: relabelling changes the G-word and nothing
+//! else; placing the WCS moves every coordinate by exactly its
+//! placement. A height measured from the work offset reads the setup's
+//! WCS (#329), so a relabel moves no height. Two setups of one program
+//! posting one word from different placements refuse by name.
 //! Provenance: our own fixtures over RS-274 work-offset semantics.
 //!
 //! Gate map (#196): covers app::posting (wcs_context, verification_report,
@@ -64,9 +64,10 @@ fn generate(world: &World, h: &mut History, name: &str) {
     h.execute(world, GenerateOperation::new(world, name).expect("generate"));
 }
 
-fn place(world: &World, h: &mut History, slot: &str, x: f64, y: f64, z: f64) {
+/// Place the active setup's one WCS.
+fn place(world: &World, h: &mut History, x: f64, y: f64, z: f64) {
     let loc = Location { pos: Point3::new(x, y, z), rot: IDENTITY_Q };
-    h.execute(world, SetWcsOrigin::new(world, slot, loc).expect("place offset"));
+    h.execute(world, SetWcsOrigin::new(world, loc).expect("place the WCS"));
 }
 
 fn pick(world: &World, h: &mut History, setup: &str, slot: Option<usize>) {
@@ -116,18 +117,22 @@ fn shape(nc: &str) -> String {
 }
 
 #[test]
-fn a_picked_offset_posts_its_word_and_moves_coordinates_by_exactly_the_offset() {
+fn a_relabelled_wcs_posts_its_word_and_placing_it_moves_coordinates_by_exactly_the_offset() {
     let (world, mut h) = faced_block();
-    let g54 = post(&world, "g54").expect("the unpicked setup posts at G54");
+    let g54 = post(&world, "g54").expect("the unlabelled setup posts at G54");
     assert!(g54.contains("G54") && !g54.contains("G55"), "{g54}");
 
-    place(&world, &mut h, "G55", 10.0, 20.0, 5.0);
+    // #342: the label is only the word - the same origin, the same numbers.
     pick(&world, &mut h, "Setup1", Some(1));
-    // A milling path is world geometry: the pick moves no input, so the
-    // cached path stays fresh and posts through the new origin.
-    let g55 = post(&world, "g55").expect("the G55 setup posts");
-    assert!(g55.contains("G55") && !g55.contains("G54"), "{g55}");
+    let relabelled = post(&world, "g55-label").expect("the G55 setup posts");
+    assert!(relabelled.contains("G55") && !relabelled.contains("G54"), "{relabelled}");
+    assert_eq!(g54.replace("G54", "G55"), relabelled, "only the word moved");
 
+    // Placing the setup's WCS moves every coordinate by exactly it.
+    place(&world, &mut h, 10.0, 20.0, 5.0);
+    // A milling path is world geometry: the placement moves no input, so
+    // the cached path stays fresh and posts through the new origin.
+    let g55 = post(&world, "g55").expect("the placed G55 setup posts");
     assert_eq!(shape(&g54).replace("G54", "G55"), shape(&g55), "only the word and the numbers move");
     let (a, b) = (axis_words(&g54), axis_words(&g55));
     assert_eq!(a.len(), b.len());
@@ -200,51 +205,46 @@ fn the_pick_round_trips_and_old_files_read_the_inferred_law() {
     assert_eq!(setup::work_offset(&w, "Setup1"), None);
     let bad = old
         .replace("\"version\": 50", &format!("\"version\": {}", project::PROJECT_VERSION))
-        .replace("\"wcs\": [\"G54\", \"G55\"]", "\"wcs\": [\"G54\"], \"work_offset\": \"G60\"");
+        .replace("\"wcs\": [\"G54\", \"G55\"]", "\"wcs\": \"G54\", \"work_offset\": \"G60\"");
     let err = project::open(&new_world(), &bad).expect_err("G60 is no slot");
     assert!(err.to_string().contains("G60"), "{err}");
 }
 
 #[test]
-fn work_offset_heights_follow_the_setups_pick_and_its_undo() {
-    // #329: a height names no slot - it reads the setup's. Picking G56
-    // moves every work-offset height of the setup onto G56's plane, the
-    // op goes stale and posts at G56; undoing the pick moves them back.
+fn a_relabel_moves_no_height_and_undoes_to_the_old_word() {
+    // #342: a height names no slot (#329) and reads the setup's one WCS.
+    // Labelling it G56 changes the word the post writes, never the plane
+    // a height reads: the op stays fresh, and undo restores the word.
     let (world, mut h) = faced_block();
     let mut p = face_params();
     if let OpParams::Face { clearance_z, cut_z, .. } = &mut p {
         *clearance_z = Height::of(HeightReference::WorkOffset, 25.0);
         *cut_z = Height::of(HeightReference::WorkOffset, 19.5);
     }
-    place(&world, &mut h, "G54", 0.0, 0.0, 0.0);
-    place(&world, &mut h, "G56", 0.0, 0.0, -3.0);
+    place(&world, &mut h, 0.0, 0.0, -3.0);
     h.execute(&world, EditOperationParams::new(&world, "Face1", p).expect("edit"));
     generate(&world, &mut h, "Face1");
     let ctx = Some("Setup1");
     let cut = Height::of(HeightReference::WorkOffset, 19.5);
-    assert_eq!(cut.z_for(&world, ctx), Some(19.5), "unpicked: G54's plane");
+    assert_eq!(cut.z_for(&world, ctx), Some(16.5), "the setup's WCS plane");
     let g54 = post(&world, "wo-g54").expect("posts");
     assert!(g54.contains("G54") && !g54.contains("G56"), "{g54}");
 
     pick(&world, &mut h, "Setup1", Some(2));
-    assert_eq!(cut.z_for(&world, ctx), Some(16.5), "picked: G56's plane, every height");
-    let face = camcraft_app::model::find_by_name(&world, "Face1").expect("op");
-    assert_ne!(
-        camcraft_app::operation::status_of(&world, &face),
-        camcraft_app::operation::OpStatus::Ok,
-        "the heights moved, so the cached path is stale"
-    );
+    assert_eq!(cut.z_for(&world, ctx), Some(16.5), "the label moved no height");
+    // The stamp digests the word a work-offset height posts under (kept
+    // from #329 so migrated stamps stay byte-identical): the op asks for
+    // one regenerate, which lands the very same path.
     generate(&world, &mut h, "Face1");
-    let g56 = post(&world, "wo-g56").expect("the op and its setup agree by construction");
-    assert!(g56.contains("G56") && !g56.contains("G54"), "{g56}");
+    let g56 = post(&world, "wo-g56").expect("posts at the new word");
+    assert_eq!(g54.replace("G54", "G56"), g56, "only the word changed");
 
-    // Undo the generate, then the pick: the heights are G54's again.
-    assert!(h.undo(&world));
+    assert!(h.undo(&world)); // the regenerate
     assert!(h.undo(&world));
     assert_eq!(setup::work_offset(&world, "Setup1"), None);
-    assert_eq!(cut.z_for(&world, ctx), Some(19.5), "undo moved every height reference back");
+    assert_eq!(post(&world, "wo-undo").expect("posts"), g54, "undo restores the old word");
     assert!(h.redo(&world));
-    assert_eq!(cut.z_for(&world, ctx), Some(16.5), "and redo moves them again");
+    assert_eq!(setup::work_offset(&world, "Setup1"), Some(2));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn two_setups_on_one_word_from_different_placements_refuse_one_file() {
     h.execute(&world, CreateSetup::new(&world, None, None).expect("Setup2"));
     let stock = SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Default::default());
     h.execute(&world, stock.expect("Setup2 stock"));
-    place(&world, &mut h, "G54", 100.0, 0.0, 0.0); // Setup2/G54, the active setup's
+    place(&world, &mut h, 100.0, 0.0, 0.0); // Setup2/WCS, the active setup's
     let op = CreateOperation::new(&world, "Face2", TOOL, SrcRef::Stock, face_params());
     h.execute(&world, op.expect("create"));
     generate(&world, &mut h, "Face2");
@@ -269,8 +269,7 @@ fn two_setups_on_one_word_from_different_placements_refuse_one_file() {
     let files = posting::post_per_op(&world, &dir, "P").expect("per-op files post");
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(files.len(), 2);
-    // Picking G55 for Setup2 (placed where its G54 was) resolves it.
-    place(&world, &mut h, "G55", 100.0, 0.0, 0.0);
+    // Labelling Setup2's WCS G55 resolves it - its origin stays put.
     pick(&world, &mut h, "Setup2", Some(1));
     let nc = post(&world, "resolved").expect("distinct words post");
     assert!(nc.contains("G54") && nc.contains("G55"), "{nc}");

@@ -747,10 +747,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Post => actions::post_program(state),
         Cmd::Setups => actions::target(state, UiTarget::Setups),
         Cmd::Stock => actions::target(state, UiTarget::Stock),
-        Cmd::Origin => {
-            let slot = state.wcs_ui.slot.min(WCS_SLOTS.len() - 1);
-            actions::target(state, UiTarget::WcsSlot(slot));
-        }
+        Cmd::Origin => actions::target(state, UiTarget::Wcs),
         Cmd::Tools => actions::target(state, UiTarget::Tool(String::new())),
         Cmd::Create(i) => actions::add_operation(state, i),
         Cmd::Undo => actions::undo(state),
@@ -1474,7 +1471,7 @@ pub(crate) enum Leaf {
     /// setups list, like Tool rows - target-only, never arms Del.
     Setups,
     Stock,
-    Wcs(usize),
+    Wcs,
     Model(String),
     Tool(String),
     Op(String),
@@ -1582,24 +1579,25 @@ pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             1,
             Leaf::Stock,
         );
-        for (i, slot) in WCS_SLOTS.iter().enumerate() {
-            let placed =
-                camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
-            let offset_name = camcraft_app::setup::wcs_entity_name(&state.world, active.as_deref(), i)
-                .unwrap_or_else(|| (*slot).to_owned());
-            push_row(
-                &mut rows,
-                &mut leaves,
-                (*slot).to_owned(),
-                if placed { String::new() } else { "not placed".into() },
-                painted::Kind::Wcs,
-                Some(Icon::WorkOffset),
-                matches!(t, UiTarget::WcsSlot(j) if j == i),
-                state.hidden_offsets.contains(&offset_name),
-                1,
-                Leaf::Wcs(i),
-            );
-        }
+        // #342: one WCS per setup, one row - plain "WCS", with the word
+        // its post writes beside it (the label lives on the Setups page).
+        let wcs_name = camcraft_app::setup::wcs_entity_name(&state.world, active.as_deref());
+        let word = WCS_SLOTS
+            .get(camcraft_app::setup::wcs_slot(&state.world, active.as_deref()))
+            .copied()
+            .unwrap_or("G54");
+        push_row(
+            &mut rows,
+            &mut leaves,
+            "WCS".to_owned(),
+            word.to_owned(),
+            painted::Kind::Wcs,
+            Some(Icon::WorkOffset),
+            matches!(t, UiTarget::Wcs),
+            state.hidden_offsets.contains(&wcs_name),
+            1,
+            Leaf::Wcs,
+        );
     }
 
     let models_open = state.browser_expanded[BrowserSection::Models.index()];
@@ -1785,14 +1783,12 @@ pub fn browser(
                 );
                 State::toggle_visibility(&mut state.hidden_stocks, &name);
             }
-            Leaf::Wcs(i) => {
-                if let Some(name) = camcraft_app::setup::wcs_entity_name(
+            Leaf::Wcs => {
+                let name = camcraft_app::setup::wcs_entity_name(
                     &state.world,
                     camcraft_app::setup::active(&state.world).as_deref(),
-                    i,
-                ) {
-                    State::toggle_visibility(&mut state.hidden_offsets, &name);
-                }
+                );
+                State::toggle_visibility(&mut state.hidden_offsets, &name);
             }
             Leaf::Op(n) => State::toggle_visibility(&mut state.hidden_paths, &n),
             _ => {}
@@ -1818,12 +1814,14 @@ pub fn browser(
                     state.pending.push_back(CommandKind::Select(Some(stock_name)));
                 }
             }
-            Leaf::Wcs(i) => {
-                actions::target(state, UiTarget::WcsSlot(i));
-                if let Some(slot) = WCS_SLOTS.get(i)
-                    && model::find_by_name(&state.world, slot).is_some()
-                {
-                    state.pending.push_back(CommandKind::Select(Some((*slot).to_owned())));
+            Leaf::Wcs => {
+                actions::target(state, UiTarget::Wcs);
+                let name = camcraft_app::setup::wcs_entity_name(
+                    &state.world,
+                    camcraft_app::setup::active(&state.world).as_deref(),
+                );
+                if model::find_by_name(&state.world, &name).is_some() {
+                    state.pending.push_back(CommandKind::Select(Some(name)));
                 }
             }
             Leaf::Model(n) => {
