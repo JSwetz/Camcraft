@@ -33,6 +33,7 @@ use crate::machining2d::GenError;
 
 use super::offset;
 use super::profile;
+use super::stock::StockEnv;
 
 /// The profile finish as the kernel reads it: the two heights that
 /// bound the walk along the bar, the rapids plane, the feed in
@@ -151,6 +152,16 @@ pub(crate) fn ride(
 /// The finished ride: one pass of the nose along the profile,
 /// leave-free by construction, within tolerance by the chord law.
 pub fn profile_finish(facets: &[Triangle], p: &ProfileFinishParams) -> Result<Toolpath, GenError> {
+    profile_finish_in(facets, p, None)
+}
+
+/// [`profile_finish`] inside a setup stock (#130): the approach and
+/// retract stand clear of the bar's OD, not only the part's.
+pub fn profile_finish_in(
+    facets: &[Triangle],
+    p: &ProfileFinishParams,
+    stock: Option<StockEnv>,
+) -> Result<Toolpath, GenError> {
     let (f, pts, prof, (s_lo, s_hi)) = setup(
         facets,
         p.clearance_z,
@@ -159,12 +170,12 @@ pub fn profile_finish(facets: &[Triangle], p: &ProfileFinishParams) -> Result<To
         p.nose_radius,
         p.tolerance,
     )?;
-    let _ = &prof;
     let cl = offset::profile_offset(&pts, p.nose_radius, p.tolerance * 0.25, s_lo, s_hi)?;
     // A rapid that clears every CL point of the pass by at least
     // the tolerance - the facing ladder's clearance law, stated at
     // the exact reach of this one's ride.
     let rho_clear = cl.iter().map(|q| q.1).fold(0.0f64, f64::max) + p.tolerance;
+    let rho_clear = StockEnv::rapid_radius(stock, prof.r_max, rho_clear, p.nose_radius);
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
     ride(&mut b, &f, &cl, rho_clear, p.feed, p.plunge_feed);
     b.push(
@@ -179,6 +190,18 @@ pub fn profile_finish(facets: &[Triangle], p: &ProfileFinishParams) -> Result<To
 /// eating a radial shell stepdown wide (2 * nose wide at the most),
 /// down to the leave the finish will take off.
 pub fn profile_rough(facets: &[Triangle], p: &ProfileRoughParams) -> Result<Toolpath, GenError> {
+    profile_rough_in(facets, p, None)
+}
+
+/// [`profile_rough`] inside a setup stock (#130): the ladder starts at
+/// the bar's OD - the outermost rung's nose reaches the bar's skin -
+/// and steps down to the part plus the leave; a rung riding wholly
+/// outside the bar is air and is dropped; every rapid clears the OD.
+pub fn profile_rough_in(
+    facets: &[Triangle],
+    p: &ProfileRoughParams,
+    stock: Option<StockEnv>,
+) -> Result<Toolpath, GenError> {
     let (f, pts, prof, (s_lo, s_hi)) = setup(
         facets,
         p.clearance_z,
@@ -211,7 +234,7 @@ pub fn profile_rough(facets: &[Triangle], p: &ProfileRoughParams) -> Result<Tool
     }
     // The deepest material point of the bar below its tallest
     // skin bounds what any rung must eat.
-    let e_max = prof.r_max - pts.iter().map(|q| q.1).fold(f64::INFINITY, f64::min);
+    let e_max = StockEnv::top(stock, prof.r_max, prof.r_max) - pts.iter().map(|q| q.1).fold(f64::INFINITY, f64::min);
     let reach = 2.0 * p.nose_radius + p.stock_to_leave;
     let rungs = if e_max <= reach {
         0.0
@@ -237,7 +260,22 @@ pub fn profile_rough(facets: &[Triangle], p: &ProfileRoughParams) -> Result<Tool
             s_hi,
         )?);
     }
-    let rho_clear = cl_by_rung[0].iter().map(|q| q.1).fold(0.0f64, f64::max) + p.tolerance;
+    // A rung whose nose never reaches the bar cuts nothing: dropped
+    // (the innermost is the leave line and always rides).
+    if let Some(e) = StockEnv::usable(stock, prof.r_max) {
+        let last = cl_by_rung.len().saturating_sub(1);
+        let mut k = 0usize;
+        cl_by_rung.retain(|cl| {
+            let keep = k == last || cl.iter().map(|q| q.1).fold(f64::INFINITY, f64::min) - p.nose_radius < e.r_out;
+            k += 1;
+            keep
+        });
+    }
+    let Some(outer) = cl_by_rung.first() else {
+        return Err(GenError::Empty("the roughing ladder holds no rung".into()));
+    };
+    let rho_clear = outer.iter().map(|q| q.1).fold(0.0f64, f64::max) + p.tolerance;
+    let rho_clear = StockEnv::rapid_radius(stock, prof.r_max, rho_clear, p.nose_radius);
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
     for cl in &cl_by_rung {
         ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed);

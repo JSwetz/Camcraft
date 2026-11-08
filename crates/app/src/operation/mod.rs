@@ -135,6 +135,7 @@ mod air_law;
 mod turning_credit;
 mod turning_outline;
 mod turning_rapids;
+mod turning_stock;
 pub use air_law::AIR_NOTE;
 pub use generate::*;
 #[cfg(test)]
