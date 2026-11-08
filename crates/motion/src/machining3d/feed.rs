@@ -160,6 +160,8 @@ pub fn optimize_feed(
         cycles: path.cycles.clone(),
         notes: path.notes.clone(),
         comps: path.comps.clone(),
+        threads: path.threads.clone(),
+        probes: path.probes.clone(),
     };
     if !out.all_finite() {
         return Err(GenError::Invalid("feed modulation broke the finite horizon".into()));

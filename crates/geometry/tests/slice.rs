@@ -104,6 +104,23 @@ fn l_prism_footprint_unions_its_slices() {
 }
 
 #[test]
+fn repeated_projection_tracks_changed_placement_and_flat_errors() {
+    let a = cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0));
+    let moved = cube(Point3::new(20.0, 0.0, 0.0), Point3::new(30.0, 10.0, 5.0));
+    let first = slice::project(&a.facets, 16).expect("first footprint");
+    assert_eq!(slice::project(&a.facets, 16).expect("repeat"), first);
+    let second = slice::project(&moved.facets, 16).expect("moved footprint");
+    assert!(!second.contains(Point2::new(5.0, 5.0)));
+    assert!(second.contains(Point2::new(25.0, 5.0)));
+    let flat = [Triangle::new(
+        Point3::new(0.0, 0.0, 2.0),
+        Point3::new(1.0, 0.0, 2.0),
+        Point3::new(0.0, 1.0, 2.0),
+    )];
+    assert_eq!(slice::project(&flat, 16), slice::project(&flat, 16));
+}
+
+#[test]
 fn figure_eight_section_decomposes_into_lobes() {
     // Two lobes touching along a vertical line: a real (non-manifold
     // contact) solid. Slicing must keep both lobes - the even-odd reading

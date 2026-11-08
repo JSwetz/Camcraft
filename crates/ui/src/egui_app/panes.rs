@@ -382,6 +382,8 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
                         "The document's machine is a {} - {fword} operations do not drive it; mount a {mword} or a mill-turn (Setup > Machine)",
                         machine.word()
                     )
+                } else if !has_stock(state) {
+                    NO_STOCK_TIP.into()
                 } else if let Some(reason) = tool_law_note(i, state) {
                     reason
                 } else if i == 0 {
@@ -428,7 +430,10 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
                 .is_none_or(|k| k.admits(machine));
             // The tool law (M10.1 B): darken, never hide - the cell
             // stays to explain itself, the fix is a library click away.
-            kind_admits && !state.tool_names().is_empty() && tool_law_note(i, state).is_none()
+            // #216: every ribbon-made op machines the active setup's stock
+            // (`SrcRef::Stock`) - without one the door refuses, so the
+            // cell darkens and says so instead of failing on the click.
+            kind_admits && !state.tool_names().is_empty() && has_stock(state) && tool_law_note(i, state).is_none()
         }
         // A dropdown button is live whenever it is on the ribbon; the
         // kinds behind it carry their own gates.
@@ -477,10 +482,82 @@ fn gate_note(c: Cmd, state: &State) -> Option<String> {
                 machine.word(),
             ))
         }
+        None if !has_stock(state) => Some(String::from(
+            "cannot add an operation: no stock in the setup - set up stock first (Setup > Stock)",
+        )),
         None => tool_law_note(i, state).map(|r| {
             let label = camcraft_app::operation::KindInfo::ALL.get(i).map_or("", |k| k.label);
             format!("cannot add a {label} operation: {r}")
         }),
+    }
+}
+
+/// Where a refused Create click leads (#191): the place that fixes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GateRoute {
+    /// No tool, or none that fits the kind: the Tool library page.
+    Tools,
+    /// The mounted machine cannot run the kind's family: the machine
+    /// door's workspace list.
+    Machine,
+    /// The active setup has no stock (#216): the Stock page.
+    Stock,
+}
+
+/// The dark Create cell's tip when the setup has no stock (#216).
+const NO_STOCK_TIP: &str = "No stock yet - set up stock first (Setup > Stock)";
+
+/// Does the active setup have stock? Every ribbon-made operation
+/// machines it (`SrcRef::Stock`), so without it `CreateOperation`
+/// refuses - the same resolution the command door makes.
+fn has_stock(state: &State) -> bool {
+    let active = camcraft_app::setup::active(&state.world);
+    let name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
+    model::find_by_name(&state.world, &name).is_some_and(|e| model::is_stock(&state.world, &e))
+}
+
+/// The fix for a dark Create cell, when it has one ([`gate_note`]'s
+/// cases, in its order).
+pub(super) fn gate_route(c: Cmd, state: &State) -> Option<GateRoute> {
+    let Cmd::Create(i) = c else { return None };
+    if enabled(c, state) {
+        return None;
+    }
+    if state.tool_names().is_empty() {
+        return Some(GateRoute::Tools);
+    }
+    let machine = camcraft_app::machine::kind_of(&state.world);
+    if camcraft_app::operation::KindInfo::ALL.get(i).is_some_and(|k| !k.admits(machine)) {
+        return Some(GateRoute::Machine);
+    }
+    if !has_stock(state) {
+        return Some(GateRoute::Stock);
+    }
+    tool_law_note(i, state).map(|_| GateRoute::Tools)
+}
+
+/// A dark Create cell was clicked anyway (#191): say why on the status
+/// line, then take the user to the fix rather than leave them at the
+/// error - the Tool library, or the machine door opened on its list.
+/// View state only; nothing is created or queued.
+pub(super) fn follow_gate(c: Cmd, state: &mut State) {
+    let Some(why) = gate_note(c, state) else { return };
+    match gate_route(c, state) {
+        Some(GateRoute::Tools) => {
+            actions::target(state, UiTarget::Tool(String::new()));
+            state.status = format!("{why} - opened the tool library");
+        }
+        Some(GateRoute::Stock) => {
+            actions::target(state, UiTarget::Stock);
+            state.status = format!("{why} - opened the Stock page");
+        }
+        Some(GateRoute::Machine) => {
+            state.ribbon_more = None;
+            state.ribbon_view_open = false;
+            state.ribbon_mode_open = true;
+            state.status = format!("{why} - pick a workspace");
+        }
+        None => state.status = why,
     }
 }
 
@@ -587,6 +664,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Deburr => Icon::Contour,
         OpType::Circular => Icon::Pocket,
         OpType::Drill => Icon::Drill,
+        OpType::Probe => Icon::Probe,
         OpType::Pocket3D => Icon::Pocket,
         OpType::Finish3D => Icon::Finish3D,
         OpType::Contour5D => Icon::Contour5D,
@@ -971,10 +1049,8 @@ pub fn ribbon(
         if fired {
             run_cmd(c, state);
         }
-        if gated
-            && let Some(why) = gate_note(c, state)
-        {
-            state.status = why;
+        if gated {
+            follow_gate(c, state);
         }
         if let (Cmd::Create(i), true) = (c, pin) {
             toggle_pin(state, i);
@@ -1085,10 +1161,8 @@ pub fn ribbon(
                     // click into silence is what made the folded
                     // ribbon read as dead - this branch is why it
                     // never is.
-                    if let Some(why) = gate_note(c, state) {
-                        state.status = why;
-                    }
                     state.ribbon_more = None;
+                    follow_gate(c, state);
                 } else if state.ribbon_more == before {
                     // Primary press anywhere outside the door and its
                     // rows closes it (egui's popup law, hand-drawn
@@ -1362,6 +1436,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Thread => "threading insert",
         ToolKind::Form => "form gauge",
         ToolKind::Taper => "chamfer mill",
+        ToolKind::Probe => "touch probe",
     }
 }
 

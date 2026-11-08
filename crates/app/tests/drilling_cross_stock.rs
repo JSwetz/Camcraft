@@ -212,12 +212,14 @@ fn a_cross_drill_with_the_stock_equal_to_the_part_drills_the_part_only_chain() {
 }
 
 #[test]
-fn a_station_change_whose_chord_would_clip_the_bar_is_refused_by_name() {
-    // Two mouths on the r10 face off their stations' centre lines: the
-    // kernel's quarter-turn chord law assumes mouths ON the station
-    // axes, so this chord passes 10.757 mm from the spindle - the r2
-    // drill's rim 1.24 mm inside the bar. The rapid proof refuses it
-    // by name rather than post it.
+fn a_station_change_with_mouths_off_their_centre_lines_hops_clear() {
+    // #81: two mouths on the r10 face off their stations' centre lines.
+    // The old quarter-turn chord law assumed mouths ON the station axes,
+    // so this chord passed 10.757 mm from the spindle - the r2 drill's
+    // rim 1.24 mm inside the bar - and #77's rapid proof refused it.
+    // The kernel now measures the chord between the real hop points and
+    // raises the hop until it clears: the pair drills, nothing blocks the
+    // post, and no rapid brings the rim inside the bar.
     let h = |x: f64, y: f64, dir: Point3| CrossHole {
         origin: Point3::new(x, y, 0.0),
         dir,
@@ -226,21 +228,22 @@ fn a_station_change_whose_chord_would_clip_the_bar_is_refused_by_name() {
         floor_d: -3.0,
         through: false,
     };
+    let pair = vec![h(8.0, -6.0, Point3::new(-1.0, 0.0, 0.0)), h(-6.0, 8.0, Point3::new(0.0, -1.0, 0.0))];
     for word in ["lathe", "mill-turn"] {
-        let (world, _h) = world_with(word, None);
+        // The pair modelled in the bar (the #117 part law reads the model).
+        let (world, _h) = world_part(word, None, (0.0, 0.0), |_| {}, bar(PART_R, &pair));
         let mut o = op();
         if let OpParams::Drill { cross, .. } = &mut o.params {
-            *cross = vec![h(8.0, -6.0, Point3::new(-1.0, 0.0, 0.0)), h(-6.0, 8.0, Point3::new(0.0, -1.0, 0.0))];
+            *cross = pair.clone();
         }
-        match operation::generate(&world, &o, "") {
-            Ok((t, _)) => panic!("{word}: a chord through the bar drilled {} moves", t.moves.len()),
-            Err(e) => {
-                let e = e.to_string();
-                for s in ["cross-drill rapid", "through material", "10.757"] {
-                    assert!(e.contains(s), "{word}: the refusal names '{s}': {e}");
-                }
-            }
-        }
+        let (t, w) = operation::generate(&world, &o, "")
+            .unwrap_or_else(|e| panic!("{word}: the off-centre pair must hop clear, not refuse: {e}"));
+        assert!(!w.iter().any(|w| w.blocks_post()), "{word}: the off-centre pair is convicted: {w:?}");
+        let floor = rapid_floor(&t);
+        assert!(
+            floor >= PART_R + 2.0 - 1e-9,
+            "{word}: a rapid reaches r {floor:.3}, the r2 rim inside the r{PART_R} bar"
+        );
     }
 }
 

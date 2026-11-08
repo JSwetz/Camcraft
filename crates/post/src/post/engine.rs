@@ -60,9 +60,20 @@ pub struct PostOutput {
 /// Post a stream text with one script. The machine value is the raw
 /// `.mch` JSON (flattened here); pass `Value::Null` for none.
 pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError> {
+    run_with(cps, mch, stream, &Value::Null)
+}
+
+/// [`run`] with the document's post options (issue #34): a JSON object
+/// the script reads as the global `postOptions` - the user's choices
+/// for this post (e.g. `{"Threading": "G76"}`). `Value::Null` (or any
+/// non-object) leaves the PRELUDE's empty object: every default.
+pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result<PostOutput, PostError> {
     let records = super::normalize_program_order(cnc::parse(stream)?);
     let mut s = Script::load(cps)?;
     s.set_machine(&machine::script_props(mch))?;
+    if options.is_object() {
+        s.set_options(options)?;
+    }
     s.call("onOpen", "")?;
     let head = s.out_len()?;
 
@@ -235,6 +246,66 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                     s.call("onRadiusCompensation", &json!(word).to_string())?;
                 }
             }
+            Record::Touch(t) => {
+                // A probing move (#108): no PRELUDE default - a script
+                // that cannot write a probing block is refused by name,
+                // because the only fallback (a feed) drives the stylus
+                // through the part.
+                if !s.hook_exists("onProbeMove") {
+                    warnings.push(
+                        "probing: this post script does not define onProbeMove - it cannot write a \
+                         probing (skip) move, so the probe operation is refused"
+                            .into(),
+                    );
+                } else {
+                    s.set_properties(&merged(&base, &t.props(), pos))?;
+                    s.call("onProbeMove", "")?;
+                }
+                // The machine stops where the stylus trips: nominally
+                // the expected point the chain continues from.
+                pos = (t.expect[0], t.expect[1], t.expect[2]);
+            }
+            Record::Retreat(r) => {
+                if !s.hook_exists("onProbeRetreat") {
+                    warnings.push(format!(
+                        "probing: {}: this post script does not define onProbeRetreat - it cannot back \
+                         off a probe trip incrementally, so the probe operation is refused",
+                        op_name(&base)
+                    ));
+                } else {
+                    s.set_properties(&merged(&base, &r.props(), pos))?;
+                    s.call("onProbeRetreat", "")?;
+                }
+                pos = (r.expect[0], r.expect[1], r.expect[2]);
+            }
+            Record::Found(f) => {
+                if !s.hook_exists("onProbeResult") {
+                    warnings.push(
+                        "probing: this post script does not define onProbeResult - it cannot set a \
+                         work offset or stop on a probing result, so the probe operation is refused"
+                            .into(),
+                    );
+                } else {
+                    s.set_properties(&merged(&base, &f.props(), pos))?;
+                    s.call("onProbeResult", "")?;
+                }
+            }
+            Record::Thread(t) => {
+                // A threading cycle (issue #34): a lifecycle record like
+                // COMP - no motion, `onCommand` never sees it. A script
+                // without the hooks posts the explicit passes that
+                // follow, exactly as before the record existed.
+                match t {
+                    Some(t) => {
+                        s.set_properties(&merged(&base, &t.props(), pos))?;
+                        s.set_current(pos.0, pos.1, pos.2)?;
+                        s.call("onThreadCycle", "")?;
+                    }
+                    None => {
+                        s.call("onThreadCycleEnd", "")?;
+                    }
+                }
+            }
             Record::Probe { tol_mm } => {
                 // The fourth lifecycle name (M5.3 D): the measurement
                 // ask rides as a property, the same law as its
@@ -305,4 +376,13 @@ fn merged(
         m.insert(k.clone(), v.clone());
     }
     m
+}
+
+/// The operation a record belongs to, by the section's `OperationName`
+/// PARAM - what a probing refusal names (#108).
+fn op_name(base: &BTreeMap<String, Value>) -> String {
+    base.get("OperationName")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| "the probe operation".to_string(), |s| format!("operation {s:?}"))
 }

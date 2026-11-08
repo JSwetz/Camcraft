@@ -101,6 +101,16 @@ pub struct PathDto {
     /// before the option. The same additive law as the notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comps: Vec<CompSpanDto>,
+    /// The threading-cycle records (issue #34): the same additive law.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads: Vec<super::thread_dto::ThreadCycleDto>,
+    /// The probing touches (#108, `crate::cl::ProbeTouch`): absent is
+    /// none - every cutting path. A touch lost on load would post as a
+    /// plain feed through the part, so a touch that does not sit on
+    /// its move is dropped AND the path's probe op re-generates (its
+    /// cache no longer matches: see `to_cache`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<super::touch_dto::ProbeTouchDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -374,6 +384,8 @@ impl PathDto {
             cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
             notes: t.path.notes.clone(),
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
+            threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
+            probes: t.path.probes.iter().map(super::touch_dto::ProbeTouchDto::from_touch).collect(),
         }
     }
 
@@ -395,6 +407,8 @@ impl PathDto {
             .map(CompSpanDto::to_span)
             .filter(|c| c.is_sane(&path.moves))
             .collect();
+        path.probes = super::touch_dto::load(&self.probes, &path.moves);
+        path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
         ToolpathCache::new(path, self.warnings.clone())
     }
 }

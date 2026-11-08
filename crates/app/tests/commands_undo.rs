@@ -787,6 +787,71 @@ fn move_model_rotation_roundtrips_exact_and_the_stamp_follows() {
 }
 
 #[test]
+fn moving_one_part_carries_existing_stock_and_undo_restores_both() {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, ImportModel::from_mesh("part", cube_mesh()));
+    let stock_before = Location {
+        pos: Point3::new(2.0, 0.0, 0.0),
+        ..Location::default()
+    };
+    history.execute(
+        &world,
+        SetStock::new(&world, StockShape::Box { dx: 4.0, dy: 4.0, dz: 2.0 }, stock_before)
+            .expect("stock"),
+    );
+    let part_after = Location {
+        pos: Point3::new(10.0, 0.0, 0.0),
+        rot: quat_from_euler(0.0, 0.0, FRAC_PI_2),
+    };
+    history.execute(&world, MoveModel::new(&world, "part", part_after).expect("move"));
+    let stock = model::find_by_name(&world, STOCK_NAME).expect("stock remains");
+    let moved = model::transform_of(&world, &stock).expect("placement");
+    assert!((moved.pos.x - 10.0).abs() < 1e-12);
+    assert!((moved.pos.y - 2.0).abs() < 1e-12);
+    for (actual, expected) in moved.rot.iter().zip(part_after.rot) {
+        assert!((*actual - expected).abs() < 1e-12);
+    }
+
+    assert!(history.undo(&world));
+    assert_eq!(model::transform_of(&world, &stock), Some(stock_before));
+    assert!(history.redo(&world));
+    assert_eq!(model::transform_of(&world, &stock), Some(moved));
+}
+
+#[test]
+fn moving_one_of_two_parts_only_carries_stock_copied_from_it() {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, ImportModel::from_mesh("part", cube_mesh()));
+    history.execute(&world, ImportModel::from_mesh("other", cube_mesh()));
+    history.execute(
+        &world,
+        SetStock::new(&world, StockShape::Box { dx: 4.0, dy: 4.0, dz: 2.0 }, Location::default())
+            .expect("stock"),
+    );
+    let moved = Location { pos: Point3::new(3.0, 0.0, 0.0), ..Location::default() };
+    history.execute(&world, MoveModel::new(&world, "part", moved).expect("move"));
+    let stock = model::find_by_name(&world, STOCK_NAME).expect("stock");
+    assert_eq!(model::transform_of(&world, &stock), Some(Location::default()));
+
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::FromModel { source: "part".into() },
+            Location::default(),
+        )
+        .expect("stock copied from part"),
+    );
+    history.execute(
+        &world,
+        MoveModel::new(&world, "part", Location::default()).expect("move back"),
+    );
+    assert_eq!(model::transform_of(&world, &stock), Some(Location::default()));
+}
+
+#[test]
 fn a_moved_part_marks_generated_ops_stale_and_undo_clears_it() {
     let (world, mut history, _top) = selection_fixture();
     history.execute(

@@ -40,7 +40,7 @@ pub(crate) const ARC_TOL_UNITS: f64 = 5e3;
 /// running a spike out to infinity.
 pub(crate) const MITER_LIMIT: f64 = 2.0;
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Clone, Error, Debug, PartialEq)]
 pub enum GeoError {
     #[error("invalid geometry: {0}")]
     Invalid(String),

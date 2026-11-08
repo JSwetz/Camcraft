@@ -33,6 +33,39 @@ impl OpParams {
         tilt_ok
             && links_ok
             && match self {
+            // The probe's door (#108): every distance and feed a real
+            // number, the measure no faster than the seek, the back-off
+            // inside the approach, a slot G54..G59 when one is named.
+            OpParams::Probe {
+                clearance_z,
+                target,
+                radius,
+                approach,
+                overtravel,
+                backoff,
+                fast_feed,
+                slow_feed,
+                depth,
+                inset,
+                set_wcs,
+                tolerance,
+                ..
+            } => {
+                clearance_z.is_sane()
+                    && target.iter().all(|v| v.is_finite())
+                    && nneg(*radius)
+                    && pos(*approach)
+                    && pos(*overtravel)
+                    && pos(*backoff)
+                    && *backoff <= *approach
+                    && pos(*fast_feed)
+                    && pos(*slow_feed)
+                    && *slow_feed <= *fast_feed
+                    && nneg(*depth)
+                    && nneg(*inset)
+                    && pos(*tolerance)
+                    && set_wcs.is_none_or(|s| s <= 5)
+            }
             OpParams::Face {
                 stepover,
                 clearance_z,

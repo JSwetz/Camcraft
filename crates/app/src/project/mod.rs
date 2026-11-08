@@ -112,7 +112,14 @@ pub use file::*;
 mod params;
 pub use params::*;
 mod entity;
+mod thread_dto;
+pub use thread_dto::ThreadCycleDto;
+mod touch_dto;
+pub use touch_dto::ProbeTouchDto;
 mod params_impl;
+// #108: the Probe operation's file mirror.
+mod probe_dto;
+pub use probe_dto::*;
 mod approach;
 pub use approach::*;
 mod links;

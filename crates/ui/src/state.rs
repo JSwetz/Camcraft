@@ -19,7 +19,7 @@ use camcraft_app::commands::{
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
-    SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
+    SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetToolNumber, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
 };
@@ -118,6 +118,9 @@ pub enum CommandKind {
     /// is the name, so a registry re-growth never re-points a saved
     /// file's post.
     SelectPostNamed(String),
+    /// The post's user options (issue #34): the undoable
+    /// `SetPostOptions` with the picked value.
+    SetPostOptions(camcraft_app::schema::PostOptions),
     /// The document's theme (M6.1 C), `SelectPost`'s twin: the two
     /// built-ins and a discovered file arrive as a reference (what the
     /// headless tests queue too), and the dialog arm opens the picker.
@@ -151,6 +154,11 @@ pub enum CommandKind {
     ChangeTool {
         name: String,
         tool: Tool,
+    },
+    /// #221: set (`Some`) or clear (`None`) a tool's controller number.
+    SetToolNumber {
+        name: String,
+        number: Option<u32>,
     },
     DeleteTool(String),
     /// The document's workpiece material (M13.2); `None` states none.
@@ -641,6 +649,9 @@ fn fit_circle(pts: &[[f64; 3]]) -> Option<([f64; 2], f64)> {
 pub struct ToolUi {
     pub name: String,
     pub exists: bool,
+    /// The tool's controller number (#221) as the editor shows it: 0 = not
+    /// set, and the tool posts as its position in the tool list.
+    pub number: u32,
     /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore,
     /// 6 turning insert, 7 grooving blade, 8 threading insert,
     /// 9 form gauge, 10 chamfer mill.
@@ -690,6 +701,7 @@ impl ToolUi {
         ToolUi {
             name: name.to_string(),
             exists,
+            number: 0,
             kind: match t.kind {
                 ToolKind::EndMill => 0,
                 ToolKind::BallNose => 1,
@@ -702,6 +714,7 @@ impl ToolUi {
                 ToolKind::Thread => 8,
                 ToolKind::Form => 9,
                 ToolKind::Taper => 10,
+                ToolKind::Probe => 11,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -737,6 +750,7 @@ impl ToolUi {
                 8 => ToolKind::Thread,
                 9 => ToolKind::Form,
                 10 => ToolKind::Taper,
+                11 => ToolKind::Probe,
                 _ => ToolKind::EndMill,
             },
             diameter: self.diameter,
@@ -2010,7 +2024,13 @@ impl State {
         }
         match model::find_by_name(&self.world, &ident).and_then(|e| model::tool_of(&self.world, &e))
         {
-            Some(tool) => self.tool_ui = ToolUi::from_tool(&ident, &tool, true),
+            Some(tool) => {
+                self.tool_ui = ToolUi::from_tool(&ident, &tool, true);
+                // #221: the number lives beside the geometry, on ToolDef.
+                self.tool_ui.number = model::find_by_name(&self.world, &ident)
+                    .and_then(|e| model::tool_number_of(&self.world, &e))
+                    .unwrap_or(0);
+            }
             None => self.tool_ui.exists = false,
         }
     }
@@ -2405,6 +2425,14 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
+            CommandKind::SetPostOptions(next) => match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = "post options set".into();
+                }
+                Err(err) => self.refuse(ErrorScope::Setup, format!("post options not set: {err}")),
+            },
             CommandKind::SelectTheme(next) => self.select_theme(next),
             CommandKind::SelectColorVision(next) => self.select_color_vision(next),
             CommandKind::SelectThemeDialog => {
@@ -2500,6 +2528,19 @@ impl State {
                 }
                 Err(err) => self.refuse(ErrorScope::Tool, format!("tool not added: {err}")),
             },
+            CommandKind::SetToolNumber { name, number } => {
+                match SetToolNumber::new(&self.world, &name, number) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = match number {
+                            Some(n) => format!("tool {name} is now T{n}"),
+                            None => format!("tool {name} posts as its list position"),
+                        };
+                    }
+                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool number not set: {err}")),
+                }
+            }
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {
@@ -3171,6 +3212,11 @@ impl State {
         {
             self.begin_import(next);
         }
+    }
+
+    /// The shell polls a running import on a timer while otherwise idle.
+    pub(crate) fn import_in_progress(&self) -> bool {
+        self.import_rx.is_some() || !self.import_queue.is_empty()
     }
 
     /// Drop any live/queued imports because the document is being replaced.

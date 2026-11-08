@@ -86,3 +86,7 @@ impl KindInfo {
         self.tool_kinds.contains(&kind)
     }
 }
+
+/// The touch probe (#108): the Probe operation mounts nothing else, and
+/// no cutting kind mounts a probe.
+pub const PROBE: &[ToolKind] = &[ToolKind::Probe];

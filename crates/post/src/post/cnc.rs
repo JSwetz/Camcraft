@@ -75,6 +75,22 @@ pub enum Record {
     /// `wear` (#38): the records between are the cutter-CENTRE path at
     /// `radius_mm`, and the register holds only the wear delta.
     Comp { side: Option<CompSide>, radius_mm: f64, wear: bool },
+    /// A threading cycle (issue #34): `Some` opens the span of explicit
+    /// passes the cycle stands for, `None` (`THREAD END`) closes it.
+    /// The passes between are ordinary motion records - a script with
+    /// a threading cycle writes the record and skips them, any other
+    /// posts them as they are.
+    Thread(Option<super::cnc_thread::ThreadRec>),
+    /// A probing move (#108): probe toward the target, stop on contact,
+    /// a skip move (G31) on a Fanuc-style control. A script that
+    /// cannot voice it is refused by name: a touch posted as a feed
+    /// drives the stylus through the part.
+    Touch(super::probe_rec::TouchRec),
+    /// The probing result (#108): set a work offset from the measured
+    /// trips or stop for the operator, and stop when out of tolerance.
+    Found(super::probe_rec::FoundRec),
+    /// The incremental back-off after a trip (#108).
+    Retreat(super::probe_rec::RetreatRec),
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -264,6 +280,18 @@ impl Record {
                 if *wear { " · wear" } else { "" }
             ),
             Record::Comp { side: None, .. } => "comp off".into(),
+            Record::Thread(Some(t)) => t.label(),
+            Record::Thread(None) => "thread cycle end".into(),
+            Record::Touch(t) => format!(
+                "probe → {}{}",
+                pos(t.target[0], t.target[1], t.target[2]),
+                t.measure.map_or_else(String::new, |k| format!(" · measure {k}"))
+            ),
+            Record::Retreat(r) => format!("probe retreat Δ {}", pos(r.delta[0], r.delta[1], r.delta[2])),
+            Record::Found(f) => match f.set_wcs {
+                Some(w) => format!("probe result · set G{} · tol {:.3} mm", 54 + u32::from(w), f.tol_mm),
+                None => format!("probe result · confirm · tol {:.3} mm", f.tol_mm),
+            },
         }
     }
 
@@ -403,6 +431,11 @@ pub fn serialize(records: &[Record]) -> String {
                     None => "COMP OFF\n".to_string(),
                 });
             }
+            Record::Thread(Some(t)) => s.push_str(&t.line()),
+            Record::Thread(None) => s.push_str("THREAD END\n"),
+            Record::Touch(t) => s.push_str(&super::probe_rec::write_touch(t)),
+            Record::Found(f) => s.push_str(&super::probe_rec::write_found(f)),
+            Record::Retreat(r) => s.push_str(&super::probe_rec::write_retreat(r)),
         }
     }
     s
@@ -885,6 +918,11 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                 out.push(Record::Comp { side, radius_mm, wear });
                 in_section = true;
             }
+            "THREAD" => {
+                let t = super::cnc_thread::parse(it).map_err(fail)?;
+                out.push(Record::Thread(t));
+                in_section = true;
+            }
             "PROBE" => {
                 // The measurement ask (M5.3 D): one micron integer,
                 // the lattice law like ADVANCE. A missing or
@@ -900,6 +938,22 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     return Err(fail(format!("PROBE tolerance {w:?} is negative")));
                 }
                 out.push(Record::Probe { tol_mm: v / 1000.0 });
+            }
+            "TOUCH" => {
+                let t = super::probe_rec::parse_touch(&mut it).map_err(fail)?;
+                out.push(Record::Touch(t));
+                move_idx += 1;
+                in_section = true;
+            }
+            "RETREAT" => {
+                let r = super::probe_rec::parse_retreat(&mut it).map_err(fail)?;
+                out.push(Record::Retreat(r));
+                move_idx += 1;
+                in_section = true;
+            }
+            "FOUND" => {
+                let f = super::probe_rec::parse_found(&mut it).map_err(fail)?;
+                out.push(Record::Found(f));
             }
             other => {
                 return Err(fail(format!("unknown record {other:?}")));

@@ -137,6 +137,13 @@ pub struct Machine {
     /// claims no inventory of steel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spindles: Option<usize>,
+    /// The length unit the file states (#131): `Some("inch")` when its
+    /// kinematics are in inches, `None` for mm (the default). Every
+    /// number above is mm whatever this says - the parser scales on the
+    /// way in - so this only tells a post which unit the machine is
+    /// programmed in (`machine.units`, G20 vs G21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<String>,
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -

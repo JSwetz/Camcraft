@@ -117,7 +117,7 @@ fn fanuc_refuses_a_comp_word_that_would_land_on_an_arc_a_rapid_or_the_section_en
 
 #[test]
 fn every_other_shipped_post_refuses_control_compensation_by_name() {
-    for stem in ["haas", "mazak", "sinumerik", "heidenhain", "fanuc-lathe"] {
+    for stem in ["haas", "mazak", "sinumerik", "heidenhain", "fanuc-lathe", "tormach"] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../assets/posts/{stem}.cps"));
         let cps = std::fs::read_to_string(path).expect("post");
         let out = engine::run(&cps, &Value::Null, STREAM).unwrap_or_else(|e| panic!("{stem}: {e}"));

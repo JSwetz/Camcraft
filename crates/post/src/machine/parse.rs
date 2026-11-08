@@ -160,6 +160,11 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
 
     let kine = v.pointer("/kinematics/default/parts");
     let f = mm_factor(v.pointer("/kinematics/default/units")).unwrap_or(1.0);
+    // #131: keep the stated unit for the posts (the numbers stay mm).
+    let length = v.pointer("/kinematics/default/units/length").and_then(|u| u.as_str());
+    if matches!(length, Some("inch" | "inches")) {
+        m.units = Some("inch".to_owned());
+    }
 
     if let Some(parts) = kine {
         if let Some(head) = find_type(parts, "head") {

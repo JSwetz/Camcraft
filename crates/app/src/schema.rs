@@ -104,6 +104,12 @@ pub struct Wcs;
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct ToolDef {
     pub tool: Tool,
+    /// The controller's number for this tool (#221): what the post writes
+    /// as `T..` / `H..`, matching the machine's tool table. `None` = not
+    /// stated, and the tool posts as its 1-based position in the document's
+    /// tool list (the numbering every earlier document had). Changed only
+    /// through `SetToolNumber`; `ChangeTool` leaves it as it is.
+    pub number: Option<u32>,
 }
 
 /// One machine setup (M3.2 stage A): the named context that says WHICH
@@ -256,6 +262,29 @@ pub enum PostRef {
     File(String),
 }
 
+/// The user's choices for the document's post (issue #34), a flecs
+/// singleton beside `PostRef`: setup furniture, moved only by
+/// `SetPostOptions` (undoable) or a document load. A script reads the
+/// ones it knows from its `postOptions` global and ignores the rest;
+/// the default is every post's own default, so a document that never
+/// chose writes no key.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PostOptions {
+    /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
+    /// default, or the two-block G76 cycle from the thread record).
+    pub threading: ThreadingOutput,
+}
+
+/// The thread-output choice of [`PostOptions`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThreadingOutput {
+    /// Every pass as synchronized G32 moves - the stream's own passes.
+    #[default]
+    G32Passes,
+    /// One G76 multi-pass threading cycle per thread record.
+    G76Cycle,
+}
+
 /// Which theme the document wears (M6.1 C), a flecs singleton like
 /// `PostRef`: setup furniture, never a browser row. `Dark` is the
 /// shipped default - the meaning of a file with no theme key at all;
@@ -355,6 +384,7 @@ pub fn register_schema(world: &World) {
     world.component::<Units>();
     world.component::<MachineDef>();
     world.component::<PostRef>();
+    world.component::<PostOptions>();
     world.component::<ThemeRef>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();

@@ -422,6 +422,7 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+    super::post_options::threading_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not
@@ -1477,6 +1478,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     // centre-cutting tool; otherwise it helixes, ramps,
                     // or the operation is refused by name.
                     ui.checkbox(&mut state.tool_ui.center_cutting, "Centre cutting (may plunge into solid)");
+                    // #221: the machine's tool-table number - the post's
+                    // T and H words. 0 leaves it to the list position.
+                    field(ui, "Tool number (0 = list position)");
+                    ui.add(egui::DragValue::new(&mut state.tool_ui.number).range(0..=camcraft_app::tool_numbers::MAX));
                 });
                 ui.vertical(|ui| {
                     draw_tool_preview(ui, &preview_tool, u);
@@ -1497,6 +1502,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         name: name_now.clone(),
                         tool: state.tool_ui.to_tool(),
                     });
+                    push_number_if_changed(state, &name_now);
                 }
             } else {
                 let add = ui.add_enabled(block.is_empty(), egui::Button::new("Add tool"));
@@ -1505,6 +1511,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         name: name_now.trim().to_owned(),
                         tool: state.tool_ui.to_tool(),
                     });
+                    push_number_if_changed(state, name_now.trim());
                 }
                 if !block.is_empty() {
                     ui.label(block);
@@ -1517,6 +1524,17 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
         });
     if !open || close_clicked {
         state.close_tool_editor_window();
+    }
+}
+
+/// #221: queue a `SetToolNumber` when the editor's number differs from the
+/// tool's own (a new tool has none). Rides the same Apply / Add click as
+/// the geometry, but as its own undoable command.
+fn push_number_if_changed(state: &mut State, name: &str) {
+    let want = (state.tool_ui.number > 0).then_some(state.tool_ui.number);
+    let have = model::find_by_name(&state.world, name).and_then(|e| model::tool_number_of(&state.world, &e));
+    if want != have {
+        state.pending.push_back(CommandKind::SetToolNumber { name: name.to_owned(), number: want });
     }
 }
 

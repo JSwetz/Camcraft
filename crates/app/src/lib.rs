@@ -27,6 +27,7 @@ pub mod pick;
 pub use camcraft_post::post;
 pub mod path_sig;
 pub mod posting;
+pub use camcraft_motion::probing;
 pub mod project;
 pub mod rest;
 pub mod ribbon;
@@ -43,6 +44,8 @@ pub mod stock_play;
 pub mod stock_play_worker;
 pub mod stock_view;
 pub mod tool_list;
+// #221: the number a tool posts as, and the clash law.
+pub mod tool_numbers;
 pub use camcraft_tools::tools;
 pub mod units;
 pub use camcraft_sim::verify;

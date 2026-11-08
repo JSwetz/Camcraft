@@ -80,6 +80,30 @@ takes the next. Never launch two `PR-reviewer` agents at once.
    the agent failed to) and that `../cc-pr<N>-review` is removed. Do not poll
    while it runs.
 
+## 2b. Labels - one colour per state
+
+Every reviewed PR carries exactly the labels its state calls for (user,
+2026-11-08: "a merge conflict should prob get orange flagged 'conflicts' so
+we can find em"):
+
+| Label | Colour | Means |
+|---|---|---|
+| `merge-ready` | green | review clean AND merges cleanly with main - the owner can merge now |
+| `needs-rework` | red | the review found blocking items |
+| `conflicts` | orange | conflicts with main - needs a branch refresh (`git merge origin/main`) |
+
+After posting the review, read `gh pr view <N> --json mergeable`
+(re-read once if it says `UNKNOWN`):
+- clean review + `MERGEABLE` -> add `merge-ready`, remove `needs-rework` and `conflicts`;
+- clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` (never green while it conflicts);
+- blocking review -> add `needs-rework`, remove `merge-ready`; also add `conflicts` if it conflicts.
+
+Whoever refreshes a branch re-reads `mergeable` after the push: once it is
+`MERGEABLE`, drop `conflicts` and restore `merge-ready` if the last review
+was clean. Merging a PR can turn others `CONFLICTING`, so each run also
+re-checks every open PR labelled `merge-ready` and swaps any that now
+conflict to `conflicts`.
+
 ## 3. Report
 
 One short line per PR: number, author, verdict, link to the posted review.
