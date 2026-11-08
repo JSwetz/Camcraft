@@ -116,6 +116,7 @@ impl CreateOperation {
                 stamp: None,
                 setup,
                 area: Default::default(),
+                coolant: Default::default(),
             },
         })
     }

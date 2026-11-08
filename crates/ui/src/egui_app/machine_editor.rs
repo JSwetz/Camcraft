@@ -217,7 +217,7 @@ fn draw_coolants(ui: &mut Ui, m: &mut Machine) {
     let mut remove: Option<usize> = None;
     for (i, c) in m.coolants.iter_mut().enumerate() {
         ui.horizontal(|ui| {
-            ui.add(TextEdit::singleline(&mut c.name).desired_width(90.0));
+            coolant_name(ui, i, &mut c.name);
             ui.label("M-code");
             ui.add(TextEdit::singleline(&mut c.m_code).desired_width(50.0));
             if c.m_code.is_empty() {
@@ -239,6 +239,30 @@ fn draw_coolants(ui: &mut Ui, m: &mut Machine) {
             name: "Flood".to_owned(),
             m_code: String::new(),
         });
+    }
+}
+
+/// The coolant name (#150): a pick of the kinds the posts read, so a
+/// typed "Through spindle" can't miss the post's lookup; "custom" keeps
+/// a shop's own name (its first coded entry serves Flood ops) as text.
+fn coolant_name(ui: &mut Ui, i: usize, name: &mut String) {
+    let known = machine::COOLANT_KINDS.iter().any(|k| k.eq_ignore_ascii_case(name));
+    let shown = if known { name.clone() } else { "custom".to_owned() };
+    ComboBox::from_id_salt(("coolant-kind", i))
+        .selected_text(shown)
+        .width(110.0)
+        .show_ui(ui, |ui| {
+            for k in machine::COOLANT_KINDS {
+                if ui.selectable_label(name.eq_ignore_ascii_case(k), k).clicked() {
+                    *name = k.to_owned();
+                }
+            }
+            if ui.selectable_label(!known, "custom").clicked() && known {
+                name.clear();
+            }
+        });
+    if !known {
+        ui.add(TextEdit::singleline(name).desired_width(90.0).hint_text("name"));
     }
 }
 

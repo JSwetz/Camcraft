@@ -35,9 +35,18 @@ if [ -f "$lock" ]; then cat "$lock"; find "$lock" -mmin +90; fi
 
 ## 1. Find PRs that need a review
 
-If the user named a PR (`/review-prs 58`), take just that one and go to step 2.
+**Only PRs marked ready for review are reviewed - never a draft** (user,
+2026-11-08: "Update the review-prs skill to only review PRs that is ready
+to review"; AGENTS.md "Every PR opens as a draft"). A draft is still being
+worked on and may take more pushes; reviewing it wastes a full build.
 
-Otherwise list open, non-draft PRs with their head SHA and reviews:
+If the user named a PR (`/review-prs 58`), check it first:
+`gh pr view <N> --json isDraft,state --jq '.isDraft, .state'`. If it is a
+draft (or not open), say "PR #N is a draft - not reviewed until it is marked
+ready (`gh pr ready N`)" in one line and stop. Otherwise take just that one
+and go to step 2.
+
+Otherwise list open PRs that are ready for review (non-draft) with their head SHA and reviews:
 
 ```bash
 gh pr list --repo NeoTech/Camcraft --state open --limit 100 \
