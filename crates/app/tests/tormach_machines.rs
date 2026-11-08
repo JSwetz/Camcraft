@@ -266,3 +266,109 @@ fn a_rigid_tap_is_refused_on_a_machine_that_cannot_rigid_tap() {
         );
     }
 }
+
+/// A Ø40 x 10 mm puck with a blind Ø6.2 hole 8 mm deep on its axis (a
+/// 16-gon revolve, closed and outward-facing): room for a Ø6 tap without
+/// the material sim calling the sweep a gouge.
+fn tapped_puck() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Mesh, Point3, Triangle};
+    let meridian = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (3.1, 10.0), (3.1, 2.0), (0.0, 2.0)];
+    let v = |j: usize, r: f64, z: f64| {
+        let th = std::f64::consts::TAU * j as f64 / 16.0;
+        Point3::new(r * th.cos(), r * th.sin(), z)
+    };
+    let mut facets = Vec::new();
+    for seg in meridian.windows(2) {
+        let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
+        for j in 0..16 {
+            let (a1, a2, b1, b2) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
+            if ra <= 1e-12 {
+                facets.push(Triangle::new(a1, b2, b1));
+            } else if rb <= 1e-12 {
+                facets.push(Triangle::new(a1, a2, b2));
+            } else {
+                facets.push(Triangle::new(a1, a2, b2));
+                facets.push(Triangle::new(a1, b2, b1));
+            }
+        }
+    }
+    Mesh::from_facets(facets)
+}
+
+/// The GUI's own path (`posting::post_setup`, what the Post button runs):
+/// a tap job on the built-in 770M is refused with the rigid-tapping
+/// reason and writes no file; the same job on the 1100MX posts its G84.
+#[test]
+fn a_tap_job_posts_on_the_1100mx_and_is_refused_on_the_770m() {
+    use camcraft_app::commands::{
+        AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SelectPost,
+        SetStock,
+    };
+    use camcraft_app::drilling::{CycleChoice, Hole};
+    use camcraft_app::geo2d::Point2;
+    use camcraft_app::operation::{Height, OpParams, SrcRef};
+    use camcraft_app::schema::{Location, PostRef};
+    use camcraft_app::stock::StockShape;
+    use camcraft_app::tools::catalog;
+
+    let job = |machine: &str| {
+        let world = camcraft_app::world::new_world();
+        let mut h = History::default();
+        h.execute(&world, LoadMachine::builtin(&world, machine).expect("built-in machine"));
+        h.execute(
+            &world,
+            SelectPost::new(&world, PostRef::Named("Tormach PathPilot".into())).expect("post"),
+        );
+        let stock = StockShape::Cylinder { diameter: 40.0, height: 10.0 };
+        h.execute(&world, SetStock::new(&world, stock, Location::default()).expect("stock"));
+        h.execute(&world, ImportModel::from_mesh("puck", tapped_puck()));
+        let tap = catalog().into_iter().find(|(n, _)| *n == "TAP-M6").map(|(_, t)| t).expect("tap");
+        h.execute(&world, AddTool::new(&world, "TAP-M6", tap).expect("add tap"));
+        let drill = OpParams::Drill {
+            clearance_z: Height::fixed(25.0),
+            retract_z: None,
+            top_z: Height::fixed(12.0),
+            bottom_z: None,
+            cycle: CycleChoice::Auto,
+            peck: 0.0,
+            dwell: 0.0,
+            feed: 100.0,
+            plunge_feed: 100.0,
+            holes: vec![Hole {
+                xy: Point2::new(0.0, 0.0),
+                radius: 3.05,
+                entry_z: 10.0,
+                floor_z: 2.0,
+                through: false,
+                stepped: false,
+            }],
+            cross: Vec::new(),
+        };
+        let src = SrcRef::Entity("puck".into());
+        h.execute(&world, CreateOperation::new(&world, "Tap1", "TAP-M6", src, drill).expect("tap op"));
+        h.execute(&world, GenerateOperation::new(&world, "Tap1").expect("generate"));
+        let path = std::env::temp_dir().join(format!(
+            "camcraft_tormach_tap_{}_{}.nc",
+            machine.replace(' ', "_"),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let posted = camcraft_app::posting::post_setup(&world, &path);
+        let written = path.exists();
+        let _ = std::fs::remove_file(&path);
+        (posted, written)
+    };
+
+    let (posted, written) = job("Tormach 1100MX");
+    let posted = posted.unwrap_or_else(|e| panic!("the 1100MX rigid-taps: {e}"));
+    assert!(written, "the program is on disk");
+    assert!(posted.program.lines().any(|l| l.starts_with("G84 ")), "{}", posted.program);
+
+    let (refused, written) = job("Tormach 770M");
+    let err = match refused {
+        Ok(p) => panic!("the 770M must refuse a rigid tap:\n{}", p.program),
+        Err(e) => e,
+    };
+    assert!(err.contains("rigid tapping") && err.contains("Tormach 770M"), "{err}");
+    assert!(!written, "a refused post writes nothing");
+}
