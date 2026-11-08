@@ -11,6 +11,12 @@
 ;   ISCC.exe /DAppVersion=0.8.0 /DStageDir=dist\camcraft-0.8.0-win-x64 ^
 ;            /DOutDir=dist scripts\installer\camcraft.iss
 ; Every /D below has a default so the script also compiles from the IDE.
+;
+; Signing: when a certificate is configured (CAMCRAFT_SIGN_*, see
+; scripts/sign.ps1) installer.ps1 adds /DSignToolName=camcraft and defines
+; that sign tool with /Scamcraft=<sign.ps1 call>. ISCC then signs both the
+; setup exe and the uninstaller it embeds. Without it nothing is signed and
+; the script compiles exactly as an unsigned build always has.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -51,6 +57,11 @@ WizardStyle=modern
 UninstallDisplayName={#AppName} {#AppVersion}
 UninstallDisplayIcon={app}\{#AppExe}
 ShowLanguageDialog=no
+#ifdef SignToolName
+; Named sign tool, defined on the ISCC command line by installer.ps1.
+SignTool={#SignToolName}
+SignedUninstaller=yes
+#endif
 ; The uninstaller removes what the installer wrote; user data in the install
 ; dir (projects, exported NC) is left alone - it is listed, never deleted.
 
