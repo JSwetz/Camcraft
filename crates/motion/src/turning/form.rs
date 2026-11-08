@@ -39,6 +39,7 @@ use crate::verify::Warning;
 use super::blade;
 use super::profile;
 use super::revolve;
+use super::stock::StockEnv;
 
 /// Form turning on a crown gauge: the window the formed surfaces
 /// stand in, the feeds, and the gauge's ground profile - its crown
@@ -69,6 +70,12 @@ fn sag(r: f64, d: f64) -> f64 {
 /// sunk to the deepest position whose floor stands at or above
 /// every chord the band passes over.
 pub fn form(facets: &[Triangle], p: &FormParams) -> Result<Toolpath, GenError> {
+    form_in(facets, p, None)
+}
+
+/// [`form`] inside a setup stock (#130): every rapid clears the
+/// bar's OD, not only the part's.
+pub fn form_in(facets: &[Triangle], p: &FormParams, stock: Option<StockEnv>) -> Result<Toolpath, GenError> {
     if !p.crown_radius.is_finite() || p.crown_radius <= 0.0 {
         return Err(GenError::Invalid(format!(
             "a crown of radius {:.3} is no arc at all - a flat floor is a wide blade, \
@@ -86,6 +93,7 @@ pub fn form(facets: &[Triangle], p: &FormParams) -> Result<Toolpath, GenError> {
         p.tolerance,
         "form",
         "form gauge",
+        stock,
     )?;
     let half = p.band_width * 0.5;
     if half > p.crown_radius {

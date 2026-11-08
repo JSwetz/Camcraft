@@ -65,6 +65,8 @@ mod params_page;
 mod rotary_page;
 mod turning_more_page;
 mod turning_page;
+// #107: Save / Don't Save / Cancel over unsaved changes.
+mod unsaved_prompt;
 mod panes;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam

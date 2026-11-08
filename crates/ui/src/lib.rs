@@ -18,6 +18,7 @@ pub mod operations;
 pub mod state;
 pub mod theme_dir;
 pub mod trace;
+pub mod unsaved;
 pub mod vertex_pick;
 pub mod viewport;
 
