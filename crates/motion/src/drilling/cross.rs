@@ -81,6 +81,16 @@ fn along(h: &CrossHole, d: f64) -> Point3 {
     )
 }
 
+/// Reuse the cursor for roundoff-only travel, but still let the builder
+/// record a changed station pose. Exact float equality otherwise leaves
+/// an extra rapid when a measured bar radius differs by a few ULPs (#151).
+/// This is local to radial rapids, not a change to the CL builder's law.
+fn rapid(b: &mut PathBuilder, to: Point3) {
+    let delta = to - b.at();
+    let to = if delta.dot(delta) <= 1e-18 { b.at() } else { to };
+    b.push(MoveKind::Rapid, to, None);
+}
+
 /// The dominant axis of an axis-aligned unit plunge direction.
 fn plunge_axis(dir: Point3) -> Option<usize> {
     let mut hit = None;
@@ -183,7 +193,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
             // except on the detour, where the index happens above
             // the bar's end face (stage G).
             match traverse_s(hs[i - 1].dir, h.dir, hop_s) {
-                Some(s) => b.push(MoveKind::Rapid, along(h, start_d(h, s)), None),
+                Some(s) => rapid(&mut b, along(h, start_d(h, s))),
                 None => {
                     let z_top = p.stock_z_max.map(|z| z + p.clearance_d.max(margin));
                     let Some(z_top) = z_top else {
@@ -204,7 +214,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
         // previous hole's pose, so this sign is what makes the
         // traverse leave the way the tool came in.
         b.set_axis(Some([-h.dir.x, -h.dir.y, -h.dir.z]));
-        b.push(MoveKind::Rapid, along(h, p.r_d), None);
+        rapid(&mut b, along(h, p.r_d));
         let floor_bottom = h.floor_d - if h.through { THROUGH_CLEAR } else { 0.0 };
         // In d-space the entry plane is d = 0 (the mouth; `r_d` is
         // only where the rapids stop outside), so the dimple law
@@ -238,7 +248,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
         match kind {
             CycleKind::Spot | CycleKind::Drill => {
                 b.push(MoveKind::Plunge, along(h, bottom), Some(p.plunge_feed));
-                b.push(MoveKind::Rapid, along(h, p.r_d), None);
+                rapid(&mut b, along(h, p.r_d));
             }
             CycleKind::Peck | CycleKind::Deep => {
                 let auto = if kind == CycleKind::Peck { 3.0 * d } else { d };
@@ -257,10 +267,10 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
                     } else {
                         p.r_d
                     };
-                    b.push(MoveKind::Rapid, along(h, up), None);
+                    rapid(&mut b, along(h, up));
                     t = (t - step).max(bottom);
                 }
-                b.push(MoveKind::Rapid, along(h, p.r_d), None);
+                rapid(&mut b, along(h, p.r_d));
             }
             _ => {}
         }
@@ -271,11 +281,11 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
             // the next round's traverse branch takes the axial
             // detour, or refuses if the bar's Z top is unknown.
             let s = traverse_s(h.dir, hs[i + 1].dir, hop_s).unwrap_or(hop_s);
-            b.push(MoveKind::Rapid, along(h, start_d(h, s)), None);
+            rapid(&mut b, along(h, start_d(h, s)));
         }
     }
     let last = hs[hs.len() - 1];
-    b.push(MoveKind::Rapid, along(&last, start_d(&last, end_s)), None);
+    rapid(&mut b, along(&last, start_d(&last, end_s)));
     let t = b.finish();
     if !t.is_chained() || !t.all_finite() {
         return Err(GenError::Invalid("cross-drill chain self-check failed".into()));
@@ -312,13 +322,13 @@ fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
 /// (`d/2` below the tip line) off the end face.
 fn detour(b: &mut PathBuilder, prev: &CrossHole, h: &CrossHole, hop_s: f64, z_top: f64) {
     let p0 = along(prev, start_d(prev, hop_s));
-    b.push(MoveKind::Rapid, Point3::new(p0.x, p0.y, z_top), None);
+    rapid(b, Point3::new(p0.x, p0.y, z_top));
     // The index: the pose flips to the NEW plunge, shank behind
     // the tip, while the tool hangs above the bar.
     b.set_axis(Some([-h.dir.x, -h.dir.y, -h.dir.z]));
     let p1 = along(h, start_d(h, hop_s));
-    b.push(MoveKind::Rapid, Point3::new(p1.x, p1.y, z_top), None);
-    b.push(MoveKind::Rapid, p1, None);
+    rapid(b, Point3::new(p1.x, p1.y, z_top));
+    rapid(b, p1);
 }
 
 /// The travel `d` at which the hole's point reaches radial distance
