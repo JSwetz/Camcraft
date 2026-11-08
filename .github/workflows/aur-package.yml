@@ -44,10 +44,14 @@ jobs:
         run: su builder -c "cd '$GITHUB_WORKSPACE/aur' && makepkg --noconfirm"
       - name: Check package contents
         run: |
-          bsdtar -tf aur/camcraft-*.pkg.tar.zst | grep -E '(^|/)usr/lib/camcraft/camcraft-ui$'
-          bsdtar -tf aur/camcraft-*.pkg.tar.zst | grep -E '(^|/)usr/share/applications/camcraft.desktop$'
+          set -- aur/camcraft-[0-9]*.pkg.tar.zst
+          [ "$#" -eq 1 ] && [ -f "$1" ]
+          bsdtar -tf "$1" | grep -E '(^|/)usr/lib/camcraft/camcraft-ui$'
+          bsdtar -tf "$1" | grep -E '(^|/)usr/share/applications/camcraft.desktop$'
+          mkdir -p dist
+          cp "$1" dist/
       - uses: actions/upload-artifact@v4
         with:
           name: arch-package
-          path: aur/camcraft-*.pkg.tar.zst
+          path: dist/*.pkg.tar.zst
           if-no-files-found: error
