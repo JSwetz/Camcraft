@@ -13603,3 +13603,29 @@ On main a hole in the skin that no ladder level slices through wrapped silently.
 - Curtaining every free edge: it would close a real hole silently.
 - Putting the seam end-to-end test in `rotary_adaptive.rs` (the issue's "Done means"):
   that file sits at the 400-line budget, so the D-flat suite `rotary_dflat.rs` carries it.
+
+
+### PR #210 review: a flat across the seam is refused by name, not wrapped
+
+**Chosen:** the wrap refuses by name any work whose seam is not turned
+(`rotary_seam::refuse_feature_on_seam`). The off-axis vertices of the facets that
+straddle the ±π branch must stand on exactly two meridian columns with one profile. A
+flat, keyway or cross hole across the seam breaks that, and the refusal says to rotate
+the work clear of it.
+
+**Why:** the review probe (a 3.5 deep flat off its centre across the seam) wrapped and
+put 12 to 1606 cut tips inside the part, down to the axis. Clipping the cover to the
+ragged seam chains' inner columns removed the reviewer's strip gouge. A second gouge
+was left, though: a whole-lap band at the flat's end stations, at the shoulder plus the
+pad. It showed even with the flat centred on the seam (n=64, D2: 245 tips), so a
+cover-shape fix was not enough. Gouge-free beats coverage. The placements clear of the
+seam were checked against the true cross-section polygon (n 16/64, D2/D0.8) with 0 tips
+inside, and they wrap as before.
+
+**Dropped:**
+- The ragged-cover clip (it only removed the strip gouge).
+- The #9 seam-law end-to-end pin under Adaptive: its fixture is a flat across the seam,
+  which is now refused. The seam law stays unit-pinned. The pin now asserts the named
+  refusal under Adaptive and Offset rings.
+- Not done (follow-up worth an issue): rotate the development's branch to an azimuth
+  where the work is turned, so a D-flat bar wraps whatever its placement.

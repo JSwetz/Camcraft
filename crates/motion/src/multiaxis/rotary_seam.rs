@@ -89,6 +89,45 @@ pub(super) fn refuse_open(facets: &[Triangle]) -> Result<(), GenError> {
     Ok(())
 }
 
+/// Refuse a work whose seam is not turned: `cols` are the off-axis
+/// vertices `(azimuth, station, radius)` of every facet straddling the
+/// wrap's ±π branch. On a revolve those stand on exactly two meridian
+/// columns, one each side of the branch, with one profile. A flat, a
+/// keyway or a cross hole crossing the seam breaks that: its vertices
+/// sit at their own azimuths (a ragged seam), or the columns either side
+/// carry different radii. Such a seam is refused by name - the cover's
+/// ends would read the metal another lap holds as air (PR #210's review:
+/// cut tips down to the axis).
+pub(super) fn refuse_feature_on_seam(cols: &[(f64, f64, f64)], scale: f64) -> Result<(), GenError> {
+    let th_tol = 1e-9;
+    let q = |x: f64| (x * WELD / scale.max(1.0)).round() as i64;
+    let mut columns: Vec<(f64, Vec<(i64, i64)>)> = Vec::new();
+    for &(th, v, rho) in cols {
+        let a = th.rem_euclid(std::f64::consts::TAU);
+        let at = (q(v), q(rho));
+        match columns.iter_mut().find(|(c, _)| (c - a).abs() <= th_tol) {
+            Some((_, prof)) => prof.push(at),
+            None => columns.push((a, vec![at])),
+        }
+    }
+    for (_, prof) in columns.iter_mut() {
+        prof.sort_unstable();
+        prof.dedup();
+    }
+    let turned = match columns.as_slice() {
+        [] => true,
+        [(_, a), (_, b)] => a == b,
+        _ => false,
+    };
+    if turned {
+        return Ok(());
+    }
+    Err(GenError::Invalid(format!(
+        "a feature that is not turned (a flat, a keyway, a cross hole) crosses the rotary wrap's seam ({} meridian columns meet it, a turned seam has 2 alike): refused rather than read the seam's metal as air - rotate the work so the feature is clear of the seam",
+        columns.len()
+    )))
+}
+
 /// The curtains closing the developed sheet's seam: `edges` are the
 /// FIRST copy's developed edges (three per facet), `period` the lap's
 /// arc length (the second copy rides one period up), `floor` the radius
@@ -98,9 +137,14 @@ pub(super) fn refuse_open(facets: &[Triangle]) -> Result<(), GenError> {
 /// (second copy, one period up) are the sheet's two free ends.
 pub(super) fn curtains(edges: &[DevEdge], period: f64, floor: f64) -> Vec<Triangle> {
     let mut by: HashMap<(Key, Key), Vec<usize>> = HashMap::new();
-    for (i, e) in edges.iter().enumerate() {
-        if e.world.0 != e.world.1 {
-            by.entry(edge_key(e.world.0, e.world.1)).or_default().push(i);
+    // Three edges per facet, in facet order; a sliver (two corners
+    // welded together) takes no part, as in [`refuse_open`].
+    for (k, f) in edges.chunks(3).enumerate() {
+        if f.len() < 3 || f.iter().any(|e| e.world.0 == e.world.1) {
+            continue;
+        }
+        for (i, e) in f.iter().enumerate() {
+            by.entry(edge_key(e.world.0, e.world.1)).or_default().push(3 * k + i);
         }
     }
     let tol = 1e-6 * period.abs().max(1.0);

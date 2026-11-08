@@ -241,6 +241,7 @@ fn develop(
     let mut wrap: Vec<Triangle> = Vec::with_capacity(facets.len() * 3);
     let (mut s_lo, mut s_hi) = (f64::INFINITY, f64::NEG_INFINITY);
     let mut edges: Vec<DevEdge> = Vec::with_capacity(facets.len() * 3);
+    let mut seam_cols: Vec<(f64, f64, f64)> = Vec::new(); // straddlers' vertices
     let dev = |q0: Point3| -> (f64, f64, f64) {
         let d = q0 - ax.origin;
         let v = d.dot(u);
@@ -265,6 +266,13 @@ fn develop(
             } else {
                 mn
             };
+            if shift == 0.0 && mx - mn > std::f64::consts::PI {
+                for (th, v, rho) in [(ta, va, ra), (tb, vb, rb), (tc, vc, rc)] {
+                    if rho > rho_eps {
+                        seam_cols.push((th, v, rho));
+                    }
+                }
+            }
             let s = |th: f64| -> f64 {
                 // Measured (Pi - x).rem_euclid so a column exactly
                 // half a turn off the base rides +Pi, never its -Pi
@@ -325,6 +333,9 @@ fn develop(
             }
         }
     }
+
+    // Only a turned seam is wrapped (#54; `rotary_seam` says why).
+    rotary_seam::refuse_feature_on_seam(&seam_cols, rho_max)?;
 
     // The cover's two ends are the chain's loose ends: a curtain hangs
     // from each free seam edge down to the floor radius, so every

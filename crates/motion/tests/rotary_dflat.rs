@@ -5,19 +5,17 @@
 //! seam's two copies) and plain solid-modelling topology (a closed
 //! 2-manifold has no free edge); no vendor material consulted.
 //!
-//! Read here: a D-flat bar wraps in every placement (flat through the
-//! ends, a closed flat beside the seam, a closed flat across it) and its
-//! Offset-rings rough is cut; a bar with a facet missing is still
-//! refused by name; and issue #9's seam law end to end - under Adaptive,
-//! a developed level whose centre component reaches a cover end short of
-//! a whole lap (the flat's channel, at a radius only the flat reaches)
-//! is refused by name and cut by Offset rings.
+//! Read here: a D-flat bar clear of the wrap's seam wraps (flat through
+//! the ends, a closed flat) and its Offset-rings rough keeps every cut tip
+//! out of the part's true cross-section; a flat ACROSS the seam, on or
+//! off its centre line, is refused by name (PR #210's review: wrapped, it
+//! gouged to the axis); a bar with a facet missing is refused by name.
 //!
 //! Gate map (M4.4): covers camcraft_motion::multiaxis (rotary_offset,
-//! rotary_seam) and camcraft_motion::machining3d (hsm's seam law), on
+//! rotary_seam), on
 //! this suite's own prism fixtures.
-//! Lane shape (M4.4): the rings wraps run in seconds in debug; the
-//! Adaptive seam case plans one window of levels.
+//! Lane shape (M4.4): every wrap here is Offset rings or a refusal;
+//! the suite runs in about a minute in debug.
 
 use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::machining2d::PocketStrategy;
@@ -26,8 +24,6 @@ use camcraft_motion::machining3d::{Entry3D, Pocket3DParams};
 use camcraft_motion::multiaxis::{rotary_offset_developed, rotary_offset_in, AxisControl};
 
 const TAU: f64 = std::f64::consts::TAU;
-/// The head of the HSM planner's seam refusal (`hsm::SEAM_RINGS`).
-const SEAM_RINGS: &str = "adaptive: the developed level crosses the wrap's seam";
 const RAD: f64 = 6.0;
 
 /// One cross-section ring of `n` points at station `z`: the circle of
@@ -155,12 +151,25 @@ fn feeds(t: &camcraft_motion::cl::Toolpath) -> impl Iterator<Item = &camcraft_mo
     t.moves.iter().filter(|m| m.kind == MoveKind::Feed)
 }
 
-/// Every placement of a D-flat wraps: a flat ground through both ends
-/// (r5.8) and one closed over the middle stations (r5); the closed one's
-/// channel is roughed under the round's skin. On main the flat across
-/// the seam was refused as "the mesh is open" (4 dangling chord ends):
-/// the cover-end wall stood in the extreme column's plane and met none
-/// of the ragged seam column's edges.
+/// The name the wrap refuses a feature across its seam by.
+const SEAM_REFUSAL: &str = "crosses the rotary wrap's seam";
+
+/// Is `q` inside the part by more than `margin`: inside the TRUE
+/// cross-section polygon of its station (the D over the flat's
+/// stations, the round elsewhere) of a bar over `z0..z1`?
+fn in_part(q: Point3, n: usize, phi: f64, d: f64, span: Option<(f64, f64)>, z0: f64, z1: f64) -> bool {
+    let flat_here = span.is_none_or(|(lo, hi)| q.z >= lo && q.z <= hi);
+    let sect = ring(n, 0.0, if flat_here { Some((phi, d)) } else { None });
+    q.z > z0 && q.z < z1 && deep_inside(&sect, q, 0.05)
+}
+
+/// Every placement of a D-flat clear of the wrap's seam wraps: a flat
+/// ground through both ends (r5.8) and one closed over the middle
+/// stations (r5), at three azimuths; the closed one's channel is roughed
+/// under the round's skin, and no cut tip stands inside the part. The
+/// placement ACROSS the seam is refused by name before the wrap (on main
+/// it read "the mesh is open: 4 dangling chord ends"; PR #210's first
+/// round wrapped it and gouged - see the review probe below).
 #[test]
 fn a_d_flat_bar_wraps_in_every_placement() {
     let st = stock(6.5, -20.0, 20.0);
@@ -170,22 +179,18 @@ fn a_d_flat_bar_wraps_in_every_placement() {
             let f = dflat_bar(64, -20.0, 20.0, phi, d, span);
             let t = match rotary_offset_in(&f, Some(&st), &p, &control()) {
                 Ok(t) => t,
+                Err(e) if phi == SEAM_PHI && e.to_string().contains(SEAM_REFUSAL) => continue,
                 Err(e) => panic!("{name} flat at phi {phi}: {e}"),
             };
+            assert!(phi != SEAM_PHI, "{name} flat across the seam wrapped instead of being refused");
             assert!(t.all_finite(), "{name} flat at phi {phi}: a non-finite move");
             let cuts = feeds(&t).count();
             assert!(cuts > 50, "{name} flat at phi {phi}: only {cuts} cut moves");
-            // No cut tip stands inside the part: inside the round's skin
-            // AND (over the flat's stations) behind the flat's plane, both
-            // by more than a sag tolerance (the leave is 0.1).
-            let (nx, ny) = (phi.cos(), phi.sin());
             for m in feeds(&t) {
-                let q = m.to;
-                let flat_here = span.is_none_or(|(lo, hi)| q.z >= lo && q.z <= hi);
-                let behind = !flat_here || q.x * nx + q.y * ny < d - 0.05;
                 assert!(
-                    !(q.x.hypot(q.y) < RAD - 0.05 && behind),
-                    "{name} flat at phi {phi}: a cut tip at {q:?} stands inside the part"
+                    !in_part(m.to, 64, phi, d, span, -20.0, 20.0),
+                    "{name} flat at phi {phi}: a cut tip at {:?} stands inside the part",
+                    m.to
                 );
             }
             let low = feeds(&t).map(|m| m.to.x.hypot(m.to.y)).fold(f64::INFINITY, f64::min);
@@ -219,33 +224,69 @@ fn a_bar_with_a_hole_in_its_skin_is_still_refused_by_name() {
     }
 }
 
-/// Issue #9's seam law end to end: a long bar (so the axis fit reads
-/// the round, not the flat) clamped at its own skin, a deep D-flat
-/// across the seam over the windowed stations. The levels under the
-/// skin find stock only in the flat's channel, and its centre component
-/// reaches the cover's ends short of a lap: under Adaptive each such
-/// level is refused by name and Offset rings cut it.
+/// The seam case #9 round 2 wanted end to end (a flat's channel across
+/// the seam under Adaptive) is refused by name before the wrap, under
+/// Adaptive and Offset rings alike: the seam's ends would read the metal
+/// another lap holds as air. #9's seam law itself stays pinned by its unit
+/// test (`machining3d::hsm::tests::the_seam_cuts_an_area_at_a_cover_end_short_of_a_lap`).
 #[test]
-fn a_flat_channel_across_the_seam_is_refused_adaptive_by_name_and_rings_cut_it() {
+fn a_flat_channel_across_the_seam_is_refused_by_name_before_the_wrap() {
     let f = dflat_bar(64, -40.0, 40.0, SEAM_PHI, 4.0, Some((-8.0, 8.0)));
-    let p = Pocket3DParams { stepdown: 1.0, ..params(PocketStrategy::Adaptive, 4.0, 5.0) };
-    let dev = match rotary_offset_developed(&f, None, &p) {
-        Ok(t) => t,
-        Err(e) => panic!("the developed seam window: {e}"),
-    };
-    assert!(dev.is_chained() && dev.all_finite());
-    println!("notes: {:?}", dev.notes);
-    let seam: Vec<&String> = dev.notes.iter().filter(|n| n.starts_with(SEAM_RINGS)).collect();
-    assert!(!seam.is_empty(), "no developed level was refused at the seam: {:?}", dev.notes);
-    for n in &seam {
-        // The note names its level's radius; rings cut that level.
-        let Some(r) = n.rsplit("radius ").next().and_then(|t| t.split(' ').next()).and_then(|t| t.parse::<f64>().ok()) else {
-            panic!("a seam refusal that names no radius: {n}")
-        };
-        assert!(r < RAD, "the seam refusal names r{r}, not a level under the skin");
-        let at = feeds(&dev).filter(|m| (m.from.z - r).abs() < 1e-3 && (m.to.z - r).abs() < 1e-3).count();
-        let arcs = feeds(&dev).filter(|m| (m.from.z - r).abs() < 1e-3 && (m.to.z - r).abs() < 1e-3 && m.arc.is_some()).count();
-        assert!(at > 0, "the seam-refused level r{r} is not cut");
-        assert_eq!(arcs, 0, "the seam-refused level r{r} posts HSM arcs, not rings");
+    for strategy in [PocketStrategy::Adaptive, PocketStrategy::OffsetRings] {
+        let p = Pocket3DParams { stepdown: 1.0, ..params(strategy, 4.0, 5.0) };
+        match rotary_offset_developed(&f, None, &p) {
+            Ok(_) => panic!("{strategy:?}: the flat across the seam was developed"),
+            Err(e) => assert!(e.to_string().contains(SEAM_REFUSAL), "{strategy:?}: refused, but not by name: {e}"),
+        }
     }
+}
+
+/// Is `q` inside the convex counter-clockwise polygon `ring` by more
+/// than `margin` (its distance to every edge's line)?
+fn deep_inside(ring: &[Point3], q: Point3, margin: f64) -> bool {
+    let n = ring.len();
+    (0..n).all(|j| {
+        let (a, b) = (ring[j], ring[(j + 1) % n]);
+        let (ex, ey) = (b.x - a.x, b.y - a.y);
+        let l = ex.hypot(ey);
+        l <= 1e-12 || (ex * (q.y - a.y) - ey * (q.x - a.x)) / l > margin
+    })
+}
+
+/// PR #210's review probe (issue #54): a 3.5 deep flat across the seam,
+/// on and off its centre line (and midway between two vertices). The
+/// first round wrapped them and the cover's ends read other laps' metal
+/// as air: 12 to 1606 cut tips inside the part, down to the axis (and a
+/// whole-lap band at the flat's end stations, even centred). Every such
+/// placement is now refused by name; the placements clear of the seam
+/// rough with no tip inside the TRUE cross-section of their station.
+#[test]
+fn an_off_centre_flat_across_the_seam_never_puts_a_tip_in_the_part() {
+    let st = stock(6.5, -40.0, 40.0);
+    let half = std::f64::consts::FRAC_PI_2;
+    let mut wrapped = 0usize;
+    for n in [16usize, 64] {
+        for tool in [2.0, 0.8] {
+            let p = params(PocketStrategy::OffsetRings, tool, 12.0);
+            for phi in [-half - 0.4, -half + 0.4, -half - 0.7, -half + 0.7, -half, -half + std::f64::consts::PI / n as f64, 0.0, half, 2.3] {
+                let f = dflat_bar(n, -40.0, 40.0, phi, 3.5, Some((-8.0, 8.0)));
+                let t = match rotary_offset_in(&f, Some(&st), &p, &control()) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        let msg = e.to_string();
+                        println!("n {n} D{tool} phi {phi:.3}: refused - {msg}");
+                        assert!(msg.contains(SEAM_REFUSAL), "n {n} D{tool} phi {phi:.3}: refused, but not by the seam's name: {msg}");
+                        continue;
+                    }
+                };
+                let inside = feeds(&t).filter(|m| in_part(m.to, n, phi, 3.5, Some((-8.0, 8.0)), -40.0, 40.0)).count();
+                println!("n {n} D{tool} phi {phi:.3}: {} cut moves, {inside} tips inside", feeds(&t).count());
+                assert_eq!(inside, 0, "n {n} D{tool} phi {phi:.3}: cut tips inside the part");
+                if tool > 1.0 {
+                    wrapped += 1;
+                }
+            }
+        }
+    }
+    assert!(wrapped >= 6, "the 2 mm tool roughs the placements clear of the seam: {wrapped}");
 }
