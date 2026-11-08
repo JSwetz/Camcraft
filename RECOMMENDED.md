@@ -13612,50 +13612,60 @@ revolved (follow-up material if users hit it with long keyways).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
 
-## #128 first slice: `camcraft-cli mcp` (2026-11-07)
+## #20 - the rotary sweep's flute-rotation bound: stated always, enforced on request (2026-11-08, M13.1)
 
-- **Where it lives:** `crates/app/src/mcp/` (protocol `mod.rs`, tool table
-  `tools.rs`, read side `job.rs`, write side `edit.rs`), behind
-  `camcraft-cli mcp`. The CLI already lives in app, and the server is a
-  command executant like the script host, so it sits in the app layer.
-  No new crate: a `camcraft-mcp` crate would only re-export app.
-- **No MCP SDK.** The protocol surface we need (initialize, ping,
-  tools/list, tools/call over newline-delimited stdio) is about 150 lines
-  of serde_json. The Rust SDK (`rmcp`, MIT) pulls tokio and an async
-  runtime into a synchronous, deterministic binary; dropped for that
-  weight. Revisit if we need resources, prompts, sampling or the HTTP
-  transport.
-- **One session = one `script::Env`.** The server reuses the job-script
-  host's document + History, and its load/save/import/generate/verify/
-  post verbs are called directly (no JS engine involved). So the batch
-  lane, the script lane and the MCP lane share one meaning of every verb.
-- **Every write rides a command** (`AddTool`, `SetStock`,
-  `CreateOperation`, `EditOperationParams`, `EditOperationLinks`,
-  `DeleteOperation`, the verbs' `ImportModel` / `GenerateOperation`), so
-  `undo` / `redo` walk the History. Refusals come from the commands'
-  construction gates and never enter the history.
-- **Params are the file's DTO shape** (`project::params_to_json` /
-  `params_from_json`, new `project/json.rs`): `get_job` shows
-  `{"face": {...}}`, `edit_operation` takes a JSON merge patch (RFC 7386)
-  over the kind's field object. A patched key the kind does not have is
-  refused by name (serde would drop it silently). Considered: a
-  hand-written schema per kind - dropped, a second truth beside the file
-  format. `list_operation_types` therefore lists fields as the default
-  object's keys and JSON types; optional fields that default to off are
-  absent (said in its note).
-- **Unknown tool = tool error** (`isError: true`), as the issue asked,
-  rather than the spec's suggested JSON-RPC -32602: an agent reads tool
-  errors in-band. Malformed `tools/call` params (no name, non-object
-  arguments) stay JSON-RPC -32602. Unknown arguments are refused too.
-- **Panic backstop:** `tools/call` runs inside `catch_unwind` and turns a
-  bug's panic into a tool error, so a generator bug cannot kill the
-  agent's session. No tool path panics by law; this is defense in depth.
-- **Added beyond the brief:** `add_tool`, `list_tool_catalog` and
-  `set_stock` (box / cylinder / from model). A fresh document has no tool
-  and no stock, so without them no op can be created or generated.
-  `set_tool` assigns a document tool to an operation.
-- **Owed, filed as issues:** picking faces/edges/loops; WCS, machine and
-  fixtures; sim render and screenshots; a server mode inside the GUI app.
+**What "flute rotation" is here.** Not the helical flutes spinning (the
+sim's tool is already its body of revolution, which bounds any flute
+geometry): it is the rotary chord pre-pass (`stock_sim/field_rotary.rs`)
+standing each sub-chord's whole tool on the sub-chord's MID pose while
+the true pose turns through it. A tool point at distance `w` from the
+tool's reference (ball center, flat tip) is off its true-pose place by
+at most `w·2·sin(β/2)`, `β ≤ half_angle` (Craig, "Introduction to
+Robotics", ch. 2 - the chord of a rigid turn). The old chord count only
+bounded the SAG at the farthest reach (second order), so the flank's
+error (first order, `L·α`) was unstated - the "7.9e-4 at tol 1e-4"
+reading of the M13.1 parity.
+
+**The bound.** `RotaryChordStats::flute_shift = L·2·sin(half_angle/2)`,
+`L` = the farthest corner of the field's bounds from the tip at either
+station (plus `r` for a ball), capped at shank + `r` - only points inside
+the field cut, so nothing farther counts. With `center_sag` it is a
+two-sided Hausdorff bound: every point of the true sweep has a chorded
+point within `center_sag + flute_shift`, and back, so any point farther
+than that from the true skin reads the right steel/air. It is two-sided
+by nature, not one-signed: the chorded solid is neither a superset nor a
+subset of the true one (the brief's "never smaller" is not a property of
+this law, and neither direction would be conservative for every consumer:
+over-removal hides rest material, under-removal invents gouges).
+
+**Enforced on request.** `Stock::simulate_rotary_bounded(.., Some(t))`
+(and `ChordLaw::flute_tol`) also counts sub-chords until
+`L·2·sin(half/2) ≤ t`; refused by name past `MAX_SUBCHORDS`, never
+coarsened. `simulate_rotary` keeps today's count (flute tolerance
+`None`): the eye and the slices are unchanged in cost and output. On the
+pinning fixture (flat d6, 30 degrees on a d20 bar, pose_tol 1e-3) the
+unenforced stat reads 0.147 mm at 44 sub-chords; enforcing 0.05 takes
+130.
+
+**Agreement tests** (`crates/sim/tests/stock_rotary_flute.rs`): the field
+against a brute-force reference (the flat tool at 4,001 samples of the
+controller's lerp, its own sampling error added to the margin) at every
+field cell center in the band: 0 sign misses past `center_sag +
+flute_shift` (17,144 points) and 0 past an enforced 0.05 (17,280); and at
+the sag class alone the worst miss is 9.5e-3 > 5.5e-3 - the flute error
+is real and the bound is what covers it.
+
+**Dropped:** (1) enforcing `α ≤ tol/L` at the eye's or verdict's pose
+tolerance by default - 3x-1000x the sub-chords (the eye 2.5 s would go
+to minutes) for a flank class no current consumer reads (the column
+verdict refuses rotary by name); a caller that needs it asks for it.
+(2) a one-signed inflation (cut with `r + flute_shift`) - no consumer is
+conservative in a single direction. (3) a second-order "scallop" law for
+radial poses - true only when the pose's turn is parallel to the tip
+chord, which the straight tip chord itself breaks by up to half a move's
+turn. (4) sampling the reference between field cell centers - the field's
+`distance` reads its cell's value, and that quantization (up to ~0.26 mm
+at cell 0.5) would be charged to the flute.
 
 ## #152 - a short turned bar's axis is read off its facing flats (2026-11-08)
 
