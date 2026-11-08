@@ -203,7 +203,7 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 s.set_properties(&merged(&base, &p, pos))?;
                 s.call("onPartTransfer", "")?;
             }
-            Record::Comp { side, radius_mm } => {
+            Record::Comp { side, radius_mm, wear } => {
                 // Cutter compensation (M13.11): a lifecycle record like
                 // its siblings - no motion, `onCommand` never sees it -
                 // but NOT comment-only by default: the records after it
@@ -227,6 +227,10 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                     };
                     p.insert("Compensation".into(), json!(word));
                     p.insert("CompensationRadius".into(), json!(radius_mm));
+                    // #38: "wear" - the records between are the centre
+                    // path and the register holds the wear delta only;
+                    // "control" - they are the part contour.
+                    p.insert("CompensationType".into(), json!(if *wear { "wear" } else { "control" }));
                     s.set_properties(&merged(&base, &p, pos))?;
                     s.call("onRadiusCompensation", &json!(word).to_string())?;
                 }

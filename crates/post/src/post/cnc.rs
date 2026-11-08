@@ -72,7 +72,9 @@ pub enum Record {
     /// must refuse by name, and the engine refuses for a script that
     /// does not define the hook at all - a centre-less contour posted
     /// without its G41 is an undersize part, the silent wrong answer.
-    Comp { side: Option<CompSide>, radius_mm: f64 },
+    /// `wear` (#38): the records between are the cutter-CENTRE path at
+    /// `radius_mm`, and the register holds only the wear delta.
+    Comp { side: Option<CompSide>, radius_mm: f64, wear: bool },
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -256,8 +258,11 @@ impl Record {
             Record::Part { loading: false, .. } => "part unload".into(),
             Record::Transfer { from, to } => format!("part transfer {from}→{to}"),
             Record::Probe { tol_mm } => format!("probe · tol {tol_mm:.3} mm"),
-            Record::Comp { side: Some(CompSide::Left), radius_mm } => format!("comp left · r {radius_mm:.3} mm"),
-            Record::Comp { side: Some(CompSide::Right), radius_mm } => format!("comp right · r {radius_mm:.3} mm"),
+            Record::Comp { side: Some(side), radius_mm, wear } => format!(
+                "comp {} · r {radius_mm:.3} mm{}",
+                if *side == CompSide::Left { "left" } else { "right" },
+                if *wear { " · wear" } else { "" }
+            ),
             Record::Comp { side: None, .. } => "comp off".into(),
         }
     }
@@ -388,11 +393,13 @@ pub fn serialize(records: &[Record]) -> String {
                 // the lattice law - not a parameter real.
                 s.push_str(&format!("PROBE {}\n", q(*tol_mm)));
             }
-            Record::Comp { side, radius_mm } => {
-                // The radius rides as microns like every length here.
+            Record::Comp { side, radius_mm, wear } => {
+                // The radius rides as microns like every length here;
+                // a trailing WEAR (#38) marks the centre-path variant.
+                let w = if *wear { " WEAR" } else { "" };
                 s.push_str(&match side {
-                    Some(CompSide::Left) => format!("COMP LEFT {}\n", q(*radius_mm)),
-                    Some(CompSide::Right) => format!("COMP RIGHT {}\n", q(*radius_mm)),
+                    Some(CompSide::Left) => format!("COMP LEFT {}{w}\n", q(*radius_mm)),
+                    Some(CompSide::Right) => format!("COMP RIGHT {}{w}\n", q(*radius_mm)),
                     None => "COMP OFF\n".to_string(),
                 });
             }
@@ -865,7 +872,17 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                         v
                     }
                 };
-                out.push(Record::Comp { side, radius_mm });
+                // An optional WEAR after the radius (#38); anything
+                // else trailing is refused - a guessed mode is a part a
+                // radius off.
+                let wear = match (side, it.next()) {
+                    (_, None) => false,
+                    (Some(_), Some("WEAR")) => true,
+                    (_, Some(other)) => {
+                        return Err(fail(format!("COMP {dir} takes only WEAR after its radius, found {other:?}")))
+                    }
+                };
+                out.push(Record::Comp { side, radius_mm, wear });
                 in_section = true;
             }
             "PROBE" => {

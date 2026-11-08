@@ -43,7 +43,7 @@ argument semantics in `docs/CNC-INTERMEDIATE.md`):
 | `onRapid` / `onLinear` / `onCircular` / `onPlunge` | the motion kinds (`onPlunge` only if defined, else `onLinear`) |
 | `onCycle` → `onCyclePoint` → `onDwell(s)` → `onCycleEnd` | per canned cycle |
 | `onComment(text)` | per `WARN` (the PRELUDE default echoes it verbatim) |
-| `onRadiusCompensation(side)` | per `COMP` (M13.11): `"left"` / `"right"` engage G41 / G42 on the NEXT motion record (a straight lead at least a radius long, by the generator's law; `properties.CompensationRadius` is the register's radius), `"off"` cancels (G40) on the next one. The records between are the PART contour, so a post that cannot write the words must `message()` a refusal — the engine refuses a script that lacks the hook outright |
+| `onRadiusCompensation(side)` | per `COMP` (M13.11): `"left"` / `"right"` engage G41 / G42 on the NEXT motion record (a straight lead at least a radius long, by the generator's law; `properties.CompensationRadius` is the register's radius), `"off"` cancels (G40) on the next one. The records between are the PART contour - or, when `properties.CompensationType` is `"wear"` (#38), the cutter-centre path with the register holding only the wear delta - so a post that cannot write the words must `message()` a refusal — the engine refuses a script that lacks the hook outright |
 | `onClose` | once, after all records (retract + `%`-end here) |
 
 Output is only what `writeln`/`write`/`writeBlock` push into `OUT`;

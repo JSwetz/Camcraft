@@ -38,6 +38,7 @@ var tiltRefused = false;   // a refusal the gate counts once, not per line
 var compG = "";            // G41/G42/G40 pending for the next straight block (M13.11)
 var compD = "";            // the D word riding the engage block
 var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
+var wearNoted = false;     // the wear-register comment was written this section (#38)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs):
 // the stream speaks world coordinates; the machine measures its program
 // from the work offset. A legacy .cl carries no PARAMs, so these stay 0.
@@ -105,7 +106,10 @@ function tilt(p) {  // words to append, [] if none, null if refused
 // register: the tool library states none, so it is the tool number,
 // the same slot the H word reads. A comp word that would land on a
 // rapid or an arc is refused by name (counted, gate-blocked) - never
-// written where the control would misread it.
+// written where the control would misread it. Wear compensation (#38,
+// properties.CompensationType "wear") writes the same words over the
+// cutter-centre path: the register must hold only the wear delta, so
+// the section says so once, in a comment the operator reads.
 function onRadiusCompensation(side) {
   var s = String(side || properties.Compensation || "off");
   if (s === "off") {
@@ -118,6 +122,10 @@ function onRadiusCompensation(side) {
   compG = (s === "left") ? "G41" : "G42";
   compD = "D" + pad2(tNo);
   compOn = true;
+  if (properties.CompensationType === "wear" && !wearNoted) {
+    block(["(WEAR COMP - " + compD + " HOLDS THE WEAR DELTA ONLY, NOT THE TOOL RADIUS)"]);
+    wearNoted = true;
+  }
 }
 function compRefuse(what) {
   if (compG) {
@@ -267,6 +275,7 @@ function endPreamble() {
     msg("cutter compensation still engaged at section end - no cancel block");
     compG = ""; compD = ""; compOn = false;
   }
+  wearNoted = false;
   if (coolant) block(["M9"]);
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
