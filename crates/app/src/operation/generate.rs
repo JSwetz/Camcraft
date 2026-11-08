@@ -1995,8 +1995,11 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // as in RotaryOffset) - the kernel itself chords the
             // profile by that law's own tol/4 promise.
             let _ = tolerance;
+            // #122: the setup's stock rides along, so an allowance
+            // above a part at its finished length is faced off.
             let path = crate::turning::facing(
                 &material.facets,
+                stock_facets.as_deref(),
                 &crate::turning::FacingParams {
                     clearance_z: hl.clearance,
                     top_z: req_z(hl.top, "Top of Part Z")?,
