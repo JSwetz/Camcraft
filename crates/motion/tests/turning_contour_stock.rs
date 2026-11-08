@@ -204,3 +204,33 @@ fn multipass_stock_exits_preserve_geometry_and_cover_interior_windows() {
         multi_pass_in(&part, &MultiPassParams { top_z: top, ..p }, s).expect("multi")
     });
 }
+
+#[test]
+fn a_wide_stock_ladder_drops_air_rungs_outside_a_restricted_window() {
+    let part = revolve(&[
+        (0.0, -16.0), (6.0, -16.0), (6.0, 0.0),
+        (10.0, 0.0), (10.0, 40.0), (0.0, 40.0),
+    ]);
+    let frame = Frame::about(&part).expect("axis");
+    let p = MultiPassParams {
+        tolerance: 0.05, clearance_z: 56.0, top_z: 40.0, bottom_z: 2.0,
+        stepdown: 0.5, stock_to_leave: 0.25, passes: 3,
+        feed: 200.0, plunge_feed: 50.0, nose_radius: 0.8,
+    };
+    let path = multi_pass_in(&part, &p, Some(StockEnv {
+        r_out: 14.0, clearance: 1.0, s_top: frame.station_of(48.0),
+    })).expect("windowed multipass");
+    let plunges: Vec<_> = path.moves.windows(2)
+        .filter(|w| w[0].kind == MoveKind::Rapid && w[1].kind == MoveKind::Feed)
+        .map(|w| &w[1]).collect();
+    assert!(plunges.len() > p.passes as usize, "roughing plus all springs");
+    assert!(plunges.iter().all(|m| (m.to.z - 2.0).abs() < 1e-8), "the window excludes the narrow section");
+    let first = rho(plunges[0].to) - p.nose_radius;
+    assert!(first < 14.0 && first >= 14.0 - p.stepdown - 1e-8, "first roughing rung must engage the stock: {first}");
+    assert!(plunges.iter().all(|m| rho(m.to) - p.nose_radius < 14.0), "no air-only rungs");
+    let springs = &plunges[plunges.len() - p.passes as usize..];
+    for (i, m) in springs.iter().enumerate() {
+        let expected = 10.0 + p.nose_radius + p.stock_to_leave * (2 - i) as f64 / 3.0;
+        assert!((rho(m.to) - expected).abs() < 1e-8, "all finishing rides remain");
+    }
+}
