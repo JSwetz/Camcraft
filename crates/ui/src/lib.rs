@@ -15,6 +15,7 @@ pub mod feedback;
 pub mod interact;
 pub mod machined;
 pub mod operations;
+pub mod post_file;
 pub mod state;
 pub mod theme_dir;
 pub mod trace;

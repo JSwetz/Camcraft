@@ -2274,7 +2274,8 @@ impl State {
             }
             CommandKind::SaveProjectFile(path) => self.save_project_path(path),
             CommandKind::PostProgramDialog => {
-                if let Some(path) = post_program_dialog() {
+                let target = crate::post_file::for_document(self);
+                if let Some(path) = post_program_dialog(&target) {
                     self.post_program_path(path);
                 }
             }
@@ -3630,13 +3631,16 @@ pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     dialog.set_file_name(filename).save_file()
 }
 
-fn post_program_dialog() -> Option<PathBuf> {
+/// The Post dialog, opened where `crate::post_file::post_target` says
+/// (#258: the last post's folder and name, else the project's).
+fn post_program_dialog(target: &crate::post_file::PostTarget) -> Option<PathBuf> {
     // The extension law lives with the script (fanuc.cps's `extension`
     // is "nc"); the dialog just offers it.
-    rfd::FileDialog::new()
-        .add_filter("NC Program", &["nc"])
-        .set_file_name("program.nc")
-        .save_file()
+    let mut dialog = rfd::FileDialog::new().add_filter("NC Program", &["nc"]);
+    if let Some(dir) = &target.dir {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.set_file_name(&target.file_name).save_file()
 }
 
 fn save_stl_dialog() -> Option<PathBuf> {
