@@ -22,7 +22,7 @@ use super::fields::{combo, num, num_feed, num_unit};
 use super::layout::{auto_value, check_row, consequence, group, hint, prop_row, prop_row_hint};
 
 const LEAD_OUTS: [&str; 6] = ["Same as lead-in", "None", "Linear", "Arc", "Tangential", "Perpendicular"];
-const COMPS: [&str; 2] = ["In computer", "In control (G41/G42)"];
+const COMPS: [&str; 3] = ["In computer", "In control (G41/G42)", "Wear (G41/G42)"];
 
 /// The entry arm's own numbers (`arm` - the first entry, or the level
 /// descent a kind without a first entry uses), inside the caller's group.
@@ -175,18 +175,29 @@ pub(super) fn contour_leads_editor(ui: &mut Ui, u: Unit, a: &mut Approach) {
     // the centre (the simulation and every file before the option), the
     // control offsets the part contour by its register.
     group(ui, "Cutter compensation", None, |ui| {
-        let mut i = usize::from(a.compensation == Compensation::Control);
+        let mut i = match a.compensation {
+            Compensation::Computer => 0,
+            Compensation::Control => 1,
+            Compensation::Wear => 2,
+        };
         let before = i;
         prop_row_hint(
             ui,
             "Compensation",
-            "In computer: the cutter-centre path is posted. In control: the part contour is posted under G41/G42 with the tool's offset register (D = tool number), so a worn cutter is shimmed at the pendant",
+            "In computer: the cutter-centre path is posted. In control: the part contour is posted under G41/G42 with the tool's offset register (D = tool number) holding the full radius. Wear: the cutter-centre path is posted under G41/G42 and the register holds only the wear delta (zero on a new cutter)",
             |ui| combo(ui, "c_comp", &mut i, &COMPS),
         );
         if i != before {
-            a.compensation = if i == 1 { Compensation::Control } else { Compensation::Computer };
+            a.compensation = match i {
+                1 => Compensation::Control,
+                2 => Compensation::Wear,
+                _ => Compensation::Computer,
+            };
         }
-        if a.compensation == Compensation::Control {
+        if a.compensation == Compensation::Wear {
+            consequence(ui, "set the D register to the wear delta only - a full radius there cuts the part a radius undersize");
+        }
+        if a.compensation.in_control() {
             consequence(ui, "needs straight Linear or Perpendicular leads at least a tool radius long; tabs, corner blends, overlap, keep-down links and non-Fanuc posts are refused by name");
         }
     });
@@ -200,6 +211,10 @@ pub(super) fn contour_leads_editor(ui: &mut Ui, u: Unit, a: &mut Approach) {
 pub(crate) fn entry_status_lines(notes: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for n in notes {
+        if n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING) {
+            out.push(format!("warning: {n}"));
+            continue;
+        }
         let fix = if n.contains("not centre-cutting") {
             "fix: a centre-cutting tool, or a Helix / Ramp entry that fits"
         } else if n.contains("second dive") {
@@ -217,4 +232,13 @@ pub(crate) fn entry_status_lines(notes: &[String]) -> Vec<String> {
         out.push(format!("Entry: {body} - {fix}"));
     }
     out
+}
+
+#[cfg(test)]
+mod top_stock_tests {
+    #[test]
+    fn the_top_stock_note_is_a_visible_warning_not_an_entry_fallback() {
+        let note = format!("{} top Z5.000, stock Z10.000 - raise Top or face first", camcraft_app::operation::TOP_STOCK_WARNING);
+        assert_eq!(super::entry_status_lines(std::slice::from_ref(&note)), vec![format!("warning: {note}")]);
+    }
 }

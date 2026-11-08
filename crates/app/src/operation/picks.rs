@@ -76,13 +76,11 @@ pub fn selection_account(
     }
 }
 
-/// The pocket family's flat-area refusal, decided at the doors (pick,
-/// links edit, creation) instead of only at Generate: a pocket, adaptive
-/// or offset clearing whose picks include a vertical wall's rim or a
-/// non-horizontal face bounds no area seen from above - that is a wrong
-/// pick, and the user should hear it when they make it. `None` for any
-/// other source, kind, or refusal (those stay generation's; an open run
-/// mid-pick is the normal state of building a chain edge by edge).
+/// The early flat-area refusal, decided at the pick/link/create doors.
+/// Pocket-family selections that project to a line and a Face selection
+/// whose picked face is too steep are refused before a costly generation.
+/// Other errors stay with generation (an open run mid-pick is normal while
+/// building a chain edge by edge).
 #[must_use]
 pub fn selection_refusal(
     world: &World,
@@ -93,7 +91,9 @@ pub fn selection_refusal(
     let SrcRef::Selection(items) = src else {
         return None;
     };
-    if !pocket_family(params) || items.is_empty() {
+    let facing_face = matches!(params, OpParams::Face { .. })
+        && items.iter().any(|g| matches!(g.feature, FeatureSel::Face(_)));
+    if !(pocket_family(params) || facing_face) || items.is_empty() {
         return None;
     }
     selection_geometry_impl(world, setup, items, params, None)
@@ -111,6 +111,9 @@ fn pocket_family(params: &OpParams) -> bool {
 fn door_refusal(params: &OpParams, err: GenError) -> Option<String> {
     match err {
         GenError::Invalid(msg) if pocket_family(params) && msg.contains(LINE_FROM_ABOVE) => Some(msg),
+        GenError::Invalid(msg)
+            if matches!(params, OpParams::Face { .. })
+                && msg.contains("is not horizontal - a facing pass needs a floor") => Some(msg),
         _ => None,
     }
 }

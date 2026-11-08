@@ -21,7 +21,7 @@ pub use rotary::{
 // blade's refusal, the verdict's refusal.
 #[path = "stock_sim_lathe.rs"]
 pub mod lathe;
-pub use lathe::{LathePlan, LATHE_BLADE_REFUSAL, LATHE_VERDICT_REFUSAL};
+pub use lathe::{LathePlan, LATHE_HELIX_REFUSAL, LATHE_THREAD_REFUSAL, LATHE_VERDICT_REFUSAL};
 
 use crate::geometry::Triangle;
 
@@ -259,6 +259,13 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t))
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        // A touch probe removes no stock (#108): its stylus only ever
+        // meets the part tangent, and the protected-move law in
+        // `operation::probe_op` already convicted any other meeting -
+        // so the probe op carves nothing and stays out of the plan.
+        if tool.kind == crate::tools::ToolKind::Probe {
+            continue;
+        }
         let cache = model::toolpath_of(world, e)
             .ok_or_else(|| format!("{name}: lost its toolpath"))?;
         // The cone's slope, cot of the half-angle from the axis -
@@ -281,14 +288,15 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // The revolved clause (#19, was M5.2 G.2's refusal): a Turn-
         // family path lives in the half-plane of its fitted axis, so
         // the plan carries the nose and that axis for the field eye's
-        // revolved stadium; a blade refuses by name (`lathe`).
-        let lathe = lathe::lathe_plan(world, name, &op, &tool)?;
+        // revolved stadium, a blade its own footprint (`lathe`, #21).
+        let lathe = lathe::lathe_plan(world, name, &op, &tool, &cache.path.moves)?;
         planned.push(Planned {
             name: name.clone(),
             moves: cache.path.moves,
-            // A turning insert's cutting feature is its nose: the
+            // A turning insert's cutting feature is its nose (a
+            // blade's, half its band - `LathePlan::feature`): the
             // display cell law (`auto_cell`) reads it, not the IC.
-            radius: lathe.map_or(tool.diameter / 2.0, |l| l.nose),
+            radius: lathe.map_or(tool.diameter / 2.0, |l| l.feature()),
             ball: tool.kind == crate::tools::ToolKind::BallNose,
             cone,
             corner,
