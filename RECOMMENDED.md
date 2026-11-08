@@ -13212,3 +13212,31 @@ revolved (follow-up material if users hit it with long keyways).
   today; can seed the op default later), and offering Through tool only
   for machines that state it (the row would change with the mount; the
   post-time refusal names the gap instead).
+
+## #150 - coolant review follow-ups (2026-11-08)
+
+- **Refusals name the op:** every post captures the section's
+  `OperationName` PARAM and prefixes its coolant `message()` with
+  `operation <name>:`; a legacy stream with no name keeps the bare text.
+- **Machine editor:** the coolant name is a pick of the posts'
+  vocabulary (`COOLANT_KINDS`: Flood, Mist, Through-spindle,
+  Through-tool) plus "custom" (a text field, since a shop's own name
+  like `Brine` is a tested flood law). The posts ALSO normalize names
+  (trim, case-blind, spaces/underscores as hyphens) so hand-edited
+  files read. Dropped: editor-only normalization (a hand-typed `.mch`
+  would still miss).
+- **Flood with no flood code:** refused by name when the machine's
+  list is stated but holds only other kinds (Mist-only no longer posts
+  a Flood op as M7). Kept silent: an EMPTY/unstated list (the
+  unstated-limit law, pinned by `a_mounted_machine_names_the_program_
+  and_speaks_only_its_own_coolant` and relied on by every turning fixture
+  that mounts a coolant-less machine) and a codeless Flood entry (the
+  operator's own valve). Considered and dropped: refusing the empty
+  list too - it would block every program on a machine that never
+  stated coolant, a behaviour change wider than this review asked.
+- **User posts:** a manifest flag `coolantModes = true` (read once at
+  load, like the hook table). A script without it gets a counted engine
+  warning naming the op on any `PARAM Coolant` - so it refuses
+  Off/Mist/Through-tool rather than flood them. Flood-only programs
+  need no flag, so existing user posts keep posting what they did.
+  Dropped: sniffing the script text for "Coolant" (fragile).
