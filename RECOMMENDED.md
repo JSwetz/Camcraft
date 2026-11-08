@@ -13636,6 +13636,118 @@ revolved (follow-up material if users hit it with long keyways).
   not remove it). A revolve with no flat end (domed or pointed both
   ends) near L/D 1..2 is still refused; none is known to be needed.
 
+## #208 - normal lines through one point cannot certify an axis (2026-11-08)
+
+- **Decided:** a point-concurrency guard in the axis judgement
+  (`crates/motion/src/multiaxis/axis_point.rs`). Find the point the
+  candidate's inlier normal lines meet best (area-weighted
+  least-squares point of nearest approach, refitted on the area half
+  that misses it least). When the lines through that point (within the
+  sagitta tolerance) carry half the inlier area or more, the coarseness
+  gate is applied to those facets alone: their own bearings about the
+  axis must leave no skip past the sagitta budget. Otherwise the
+  candidate fails and the fit refuses by name as before ("share no
+  rotation axis" / "every axis fits ... equally"). Plus, on an
+  isotropic part a pole (facing-flat) axis is no longer tilted by the
+  direction refinement. The guard alone already refuses the cube; this
+  is a second safeguard asked for in the re-review of PR #204.
+- **Why:** two-triangle faces anchor their normal lines at the face
+  centre, so a box's faces all meet at its centre; a single-band wall's
+  lines all meet at the bar's mid point. Lines through one point meet
+  every line through it, so the concurrency share passed for any
+  direction through the point, and a small finely meshed boss or cross
+  hole supplied the bearings. A pencil of lines has no direction of its
+  own; it can only stand for a revolve when it is itself rotationally
+  symmetric about the axis (the Gauss map of a revolve is circles about
+  the axis). A box's faces bear 2-4 azimuths about any axis; a
+  single-band shaft's wall bears all of them about its own axis and two
+  about a cross one. So the common single-band CAD cylinder still fits
+  (pinned: `a_single_band_bar_still_fits_its_true_axis`), and plates,
+  cubes and cross readings are refused.
+- **Considered and dropped:** (b) sub-sampling big facets into many
+  lines: the circumcenter anchor is what makes a turned facet's line
+  meet the axis exactly; samples elsewhere on a wall facet miss it by
+  up to half a chord, so every coarse revolve would lose concurrency.
+  (a) requiring the contact points to spread along the axis: it refuses
+  the single-band cylinder, the most common real STL, whose direction
+  the Gauss map does fix. (c) refusing whenever the inliers are mostly
+  point-concurrent: same single-band loss. An EGI second-moment
+  symmetry test: a square plate is second-moment symmetric about its
+  normal, so it would pass a plate-with-boss about the plate centre.
+- **Cost / caveat:** the guard can only refuse. A single-band shaft
+  with a keyway or D-flat wider than the sagitta skip (about 28 degrees
+  of bearing on each side of the feature's own facets) in its
+  point-concurrent wall is refused rather than read (the issue's
+  shaft-with-D-flat fixture is refused this way, which the issue
+  allows). Five-band and banded shafts are untouched: their lines meet
+  the axis at several points, so no point carries half the area.
+
+### #208, review of PR #223: pencils judged one by one; only inliers vouch for roundness
+
+- **Decided:** (1) the coarseness gate reads only the facets whose
+  normal lines MEET the candidate axis; outliers (an off-centre boss)
+  no longer supply bearings. (2) The inliers are peeled into pencils
+  (lines through one point, one after another, up to 12, each of at
+  least 5 % of the inlier area), and each pencil is judged by itself:
+  its area-weighted low trigonometric moments about the axis (k = 1..4)
+  must vanish. The moments times the pencil's area, summed, may total
+  at most 10 % of the inlier area (the same 10 % the concurrency share
+  allows to miss). A pencil holding half the inliers must still pass
+  the coarseness gate alone.
+- **Why:** with sides split into three or more rectangles, no one
+  point held half the area, so the first guard never fired; and two
+  crossed single-band rods are two pencils at ONE point, whose union
+  looked round about the cross axis. A revolve's ring spreads its area
+  evenly over the bearings (all moments below its segment count
+  vanish); a crossing rod's wall puts its share s on two opposite
+  bearings (k = 2 moment s), a box's faces on four (k = 4).
+- **Dropped:** Kuiper's statistic against the uniform circle (tried
+  first): it reads two opposite lumps at only half their share (0.19
+  for a crossing rod holding 37 %), the same as a D-flat's single lump
+  that a real part needs to pass, so no threshold separated them. The
+  moments do: a flat that lumps a cut arc's area on one bearing keeps
+  the low moments nearly whole (about 0.015 at k = 2 for a 1 mm flat
+  on r10).
+- **Cost:** crossed rods of any proportion are refused (fail closed),
+  including a short cross pin holding more than about 10 % of the
+  inlier area. A single-band shaft whose keyway or flat is wide enough
+  to move the first moment past 10 % is refused.
+
+### #208, second re-review of PR #223: rings by latitude class, latitude must not run with bearing
+
+- **Decided:** the per-pencil moment test (e883ae6) is replaced by two
+  tests on each pencil. (1) **Latitude classes:** the pencil's facets
+  are sorted by latitude `n . u` and split where it jumps by more than
+  0.01. Each narrow class (range at most 0.05) must hold a ring, with
+  its widest bearing skip within twice the sagitta budget; a class
+  that holds none counts its area as off the axis. Flats at a ring's
+  latitude ride with it (a D-flat; a square plate's sides round a
+  centred bore; a keyway floor in its band). (2) **Off-cone share:**
+  the share of the latitude's variance (and of its squared deviation)
+  that the first two bearing harmonics explain (trigonometric
+  regression, Mardia & Jupp). It counts only when the explained swing
+  exceeds 2e-3 (about 0.1 degrees; the jittered-mesh pins explain at
+  most 3.3e-4). Both are summed, weighted by area, and capped at 10 %
+  of the inliers, as before.
+- **Why:** a skewed cross's shaft wall, seen from the rod's axis (or
+  from a line between the two), is a squashed ring: its bearings stay
+  spread, so the moments read it at only (1 - cos ang)/2, but its
+  latitude swings once per turn. A revolve's ring keeps one latitude.
+  The moment test also refused a square plate with a centred bore,
+  because the plate's four sides sit in the bore's pencil; by latitude
+  class they ride with the bore's ring, as a D-flat does. A 90-degree
+  cross folds the crossing wall onto two bearings at many latitudes,
+  so each of those classes holds no ring.
+- **Dropped:** the bearing moments of the whole pencil (they refused
+  plate-with-bore and missed skewed crosses); R^2 with no absolute
+  floor (a jittered shaft's correlated rounding explained up to 19 %
+  of its tiny latitude variance); a strict sagitta budget per class (a
+  keyway confined to one band leaves 30-degree skips beside its floor).
+- **Cost:** a skewed cross under about 0.1 degrees passes as one axis,
+  which is harmless at that angle. A finely meshed dome whose latitude
+  steps are under 0.01 is one wide class, judged by the off-cone share
+  alone.
+
 ## Issue #130 - turning kinds approach from the stock
 
 - **Envelope = one radius.** The kernels get `StockEnv { r_out, clearance }`:
