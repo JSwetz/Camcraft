@@ -30,6 +30,7 @@ mod path;
 mod plane;
 mod pose;
 mod rotary;
+pub mod text;
 mod thread;
 mod touch;
 

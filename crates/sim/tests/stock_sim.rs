@@ -348,8 +348,12 @@ fn hidden_rest_over_budget_says_not_judged() {
     let full = stock_sim::envelope_scan(&f, &raster(10.0), 3.0, 0.1).expect("scan");
     assert_eq!(full.hidden, stock_sim::HiddenRest::Judged, "the shipped budget judges this fixture");
     for (budget, what) in [
-        (stock_sim::ScanBudget { cells: usize::MAX, claims: 10 }, "claims"),
-        (stock_sim::ScanBudget { cells: 100, claims: usize::MAX }, "cells"),
+        // M13.1 (#24): past the holding budget the scan streams in row
+        // bands, so these starve what ONE ROW needs (a row's ~128
+        // claims, a row's ~50 bin headers) or the walk itself.
+        (stock_sim::ScanBudget { cells: usize::MAX, claims: 10, work: usize::MAX }, "claims"),
+        (stock_sim::ScanBudget { cells: 10, claims: usize::MAX, work: usize::MAX }, "cells"),
+        (stock_sim::ScanBudget { cells: usize::MAX, claims: usize::MAX, work: 100 }, "work"),
     ] {
         let rep = stock_sim::envelope_scan_within(&f, &raster(10.0), 3.0, 0.1, budget).expect("scan");
         let stock_sim::HiddenRest::OverBudget { cells, claims } = rep.hidden else {

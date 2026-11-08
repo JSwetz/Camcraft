@@ -2,10 +2,12 @@
 //! Contour op set to In control posts the PART contour under G41/G42
 //! with the tool's D register through the Fanuc post - the golden
 //! `golden/nc/contour_control_comp.nc` locks the text - while the same
-//! op in computer posts the centre path every earlier golden holds;
-//! the lathe post and the other mill posts refuse it by name, and so
-//! does a user script that lacks the hook, so a Control op can never
-//! leave as an undersize part.
+//! op in computer posts the centre path every earlier golden holds.
+//! Haas, Mazak and Siemens 840D write their own comp words (#39) to
+//! `golden/nc/<dialect>/contour_control_comp.nc`; the lathe post,
+//! Heidenhain and Tormach refuse it by name, and so does a user script
+//! that lacks the hook, so a Control op can never leave as an
+//! undersize part.
 //!
 //! Regenerate after an intentional change:
 //! `WRITE_GOLDEN=1 cargo test -p camcraft-app --test control_comp`
@@ -135,6 +137,48 @@ fn in_control_posts_the_part_contour_under_g42_through_fanuc_to_the_golden() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// The dialects that write the comp words (#39): (post stem, the
+/// engage block's leading words, the cancel block's, the D word - None
+/// where the tool call's own D selects the edge).
+const DIALECTS: &[(&str, &str, &str, Option<&str>)] = &[
+    ("haas", "G1 G42 ", "G1 G40 ", Some(" D1 ")),
+    ("mazak", "G01 G42 ", "G01 G40 ", Some(" D1 ")),
+    ("sinumerik", "G1 G42 ", "G1 G40 ", None),
+];
+
+#[test]
+fn haas_mazak_and_840d_post_the_part_contour_under_their_own_comp_words_to_the_goldens() {
+    let (world, _) = world_with(Compensation::Control);
+    let e = model::find_by_name(&world, "Contour1").expect("op");
+    let spans = model::toolpath_of(&world, &e).expect("cache").path.comps.len();
+    assert!(spans >= 2);
+    let text = stream(&world);
+    let m = posting::machine_value(&world);
+    for (stem, engage, cancel, d) in DIALECTS {
+        let out = engine::run(&post_text(stem), &m, &text).unwrap();
+        assert!(out.warnings.is_empty(), "{stem}: {:?}", out.warnings);
+        let p = &out.program;
+        assert_eq!(p.matches(engage).count(), spans, "{stem}: {p}");
+        assert_eq!(p.matches(cancel).count(), spans, "{stem}: {p}");
+        assert_eq!(p.matches("G41").count(), 0, "{stem}: {p}");
+        match d {
+            Some(d) => assert_eq!(p.matches(d).count(), spans, "{stem}: the D word rides each engage: {p}"),
+            None => assert!(
+                p.lines().filter(|l| l.contains(engage)).all(|l| !l.contains(" D")),
+                "{stem}: the tool call's D selects the edge: {p}"
+            ),
+        }
+        assert!(p.contains("X10 Y10 "), "{stem}: the part corner: {p}");
+        assert!(!p.contains("WEAR COMP"), "{stem}: no wear note under control: {p}");
+        common::write_golden(&format!("nc/{stem}/contour_control_comp.nc"), p);
+        let mut path = std::env::temp_dir();
+        path.push(format!("camcraft_control_comp_ok_{stem}_{}.nc", std::process::id()));
+        let posted = posting::post_script(&world, &path, &post_text(stem)).expect("the gate releases it");
+        assert_eq!(&posted.program, p, "{stem}");
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 #[test]
 fn the_lathe_and_the_other_mill_posts_refuse_a_control_op_by_name_and_the_gate_blocks() {
     let (world, _) = world_with(Compensation::Control);
@@ -142,7 +186,7 @@ fn the_lathe_and_the_other_mill_posts_refuse_a_control_op_by_name_and_the_gate_b
     let m = posting::machine_value(&world);
     let out = engine::run(&post_text("fanuc-lathe"), &m, &text).unwrap();
     assert!(out.warnings.iter().any(|w| w.contains("nose-radius compensation")), "{:?}", out.warnings);
-    for stem in ["haas", "mazak", "sinumerik", "heidenhain", "tormach"] {
+    for stem in ["heidenhain", "tormach"] {
         let out = engine::run(&post_text(stem), &m, &text).unwrap();
         assert!(out.warnings.iter().any(|w| w.contains("G41/G42) is not supported")), "{stem}: {:?}", out.warnings);
         let mut path = std::env::temp_dir();

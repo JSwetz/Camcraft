@@ -150,7 +150,7 @@ pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result
         // A turning op's moves revolve about its fitted spindle (#19,
         // `stock_sim::lathe`).
         let cut = match (&p.rotary, &p.lathe) {
-            (_, Some(l)) => stock.simulate_lathe_about(&p.moves, l.nose, &l.axis),
+            (_, Some(l)) => stock.simulate_lathe_profile(&p.moves, &l.profile, &l.axis),
             (Some(ax), None) => crate::stock_sim::simulate_rotary_slice(&mut stock, &op, &p.moves, 0, ax, pose_tol).map(|_| ()),
             (None, None) => stock.simulate_display(std::slice::from_ref(&op)),
         };

@@ -154,11 +154,18 @@ function onOpen() {
   writeln("%" + pgmName + " G71 *");
 }
 
-// Cutter compensation in the control (M13.11): this dialect does not
-// state it yet - refused by name, never a centre path under a
-// Control op (the stream's contour is the PART contour).
+// Cutter compensation in the control (M13.11, #39): refused by name,
+// never a centre path under a Control op (the stream's contour is the
+// PART contour). The TNC's documented engage rule (the manuals: the
+// block that activates G41/G42 ends with the tool perpendicular to the
+// programmed point, compensation taking effect only at its end) is
+// not stated against the next element the way the Fanuc start-up is,
+// so a perpendicular lead's engage point would be a guess; and the
+// radius is always the tool table's R plus DR, so the wear variant's
+// "the register holds only the wear delta" has no TNC form.
+// docs/decisions/39-comp-dialects.md records the call.
 function onRadiusCompensation() {
-  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
+  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc, Haas, Mazak or Siemens 840D post");
 }
 
 // #50: in this mode G54 is DATUM SHIFT with axis values and G55 a

@@ -29,6 +29,10 @@ var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
+var compG = "";            // G41/G42/G40 pending for the next straight block (#39)
+var compD = "";            // the D word riding the engage block ("" when the tool call selects it)
+var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
+var compNoted = false;     // the section's operator note was written
 var orgX = 0, orgY = 0, orgZ = 0;
 var nLine = 0;             // the numbered-block dialect: every written
                            // block advances N by 10 (gap left for hand edits)
@@ -153,11 +157,42 @@ function onOpen() {
   writeln("; " + nm);
 }
 
-// Cutter compensation in the control (M13.11): this dialect does not
-// state it yet - refused by name, never a centre path under a
-// Control op (the stream's contour is the PART contour).
-function onRadiusCompensation() {
-  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
+// Cutter radius compensation in the control (#39; DIN 66025 / ISO 6983
+// G41 left / G42 right / G40 cancel, and the family's published
+// programming fundamentals: the radius is the ACTIVE cutting edge's -
+// the D the tool call already selected (T n D n) - so no D word rides
+// the engage block; the approach NORM runs straight to the first point
+// and stands the tool perpendicular to the path tangent at that start
+// point, the start-up the generator's lead law assumes - stated on the
+// engage block, never left to a modal KONT). The stream's COMP
+// record says which side; the NEXT motion record is the engage (or
+// cancel) block, a straight lead at least a radius long. A comp word
+// that would land on a rapid or an arc is refused by name (counted,
+// gate-blocked) - never written where the control would misread it.
+// Under wear (CompensationType "wear", the centre path) the edge must
+// hold only the wear delta: the section says so once, in a comment.
+function onRadiusCompensation(side) {
+  var s = String(side || properties.Compensation || "off");
+  if (s === "off") {
+    compG = compOn ? "G40" : "";
+    compD = "";
+    compOn = false;
+    return;
+  }
+  if (inCycle) { msg("cutter compensation inside a canned-cycle group"); return; }
+  compG = ((s === "left") ? "G41" : "G42") + " NORM";  // NORM stated, never a stale KONT
+  compD = "";
+  compOn = true;
+  if (properties.CompensationType === "wear" && !compNoted) {
+    block(["; WEAR COMP - D" + ni(tNo) + " HOLDS THE WEAR DELTA ONLY, NOT THE TOOL RADIUS"]);
+    compNoted = true;
+  }
+}
+function compRefuse(what) {
+  if (compG) {
+    msg("cutter compensation must engage or cancel on a straight G1 move, not " + what);
+    compG = ""; compD = ""; compOn = false;
+  }
 }
 
 function onParameter(name, value) {
@@ -209,6 +244,11 @@ function endPreamble() {
   sectionOpen = false;
   if (inCycle) block(["G80"]);
   inCycle = false;
+  if (compOn || compG) {
+    msg("cutter compensation still engaged at section end - no cancel block");
+    compG = ""; compD = ""; compOn = false;
+  }
+  compNoted = false;
   if (coolant) block(["M9"]);
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
@@ -224,16 +264,21 @@ function onSectionEnd() { endPreamble(); }
 // not a second copy of output.
 function onRapid() {
   startPreamble();
+  compRefuse("a rapid");
   if (!tiltOk(properties) || inCycle) return;
   block(["G0"].concat(xyz(properties)));
 }
 function onLinear() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
-  block(["G1"].concat(xyz(properties), [fw(properties.FeedRate)]));
+  // The pending comp word rides this straight block (#39).
+  var cg = compG, cd = compD;
+  compG = ""; compD = "";
+  block(["G1", cg].concat(xyz(properties), [cd, fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
+  compRefuse("an arc");
   if (!tiltOk(properties) || inCycle) return;
   var p = properties;
   block([
