@@ -21,6 +21,15 @@ pub fn params_to_json(p: &OpParams) -> Value {
 /// Shape errors (a missing field, a string where a number goes) are the
 /// refusal text; sanity (finite, positive) stays the commands' law.
 pub fn params_from_json(v: &Value) -> Result<OpParams, String> {
+    // #329: a height naming its own work-offset slot is refused, never
+    // ignored - the slot is the setup's (`SetSetupWorkOffset`).
+    let mut slots = Vec::new();
+    super::wcs_migrate::height_slots(v, &mut slots);
+    if !slots.is_empty() {
+        return Err("a work_offset height names no slot - the setup's work offset is the \
+                    one every height reads; pick it on the setup"
+            .into());
+    }
     let dto: ParamsDto = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
     Ok(dto.to_params())
 }

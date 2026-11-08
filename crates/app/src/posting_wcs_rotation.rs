@@ -62,7 +62,7 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
             continue; // not in the program (#110)
         }
         let setup = op.setup.as_deref();
-        let slot = wcs_slot(world, setup, &op.params);
+        let slot = wcs_slot(world, setup);
         let Some(wcs) = crate::setup::wcs_entity(world, setup, slot) else {
             continue; // never placed: the identity at the origin
         };

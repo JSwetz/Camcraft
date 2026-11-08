@@ -154,7 +154,7 @@ fn contour_params() -> OpParams {
         clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
         retract_z: Height::of(HeightReference::TopOfStock, 10.0),
         top_z: Height::of(HeightReference::TopOfModel, 0.0),
-        bottom_z: Height::of(HeightReference::WorkOffset(0), 0.0),
+        bottom_z: Height::of(HeightReference::WorkOffset, 0.0),
         stepdown: 5.0,
         feed: 1200.0,
         plunge_feed: 300.0,
@@ -185,7 +185,8 @@ pub fn collect(state: &State) -> Scene {
 
 fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 3]> {
     let tris = model::facets_of(&state.world, entity).unwrap_or_default();
-    let loc = model::transform_of(&state.world, entity).unwrap_or_default();
+    // #326: the part where the active setup holds it.
+    let loc = camcraft_app::setup_align::view_pose(&state.world, entity).unwrap_or_default();
     let mut verts = Vec::with_capacity(tris.len() * 3);
     for t in tris.iter() {
         for p in [t.a, t.b, t.c] {

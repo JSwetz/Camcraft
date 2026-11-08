@@ -344,3 +344,29 @@ fn deburr_at_the_wall_corner_is_chamfer_byte_for_byte() {
     let za = t.moves.iter().find(|m| m.kind == MoveKind::Plunge).unwrap().to.z;
     assert!((za - cp.corner_z()).abs() < 1e-6, "corner_z {} vs deburr tip {za}", cp.corner_z());
 }
+
+#[test]
+fn every_run_leaves_its_cut_straight_up_before_the_next_traverse() {
+    // #304: a closed box rides as several runs (the rims, the corner
+    // tip lines), and the cone ends each one still in the edge it
+    // broke. Every rapid that starts below the clearance plane must be
+    // the vertical retract out of that break - a diagonal one would
+    // drag the cone up and across the part.
+    let f = box_mesh(0.0, 0.0, 40.0, 20.0, -10.0, 0.0);
+    let p = params(2.0, -12.0);
+    let t = deburr(&f, &p).expect("a box is all burr");
+    let plunges = t.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count();
+    assert!(plunges >= 2, "the box must ride as several runs to test the links: {plunges}");
+    for (i, m) in t.moves.iter().enumerate() {
+        if m.kind != MoveKind::Rapid || m.from.z >= p.clearance_z - 1e-9 {
+            continue;
+        }
+        assert!(
+            (m.from.x - m.to.x).abs() < 1e-9 && (m.from.y - m.to.y).abs() < 1e-9,
+            "rapid {i} leaves cutting depth diagonally: {:?} -> {:?}",
+            m.from,
+            m.to
+        );
+        assert!((m.to.z - p.clearance_z).abs() < 1e-9, "rapid {i} stops short of clearance: {:?}", m.to);
+    }
+}

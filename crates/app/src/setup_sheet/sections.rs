@@ -84,17 +84,13 @@ pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
     if !any {
         out.push_str("  (none placed)\n");
     }
-    // #196: the word the program runs in - the setup's pick, or the
-    // per-operation law when it picked none.
-    match ctx.and_then(|s| setup::work_offset(world, s)) {
-        Some(slot) => out.push_str(&format!(
-            "  program offset: {} (picked for this setup)\n",
-            WCS_SLOTS.get(slot).copied().unwrap_or("G54")
-        )),
-        None => out.push_str(
-            "  program offset: per operation - its height references, else G54 (not picked)\n",
-        ),
-    }
+    // #196, #329: the one word the setup's program runs in and its
+    // work-offset heights measure from: the setup's word, G54 when unset.
+    let slot = ctx.and_then(|s| setup::work_offset(world, s)).unwrap_or(0);
+    out.push_str(&format!(
+        "  program offset: {}\n",
+        WCS_SLOTS.get(slot).copied().unwrap_or("G54")
+    ));
     out.push('\n');
 }
 
@@ -106,6 +102,15 @@ pub(super) fn render_datum(world: &World, ctx: Option<&str>, out: &mut String) {
         out.push_str("DATUM\n");
         out.push_str(&format!(
             "  transferred from '{from}' - its stock and placed offsets were cloned\n\n"
+        ));
+    }
+    // #326: the operator must clamp the part the way the program assumes.
+    // As modelled prints nothing (identity is absence - sheets unchanged).
+    if let Some(a) = setup::effective(world, ctx).and_then(|s| crate::setup_align::stored(world, &s)) {
+        out.push_str("PART ALIGNMENT\n");
+        out.push_str(&format!(
+            "  {} - clamp the part this way up; stock, offsets and fixtures above are in this frame\n\n",
+            crate::setup_align::describe(Some(a))
         ));
     }
 }

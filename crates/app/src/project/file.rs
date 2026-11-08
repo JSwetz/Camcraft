@@ -44,7 +44,15 @@ use super::*;
 /// (`work_offset`, a G-word). Absent reads as the inferred law every v50
 /// file posted with; an old reader must refuse the file rather than
 /// silently post a picked G55 setup at G54.
-pub const PROJECT_VERSION: u32 = 51;
+/// v52 (#329): a work-offset height names no slot of its own - it reads
+/// its setup's. Older files' per-height slots move onto their setup when
+/// the setup agreed and refuse by name when not (`wcs_migrate`); an old
+/// reader must refuse a v52 file rather than read `{"work_offset": {}}`.
+/// v53 (#326): a setup may hold the part turned (`part_alignment`, a
+/// rigid transform document -> setup frame). Absent reads as "as
+/// modelled", so every v52 file loads unchanged; an old reader must
+/// refuse a v53 file rather than machine a flipped setup unflipped.
+pub const PROJECT_VERSION: u32 = 53;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -54,6 +62,15 @@ pub enum ProjectError {
     UnsupportedVersion(u32),
     #[error("malformed project file: {0}")]
     Corrupt(String),
+    /// #329: an older file whose operations measured from different work
+    /// offsets inside one setup - opening it would re-point a zero.
+    #[error(
+        "work offsets disagree - since project v52 a setup's work offset is program zero for \
+         every operation in it, and opening this file would silently re-point an operation. \
+         Make each setup's operations measure from one offset (in the release that wrote the \
+         file), then reopen:\n{0}"
+    )]
+    WorkOffsetConflict(String),
 }
 
 #[derive(Serialize, Deserialize)]

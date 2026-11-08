@@ -36,7 +36,17 @@ use crate::fixture::MACHINE_TABLE;
 use crate::geometry::{quat_conjugate, quat_mul, transform_inverse_point, transform_point};
 use crate::model;
 use crate::schema::Location;
+use crate::setup_align;
 use crate::stock::StockShape;
+
+/// The part alignment of the setup that names `stock` as its stock, when
+/// that setup holds the part turned (#326).
+fn aligned_owner(world: &World, stock: &str) -> Option<Location> {
+    crate::setup::names(world)
+        .into_iter()
+        .filter(|s| crate::setup::def_of(world, s).is_some_and(|d| d.stock == stock))
+        .find_map(|s| setup_align::stored(world, &s))
+}
 
 /// Place a model: the same rigid transform any page sets, applied to
 /// the named part. Construction snapshots the previous `Location` for
@@ -84,6 +94,14 @@ impl MoveModel {
                 };
                 follows.then(|| {
                     let before = model::transform_of(world, &entity).unwrap_or_default();
+                    // #326: a stock placed in a setup that holds the part
+                    // turned follows the move as that setup sees it - the
+                    // document move conjugated by the setup's alignment.
+                    if let Some(a) = aligned_owner(world, &stock_name) {
+                        let delta = setup_align::compose(next, setup_align::inverse(prev));
+                        let seen = setup_align::compose(a, setup_align::compose(delta, setup_align::inverse(a)));
+                        return (stock_name, before, setup_align::compose(seen, before));
+                    }
                     let local = transform_inverse_point(before.pos, prev.pos, prev.rot);
                     let after = Location {
                         pos: transform_point(local, next.pos, next.rot),

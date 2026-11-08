@@ -29,7 +29,9 @@ impl OpParams {
                 HeightReference::BottomOfStock => (2, 0),
                 HeightReference::TopOfModel => (3, 0),
                 HeightReference::BottomOfModel => (4, 0),
-                HeightReference::WorkOffset(i) => (5, i.min(255) as u8),
+                // #329: the slot is the setup's; digesting the resolved
+                // one keeps every migrated stamp exactly as it was.
+                HeightReference::WorkOffset => (5, u8::try_from(crate::setup::wcs_slot(world, setup)).unwrap_or(u8::MAX)),
                 HeightReference::TopOfSelection => (6, 0),
                 HeightReference::BottomOfSelection => (7, 0),
             };

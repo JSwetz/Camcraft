@@ -124,16 +124,27 @@ pub struct ToolDef {
 /// sheet, inert for every stamp (the clones themselves carry the data).
 /// `work_offset` is the setup's PICKED program offset (#196), an index
 /// into [`WCS_SLOTS`]: every operation of the setup posts at that word,
-/// measured from that slot's placement. `None` - every pre-#196 document
-/// and the default - is "not picked": each operation keeps the inferred
-/// law (the first slot its heights reference, else `G54`), so old files
-/// post byte-identical. Written only by `SetSetupWorkOffset`.
+/// measured from that slot's placement, and every work-offset height of
+/// its operations reads that slot (#329). `None` - the default - is
+/// "not picked" and reads `G54` ([`crate::setup::wcs_slot`]). The loader
+/// lifts an older file's per-height slots onto this field when the whole
+/// setup agreed (`project::wcs_migrate`). Written only by
+/// `SetSetupWorkOffset` and that migration.
+/// `part_alignment` (#326) is how the PART sits in this setup: the rigid
+/// transform from the document frame into the setup frame (which face
+/// is on the table, which edge runs along X). The stock, the offsets and
+/// the fixtures of the setup are placed in that frame already; only the
+/// parts read through it (`setup_align`). `None` - the default - is "as
+/// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
+/// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
+/// carries it) and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
     pub wcs: Vec<String>,
     pub datum_from: String,
     pub work_offset: Option<usize>,
+    pub part_alignment: Option<Location>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the

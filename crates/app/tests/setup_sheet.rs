@@ -366,7 +366,7 @@ fn every_float_uses_the_format_helper() {
 
     let mut params = face_params();
     if let OpParams::Face { cut_z: c, .. } = &mut params {
-        *c = Height::of(HeightReference::WorkOffset(0), 0.0);
+        *c = Height::of(HeightReference::WorkOffset, 0.0);
     }
     // Unresolvable at render time, sane at creation time - the command
     // gate checks structure, not resolution (depth_sane's rule).
