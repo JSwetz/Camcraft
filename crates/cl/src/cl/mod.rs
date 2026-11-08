@@ -29,6 +29,7 @@ mod moves;
 mod path;
 mod plane;
 mod pose;
+pub mod text;
 mod thread;
 mod touch;
 
