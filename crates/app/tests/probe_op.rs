@@ -352,7 +352,8 @@ fn every_older_kind_keeps_its_stored_id_and_digest_tag() {
         assert_eq!(KindInfo::ALL[i].ty, *ty, "id {i} moved");
         assert_eq!(usize::from(ty.info().tag), i, "{ty:?}'s digest tag moved");
     }
-    assert_eq!(project::PROJECT_VERSION, 50, "the probe arrives without a format rung");
+    // v51 is #196's setup work-offset rung, not the probe's.
+    assert_eq!(project::PROJECT_VERSION, 51, "the probe arrives without a format rung");
 }
 
 /// The posted Z of every G31 for a probe whose length register is

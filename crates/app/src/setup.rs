@@ -86,6 +86,15 @@ pub fn def_of(world: &World, name: &str) -> Option<SetupDef> {
         .and_then(|e| e.entity_view(world).try_get::<&SetupDef>(|d| d.clone()))
 }
 
+/// The program offset a setup PICKED (#196), as a [`WCS_SLOTS`] index;
+/// `None` when it picked none (the inferred per-operation law) or the
+/// name wears no setup. An out-of-range stored index reads as no pick -
+/// `SetSetupWorkOffset` and the loader refuse one, so it cannot arise.
+#[must_use]
+pub fn work_offset(world: &World, name: &str) -> Option<usize> {
+    def_of(world, name)?.work_offset.filter(|i| *i < WCS_SLOTS.len())
+}
+
 /// The effective setup of an operation or piece of furniture: what the
 /// document resolves a declared `Option<String>` to.
 #[must_use]

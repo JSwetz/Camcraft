@@ -281,6 +281,8 @@ mod per_op;
 mod suppressed;
 #[path = "posting_wcs_rotation.rs"]
 mod wcs_rotation;
+#[path = "posting_wcs_slot.rs"]
+mod wcs_slot;
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
@@ -329,7 +331,10 @@ fn post_script_body(world: &World, out_path: &Path, cps: &str) -> Result<Posted,
     // computed here and now - never a cached verdict carried in from
     // the viewer (the PostView law: a verdict about an older world
     // must not release this one's metal).
-    let report = verification_report(world);
+    let mut report = verification_report(world);
+    // One file, one register per word (#196): two setups posting the same
+    // word from different placements refuse here - per-op files are exempt.
+    report.problems.extend(wcs_slot::shared_word_problems(world));
     if !report.problems.is_empty() {
         return Err(format!("post blocked - {}", report.problems.join("; ")));
     }
@@ -505,6 +510,9 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(suppressed::suppressed_problems(world));
     // The rotated-offset clause (#315): the post carries translation only.
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
+    // The picked-offset clause (#196): a height on another slot than its
+    // setup's pick is a conflict, never a silent override.
+    problems.extend(wcs_slot::slot_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
         match crate::machine::check_document(world, &m) {
@@ -750,9 +758,10 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
     Ok(streams)
 }
 
-/// The work offset this operation posts to: the first WCS slot its
-/// height grammar references, else the default `G54` - and that
-/// slot's origin as the machine would measure it. `pub(crate)` so the
+/// The work offset this operation posts to: its setup's picked slot
+/// (#196), else the first WCS slot its height grammar references, else
+/// the default `G54` - and that slot's origin as the machine would
+/// measure it. `pub(crate)` so the
 /// machine-limit travel check (M2.3 C) reads program coordinates by
 /// exactly this law, not by a second copy of it.
 ///
@@ -765,7 +774,7 @@ pub(crate) fn wcs_context<'a>(
     setup: Option<&str>,
     params: &'a OpParams,
 ) -> (&'a str, [f64; 3]) {
-    let slot = wcs_rotation::wcs_slot(params);
+    let slot = wcs_slot::wcs_slot(world, setup, params);
     let name = WCS_SLOTS[slot];
     let origin = crate::setup::wcs_entity(world, setup, slot)
         .and_then(|e| model::transform_of(world, &e))

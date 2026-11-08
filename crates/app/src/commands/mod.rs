@@ -20,6 +20,8 @@ pub mod ribbon_pins;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
+// #196: a setup's picked program offset.
+pub mod setup_wcs;
 pub mod set_units;
 // M6.1 C: the document's theme choice, `SelectPost`'s twin.
 pub mod theme;
@@ -53,6 +55,7 @@ pub use ribbon_pins::SetRibbonPins;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
+pub use setup_wcs::SetSetupWorkOffset;
 pub use set_units::SetUnits;
 pub use theme::{theme_of, theme_set, SetTheme};
 pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};

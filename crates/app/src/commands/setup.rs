@@ -118,12 +118,17 @@ impl CreateSetup {
                 stock: STOCK_NAME.to_string(),
                 wcs: WCS_SLOTS.iter().map(|s| s.to_string()).collect(),
                 datum_from: String::new(),
+                work_offset: None,
             }
         } else {
             SetupDef {
                 stock: format!("{name}/Stock"),
                 wcs: WCS_SLOTS.iter().map(|w| format!("{name}/{w}")).collect(),
                 datum_from: datum_from.unwrap_or("").to_string(),
+                // The datum transfer carries the source's picked program
+                // offset with its placements (#196): the slot is part of
+                // the datum system being cloned.
+                work_offset: datum_from.and_then(|f| setup::work_offset(world, f)),
             }
         };
         let mut stock = None;

@@ -122,11 +122,18 @@ pub struct ToolDef {
 /// as a missing `G55` entity means today. `datum_from` records the setup
 /// whose stock and G54 a new setup was cloned from - provenance for the
 /// sheet, inert for every stamp (the clones themselves carry the data).
+/// `work_offset` is the setup's PICKED program offset (#196), an index
+/// into [`WCS_SLOTS`]: every operation of the setup posts at that word,
+/// measured from that slot's placement. `None` - every pre-#196 document
+/// and the default - is "not picked": each operation keeps the inferred
+/// law (the first slot its heights reference, else `G54`), so old files
+/// post byte-identical. Written only by `SetSetupWorkOffset`.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
     pub wcs: Vec<String>,
     pub datum_from: String,
+    pub work_offset: Option<usize>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the

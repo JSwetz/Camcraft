@@ -15,28 +15,14 @@
 use flecs_ecs::prelude::World;
 
 use crate::model;
-use crate::operation::{HeightReference, OpParams};
-use crate::posting::HeightRefs;
 use crate::schema::WCS_SLOTS;
+
+use super::wcs_slot::wcs_slot;
 
 /// Rotation angle below which an offset counts as unrotated: 1e-9 rad
 /// turns a point 1 m out by 1 nm - far under any machine resolution,
 /// and far over the float noise of a normalized identity quaternion.
 pub(crate) const ROT_TOL_RAD: f64 = 1e-9;
-
-/// The work-offset slot an operation posts to: the first WCS slot its
-/// height grammar references, else slot 0 (`G54`). The one law
-/// [`crate::posting::wcs_context`] and this clause both read.
-pub(crate) fn wcs_slot(params: &OpParams) -> usize {
-    params
-        .heights()
-        .into_iter()
-        .find_map(|h| match h.reference {
-            HeightReference::WorkOffset(i) if i < WCS_SLOTS.len() => Some(i),
-            _ => None,
-        })
-        .unwrap_or(0)
-}
 
 /// Angle (rad, in [0, pi]) and unit axis of a unit quaternion (x, y, z, w).
 /// `atan2` rather than `acos(w)`, which is ill-conditioned near identity.
@@ -76,7 +62,7 @@ pub(super) fn rotated_wcs_problems(world: &World) -> Vec<String> {
             continue; // not in the program (#110)
         }
         let setup = op.setup.as_deref();
-        let slot = wcs_slot(&op.params);
+        let slot = wcs_slot(world, setup, &op.params);
         let Some(wcs) = crate::setup::wcs_entity(world, setup, slot) else {
             continue; // never placed: the identity at the origin
         };

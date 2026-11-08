@@ -54,6 +54,7 @@ mod lead_page;
 mod op_tabs;
 mod painted;
 mod pages;
+mod setup_wcs_pick;
 // The operation dialog, split out of `pages` with the property grid
 // (user review 2026-11-06): the frame, the Geometry pick block, the
 // params dispatcher and its kind-family pages, the shared widgets.
@@ -116,6 +117,8 @@ mod debug_info_tests;
 mod fresh_op_tests;
 #[cfg(test)]
 mod tool_number_tests;
+#[cfg(test)]
+mod setup_wcs_tests;
 #[cfg(test)]
 mod ball_corner_tests;
 #[cfg(test)]
