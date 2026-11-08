@@ -104,6 +104,8 @@ mod pin_tests;
 #[cfg(test)]
 mod ribbon_icon_tests;
 
+mod tool_number_tests;
+#[cfg(test)]
 mod gate_route_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
