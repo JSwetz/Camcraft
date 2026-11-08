@@ -50,6 +50,7 @@ use crate::verify::Warning;
 use super::blade;
 use super::profile;
 use super::revolve;
+use super::stock::StockEnv;
 
 /// The lean an XY-circle helix can live with: the circles must stand
 /// in planes square to the axis, or the pass stops being one turn
@@ -83,6 +84,12 @@ pub struct ThreadParams {
 /// down to the root, one helical pass per rung, each pass a full
 /// turn per pitch across the window's lattice of turns.
 pub fn thread(facets: &[Triangle], p: &ThreadParams) -> Result<Toolpath, GenError> {
+    thread_in(facets, p, None)
+}
+
+/// [`thread`] inside a setup stock (#130): every rapid clears the
+/// bar's OD, not only the part's.
+pub fn thread_in(facets: &[Triangle], p: &ThreadParams, stock: Option<StockEnv>) -> Result<Toolpath, GenError> {
     if p.pitch <= 0.0 {
         return Err(GenError::Invalid("threading needs a positive pitch".into()));
     }
@@ -115,6 +122,7 @@ pub fn thread(facets: &[Triangle], p: &ThreadParams) -> Result<Toolpath, GenErro
         p.tolerance,
         "thread",
         "threading insert",
+        stock,
     )?;
     if f.lean() > LEAN_MAX {
         return Err(GenError::Invalid(format!(
