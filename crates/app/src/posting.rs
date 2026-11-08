@@ -533,13 +533,17 @@ fn fixture_problems(world: &World) -> Vec<String> {
 pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
     let ops = program_ops(world)?;
 
-    // Tool library rank, the T../H.. law: 1-based position among the
-    // named tools in document order.
-    let tool_ranks: Vec<String> = model::named_entities(world)
-        .into_iter()
-        .filter(|(_, e)| model::is_tool(world, e))
-        .map(|(n, _)| n)
+    // The T../H.. law (#221): a tool's own number when it has one, else
+    // its 1-based position among the named tools in document order - and
+    // two tools of one program posting the same number refuse by name.
+    let tool_numbers = crate::tool_numbers::numbers(world);
+    let used: Vec<String> = ops
+        .iter()
+        .filter_map(|(_, e)| model::operation_of(world, e).map(|op| op.tool))
         .collect();
+    if let Some(msg) = crate::tool_numbers::clash(world, &used) {
+        return Err(msg);
+    }
 
     let mut records: Vec<cnc::Record> = Vec::new();
     let mut moved = 0usize; // cycle AT anchors are stream-global
@@ -554,10 +558,10 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         let setup = op.setup.as_deref();
         let hs = operation::resolve_params(world, setup, Some(&op.src), &op.params)
             .map_err(|err| format!("{name}: {err}"))?;
-        let tool_number = tool_ranks
+        let tool_number = tool_numbers
             .iter()
-            .position(|n| *n == op.tool)
-            .map_or(0, |i| i as u32 + 1);
+            .find(|(n, _)| *n == op.tool)
+            .map_or(0, |(_, t)| *t);
         let (wcs, origin) = wcs_context(world, setup, &op.params);
         // The stock box is THIS operation's setup context (M3.2 A): a
         // later setup's block is where and how tall its own stock says.

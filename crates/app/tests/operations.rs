@@ -7508,7 +7508,7 @@ fn deburr_refuses_a_cone_that_rules_no_chamfer() {
     );
     model::spawn(&world, "FLAT-CONE")
         .entity_view(&world)
-        .set(ToolDef { tool: flat });
+        .set(ToolDef { tool: flat, number: None });
     history.execute(&world, ImportModel::from_mesh("brick", deburr_brick()));
     history.execute(
         &world,

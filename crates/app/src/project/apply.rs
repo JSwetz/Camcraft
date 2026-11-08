@@ -627,11 +627,13 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             }
             EntityKind::Tool => {
                 // validate_kind already refused a missing or insane one.
-                let tool = dto
+                let tdto = dto
                     .tool
-                    .ok_or_else(|| corrupt("tool entity without a definition"))?
-                    .to_tool();
-                entity.entity_view(world).set(ToolDef { tool });
+                    .ok_or_else(|| corrupt("tool entity without a definition"))?;
+                entity.entity_view(world).set(ToolDef {
+                    tool: tdto.to_tool(),
+                    number: tdto.number,
+                });
             }
             EntityKind::Operation => {
                 let odto = dto
