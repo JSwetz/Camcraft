@@ -479,9 +479,19 @@ const COMPASS: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
 /// (feedback: "a dropdown under WCS that states if the origin is on stock
 /// or on model"), falling back honestly to the other when the chosen one
 /// doesn't exist. Returns the box and which one it is, for the pane note.
+///
+/// #326: the model bounds are read in the ACTIVE setup's frame - the
+/// setup whose offsets the pane places (`SetWcs` lands in the active
+/// setup) and the frame the viewport draws the part in. An aligned
+/// (flipped or turned) part's corners are its corners on the table, so
+/// G54 lands on the corner the operator touches off. The stock is that
+/// setup's own (setup furniture, already placed in its frame).
 pub(crate) fn anchor_reference(state: &State) -> Option<(Aabb, &'static str)> {
-    let stock = || model::stock_world_aabb(&state.world).map(|b| (b, "stock box"));
-    let solid = || model::solid_world_aabb(&state.world).map(|b| (b, "model bounds"));
+    let active = camcraft_app::setup::active(&state.world);
+    let stock = || model::stock_world_aabb_for(&state.world, active.as_deref()).map(|b| (b, "stock box"));
+    let solid = || {
+        camcraft_app::setup_align::solid_aabb_in(&state.world, active.as_deref()).map(|b| (b, "model bounds"))
+    };
     if state.wcs_ui.anchor_source == 1 {
         solid().or_else(stock)
     } else {
