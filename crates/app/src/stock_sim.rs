@@ -21,7 +21,7 @@ pub use rotary::{
 // blade's refusal, the verdict's refusal.
 #[path = "stock_sim_lathe.rs"]
 pub mod lathe;
-pub use lathe::{LathePlan, LATHE_BLADE_REFUSAL, LATHE_VERDICT_REFUSAL};
+pub use lathe::{LathePlan, LATHE_HELIX_REFUSAL, LATHE_THREAD_REFUSAL, LATHE_VERDICT_REFUSAL};
 
 use crate::geometry::Triangle;
 
@@ -289,12 +289,14 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // The revolved clause (#19, was M5.2 G.2's refusal): a Turn-
         // family path lives in the half-plane of its fitted axis, so
         // the plan carries the nose and that axis for the field eye's
-        // revolved stadium; a blade refuses by name (`lathe`).
-        let lathe = lathe::lathe_plan(world, name, &op, &tool)?;
-        // A turning insert's cutting feature is its nose: the display
-        // cell law (`auto_cell`) reads it, not the IC.
+        // revolved stadium, a blade its own footprint (`lathe`, #21).
+        let lathe = lathe::lathe_plan(world, name, &op, &tool, &cache.path.moves)?;
+        // A turning insert's cutting feature is its nose (a blade's,
+        // half its band - `LathePlan::feature`): the display cell law
+        // (`auto_cell`) reads it, not the IC. Every other tool sweeps
+        // its cutting radius - a tap its thread's core (#266).
         let radius = match lathe {
-            Some(plan) => plan.nose,
+            Some(plan) => plan.feature(),
             None => crate::operation::tool_law::cutting_radius(&tool).map_err(|e| format!("{name}: {e}"))?,
         };
         planned.push(Planned {

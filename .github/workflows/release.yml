@@ -221,13 +221,16 @@ jobs:
       - name: Build installer (Inno Setup, same staged tree as the zip)
         shell: pwsh
         # windows-latest ships Inno Setup 6; -Required makes a missing ISCC
-        # an error here (locally it is a named skip).
+        # an error here (locally it is a named skip). With the certificate
+        # secret set, installer.ps1 has ISCC sign the setup exe and the
+        # uninstaller it embeds through sign.ps1 (CAMCRAFT_SIGN_CERT_PATH
+        # comes from GITHUB_ENV, the password from this step's env).
+        env:
+          CAMCRAFT_SIGN_CERT_PASSWORD: ${{ secrets.CAMCRAFT_SIGN_CERT_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
           & scripts/installer.ps1 -Version $env:CAMCRAFT_VERSION -Required
           if ($LASTEXITCODE -ne 0) { throw "installer.ps1 exited with $LASTEXITCODE" }
-          & scripts/sign.ps1 -Path "dist/camcraft-$env:CAMCRAFT_VERSION-win-x64-setup.exe"
-          if ($LASTEXITCODE -ne 0) { throw "sign.ps1 exited with $LASTEXITCODE" }
           Get-ChildItem dist
       - name: Remove the signing certificate from the runner
         if: always()

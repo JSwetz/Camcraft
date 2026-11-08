@@ -11,11 +11,21 @@
 #   CAMCRAFT_SIGN_TIMESTAMP_URL   optional RFC-3161 server override
 #
 # Usage: powershell -File scripts/sign.ps1 -Path a.exe, b.exe
+#        powershell -File scripts/sign.ps1 -Status   (configured? see below)
+#
+# -Status answers "is a certificate configured?" without signing anything:
+# exit 0 configured, exit 10 not configured (prints the unsigned line), exit
+# 1 half-configured. installer.ps1 asks it before wiring Inno Setup's
+# SignTool, so this file stays the one place that reads CAMCRAFT_SIGN_*.
+# Inno Setup calls this script as its sign tool for the setup exe AND the
+# uninstaller it embeds (installer.ps1, /Scamcraft=...), so the signtool
+# command and the timestamp server below are the only ones in the repo.
 # Exit 0 when unsigned-by-configuration or signed and verified; exit 1 when a
 # certificate IS configured but signing cannot proceed (missing signtool,
 # missing file, signtool failure) - a configured-but-broken setup is an error.
 param(
-    [Parameter(Mandatory = $true)][string[]]$Path,
+    [string[]]$Path = @(),
+    [switch]$Status,
     [string]$Description = "camcraft",
     [string]$TimestampUrl = ""
 )
@@ -43,8 +53,11 @@ if ($thumb) {
 } else {
     Write-Host "unsigned: no certificate configured"
     Write-Host "  (set CAMCRAFT_SIGN_THUMBPRINT, or CAMCRAFT_SIGN_CERT_PATH + CAMCRAFT_SIGN_CERT_PASSWORD; see scripts/README.md)"
+    if ($Status) { exit 10 }
     exit 0
 }
+if ($Status) { exit 0 }
+if ($Path.Count -eq 0) { Fail "-Path is required (the files to sign)" }
 
 # ---- 2. Find signtool ---------------------------------------------------
 # PATH first (the GitHub runner and a Developer Command Prompt have it),

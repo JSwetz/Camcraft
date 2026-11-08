@@ -8456,6 +8456,23 @@ file layout, not the design: `march.rs` keeps the descent and its
 bracket, `march_verdicts.rs` the three consumers, `field_ray.rs` the
 entry law - each file one concern of the march.
 
+## #61: split stock simulation at domain seams (2026-11-07)
+
+- **Chosen:** Move `Stock::block`, `from_shape`, `from_facets`, and private
+  `block_field` into `backend_build.rs`; keep simulation, verdict methods,
+  and existing API paths in `backend.rs`. Move `Sweep`, its golden-section
+  constants, and `window_of` into `field_sweep.rs`; keep `SdfTool` and field
+  subtraction entry points in `field_cut.rs`, re-exporting `Sweep` there as
+  `pub(crate)` for current sibling callers. Register both private modules
+  and preserve the moved bodies. Provenance remains the existing CamCraft
+  modules; no external or vendor source is introduced.
+- **Dropped:** Algorithm or public-API redesign, a new helper abstraction,
+  and arbitrary mid-function cuts; domain seams reduce size without
+  widening behavior. No dependency, golden, or test edits; existing sim
+  and app `stock_*` / `lathe_field_sim` suites remain the guard.
+- **Cost to change later:** Reverse the two private module moves; callers
+  retain the current `field_cut` `Sweep` path.
+
 ## M7.2 A - the march's eye: six decisions the preview law rests on (2026-11-05)
 
 **Chosen: a CPU sphere-trace preview INSIDE `camcraft-sim`

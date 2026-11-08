@@ -33,6 +33,10 @@ var coolant = "";          // the M-code this program started, if any
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
+var compG = "";            // G41/G42/G40 pending for the next straight block (#39)
+var compD = "";            // the D word riding the engage block ("" when the tool call selects it)
+var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
+var compNoted = false;     // the section's operator note was written
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs)
 
 // ------------------------------------------------------------ helpers
@@ -151,11 +155,40 @@ function onOpen() {
   block(["O0001", "(" + nm + ")"]);
 }
 
-// Cutter compensation in the control (M13.11): this dialect does not
-// state it yet - refused by name, never a centre path under a
-// Control op (the stream's contour is the PART contour).
-function onRadiusCompensation() {
-  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
+// Cutter radius compensation in the control (#39; RS-274 / ISO 6983
+// G41 left / G42 right / G40 cancel, and the family's published EIA/ISO
+// programming conventions, which follow the Fanuc words: the D word
+// names the tool-offset row whose radius the control offsets by). The
+// stream's COMP record says which side; the NEXT motion record is the
+// engage (or cancel) block - the generator's law makes it a straight
+// lead at least a radius long, so the control builds (or withdraws)
+// the offset over it. D = the tool number, the row the H word reads. A
+// comp word that would land on a rapid or an arc is refused by name
+// (counted, gate-blocked) - never written where the control would
+// misread it. Under wear (CompensationType "wear", the centre path)
+// the row must hold only the wear delta: the section says so once.
+function onRadiusCompensation(side) {
+  var s = String(side || properties.Compensation || "off");
+  if (s === "off") {
+    compG = compOn ? "G40" : "";
+    compD = "";
+    compOn = false;
+    return;
+  }
+  if (inCycle) { msg("cutter compensation inside a canned-cycle group"); return; }
+  compG = (s === "left") ? "G41" : "G42";
+  compD = "D" + ni(tNo);
+  compOn = true;
+  if (properties.CompensationType === "wear" && !compNoted) {
+    block(["(WEAR COMP - " + compD + " HOLDS THE WEAR DELTA ONLY, NOT THE TOOL RADIUS)"]);
+    compNoted = true;
+  }
+}
+function compRefuse(what) {
+  if (compG) {
+    msg("cutter compensation must engage or cancel on a straight G01 move, not " + what);
+    compG = ""; compD = ""; compOn = false;
+  }
 }
 
 function onParameter(name, value) {
@@ -207,6 +240,11 @@ function endPreamble() {
   sectionOpen = false;
   if (inCycle) block(["G80"]);
   inCycle = false;
+  if (compOn || compG) {
+    msg("cutter compensation still engaged at section end - no cancel block");
+    compG = ""; compD = ""; compOn = false;
+  }
+  compNoted = false;
   if (coolant) block(["M9"]);
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
@@ -222,16 +260,21 @@ function onSectionEnd() { endPreamble(); }
 // not a second copy of output.
 function onRapid() {
   startPreamble();
+  compRefuse("a rapid");
   if (!tiltOk(properties) || inCycle) return;
   block(["G00"].concat(xyz(properties)));
 }
 function onLinear() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
-  block(["G01"].concat(xyz(properties), [fw(properties.FeedRate)]));
+  // The pending comp word rides this straight block (#39).
+  var cg = compG, cd = compD;
+  compG = ""; compD = "";
+  block(["G01", cg].concat(xyz(properties), [cd, fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
+  compRefuse("an arc");
   if (!tiltOk(properties) || inCycle) return;
   var p = properties;
   block([

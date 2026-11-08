@@ -4,7 +4,10 @@
 //! Fanuc post - the golden `golden/nc/contour_wear_comp.nc` locks the
 //! text; the mode rides EditOperationParams (undo / redo), the project
 //! file (an additive `wear_comp` key) and the cached span's `wear`
-//! flag; the other mill posts and the lathe post refuse it by name.
+//! flag. Haas, Mazak and Siemens 840D write their own comp words (#39)
+//! to `golden/nc/<dialect>/contour_wear_comp.nc`; Heidenhain (its
+//! radius is always the table's R plus DR), Tormach and the lathe post refuse it
+//! by name.
 //!
 //! Regenerate after an intentional change:
 //! `WRITE_GOLDEN=1 cargo test -p camcraft-app --test wear_comp`
@@ -119,6 +122,34 @@ fn wear_posts_the_centre_path_under_g42_through_fanuc_to_the_golden() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// (post stem, the engage block's leading words, the wear note's
+/// register) for the dialects that write the comp words (#39).
+const DIALECTS: &[(&str, &str, &str)] =
+    &[("haas", "G1 G42 ", "(WEAR COMP - D1 "), ("mazak", "G01 G42 ", "(WEAR COMP - D1 "), ("sinumerik", "G1 G42 ", "; WEAR COMP - D1 ")];
+
+#[test]
+fn haas_mazak_and_840d_post_wear_over_the_centre_path_to_the_goldens() {
+    let (world, _) = world_with(Compensation::Wear);
+    let e = model::find_by_name(&world, "Contour1").expect("op");
+    let spans = model::toolpath_of(&world, &e).expect("cache").path.comps.len();
+    let text = stream(&world);
+    let m = posting::machine_value(&world);
+    for (stem, engage, note) in DIALECTS {
+        let out = engine::run(&post_text(stem), &m, &text).unwrap();
+        assert!(out.warnings.is_empty(), "{stem}: {:?}", out.warnings);
+        let p = &out.program;
+        assert_eq!(p.matches(engage).count(), spans, "{stem}: {p}");
+        assert_eq!(p.matches(note).count(), 1, "{stem}: one note per section: {p}");
+        assert!(!p.contains("X10 Y10 "), "{stem}: the centre path, never the part corner: {p}");
+        common::write_golden(&format!("nc/{stem}/contour_wear_comp.nc"), p);
+        let mut path = std::env::temp_dir();
+        path.push(format!("camcraft_wear_comp_ok_{stem}_{}.nc", std::process::id()));
+        let posted = posting::post_script(&world, &path, &post_text(stem)).expect("the gate releases it");
+        assert_eq!(&posted.program, p, "{stem}");
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 #[test]
 fn the_other_posts_refuse_wear_by_name_and_the_gate_blocks() {
     let (world, _) = world_with(Compensation::Wear);
@@ -126,7 +157,7 @@ fn the_other_posts_refuse_wear_by_name_and_the_gate_blocks() {
     let m = posting::machine_value(&world);
     let out = engine::run(&post_text("fanuc-lathe"), &m, &text).unwrap();
     assert!(out.warnings.iter().any(|w| w.contains("nose-radius compensation")), "{:?}", out.warnings);
-    for stem in ["haas", "mazak", "sinumerik", "heidenhain"] {
+    for stem in ["heidenhain", "tormach"] {
         let mut path = std::env::temp_dir();
         path.push(format!("camcraft_wear_comp_{stem}_{}.nc", std::process::id()));
         let err = posting::post_script(&world, &path, &post_text(stem)).expect_err("the gate blocks");

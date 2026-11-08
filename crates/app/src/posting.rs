@@ -126,6 +126,12 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Lathe", include_str!("../../../assets/machines/lathe.mch")),
     // #131: an inch machine; pairs with the "Tormach PathPilot" post.
     ("Tormach 770MX", include_str!("../../../assets/machines/tormach-770mx.mch")),
+    // #170: the other Tormach mills, each from its own operator's manual.
+    ("Tormach 770MX (ML)", include_str!("../../../assets/machines/tormach-770mx-ml.mch")),
+    ("Tormach 770M", include_str!("../../../assets/machines/tormach-770m.mch")),
+    ("Tormach 1100MX", include_str!("../../../assets/machines/tormach-1100mx.mch")),
+    ("Tormach 1500MX", include_str!("../../../assets/machines/tormach-1500mx.mch")),
+    ("Tormach PCNC 440", include_str!("../../../assets/machines/tormach-pcnc440.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the

@@ -115,6 +115,11 @@ behavior only):
   inches, else `"mm"`: the unit the machine is PROGRAMMED in. The
   stream itself stays mm either way, so a post that honors `"inch"`
   writes G20 and divides every length and feed by 25.4.
+  `spindleRanges` (#170) is the spindle's hand-changed speed ranges
+  (belt or gear), `[[low, high], ...]` in rpm, `[]` when the file
+  states none; `rigidTapping` is `false` only when the `.mch` says the
+  spindle cannot rigid-tap (`spindle.rigid_tapping: false`), so a post
+  can refuse a rigid tap cycle by name.
 - writes: `writeln(s)`, `write(s)` (appends to the open line),
   `writeBlock(...parts)`, `writeWord(w)`, `writeAddress(letter, value, dp)`,
   `writeComment(s)`, `writeBlankLine()`, `writeOutput(...)`
