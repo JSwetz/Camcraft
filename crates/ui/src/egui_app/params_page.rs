@@ -155,6 +155,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             stamp: None,
             setup: op_ctx.clone(),
             area: Default::default(),
+            coolant: Default::default(),
         };
         operation::circular_fit_of(&state.world, &draft)
     } else {

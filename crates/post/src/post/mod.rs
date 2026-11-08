@@ -27,12 +27,15 @@
 //! as an undersize part.
 
 pub mod cnc;
+pub mod cnc_thread;
+mod coolant;
 pub mod engine;
 pub mod js;
 pub mod machine;
 pub mod probe_rec;
 mod program;
 
+pub use coolant::CoolantMode;
 pub use engine::{LineInfo, PostOutput, TraceBlock};
 
 use crate::cl::{MoveKind, Toolpath};
@@ -105,6 +108,9 @@ pub struct Dump<'a> {
     /// budget (`operation::probe_problems`) - no warning rides the
     /// cache for it. None is silence: the op asks no probe.
     pub probe_tol: Option<f64>,
+    /// The cutting fluid the op asks for (#112). Flood is the stream's
+    /// silent default; any other ask rides a `PARAM Coolant`.
+    pub coolant: CoolantMode,
     /// The probing result (#108): `Some` for a Probe op, whose path
     /// carries touches - the stream then closes the section with a
     /// `FOUND` record built from the touches. None for every cutting op.
@@ -131,6 +137,7 @@ impl<'a> Default for Dump<'a> {
             part_unload: false,
             part_transfer: false,
             probe_tol: None,
+            coolant: CoolantMode::Flood,
             probe_result: None,
         }
     }
@@ -164,6 +171,9 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     out.push(Record::Param { name: "StockXYFront".into(), value: json!(d.stock[2]) });
     out.push(Record::Param { name: "StockXYBack".into(), value: json!(d.stock[3]) });
     out.push(Record::Param { name: "StockZTop".into(), value: json!(d.stock_top_z) });
+    if let Some(word) = d.coolant.param_word() {
+        out.push(Record::Param { name: "Coolant".into(), value: json!(word) });
+    }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
     }
@@ -217,6 +227,15 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // after a lean must be COMMANDED (explicit zero angles), or the
     // machine runs the "upright" move under the old lean.
     let mut tilted = false;
+    // Threading cycles (issue #34) bracket their passes: THREAD before
+    // the span's first move, THREAD END after its last. A record that
+    // does not sit on these moves is not trusted and not written - the
+    // passes then post as themselves, and a script asked for the cycle
+    // refuses by name for want of the record.
+    let mut threads: Vec<&crate::cl::ThreadCycle> = t.threads.iter().filter(|c| c.is_sane(&t.moves)).collect();
+    threads.sort_by_key(|c| c.first);
+    let mut ti = 0usize;
+    let mut open_thread: Option<usize> = None;
     // Probing touches (#108): a touch that does not sit on its move is
     // refused by name - its move would post as a plain feed.
     for p in &t.probes {
@@ -235,6 +254,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
         while ci < cycles.len() && cycles[ci].first_move <= mi {
             out.push(Record::Cycle(cycles[ci].clone()));
             ci += 1;
+        }
+        if open_thread.is_none()
+            && let Some(c) = threads.get(ti).filter(|c| c.first == mi)
+        {
+            out.push(Record::Thread(Some(cnc_thread::ThreadRec::from_cycle(c))));
+            open_thread = Some(c.last);
+            ti += 1;
         }
         if let Some(r) = pre {
             out.push(r);
@@ -300,6 +326,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             // `.cnc` producers own the letters directly.
             abc,
         }));
+        if open_thread == Some(mi) {
+            out.push(Record::Thread(None));
+            open_thread = None;
+        }
+    }
+    if open_thread.is_some() {
+        out.push(Record::Thread(None));
     }
     for c in &cycles[ci..] {
         out.push(Record::Cycle((*c).clone()));

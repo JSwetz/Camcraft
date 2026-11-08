@@ -22,8 +22,8 @@ use camcraft_app::geometry::{Mesh, Point3, Triangle};
 /// The suites' old r10 x 40 bar (L/D 2) sat exactly on the lathe axis
 /// reader's isotropy door - its end caps' normal moment equal to half
 /// fits" (#152); L/D 5 stands well clear of it, and keeps the holes'
-/// walls and floors (with their images, below) a small share of the
-/// surface the fit must find revolved.
+/// walls and floors a small share of the surface the fit must find
+/// revolved.
 pub const FOOT: f64 = -80.0;
 pub const TOP: f64 = 20.0;
 
@@ -76,19 +76,13 @@ fn mouth_point(h: &CrossHole, phi: f64, r: f64) -> Point3 {
     Point3::new(p.x + a.x * t, p.y + a.y * t, p.z)
 }
 
-/// `holes` and their half-turn images about world Z (the deeper of two
-/// that coincide kept): a part symmetric under the half turn reads its
-/// axis of revolution exactly on Z. One-sided cross holes tilt the
-/// lathe's robust axis fit by ~0.001 mm, past the spindle law's 0.0005
-/// (#116, #152); the image holes are modelled, never drilled.
-fn with_images(holes: &[CrossHole]) -> Vec<CrossHole> {
+/// `holes`, with any two that coincide merged (the deeper kept), and
+/// two from opposite faces on one line through the axis that run into
+/// each other made one through hole. No mirror images: since #116 the
+/// lathe axis fit reads a one-sided cross hole's bar on its true axis.
+fn merged(holes: &[CrossHole]) -> Vec<CrossHole> {
     let mut all: Vec<CrossHole> = Vec::new();
-    let image = |h: &CrossHole| CrossHole {
-        origin: Point3::new(-h.origin.x, -h.origin.y, h.origin.z),
-        dir: Point3::new(-h.dir.x, -h.dir.y, h.dir.z),
-        ..*h
-    };
-    for h in holes.iter().copied().chain(holes.iter().map(image)) {
+    for h in holes.iter().copied() {
         let same = |g: &CrossHole| sub(g.origin, h.origin).dot(sub(g.origin, h.origin)) < 1e-12 && g.dir.dot(h.dir) > 0.999;
         match all.iter_mut().find(|g| same(g)) {
             Some(g) => g.floor_d = g.floor_d.min(h.floor_d),
@@ -116,10 +110,9 @@ fn with_images(holes: &[CrossHole]) -> Vec<CrossHole> {
 }
 
 /// The closed bar of radius `r`, z in [`z0`, `z1`], with `holes` (blind,
-/// horizontal, mouths on the face) modelled to their `floor_d`, plus
-/// their half-turn images ([`with_images`]).
+/// horizontal, mouths on the face) modelled to their `floor_d` ([`merged`]).
 pub fn punched_bar(r: f64, z0: f64, z1: f64, holes: &[CrossHole]) -> Mesh {
-    let holes = &with_images(holes)[..];
+    let holes = &merged(holes)[..];
     let nz = ((z1 - z0) / 2.0).ceil().max(1.0) as usize;
     let zk = |k: usize| z0 + (z1 - z0) * k as f64 / nz as f64;
     let thj = |j: usize| TAU * (j % SEGS) as f64 / SEGS as f64;

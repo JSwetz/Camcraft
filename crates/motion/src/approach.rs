@@ -26,12 +26,37 @@ use crate::machining2d::Lead;
 /// operator can shim a worn cutter at the pendant. The engage and cancel
 /// must ride straight leads at least a radius long (RS-274 / ISO 6983
 /// startup and cancel block behaviour); the generator refuses control
-/// compensation by name where the leads cannot carry it.
+/// compensation by name where the leads cannot carry it. In wear
+/// (#38), the generator walks the cutter-centre path at the nominal
+/// radius as in computer, and the post writes THAT path under
+/// G41/G42 Dn with the register holding only the wear delta (zero on
+/// a new cutter) - the same engage / cancel leads and the same lead
+/// law as in control, since the control builds and withdraws the
+/// (small) offset over the same blocks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Compensation {
     #[default]
     Computer,
     Control,
+    Wear,
+}
+
+impl Compensation {
+    /// Does the control take an offset (G41/G42) at all?
+    #[must_use]
+    pub fn in_control(self) -> bool {
+        self != Compensation::Computer
+    }
+
+    /// The mode's name in refusals: "control" or "wear".
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Compensation::Computer => "computer",
+            Compensation::Control => "control",
+            Compensation::Wear => "wear",
+        }
+    }
 }
 
 /// The parameter set. `Approach::DEFAULT` is the identity.

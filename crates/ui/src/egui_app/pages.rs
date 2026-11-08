@@ -50,7 +50,7 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
     Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
@@ -188,6 +188,17 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             {}
         }
     });
+    // #197: the models' size, right above the numbers it informs.
+    match super::stock_info::part_size_lines(&state.world, u) {
+        Some([size, extents]) => {
+            ui.label(size).on_hover_text("The models' bounding box - what Fit to Models wraps, plus the fit margin");
+            ui.label(RichText::new(extents).weak());
+        }
+        None => {
+            ui.label(RichText::new("No models yet - load one to see its size.").weak());
+        }
+    }
+    ui.add_space(3.0);
     let shape = state.stock_ui.shape;
     if shape == 1 {
         field(ui, "Diameter");
@@ -233,8 +244,22 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     field(ui, "Rotation (yaw deg)");
     num_plain(ui, &mut state.stock_ui.yaw_deg);
     ui.add_space(6.0);
-    field(ui, "Fit margin");
-    num(ui, u, &mut state.stock_ui.fit_margin);
+    // #198: a box can be fitted by a separate allowance on each side.
+    let per_side = state.stock_ui.shape == 0 && {
+        ui.checkbox(&mut state.stock_ui.fit_per_side, "Per side")
+            .on_hover_text("Fit to Models pads each face of the box by its own allowance");
+        state.stock_ui.fit_per_side
+    };
+    if per_side {
+        for (i, name) in ["-X", "+X", "-Y", "+Y", "Bottom", "Top"].iter().enumerate() {
+            field(ui, &format!("Fit margin {name}"));
+            num(ui, u, &mut state.stock_ui.fit_sides[i]);
+        }
+    } else {
+        field(ui, "Fit margin");
+        num(ui, u, &mut state.stock_ui.fit_margin);
+    }
+    let sides = state.stock_ui.fit_sides;
     let shape = state.stock_ui.shape;
     let (dx, dy, dz) = (state.stock_ui.dx, state.stock_ui.dy, state.stock_ui.dz);
     let (diameter, height) = (state.stock_ui.diameter, state.stock_ui.height);
@@ -271,9 +296,12 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             });
         }
         if ui.button("Fit to Models").clicked() {
-            state
-                .pending
-                .push_back(CommandKind::StockFit { margin, shape });
+            let cmd = if per_side {
+                CommandKind::StockFitSides { sides }
+            } else {
+                CommandKind::StockFit { margin, shape }
+            };
+            state.pending.push_back(cmd);
         }
         if has_stock && ui.button("Delete").clicked() {
             state
@@ -394,6 +422,7 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+    super::post_options::threading_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not

@@ -98,6 +98,7 @@ mod tests {
             cycles: Vec::new(),
             notes: Vec::new(),
             comps: Vec::new(),
+            threads: Vec::new(),
             probes: Vec::new(),
         }
     }

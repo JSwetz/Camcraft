@@ -112,6 +112,7 @@ fn op(p: OpParams) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 
@@ -173,4 +174,37 @@ fn an_axial_lathe_drill_where_the_bar_has_no_bore_is_still_convicted() {
         warns.iter().any(|w| matches!(w, Warning::Gouge { .. }) && w.blocks_post()),
         "an axial hole the bar does not have is still convicted: {warns:?}"
     );
+}
+
+/// Issue #116: a round bar with ONE modelled cross hole (no mirror
+/// hole on the far face) reads its true axis within the spindle
+/// tolerance - the hole's wall, floor and the mouth ring's off-meridian
+/// facets are set aside, and the band tightens on the clean surface of
+/// revolution - so the cross drill generates clean and posts. Before
+/// the fix the fit leaned ~0.001 mm and the spindle law refused it.
+#[test]
+fn a_bar_with_one_modelled_cross_hole_fits_on_the_spindle_and_drills_clean() {
+    let one = vec![cross(6.0)[0]];
+    let part = punched_bar::punched_bar(PART_R, punched_bar::FOOT, punched_bar::TOP, &one);
+    let r = operation::spindle_reading(&part.facets, [0.0; 3]).expect("the one-hole bar reads as revolved");
+    println!("one hole: {r:?}");
+    assert!(r.trusted && r.worst() <= operation::SPINDLE_TOL, "the one-hole bar sits on the spindle: {r:?}");
+    let world = new_world();
+    let mut history = History::default();
+    let m = Machine { model: "TestBench lathe".into(), kind: Some("lathe".into()), axes: rotaries(), ..Default::default() };
+    history.execute(&world, LoadMachine::new(&world, "bench.mch".into(), Some(m)).expect("machine"));
+    let mut tool = catalog().into_iter().find(|(n, _)| *n == "DR-0400").map(|(_, t)| t).expect("catalog entry");
+    tool.flute_len = 30.0;
+    history.execute(&world, AddTool::new(&world, "DR-0400", tool).expect("tool"));
+    history.execute(&world, ImportModel::from_mesh("bar", part));
+    let (_, warns) = operation::generate(&world, &op(params(vec![], one.clone())), "")
+        .unwrap_or_else(|e| panic!("the one-hole cross drill generates: {e}"));
+    assert!(blocking(&warns).is_empty(), "the one-hole cross drill is convicted: {warns:?}");
+    let create = CreateOperation::new(&world, "CD1", "DR-0400", SrcRef::Entity("bar".into()), params(vec![], one));
+    history.execute(&world, create.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "CD1").expect("generate"));
+    let path = std::env::temp_dir().join(format!("camcraft-116-{}.nc", std::process::id()));
+    let posted = posting::post_setup(&world, &path);
+    let _ = std::fs::remove_file(&path);
+    assert!(posted.is_ok(), "the one-hole cross drill posts: {:?}", posted.err());
 }

@@ -72,7 +72,15 @@ pub enum Record {
     /// must refuse by name, and the engine refuses for a script that
     /// does not define the hook at all - a centre-less contour posted
     /// without its G41 is an undersize part, the silent wrong answer.
-    Comp { side: Option<CompSide>, radius_mm: f64 },
+    /// `wear` (#38): the records between are the cutter-CENTRE path at
+    /// `radius_mm`, and the register holds only the wear delta.
+    Comp { side: Option<CompSide>, radius_mm: f64, wear: bool },
+    /// A threading cycle (issue #34): `Some` opens the span of explicit
+    /// passes the cycle stands for, `None` (`THREAD END`) closes it.
+    /// The passes between are ordinary motion records - a script with
+    /// a threading cycle writes the record and skips them, any other
+    /// posts them as they are.
+    Thread(Option<super::cnc_thread::ThreadRec>),
     /// A probing move (#108): probe toward the target, stop on contact,
     /// a skip move (G31) on a Fanuc-style control. A script that
     /// cannot voice it is refused by name: a touch posted as a feed
@@ -266,9 +274,14 @@ impl Record {
             Record::Part { loading: false, .. } => "part unload".into(),
             Record::Transfer { from, to } => format!("part transfer {from}→{to}"),
             Record::Probe { tol_mm } => format!("probe · tol {tol_mm:.3} mm"),
-            Record::Comp { side: Some(CompSide::Left), radius_mm } => format!("comp left · r {radius_mm:.3} mm"),
-            Record::Comp { side: Some(CompSide::Right), radius_mm } => format!("comp right · r {radius_mm:.3} mm"),
+            Record::Comp { side: Some(side), radius_mm, wear } => format!(
+                "comp {} · r {radius_mm:.3} mm{}",
+                if *side == CompSide::Left { "left" } else { "right" },
+                if *wear { " · wear" } else { "" }
+            ),
             Record::Comp { side: None, .. } => "comp off".into(),
+            Record::Thread(Some(t)) => t.label(),
+            Record::Thread(None) => "thread cycle end".into(),
             Record::Touch(t) => format!(
                 "probe → {}{}",
                 pos(t.target[0], t.target[1], t.target[2]),
@@ -408,14 +421,18 @@ pub fn serialize(records: &[Record]) -> String {
                 // the lattice law - not a parameter real.
                 s.push_str(&format!("PROBE {}\n", q(*tol_mm)));
             }
-            Record::Comp { side, radius_mm } => {
-                // The radius rides as microns like every length here.
+            Record::Comp { side, radius_mm, wear } => {
+                // The radius rides as microns like every length here;
+                // a trailing WEAR (#38) marks the centre-path variant.
+                let w = if *wear { " WEAR" } else { "" };
                 s.push_str(&match side {
-                    Some(CompSide::Left) => format!("COMP LEFT {}\n", q(*radius_mm)),
-                    Some(CompSide::Right) => format!("COMP RIGHT {}\n", q(*radius_mm)),
+                    Some(CompSide::Left) => format!("COMP LEFT {}{w}\n", q(*radius_mm)),
+                    Some(CompSide::Right) => format!("COMP RIGHT {}{w}\n", q(*radius_mm)),
                     None => "COMP OFF\n".to_string(),
                 });
             }
+            Record::Thread(Some(t)) => s.push_str(&t.line()),
+            Record::Thread(None) => s.push_str("THREAD END\n"),
             Record::Touch(t) => s.push_str(&super::probe_rec::write_touch(t)),
             Record::Found(f) => s.push_str(&super::probe_rec::write_found(f)),
             Record::Retreat(r) => s.push_str(&super::probe_rec::write_retreat(r)),
@@ -888,7 +905,22 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                         v
                     }
                 };
-                out.push(Record::Comp { side, radius_mm });
+                // An optional WEAR after the radius (#38); anything
+                // else trailing is refused - a guessed mode is a part a
+                // radius off.
+                let wear = match (side, it.next()) {
+                    (_, None) => false,
+                    (Some(_), Some("WEAR")) => true,
+                    (_, Some(other)) => {
+                        return Err(fail(format!("COMP {dir} takes only WEAR after its radius, found {other:?}")))
+                    }
+                };
+                out.push(Record::Comp { side, radius_mm, wear });
+                in_section = true;
+            }
+            "THREAD" => {
+                let t = super::cnc_thread::parse(it).map_err(fail)?;
+                out.push(Record::Thread(t));
                 in_section = true;
             }
             "PROBE" => {
