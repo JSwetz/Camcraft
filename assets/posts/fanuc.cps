@@ -257,7 +257,7 @@ function startPreamble() {
     block(["G43", "H" + pad2(tNo)]);
     toolWait = false;
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#108) states no spindle
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
@@ -359,6 +359,72 @@ function onCycle() {
     cycleSig = sig;
   }
   inCycle = true;
+}
+
+// ------------------------------------------------------------ probing
+// #108. A probing move is the G31 skip function (Fanuc's published
+// operator documentation, custom macro B): a straight feed toward the
+// target that stops when the probe's skip signal fires. The skip
+// position lands in system variables #5061-#5063 (X, Y, Z, workpiece
+// coordinates); when no signal fires the block simply ends at its
+// target, so that is checked at once and alarms (#3000) - a probe that
+// never touched must not back off and measure air. A measured trip k is
+// kept in #(100+3k)..#(102+3k). The back-off after a trip is
+// incremental (G91), so a part nearer than the model is never driven
+// into. The offset arithmetic reads the workpiece offsets #5221 + 20 x
+// slot + axis and writes them with G10 L2.
+var probeBase = 100;
+function onProbeMove() {
+  startPreamble();
+  compRefuse("a probing move");
+  var p = properties;
+  block(["G31", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  // The travel axis: where the target and the nominal trip differ most.
+  var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
+  var ai = d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
+  var tgt = [p.X - orgX, p.Y - orgY, p.Z - orgZ][ai];
+  block(["IF[ABS[#" + (5061 + ai) + "-" + fu(tgt) + "]LT0.001]THEN#3000=2(PROBE NO CONTACT)"]);
+  if (has(p.Measure) && p.Measure >= 0) {
+    var b = probeBase + 3 * p.Measure;
+    block(["#" + b + "=#5061"]);
+    block(["#" + (b + 1) + "=#5062"]);
+    block(["#" + (b + 2) + "=#5063"]);
+  }
+}
+function onProbeRetreat() {
+  var p = properties;
+  block(["G91", "G01", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
+  block(["G90"]);
+}
+function slotOf(word) {  // "G55" -> 1
+  var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
+  return n >= 0 && n <= 5 ? n : 0;
+}
+function onProbeResult() {
+  var p = properties;
+  var org = [orgX, orgY, orgZ];
+  var axes = p.Axes || [];
+  var dev = 190;  // #190.. hold each axis's deviation, found - expected
+  for (var i = 0; i < axes.length; i++) {
+    var a = axes[i];
+    var ai = a.Axis === "X" ? 0 : (a.Axis === "Y" ? 1 : 2);
+    var sum = [];
+    for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
+    var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
+    block(["#" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    block(["IF[ABS[#" + (dev + i) + "]GT" + fu(p.Tolerance) + "]THEN#3000=1(PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
+  }
+  if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
+    var act = 5221 + 20 * slotOf(wcsWord);
+    var words = ["G10", "L2", "P" + (Number(p.SetWorkOffset) + 1)];
+    for (var j = 0; j < axes.length; j++) {
+      var aj = axes[j].Axis === "X" ? 0 : (axes[j].Axis === "Y" ? 1 : 2);
+      words.push(axes[j].Axis + "[#" + (act + aj) + "+#" + (dev + j) + "]");
+    }
+    block(words);
+  } else {
+    block(["#3006=1(CHECK PROBE RESULT #" + dev + "..)"]);
+  }
 }
 
 // ------------------------------------------------------------ footer

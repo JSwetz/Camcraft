@@ -246,6 +246,50 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                     s.call("onRadiusCompensation", &json!(word).to_string())?;
                 }
             }
+            Record::Touch(t) => {
+                // A probing move (#108): no PRELUDE default - a script
+                // that cannot write a probing block is refused by name,
+                // because the only fallback (a feed) drives the stylus
+                // through the part.
+                if !s.hook_exists("onProbeMove") {
+                    warnings.push(
+                        "probing: this post script does not define onProbeMove - it cannot write a \
+                         probing (skip) move, so the probe operation is refused"
+                            .into(),
+                    );
+                } else {
+                    s.set_properties(&merged(&base, &t.props(), pos))?;
+                    s.call("onProbeMove", "")?;
+                }
+                // The machine stops where the stylus trips: nominally
+                // the expected point the chain continues from.
+                pos = (t.expect[0], t.expect[1], t.expect[2]);
+            }
+            Record::Retreat(r) => {
+                if !s.hook_exists("onProbeRetreat") {
+                    warnings.push(format!(
+                        "probing: {}: this post script does not define onProbeRetreat - it cannot back \
+                         off a probe trip incrementally, so the probe operation is refused",
+                        op_name(&base)
+                    ));
+                } else {
+                    s.set_properties(&merged(&base, &r.props(), pos))?;
+                    s.call("onProbeRetreat", "")?;
+                }
+                pos = (r.expect[0], r.expect[1], r.expect[2]);
+            }
+            Record::Found(f) => {
+                if !s.hook_exists("onProbeResult") {
+                    warnings.push(
+                        "probing: this post script does not define onProbeResult - it cannot set a \
+                         work offset or stop on a probing result, so the probe operation is refused"
+                            .into(),
+                    );
+                } else {
+                    s.set_properties(&merged(&base, &f.props(), pos))?;
+                    s.call("onProbeResult", "")?;
+                }
+            }
             Record::Thread(t) => {
                 // A threading cycle (issue #34): a lifecycle record like
                 // COMP - no motion, `onCommand` never sees it. A script
@@ -332,4 +376,13 @@ fn merged(
         m.insert(k.clone(), v.clone());
     }
     m
+}
+
+/// The operation a record belongs to, by the section's `OperationName`
+/// PARAM - what a probing refusal names (#108).
+fn op_name(base: &BTreeMap<String, Value>) -> String {
+    base.get("OperationName")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| "the probe operation".to_string(), |s| format!("operation {s:?}"))
 }
