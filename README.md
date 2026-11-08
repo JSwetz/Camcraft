@@ -122,8 +122,9 @@ Actions runs only on a pushed release tag; the CI and nightly workflows in
 
 ## Project documents
 
-- `ROADMAP.md`: the frozen milestone archive, kept for history and design
-  context. Work is tracked as GitHub issues.
+- The roadmap is the repo's open GitHub issues. The old milestone archive,
+  `ROADMAP.md`, was retired; read it from git history
+  (`git show v0.14.0:ROADMAP.md`).
 - `RECOMMENDED.md`: the decision ledger, with what was chosen, why, and
   what was dropped.
 - `AGENTS.md`: engineering rules (clean-room protocol, the never-crash /
