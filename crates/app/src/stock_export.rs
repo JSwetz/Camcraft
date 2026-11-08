@@ -76,6 +76,9 @@ pub fn write_stl(fv: &FieldView, path: &Path) -> Result<usize, String> {
 pub struct MeshCache {
     key: Option<Arc<FieldView>>,
     mesh: Option<Result<Arc<Vec<Triangle>>, String>>,
+    /// The mesh's per-facet deviation classes (#25), judged once by
+    /// `classify` and retired with the view they belong to.
+    classes: Option<Arc<Vec<f32>>>,
 }
 
 impl MeshCache {
@@ -88,6 +91,7 @@ impl MeshCache {
         }
         self.key = None;
         self.mesh = None;
+        self.classes = None;
         let m = machined_mesh(fv).map(Arc::new);
         self.key = Some(Arc::clone(fv));
         self.mesh = Some(m.clone());
@@ -106,9 +110,30 @@ impl MeshCache {
         }
     }
 
-    /// Drop the cached view and mesh.
+    /// Judge the cached mesh of `fv` against its model, once (#25):
+    /// a no-op when the classes already stand, or when `fv` is not the
+    /// cached view with a mesh (nothing to judge; never an extraction).
+    pub fn classify(&mut self, fv: &Arc<FieldView>) {
+        if self.classes.is_some() {
+            return;
+        }
+        if let Some(m) = self.viewed(fv) {
+            self.classes = Some(Arc::new(crate::machined_classes::mesh_classes(fv, &m)));
+        }
+    }
+
+    /// The classes `classify` judged for this very view's mesh, one per
+    /// facet; `None` for another view or before the judgement.
+    #[must_use]
+    pub fn viewed_classes(&self, fv: &Arc<FieldView>) -> Option<Arc<Vec<f32>>> {
+        self.viewed(fv)?;
+        self.classes.as_ref().map(Arc::clone)
+    }
+
+    /// Drop the cached view, mesh and classes.
     pub fn clear(&mut self) {
         self.key = None;
         self.mesh = None;
+        self.classes = None;
     }
 }
