@@ -1260,7 +1260,9 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         ui.painter().rect_filled(rect, 0.0, ink.gamma_multiply(0.16));
         RichText::new(format!("! {text}")).color(ink).strong()
     } else {
-        RichText::new(text.as_str()).weak()
+        // #215: routine status in the body text ink, not egui's "weak"
+        // grey - that read as near-invisible on the dark strip.
+        RichText::new(text.as_str()).color(ui.visuals().text_color())
     };
     ui.horizontal(|ui| {
         ui.add(Label::new(line).selectable(true))

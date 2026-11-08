@@ -9,8 +9,9 @@ use crate::state::State;
 /// Phrasings the shell's own refusals use when they set the status line
 /// directly rather than through `State::refuse` (a dark cell's gate note,
 /// an import or export that could not run, an origin that was not set).
-const REFUSAL_MARKS: [&str; 7] = [
+const REFUSAL_MARKS: [&str; 8] = [
     " refused",
+    " not created:",
     " failed",
     " not set:",
     " not changed:",
@@ -56,9 +57,27 @@ mod tests {
             "origin not set: the picked face is gone",
             "WCS not aligned: pick a flat face - it sets the Z axis",
             "the picked vertex of 'block' is no longer in the model",
+            // #215's two, verbatim.
+            "operation not created: invalid parameters: no stock; set up stock first",
+            "operation not created: invalid parameters: a 2D Contour operation must cut downward: top 0 below bottom 5",
         ] {
             state.status = s.to_owned();
             assert!(is_alert(&state), "{s:?} not read as an alert");
+        }
+    }
+
+    /// #215: routine status is drawn in the body text ink (the theme's
+    /// `text`, which the visuals' `override_text_color` carries), and that
+    /// ink on the strip's own fill meets the body-text contrast gate in
+    /// both built-in themes - the old "weak" grey did not read.
+    #[test]
+    fn routine_status_ink_reads_on_the_strip() {
+        use crate::egui_app::contrast;
+        use crate::egui_app::theme::Tokens;
+        for (name, t) in [("dark", Tokens::DARK), ("light", Tokens::LIGHT)] {
+            let r = contrast::ratio(t.text, t.strip_fill());
+            assert!(r >= contrast::BODY, "{name}: status text {:?} on {:?} reads {r:.2}:1", t.text, t.strip_fill());
+            assert_eq!(t.visuals().override_text_color, Some(t.text), "{name}: the label ink is the body text");
         }
     }
 
