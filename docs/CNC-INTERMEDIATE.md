@@ -111,6 +111,10 @@ behavior only):
   is not the Z column (an A about X tilts; a spindle-column C turns
   in plane). A script may output RTCP modes only when `rtcp` is true;
   a tilted record on a `rtcp:false` machine is a counted refusal.
+  `units` (#131) is `"inch"` when the `.mch` states its lengths in
+  inches, else `"mm"`: the unit the machine is PROGRAMMED in. The
+  stream itself stays mm either way, so a post that honors `"inch"`
+  writes G20 and divides every length and feed by 25.4.
 - writes: `writeln(s)`, `write(s)` (appends to the open line),
   `writeBlock(...parts)`, `writeWord(w)`, `writeAddress(letter, value, dp)`,
   `writeComment(s)`, `writeBlankLine()`, `writeOutput(...)`
