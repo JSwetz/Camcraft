@@ -85,6 +85,7 @@ behavior only):
 | `SpindleSpeed` | rpm (PARAM) |
 | `WorkOffset` `OriginX` `OriginY` `OriginZ` | WCS slot + machine origin (PARAMs) |
 | `StockXYLeft/Right/Front/Back` `StockZTop` | stock bounds (PARAMs) |
+| `Coolant` | `off` / `mist` / `through-tool` (PARAM, #112) - absent means flood; the post picks the machine's code of that family, refusing by operation name when it states none; a script without `coolantModes = true` is refused any non-flood ask (#150) |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |

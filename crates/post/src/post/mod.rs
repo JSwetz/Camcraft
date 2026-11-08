@@ -27,11 +27,13 @@
 //! as an undersize part.
 
 pub mod cnc;
+mod coolant;
 pub mod engine;
 pub mod js;
 pub mod machine;
 mod program;
 
+pub use coolant::CoolantMode;
 pub use engine::{LineInfo, PostOutput, TraceBlock};
 
 use crate::cl::{MoveKind, Toolpath};
@@ -104,6 +106,9 @@ pub struct Dump<'a> {
     /// budget (`operation::probe_problems`) - no warning rides the
     /// cache for it. None is silence: the op asks no probe.
     pub probe_tol: Option<f64>,
+    /// The cutting fluid the op asks for (#112). Flood is the stream's
+    /// silent default; any other ask rides a `PARAM Coolant`.
+    pub coolant: CoolantMode,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -126,6 +131,7 @@ impl<'a> Default for Dump<'a> {
             part_unload: false,
             part_transfer: false,
             probe_tol: None,
+            coolant: CoolantMode::Flood,
         }
     }
 }
@@ -158,6 +164,9 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     out.push(Record::Param { name: "StockXYFront".into(), value: json!(d.stock[2]) });
     out.push(Record::Param { name: "StockXYBack".into(), value: json!(d.stock[3]) });
     out.push(Record::Param { name: "StockZTop".into(), value: json!(d.stock_top_z) });
+    if let Some(word) = d.coolant.param_word() {
+        out.push(Record::Param { name: "Coolant".into(), value: json!(word) });
+    }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
     }

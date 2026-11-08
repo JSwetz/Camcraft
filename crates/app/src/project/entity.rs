@@ -289,6 +289,12 @@ pub struct OperationDto {
     /// no version bump (the v22 `axis` precedent).
     #[serde(default, skip_serializing_if = "AreaDto::is_default")]
     pub area: AreaDto,
+    /// The op's coolant (#112), `off` / `flood` / `mist` /
+    /// `through-tool`. Absent reads flood - every earlier file's post -
+    /// and flood writes no key, so older files round-trip byte for byte
+    /// with no version bump (the `area` precedent).
+    #[serde(default, skip_serializing_if = "crate::operation::CoolantMode::is_default")]
+    pub coolant: crate::operation::CoolantMode,
 }
 
 impl MoveDto {
