@@ -104,6 +104,12 @@ pub struct Wcs;
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct ToolDef {
     pub tool: Tool,
+    /// The controller's number for this tool (#221): what the post writes
+    /// as `T..` / `H..`, matching the machine's tool table. `None` = not
+    /// stated, and the tool posts as its 1-based position in the document's
+    /// tool list (the numbering every earlier document had). Changed only
+    /// through `SetToolNumber`; `ChangeTool` leaves it as it is.
+    pub number: Option<u32>,
 }
 
 /// One machine setup (M3.2 stage A): the named context that says WHICH

@@ -55,7 +55,10 @@ pub fn collect(world: &World) -> ProjectFile {
                 None
             };
             let stock = model::stock_def_of(world, &entity).map(|s| StockDto::from_shape(&s));
-            let tool = model::tool_of(world, &entity).map(|t| ToolDto::from_tool(&t));
+            let tool = model::tool_of(world, &entity).map(|t| ToolDto {
+                number: model::tool_number_of(world, &entity),
+                ..ToolDto::from_tool(&t)
+            });
             // The setup payload only ever rides a setup row (the kind test
             // above and the component below are the same SetupDef).
             let setup = if matches!(kind, Some(EntityKind::Setup)) {

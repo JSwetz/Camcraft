@@ -125,6 +125,16 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             if !tool.to_tool().is_sane() {
                 return Err(corrupt(format!("tool parameters are not usable: {tool:?}")));
             }
+            // #221: a stated number is a real tool-table number.
+            if let Some(n) = tool.number
+                && !crate::tool_numbers::valid(n)
+            {
+                return Err(corrupt(format!(
+                    "tool '{}' has number {n}; tool numbers run {}",
+                    dto.name,
+                    crate::tool_numbers::RANGE_TEXT
+                )));
+            }
         }
         EntityKind::Operation => {
             if dto.name.is_empty() {
