@@ -184,10 +184,35 @@ pub struct OperationMeta {
 /// The cached result of generating an operation: the path plus the
 /// warnings `verify` attached to it. Deleting the operation entity frees
 /// both through the Rust-owned drop hooks (AGENTS.md resource invariant).
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+/// `sig` is the path's [`crate::path_sig::of`], computed once in
+/// [`Toolpath::new`], the only way to build one (the field is private),
+/// so the program-ahead digest reads it per frame without a clone
+/// (#109 review B1). The cache is written whole, never edited in place.
+#[derive(Component, Debug, Clone, PartialEq)]
 pub struct Toolpath {
     pub path: ClPath,
     pub warnings: Vec<Warning>,
+    sig: u64,
+}
+
+impl Toolpath {
+    #[must_use]
+    pub fn new(path: ClPath, warnings: Vec<Warning>) -> Self {
+        let sig = crate::path_sig::of(&path.moves);
+        Self { path, warnings, sig }
+    }
+
+    /// The stored signature of `path` (see the type's doc).
+    #[must_use]
+    pub fn path_sig(&self) -> u64 {
+        self.sig
+    }
+}
+
+impl Default for Toolpath {
+    fn default() -> Self {
+        Self::new(ClPath::default(), Vec::new())
+    }
 }
 
 /// The document's display unit, stored as a flecs singleton (M1.1): on
