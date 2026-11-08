@@ -13288,3 +13288,16 @@ revolved (follow-up material if users hit it with long keyways).
   scene before the UI can change browser eyes or toolpath visibility. Suspend
   frame timers while the window is occluded, then redraw when it becomes
   visible again; hidden surfaces have no useful picture to update.
+
+## Model placement and existing stock
+
+- Carry existing stock by the same rigid transform when its source is the
+  moved model, or when the document has only one non-fixture part. This
+  preserves the stock's position and orientation relative to the part, and
+  keeps the model and stock placement change in one undo step.
+- In a document with several parts, leave box and cylinder stock in place:
+  a fitted stock can cover more than one part and has no stored source link.
+  A from-model stock has that link and follows its named source.
+- Dropped: refitting stock to the new world-axis bounding box on every model
+  move. A refit would discard the stock orientation and placement the user
+  already chose.
