@@ -14,6 +14,9 @@
 //! edge, `sag_of`). A facet meeting its neighbours only at sharp edges
 //! (a box face, a hex flat) or flat is read exactly.
 //!
+//! Issue #119: the same reading, over a rectangular tube, is the cross
+//! drill's holder footprint on one station (`tube_reach`).
+//!
 //! Provenance: Sutherland-Hodgman polygon clipping against slab
 //! half-spaces, the first-contact point of a prism swept along its
 //! axis, and the chord sagitta s = (w/2) tan(theta/4) of an inscribed
@@ -136,18 +139,31 @@ impl Line {
     }
 }
 
+/// A rectangular tube along a hole line, unbounded along it: `hw`
+/// either side of the line's transverse coordinate `line.t` across it
+/// in XY, `hz` either side of `line.z` in Z. A body's square tube is
+/// `hw == hz`, its half-width; a holder sliding across its line or in
+/// Z on one station (issue #119) widens the side it sweeps.
+#[derive(Clone, Copy)]
+pub(super) struct Tube {
+    pub line: Line,
+    pub hw: f64,
+    pub hz: f64,
+}
+
 /// The outermost outward coordinate of the planar polygon `pts` inside
-/// the square tube of half-width `half` about `line`.
-fn poly_max(pts: &[Point3], line: Line, half: f64) -> Option<f64> {
+/// `tube`.
+fn poly_max(pts: &[Point3], tube: Tube) -> Option<f64> {
+    let line = tube.line;
     let mut poly: Vec<(f64, f64, f64)> =
         pts.iter().filter(|p| p.is_finite()).map(|&p| (line.u(p), line.w(p) - line.t, p.z - line.z)).collect();
     if poly.len() < 3 {
         return None;
     }
-    // Four slabs: |w| <= half and |z| <= half, each as two halves
+    // Four slabs: |w| <= hw and |z| <= hz, each as two halves
     // (`k` picks w or z, `sg` the side).
     for (k, sg) in [(1, 1.0), (1, -1.0), (2, 1.0), (2, -1.0)] {
-        poly = clip(&poly, |p| half - sg * if k == 1 { p.1 } else { p.2 });
+        poly = clip(&poly, |p| if k == 1 { tube.hw - sg * p.1 } else { tube.hz - sg * p.2 });
         if poly.is_empty() {
             return None;
         }
@@ -156,11 +172,11 @@ fn poly_max(pts: &[Point3], line: Line, half: f64) -> Option<f64> {
 }
 
 /// The outermost outward coordinate of any stock facet - a curved one
-/// as its sagitta slab - inside the square tube of half-width `half`
-/// about `line`, or `None` when the tube meets no facet. A slab's
+/// as its sagitta slab - inside `tube`, or `None` when the tube meets
+/// no facet. A slab's
 /// outermost point in the tube lies on one of its five faces (the tube
 /// is unbounded along the line), so clipping them suffices.
-fn tube_max(mesh: &StockMesh, line: Line, half: f64) -> Option<f64> {
+fn tube_max(mesh: &StockMesh, tube: Tube) -> Option<f64> {
     let mut best: Option<f64> = None;
     let mut take = |m: Option<f64>| {
         if let Some(m) = m {
@@ -171,16 +187,16 @@ fn tube_max(mesh: &StockMesh, line: Line, half: f64) -> Option<f64> {
         let v = [tri.a, tri.b, tri.c];
         let n = if s > 0.0 && s.is_finite() { unit_normal(tri) } else { None };
         let Some(n) = n else {
-            take(poly_max(&v, line, half));
+            take(poly_max(&v, tube));
             continue;
         };
         let off = |p: Point3, k: f64| Point3::new(p.x + k * n.x, p.y + k * n.y, p.z + k * n.z);
         let (lo, hi) = (v.map(|p| off(p, -s)), v.map(|p| off(p, s)));
-        take(poly_max(&lo, line, half));
-        take(poly_max(&hi, line, half));
+        take(poly_max(&lo, tube));
+        take(poly_max(&hi, tube));
         for k in 0..3 {
             let j = (k + 1) % 3;
-            take(poly_max(&[lo[k], lo[j], hi[j], hi[k]], line, half));
+            take(poly_max(&[lo[k], lo[j], hi[j], hi[k]], tube));
         }
     }
     best
@@ -222,10 +238,38 @@ fn clip(poly: &[(f64, f64, f64)], inside: impl Fn(&(f64, f64, f64)) -> f64) -> V
 pub(super) fn entry(mesh: &StockMesh, raw: f64, line: Line, half: f64) -> Option<f64> {
     let edge = (line.t.abs() - half).max(0.0);
     let circ = (edge < raw).then(|| (raw * raw - edge * edge).max(0.0).sqrt())?;
-    let Some(m) = tube_max(mesh, line, half) else { return Some(circ) };
+    let Some(m) = tube_max(mesh, Tube { line, hw: half, hz: half }) else { return Some(circ) };
+    Some(face_or_circ(m, circ, raw, edge))
+}
+
+/// The mesh's crossing `m` when it is a flat (more than a turned bar's
+/// tessellation inside `raw` at the edge offset `edge`), else the
+/// circumscribed reading `circ` - `entry`'s choice.
+fn face_or_circ(m: f64, circ: f64, raw: f64, edge: f64) -> f64 {
     let band = raw * (1.0 - (std::f64::consts::PI / 16.0).cos());
     let flat = m.is_finite() && m < circ && raw - m.hypot(edge) > band;
-    Some(if flat { m } else { circ })
+    if flat { m } else { circ }
+}
+
+/// The outermost outward coordinate of material inside `tube` (issue
+/// #119: a holder's footprint on one station), read as `entry` reads a
+/// body's: a flat at its face, a turned round at its circumscribed
+/// reading at the tube's edge nearest the axis. `None` when the tube
+/// meets no facet - the tube is unbounded along its line, so a solid
+/// it entered would cross its wall: nothing is there. A non-finite
+/// reading is `NaN`, which no holder clears.
+pub(super) fn tube_reach(mesh: &StockMesh, raw: f64, tube: Tube) -> Option<f64> {
+    let m = tube_max(mesh, tube)?;
+    if !(m.is_finite() && raw.is_finite()) {
+        return Some(f64::NAN);
+    }
+    let edge = (tube.line.t.abs() - tube.hw).max(0.0);
+    // A crossing outside the circumscribed circle (only by rounding)
+    // stands as read.
+    if edge >= raw {
+        return Some(m);
+    }
+    Some(face_or_circ(m, (raw * raw - edge * edge).max(0.0).sqrt(), raw, edge))
 }
 
 #[cfg(test)]
