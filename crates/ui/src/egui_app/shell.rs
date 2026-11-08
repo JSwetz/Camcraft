@@ -131,6 +131,10 @@ struct Shell {
     followup_redraw: bool,
     /// A hidden surface has no useful frame timer.
     occluded: bool,
+    /// Resize events can arrive faster than a GPU frame. Configure only for
+    /// the newest size when the next resize frame is due.
+    pending_resize: Option<PhysicalSize<u32>>,
+    last_resize_frame: Option<std::time::Instant>,
     state: State,
 }
 
@@ -192,6 +196,8 @@ impl Shell {
             next_repaint: None,
             followup_redraw: false,
             occluded: false,
+            pending_resize: None,
+            last_resize_frame: None,
             state,
         }
     }
@@ -290,7 +296,12 @@ impl Shell {
         }
         config.width = w;
         config.height = h;
+        let started = std::time::Instant::now();
         surface.configure(device, config);
+        let elapsed = started.elapsed();
+        if elapsed > super::frame_watch::BUDGET {
+            eprintln!("gpu: slow resize configure {} ms", elapsed.as_millis());
+        }
     }
 
     fn draw(&mut self) {
@@ -310,6 +321,7 @@ impl Shell {
             }
             self.window_title = title;
         }
+        self.frame_watch.mark("commands", now());
         let scene = world::collect(&self.state);
 
         let Self {
@@ -335,7 +347,7 @@ impl Shell {
             state,
             ..
         } = self;
-        frame_watch.mark("commands+scene", now());
+        frame_watch.mark("scene", now());
         let (
             Some(window),
             Some(device),
@@ -685,7 +697,8 @@ impl winit::application::ApplicationHandler for Shell {
             (Some(winit_state), Some(window)) => winit_state.on_window_event(window, &event).repaint,
             _ => false,
         };
-        if repaint && !self.occluded && !matches!(event, WindowEvent::RedrawRequested)
+        if repaint && !self.occluded
+            && !matches!(event, WindowEvent::RedrawRequested | WindowEvent::Resized(_))
             && let Some(window) = &self.window
         {
             self.followup_redraw = true;
@@ -694,11 +707,7 @@ impl winit::application::ApplicationHandler for Shell {
         match &event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
-                self.on_resize(*size);
-                if let Some(window) = &self.window && !self.occluded {
-                    self.followup_redraw = true;
-                    window.request_redraw();
-                }
+                self.pending_resize = Some(*size);
             }
             WindowEvent::Occluded(false) | WindowEvent::Focused(true) => {
                 if let Some(window) = &self.window && !self.occluded {
@@ -707,7 +716,32 @@ impl winit::application::ApplicationHandler for Shell {
                 }
             }
             WindowEvent::RedrawRequested => {
+                let resized = if let Some(size) = self.pending_resize {
+                    let deadline = resize_frame_deadline(self.last_resize_frame);
+                    if std::time::Instant::now() < deadline {
+                        return;
+                    }
+                    self.pending_resize = None;
+                    self.on_resize(size);
+                    self.followup_redraw = true;
+                    true
+                } else {
+                    false
+                };
                 self.draw();
+                if resized {
+                    let done = std::time::Instant::now();
+                    self.last_resize_frame = Some(done);
+                    // The layout's View3D size lands on a follow-up frame.
+                    // Keep that frame from immediately blocking the next
+                    // batch of pointer and resize events.
+                    if let (Some(next), Some(earliest)) = (
+                        self.next_repaint.as_mut(),
+                        done.checked_add(std::time::Duration::from_millis(16)),
+                    ) {
+                        *next = (*next).max(earliest);
+                    }
+                }
                 if self.exit_requested {
                     el.exit();
                 }
@@ -721,7 +755,11 @@ impl winit::application::ApplicationHandler for Shell {
             el.set_control_flow(ControlFlow::Wait);
             return;
         }
-        match (self.next_repaint, self.window.as_ref()) {
+        let resize_due = self.pending_resize.map(|_| resize_frame_deadline(self.last_resize_frame));
+        // A pending resize carries the repaint too. Its frame deadline
+        // supersedes older egui timers, including an immediate follow-up.
+        let next = resize_due.or(self.next_repaint);
+        match (next, self.window.as_ref()) {
             (Some(deadline), Some(window)) if deadline <= std::time::Instant::now() => {
                 self.next_repaint = None;
                 window.request_redraw();
@@ -731,6 +769,13 @@ impl winit::application::ApplicationHandler for Shell {
             _ => el.set_control_flow(ControlFlow::Wait),
         }
     }
+}
+
+/// A resize frame is enough to update the window promptly without making
+/// GPU reconfiguration and rendering block every pointer event in the drag.
+fn resize_frame_deadline(last: Option<std::time::Instant>) -> std::time::Instant {
+    last.and_then(|t| t.checked_add(std::time::Duration::from_millis(16)))
+        .unwrap_or_else(std::time::Instant::now)
 }
 
 /// Idle documents need no redraw. Active egui animation, queued commands,
