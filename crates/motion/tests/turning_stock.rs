@@ -2,14 +2,16 @@
 //! envelope. In a bar wider than the part every rapid clears the bar's
 //! OD plus the clearance and the rough's ladder starts at the bar's
 //! skin; a bar the part-based rapid already clears, or no stock at all,
-//! leaves the path exactly as it was.
+//! leaves the path exactly as it was. Issue #229: a pass that ends
+//! inside a bar running on past it leaves its cut at feed.
 //!
 //! Gate map (M4.4): covers camcraft_motion::turning (stock, prof,
 //! blade, parting, thread, form) with this crate's own revolve fixture.
 //! Lane shape (M4.4): all tests here run in seconds.
 
-use camcraft_motion::cl::{MoveKind, Toolpath};
+use camcraft_motion::cl::{Move, MoveKind, Toolpath};
 use camcraft_motion::geometry::{Point3, Triangle};
+use camcraft_motion::turning::profile::Frame;
 use camcraft_motion::turning::{
     groove_finish, groove_finish_in, profile_finish, profile_finish_in, profile_rough, profile_rough_in,
     GrooveFinishParams, ProfileFinishParams, ProfileRoughParams, StockEnv,
@@ -18,6 +20,8 @@ use camcraft_motion::turning::{
 const TAU: f64 = std::f64::consts::TAU;
 const NOSE: f64 = 0.8;
 const CLEAR: f64 = 1.0;
+/// The part's top end (Z): every window here climbs to it.
+const PART_TOP: f64 = 28.0;
 
 fn revolve(meridian: &[(f64, f64)]) -> Vec<Triangle> {
     let v = |j: usize, r: f64, z: f64| {
@@ -45,15 +49,23 @@ fn revolve(meridian: &[(f64, f64)]) -> Vec<Triangle> {
 /// A 12 mm part with a groove: r 6 over z -16 .. 28, floor r 4 over
 /// z -6.8 .. -3.6.
 fn part() -> Vec<Triangle> {
-    revolve(&[(0.0, -16.0), (6.0, -16.0), (6.0, -6.8), (4.0, -6.8), (4.0, -3.6), (6.0, -3.6), (6.0, 28.0), (0.0, 28.0)])
+    revolve(&[(0.0, -16.0), (6.0, -16.0), (6.0, -6.8), (4.0, -6.8), (4.0, -3.6), (6.0, -3.6), (6.0, PART_TOP), (0.0, PART_TOP)])
 }
 
 fn rho(q: Point3) -> f64 {
     q.x.hypot(q.y)
 }
 
+/// A round bar of radius `r_out` the part's own length: it ends where
+/// the part does, at Z [`PART_TOP`].
 fn bar(r_out: f64) -> Option<StockEnv> {
-    Some(StockEnv { r_out, clearance: CLEAR })
+    long_bar(r_out, 0.0)
+}
+
+/// [`bar`] running `past` mm on beyond the part's top end (#229).
+fn long_bar(r_out: f64, past: f64) -> Option<StockEnv> {
+    let s_top = Frame::about(&part()).expect("the part revolves").station_of(PART_TOP + past);
+    Some(StockEnv { r_out, clearance: CLEAR, s_top })
 }
 
 fn same(a: &Toolpath, b: &Toolpath) -> bool {
@@ -122,4 +134,42 @@ fn a_groove_finish_in_a_wider_bar_rapids_clear_of_it() {
     }
     let tips = |p: &Toolpath| p.moves.iter().filter(|m| m.kind == MoveKind::Feed).map(|m| m.to).collect::<Vec<_>>();
     assert_eq!(tips(&wide), tips(&groove_finish(&part(), &p).expect("groove")), "the floor moved");
+}
+
+/// The moves of `path` that leave a pass's cut: radial moves outward
+/// at the window's top station, world Z `top`.
+fn exits(path: &Toolpath, top: f64) -> Vec<&Move> {
+    let at_top = |q: Point3| (q.z - top).abs() < 1e-9;
+    path.moves.iter().filter(|m| at_top(m.from) && at_top(m.to) && rho(m.to) > rho(m.from)).collect()
+}
+
+/// #229: a bar that runs on past the window's top leaves every pass
+/// ending inside its uncut end, so each pass - the rough's rungs and
+/// the finish's one ride alike - leaves its cut at the plunge feed.
+/// Nothing else about the path moves.
+#[test]
+fn a_pass_ending_inside_a_longer_bar_leaves_its_cut_at_feed() {
+    let short = profile_rough_in(&part(), &rough(), bar(10.0)).expect("rough");
+    let long = profile_rough_in(&part(), &rough(), long_bar(10.0, 8.0)).expect("rough");
+    let ends: Vec<Point3> = long.moves.iter().map(|m| m.to).collect();
+    assert_eq!(ends, short.moves.iter().map(|m| m.to).collect::<Vec<_>>(), "the long bar moved the path");
+    assert!(exits(&short, PART_TOP).iter().all(|m| m.kind == MoveKind::Rapid), "a bar ending with the part keeps the rapid out");
+    let out = exits(&long, PART_TOP);
+    assert!(out.len() > 1, "one exit per rung: {}", out.len());
+    assert!(out.iter().all(|m| m.kind == MoveKind::Feed && m.feed == Some(rough().plunge_feed)), "{out:?}");
+    let fin = ProfileFinishParams { clearance_z: 35.0, top_z: PART_TOP, bottom_z: -16.0, feed: 150.0, plunge_feed: 80.0, nose_radius: NOSE, tolerance: 0.05 };
+    let finish = profile_finish_in(&part(), &fin, long_bar(10.0, 8.0)).expect("finish");
+    let out = exits(&finish, PART_TOP);
+    assert!(out.len() == 1 && out[0].kind == MoveKind::Feed, "{out:?}");
+}
+
+/// #229's other case: a window that stops partway along the bar. The
+/// pass ends inside bar the cut never reaches, so it leaves at feed.
+#[test]
+fn a_pass_stopping_partway_along_the_bar_leaves_its_cut_at_feed() {
+    const STOP: f64 = 20.0;
+    let p = ProfileRoughParams { top_z: STOP, ..rough() };
+    let path = profile_rough_in(&part(), &p, bar(10.0)).expect("rough");
+    let out = exits(&path, STOP);
+    assert!(!out.is_empty() && out.iter().all(|m| m.kind == MoveKind::Feed), "{out:?}");
 }
