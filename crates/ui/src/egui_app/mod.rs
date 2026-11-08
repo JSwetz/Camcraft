@@ -106,6 +106,8 @@ mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
 #[cfg(test)]
+mod ribbon_icon_tests;
+#[cfg(test)]
 mod fresh_op_tests;
 #[cfg(test)]
 mod tool_number_tests;
