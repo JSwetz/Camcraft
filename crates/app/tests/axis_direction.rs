@@ -190,12 +190,12 @@ fn loading_an_inverted_machine_undoes() {
 
 #[test]
 fn travel_is_judged_in_the_machines_own_coordinates() {
-    // Slide G54 so the program's X sits wholly positive (about 68..132):
+    // Slide the WCS so the program's X sits wholly positive (about 68..132):
     // a standard X with stroke 0..200 holds it; the same stroke on an
     // inverted X reads it as -132..-68 and refuses, naming the inversion.
     let (world, mut history) = faced_doc();
     let slid = Location { pos: Point3::new(-100.0, 0.0, 0.0), rot: IDENTITY_Q };
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", slid).expect("slide G54"));
+    history.execute(&world, SetWcsOrigin::new(&world, slid).expect("slide the WCS"));
     history.execute(&world, GenerateOperation::new(&world, "Face1").expect("regenerate"));
     let with_x = |travel, direction| Machine {
         model: "Flip 1".into(),
