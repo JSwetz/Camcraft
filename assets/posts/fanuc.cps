@@ -14,6 +14,7 @@ minimumRevision = 1;
 extension = "nc";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
+coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -28,6 +29,8 @@ var inCycle = false;       // a cycle group is open; its chain is suppressed
 var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
+var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
 var lastA = 0, lastB = 0, lastC = 0; // angle words the last block commanded (deg)
@@ -35,6 +38,7 @@ var tiltRefused = false;   // a refusal the gate counts once, not per line
 var compG = "";            // G41/G42/G40 pending for the next straight block (M13.11)
 var compD = "";            // the D word riding the engage block
 var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
+var wearNoted = false;     // the wear-register comment was written this section (#38)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs):
 // the stream speaks world coordinates; the machine measures its program
 // from the work offset. A legacy .cl carries no PARAMs, so these stay 0.
@@ -102,7 +106,10 @@ function tilt(p) {  // words to append, [] if none, null if refused
 // register: the tool library states none, so it is the tool number,
 // the same slot the H word reads. A comp word that would land on a
 // rapid or an arc is refused by name (counted, gate-blocked) - never
-// written where the control would misread it.
+// written where the control would misread it. Wear compensation (#38,
+// properties.CompensationType "wear") writes the same words over the
+// cutter-centre path: the register must hold only the wear delta, so
+// the section says so once, in a comment the operator reads.
 function onRadiusCompensation(side) {
   var s = String(side || properties.Compensation || "off");
   if (s === "off") {
@@ -115,6 +122,10 @@ function onRadiusCompensation(side) {
   compG = (s === "left") ? "G41" : "G42";
   compD = "D" + pad2(tNo);
   compOn = true;
+  if (properties.CompensationType === "wear" && !wearNoted) {
+    block(["(WEAR COMP - " + compD + " HOLDS THE WEAR DELTA ONLY, NOT THE TOOL RADIUS)"]);
+    wearNoted = true;
+  }
 }
 function compRefuse(what) {
   if (compG) {
@@ -123,21 +134,50 @@ function compRefuse(what) {
   }
 }
 
-// The .mch tool-station coolant list carries names + M-codes; the
-// first Flood entry (else the first entry at all) is this machine's
-// cutting-fluid-on code. M9 (stop) is the RS-274 fixed pair.
+// The .mch tool-station coolant list carries names + M-codes. A
+// flood ask takes the machine's Flood entry; failing one, the first
+// coded entry of no other known family (a shop's own "Brine" is its
+// flood); a stated codeless Flood is the operator's own valve, silent.
+// A list that states only other kinds (Mist, Through-spindle) has no
+// flood code: refused by name (#150), never posted as mist or dry. An
+// unstated list stays silent (the unstated-limit law). M9 (stop) is
+// the RS-274 fixed pair.
+var COOLANT_KINDS = ["flood", "mist", "through-spindle", "through-tool"];
+function coolantWho() { return coolantOp ? "operation " + coolantOp + ": " : ""; }
 function coolantCode() {
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
-  var first = "";
+  var other = "", floodNamed = false;
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = (typeof c === "string") ? c : (c.name || "");
-    if (!code) continue;
-    if (name === "Flood") return code;
-    if (!first) first = code;
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
+    if (name === "flood") { if (code) return code; floodNamed = true; continue; }
+    if (code && !other && COOLANT_KINDS.indexOf(name) < 0) other = code;
   }
-  return first;
+  if (other || floodNamed) return other;
+  if (cs.length > 0) msg(coolantWho() + "the machine states no flood coolant code - pick another coolant for the operation (Off cuts dry) or add a Flood entry to the machine");
+  return "";
+}
+
+// The op's coolant ask (#112): the stream says nothing for flood (every
+// older stream), or carries PARAM Coolant off / mist / through-tool. The
+// code is the machine's own entry of that family - the machine is truth;
+// an ask the machine states no code for is refused by name, naming the
+// operation (#150), never silently posted dry.
+function coolantFor(ask) {
+  if (ask === "off") return "";
+  if (!ask || ask === "flood") return coolantCode();
+  var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
+  if (want.length === 0) { msg(coolantWho() + "unknown coolant ask " + ask); return ""; }
+  var cs = (typeof machine !== "undefined" && machine.coolants) || [];
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var code = (typeof c === "string") ? "" : (c.mCode || "");
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
+    if (code && want.indexOf(name) >= 0) return code;
+  }
+  msg(coolantWho() + "the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  return "";
 }
 
 // ------------------------------------------------------------ the plane
@@ -180,6 +220,8 @@ function onOpen() {
 }
 
 function onParameter(name, value) {
+  if (name === "OperationName") coolantOp = String(value || "");
+  if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -219,7 +261,7 @@ function startPreamble() {
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
-  coolant = coolantCode();
+  coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
 }
 
@@ -233,7 +275,10 @@ function endPreamble() {
     msg("cutter compensation still engaged at section end - no cancel block");
     compG = ""; compD = ""; compOn = false;
   }
+  wearNoted = false;
   if (coolant) block(["M9"]);
+  coolant = "";
+  coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
   // The next preamble carries G49, which cancels TCPM too - so the
   // arm and the angle memory reset here, and a later tilt re-arms by

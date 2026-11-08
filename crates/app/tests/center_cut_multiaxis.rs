@@ -55,6 +55,7 @@ fn op(tool: &str, params: OpParams) -> Operation {
         stamp: None,
         setup: None,
         area: Default::default(),
+        coolant: Default::default(),
     }
 }
 

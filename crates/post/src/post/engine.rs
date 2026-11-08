@@ -102,6 +102,17 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                 // Publish the running param set so `onParameter` (and
                 // `onSpindleSpeed` just below) can actually read the
                 // value the hook names.
+                // A post that does not declare `coolantModes` would post an
+                // Off / Mist / Through-tool ask as its own flood (#150):
+                // refused by name, a counted warning, never silent.
+                if name == "Coolant" && !s.reads_coolant() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}asks {} coolant, but this post script does not declare                          coolantModes (it does not read PARAM Coolant) - set the operation's                          coolant to Flood or use a post that reads it",
+                        value.as_str().unwrap_or("non-flood")
+                    ));
+                }
                 s.set_properties(&merged(&base, &BTreeMap::new(), pos))?;
                 s.call("onParameter", &format!("{}, {}", json!(name), value))?;
                 if name == "SpindleSpeed" {
@@ -203,7 +214,7 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                 s.set_properties(&merged(&base, &p, pos))?;
                 s.call("onPartTransfer", "")?;
             }
-            Record::Comp { side, radius_mm } => {
+            Record::Comp { side, radius_mm, wear } => {
                 // Cutter compensation (M13.11): a lifecycle record like
                 // its siblings - no motion, `onCommand` never sees it -
                 // but NOT comment-only by default: the records after it
@@ -227,6 +238,10 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                     };
                     p.insert("Compensation".into(), json!(word));
                     p.insert("CompensationRadius".into(), json!(radius_mm));
+                    // #38: "wear" - the records between are the centre
+                    // path and the register holds the wear delta only;
+                    // "control" - they are the part contour.
+                    p.insert("CompensationType".into(), json!(if *wear { "wear" } else { "control" }));
                     s.set_properties(&merged(&base, &p, pos))?;
                     s.call("onRadiusCompensation", &json!(word).to_string())?;
                 }

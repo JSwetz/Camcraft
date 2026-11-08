@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{AreaControls, GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -171,6 +171,9 @@ pub struct Operation {
     /// The area controls (M11.5): how far past - or short of - the
     /// selection the tool may go. Default is the identity.
     pub area: AreaControls,
+    /// The cutting fluid the post switches on for this operation
+    /// (#112). Flood by default - what every post emitted before.
+    pub coolant: CoolantMode,
 }
 
 /// User-facing operation label and explicit position within its setup.

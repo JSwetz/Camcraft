@@ -13612,6 +13612,31 @@ revolved (follow-up material if users hit it with long keyways).
 - **B1** (the turned op's stamp does not digest the ops ahead) is covered
   by PR #153, stacked on this branch; not duplicated here.
 
+## #38: G41/G42 wear compensation - the centre path under the register's wear delta (2026-11-08)
+
+**`Compensation::Wear` joins Computer and Control on the contour's
+`Approach`** (default Computer: every golden byte-identical; the project
+file gains an additive `wear_comp` key, the digest a byte only when on).
+Wear walks the SAME centre path Control does - same mid-run seam, same
+straight leads at least a radius long, same doors (tabs, blends, overlap,
+keep-down links, open contours and runs, 3+2 tilt), refused under the name
+"wear compensation" - and its `CompSpan` (flag `wear`) programs those
+centre moves verbatim under G41/G42 Dn / G40: the machine-tool handbooks'
+wear-offset practice, where the register holds only the wear delta (zero
+on a new cutter). The stream marks it `COMP LEFT|RIGHT <µm> WEAR`, the
+engine publishes `CompensationType` ("wear" / "control"), and Fanuc writes
+the same words plus one comment per section saying the D register holds
+the wear delta only - a full radius there would cut the part a radius
+undersize, and that is the one wrong set-up wear invites. Haas/Mazak/
+Sinumerik/Heidenhain and the lathe keep refusing any COMP by name.
+Considered and dropped: keeping the lead law only for Control (a wear
+delta is small, but the control still builds the vector over the engage
+block - a zero-length or arc engage is still a misread program), skipping
+the room law for wear (the centre path is already proved; the room law
+judges the part offset by a full radius, which wear never asks - so it is
+skipped, not reused), and a separate wear register number (the library
+carries none; D = tool number, as Control).
+
 ## #20 - the rotary sweep's flute-rotation bound: stated always, enforced on request (2026-11-08, M13.1)
 
 **What "flute rotation" is here.** Not the helical flutes spinning (the
@@ -13916,3 +13941,33 @@ inside, and they wrap as before.
   refusal under Adaptive and Offset rings.
 - Not done (follow-up worth an issue): rotate the development's branch to an azimuth
   where the work is turned, so a D-flat bar wraps whatever its placement.
+
+## #197 - the Stock page shows the models' size (2026-11-07)
+
+- **Chosen:** a two-line readout above the stock fields - "Models: X x Y x
+  Z <unit>" and the X/Y/Z extents - from `model::solid_world_aabb`, the
+  very box Fit to Models wraps (its hover says so), in the document's
+  units; with no models, a dim "No models yet" line.
+- **Why:** the reporter wanted the primitive's dimensions in view while
+  typing stock numbers.
+- **Dropped:** the *selected* model's box only (the stock wraps the whole
+  job, and Fit already reads all models); copying the size into the
+  fields on a click (Fit to Models already does it with a margin; the
+  per-side allowance is #198).
+
+## #198 - box stock fitted per side (2026-11-07)
+
+- **Chosen:** for box stock the Stock page offers "Per side": six
+  allowances (-X, +X, -Y, +Y, bottom, top) replace the single fit margin,
+  and Fit to Models sends `StockFitSides`, which wraps the models' box by
+  each side's own amount (`stock::fit_box_sides`: each face its own
+  allowance off the models; refused by name for a negative or
+  non-finite allowance) through the same undoable `SetStock` as the
+  single-margin fit (both now share `State::apply_stock_fit`). Equal
+  sides read exactly as the single-margin fit.
+- **Why:** a blank is rarely padded evenly - a facing allowance on top,
+  nothing under a flat bottom, more on the side a vise jaw grips.
+- **Dropped:** per-side for cylinders (a radial allowance is one number;
+  bottom/top could follow if asked); storing the allowances in the
+  document (they are a fit recipe, not stock - the stock stays the
+  explicit box the fit produced).

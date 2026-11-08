@@ -137,6 +137,9 @@ pub const HOOKS: &[&str] = &[
 pub struct Script {
     ctx: Context,
     present: Vec<(&'static str, bool)>,
+    /// The `coolantModes = true` manifest flag (#150): the script reads
+    /// `PARAM Coolant`. Without it a non-Flood ask is refused by name.
+    coolant_modes: bool,
 }
 
 impl Script {
@@ -151,6 +154,7 @@ impl Script {
         let mut s = Self {
             ctx,
             present: Vec::new(),
+            coolant_modes: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -161,6 +165,10 @@ impl Script {
             present.push((*h, yes));
         }
         s.present = present;
+        s.coolant_modes = s
+            .eval("typeof coolantModes !== \"undefined\" && coolantModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
         Ok(s)
     }
 
@@ -221,6 +229,12 @@ impl Script {
     /// True when `name` exists (used for the onPlunge preference).
     pub fn hook_exists(&self, name: &str) -> bool {
         self.has(name)
+    }
+
+    /// True when the script declares `coolantModes = true` - it reads
+    /// the section's `PARAM Coolant` (#150).
+    pub fn reads_coolant(&self) -> bool {
+        self.coolant_modes
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

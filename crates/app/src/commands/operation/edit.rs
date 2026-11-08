@@ -37,6 +37,24 @@ impl EditOperationParams {
         Self::edit(world, name, params, Some(area))
     }
 
+    /// Change only the coolant (#112): one undo unit, the parameters and
+    /// the area as they stand. The coolant shapes the post's M words and
+    /// nothing the generator cuts, so the stamp survives - the cached
+    /// path is still exactly what this operation would generate.
+    pub fn with_coolant(
+        world: &World,
+        name: &str,
+        coolant: operation::CoolantMode,
+    ) -> Result<Self, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let prev = model::operation_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
+        let next = Operation { coolant, ..prev.clone() };
+        Ok(EditOperationParams { name: name.to_string(), prev, next })
+    }
+
     fn edit(
         world: &World,
         name: &str,

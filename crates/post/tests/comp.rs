@@ -20,14 +20,22 @@ fn fanuc() -> String {
 #[test]
 fn comp_records_round_trip_and_malformed_ones_refuse() {
     let recs = vec![
-        Record::Comp { side: Some(CompSide::Left), radius_mm: 3.0 },
-        Record::Comp { side: Some(CompSide::Right), radius_mm: 2.5 },
-        Record::Comp { side: None, radius_mm: 0.0 },
+        Record::Comp { side: Some(CompSide::Left), radius_mm: 3.0, wear: false },
+        Record::Comp { side: Some(CompSide::Right), radius_mm: 2.5, wear: true },
+        Record::Comp { side: None, radius_mm: 0.0, wear: false },
     ];
     let text = cnc::serialize(&recs);
-    assert!(text.contains("COMP LEFT 3000\n") && text.contains("COMP RIGHT 2500\n") && text.contains("COMP OFF\n"), "{text}");
+    assert!(text.contains("COMP LEFT 3000\n") && text.contains("COMP RIGHT 2500 WEAR\n") && text.contains("COMP OFF\n"), "{text}");
     assert_eq!(cnc::parse(&text).unwrap(), recs);
-    for bad in ["COMP LEFT\n", "COMP UP 3000\n", "COMP LEFT 0\n", "COMP RIGHT -3000\n", "COMP LEFT x\n"] {
+    for bad in [
+        "COMP LEFT\n",
+        "COMP UP 3000\n",
+        "COMP LEFT 0\n",
+        "COMP RIGHT -3000\n",
+        "COMP LEFT x\n",
+        "COMP LEFT 3000 FULL\n",
+        "COMP OFF WEAR\n",
+    ] {
         assert!(cnc::parse(bad).is_err(), "{bad:?} must refuse");
     }
 }

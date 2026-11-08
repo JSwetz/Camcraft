@@ -20,6 +20,7 @@ pub use camcraft_motion::machining3d;
 pub use camcraft_motion::multiaxis;
 pub use camcraft_motion::turning;
 pub mod machine;
+pub mod mcp;
 pub mod model;
 pub mod operation;
 pub mod pick;

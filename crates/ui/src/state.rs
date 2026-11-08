@@ -77,6 +77,11 @@ pub enum CommandKind {
         margin: f64,
         shape: i32,
     },
+    /// Box stock that wraps every model's world AABB by a separate
+    /// allowance per side (#198): `[-X, +X, -Y, +Y, bottom, top]`, mm.
+    StockFitSides {
+        sides: [f64; 6],
+    },
     /// The document's display unit (M1.1): a lens over numbers that all
     /// stay millimeters in the world. Undo restores the previous lens.
     SetUnits(Unit),
@@ -175,6 +180,12 @@ pub enum CommandKind {
         name: String,
         params: OpParams,
         area: AreaControls,
+    },
+    /// The op page's Coolant row (#112): the post's fluid word for one
+    /// operation, one undo unit through `EditOperationParams`.
+    EditOperationCoolant {
+        name: String,
+        coolant: camcraft_app::operation::CoolantMode,
     },
     /// The op's context-menu retype (M9.1): change the operation's kind
     /// in place, numbers carried by the one retype law, one undo unit.
@@ -304,6 +315,11 @@ pub struct StockUi {
     pub z: f64,
     pub yaw_deg: f64,
     pub fit_margin: f64,
+    /// #198: fit a box by a separate allowance per side instead of the
+    /// one margin.
+    pub fit_per_side: bool,
+    /// #198: `[-X, +X, -Y, +Y, bottom, top]`, mm.
+    pub fit_sides: [f64; 6],
 }
 
 impl Default for StockUi {
@@ -323,6 +339,8 @@ impl Default for StockUi {
             z: 0.0,
             yaw_deg: 0.0,
             fit_margin: 2.0,
+            fit_per_side: false,
+            fit_sides: [2.0; 6],
         }
     }
 }
@@ -1382,6 +1400,40 @@ impl State {
         ToolUi::from_tool(&format!("Tool{n}"), &starter.1, false)
     }
 
+    /// Place a fitted stock (#198 shared it between the single-margin and
+    /// per-side fits): the size and XY/Z placement from the fit, the
+    /// stock's own rotation kept, through the undoable `SetStock`.
+    fn apply_stock_fit(&mut self, fitted: Option<(StockShape, Point3)>) {
+        let Some((shape, pos)) = fitted else {
+            self.refuse(
+                ErrorScope::Setup,
+                String::from("stock fit refused: models have no usable extent"),
+            );
+            return;
+        };
+        // Fit replaces size and XY/Z placement; a deliberately
+        // oriented stock keeps its rotation.
+        // The fit replaces the ACTIVE setup's stock, and keeps
+        // that entity's deliberate rotation (M3.2 A: the name is
+        // resolved here; the command re-resolves at construction).
+        let stock_name = camcraft_app::setup::stock_entity_name(
+            &self.world,
+            camcraft_app::setup::active(&self.world).as_deref(),
+        );
+        let rot = model::find_by_name(&self.world, &stock_name)
+            .and_then(|entity| model::transform_of(&self.world, &entity))
+            .map_or_else(|| Location::default().rot, |loc| loc.rot);
+        let location = Location { pos, rot };
+        match SetStock::new(&self.world, shape, location) {
+            Ok(command) => {
+                self.history.execute(&self.world, command);
+                self.doc_version += 1;
+                self.status = String::from("stock fitted to models");
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("stock not fitted: {err}")),
+        }
+    }
+
     /// Record a refusal: status strip for everyone, tagged message for the
     /// pane that caused it. An operation-scope refusal is stamped with the
     /// page it was raised on, so it retires with that state.
@@ -2393,38 +2445,29 @@ impl State {
                     );
                     return;
                 };
-                let Some((shape, pos)) = (if radio == 1 {
+                let fitted = if radio == 1 {
                     stock::fit_cylinder(&bounds, margin)
                 } else {
                     stock::fit_box(&bounds, margin)
-                }) else {
+                };
+                self.apply_stock_fit(fitted);
+            }
+            CommandKind::StockFitSides { sides } => {
+                if !sides.iter().all(|s| s.is_finite() && *s >= 0.0) {
                     self.refuse(
                         ErrorScope::Setup,
-                        String::from("stock fit refused: models have no usable extent"),
+                        String::from("stock fit refused: every side's allowance must be zero or more"),
+                    );
+                    return;
+                }
+                let Some(bounds) = model::solid_world_aabb(&self.world) else {
+                    self.refuse(
+                        ErrorScope::Setup,
+                        String::from("nothing to fit: no models in the document"),
                     );
                     return;
                 };
-                // Fit replaces size and XY/Z placement; a deliberately
-                // oriented stock keeps its rotation.
-                // The fit replaces the ACTIVE setup's stock, and keeps
-                // that entity's deliberate rotation (M3.2 A: the name is
-                // resolved here; the command re-resolves at construction).
-                let stock_name = camcraft_app::setup::stock_entity_name(
-                    &self.world,
-                    camcraft_app::setup::active(&self.world).as_deref(),
-                );
-                let rot = model::find_by_name(&self.world, &stock_name)
-                    .and_then(|entity| model::transform_of(&self.world, &entity))
-                    .map_or_else(|| Location::default().rot, |loc| loc.rot);
-                let location = Location { pos, rot };
-                match SetStock::new(&self.world, shape, location) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = String::from("stock fitted to models");
-                    }
-                    Err(err) => self.refuse(ErrorScope::Setup, format!("stock not fitted: {err}")),
-                }
+                self.apply_stock_fit(stock::fit_box_sides(&bounds, sides));
             }
             CommandKind::SetWcs {
                 slot,
@@ -2559,6 +2602,16 @@ impl State {
                     Err(err) => {
                         self.refuse(ErrorScope::Operation, format!("parameters not updated: {err}"));
                     }
+                }
+            }
+            CommandKind::EditOperationCoolant { name, coolant } => {
+                match EditOperationParams::with_coolant(&self.world, &name, coolant) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("coolant set to {} for {name}", coolant.label());
+                    }
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("coolant not changed: {err}")),
                 }
             }
             CommandKind::ChangeOperationKind { name, kind } => {
