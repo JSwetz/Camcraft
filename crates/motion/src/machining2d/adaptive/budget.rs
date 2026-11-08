@@ -27,7 +27,7 @@ pub(super) const LEAST_WORK_MAX: f64 = 2_000.0;
 
 /// The growth work (tool radii of revolutions tried, every margin
 /// attempt) a plan may spend before it is refused.
-pub(super) const WORK_MAX: f64 = 30_000.0;
+pub(super) const WORK_MAX: f64 = 40_000.0;
 
 /// The channel an area reads as: its length (mm) from its center
 /// `area` and the clearance `clear` at the entry.

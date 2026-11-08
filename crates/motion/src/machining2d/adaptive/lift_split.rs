@@ -187,7 +187,7 @@ pub(super) fn seg_dist(p: Point2, a: Point2, b: Point2) -> f64 {
 const LEAD_READ: f64 = 3.0;
 
 /// The last `d` (mm) of `p`.
-fn end_of(p: &[Point2], d: f64) -> Vec<Point2> {
+pub(super) fn end_of(p: &[Point2], d: f64) -> Vec<Point2> {
     let mut k = p.len().saturating_sub(1);
     while k > 0 && len(&p[k..]) < d {
         k -= 1;

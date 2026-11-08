@@ -8,7 +8,7 @@
 
 use crate::geo2d::{Point2, Region};
 
-use super::front::dist;
+use super::front::{dist, len};
 use super::lift::MICROLIFT;
 use super::lift_split::{Piece, seg_dist};
 use super::raster::Raster;
@@ -244,6 +244,66 @@ impl LinkLaw<'_> {
         None
     }
 }
+
+impl LinkLaw<'_> {
+    /// Round 8: a late piece whose lead holds stock to its first point
+    /// (no air for [`Self::late`] to land on) is cut FROM its lead's first
+    /// point - the lead ridden at the floor as a cut, as the spiral rode
+    /// it, shaving the sub-bite slivers the re-order would otherwise
+    /// leave lap after lap. Its start too holds the slivers in the rim,
+    /// so the cut begins further back on `back` (the end of the walk's
+    /// previous piece, already cut: [`RIDE_BACK`] steps re-ridden at the
+    /// floor), reached by a return descending along what is before it.
+    /// What is ridden is the spiral's own path (it crosses no piece) and
+    /// must read within `bound` on the stock as it stands; `None` leaves
+    /// `p` untouched.
+    pub(super) fn ride_lead(&self, at: Point2, tail: &[Point2], p: &mut Piece, back: &[Point2], bound: f64) -> Option<Return> {
+        let &st = p.lead.first()?;
+        if p.lead.len() < 2 || dist(st, p.pts[0]) <= 1e-9 || back.last().is_none_or(|&b| dist(b, st) > 1e-6) {
+            return None;
+        }
+        // The exact vertices of the walk (no resampling): a re-ridden
+        // stretch posts the very segments already posted, never a hair off
+        // them that the crossing law would read as a crossing.
+        let mut tried = usize::MAX;
+        for off in RIDE_BACK {
+            // `back` split `off` mm before its end: the ride, and the lead.
+            let mut k = back.len() - 1;
+            while k > 0 && len(&back[k..]) < off {
+                k -= 1;
+            }
+            if (off > 0.0 && len(&back[k..]) < off) || k == tried {
+                if k == 0 {
+                    break;
+                }
+                continue;
+            }
+            tried = k;
+            let mut ride: Vec<Point2> = back[k..].to_vec();
+            ride.extend(p.lead.iter().skip(1).copied());
+            let w = self.ras.clone().walk_until(&ride, (self.r, self.rim, self.step), bound);
+            if w.0 > bound {
+                return None;
+            }
+            let grow = |pts: &[Point2]| {
+                let mut out = ride.clone();
+                out.extend(pts.iter().skip(1).copied());
+                out.dedup_by(|a, b| dist(*a, *b) <= 1e-9);
+                out
+            };
+            let q = Piece { pts: grow(&p.pts), lead: back[..=k].to_vec(), tail: p.tail.clone(), fine: p.fine.as_deref().map(grow) };
+            if let Some(ret) = self.find(at, tail, &q, None).or_else(|| self.high(&q)) {
+                *p = q;
+                return Some(ret);
+            }
+        }
+        None
+    }
+}
+
+/// How far back on the previous piece (mm) a ridden lead's cut may begin
+/// ([`LinkLaw::ride_lead`]), in the order tried.
+const RIDE_BACK: [f64; 8] = [0.0, 1.0, 2.0, 4.0, 6.0, 9.0, 13.0, 18.0];
 
 /// The free-space map a routed return is planned on.
 pub(super) fn free_map(ras: &Raster) -> Vec<f64> {

@@ -34,8 +34,8 @@ use crate::geo2d::{Point2, Region};
 
 use super::front::{densify, dist, len};
 use super::guard::crossing_pairs;
-use super::lift_link::{Leg, LinkLaw, Return, extend, free_map, landing, legs};
-use super::lift_split::{Piece, depends, split, thin_turn};
+use super::lift_link::{Leg, LinkLaw, RAMP_RUN, Return, extend, free_map, landing, legs};
+use super::lift_split::{Piece, depends, end_of, split, thin_turn};
 use super::raster::Raster;
 use super::{GenError, Planner, Worst};
 
@@ -108,6 +108,9 @@ pub(super) struct Lifted {
     pub rides: usize,
     /// Returns taken over the retract plane.
     pub highs: usize,
+    /// Pieces cut from their lead's first point, the lead ridden as a cut
+    /// (round 8, `LinkLaw::ride_lead`).
+    pub leads: usize,
     /// Every return so far, leg by leg.
     links: Vec<Vec<Leg>>,
 }
@@ -125,7 +128,7 @@ pub(super) fn lift(walk: &[Point2], ras0: &Raster, center: &Region, s: &LiftSpec
         return Ok(None);
     }
     coarsen(&mut pieces, &walk[ease..]);
-    let mut out = Lifted { passes: Vec::new(), joins: Vec::new(), worst: (0.0, w0), ras: ras0.clone(), dropped: 0.0, lift: 0.0, hops: 0, rides: 0, highs: 0, links: Vec::new() };
+    let mut out = Lifted { passes: Vec::new(), joins: Vec::new(), worst: (0.0, w0), ras: ras0.clone(), dropped: 0.0, lift: 0.0, hops: 0, rides: 0, highs: 0, leads: 0, links: Vec::new() };
     schedule(&mut out, pieces, center, s, true);
     if out.hops > HOP_CAP {
         return Ok(Some(out));
@@ -164,6 +167,17 @@ fn ride(tail: &[Point2], p: &Piece) -> Option<Vec<Point2>> {
     }
     let (&l0, _) = p.lead.split_first()?;
     near(t1, l0).then(|| tail[1..].iter().chain(p.lead[1..].iter()).copied().collect())
+}
+
+/// The walk's own path onto the end of `p` (its lead where it runs on
+/// to `p`, then `p`): where a ridden lead's cut may begin (round 8).
+fn back_of(p: &Piece) -> Vec<Point2> {
+    let mut b = match (p.lead.last(), p.pts.first()) {
+        (Some(&l), Some(&f)) if dist(l, f) <= 1e-9 => p.lead.clone(),
+        _ => Vec::new(),
+    };
+    b.extend(p.pts.iter().skip(usize::from(!b.is_empty())).copied());
+    end_of(&b, 18.0 + 3.0 * RAMP_RUN)
 }
 
 /// The fronts' pieces re-thinned to longer chords (the spiral's own sag
@@ -244,6 +258,15 @@ fn schedule(out: &mut Lifted, mut pieces: Vec<Piece>, center: &Region, s: &LiftS
                         && r.high
                     {
                         out.highs += 1;
+                    }
+                }
+                if pick.is_none() && rode.is_none() {
+                    // Round 8: the lead ridden as a cut (`LinkLaw::ride_lead`).
+                    let back = low.checked_sub(1).filter(|&i| done[i]).map(|i| back_of(&pieces[i])).unwrap_or_default();
+                    pick = law.ride_lead(at, &tail, &mut pieces[low], &back, s.bound).map(|r| (low, r));
+                    if let Some((_, r)) = &pick {
+                        out.leads += 1;
+                        out.highs += usize::from(r.high);
                     }
                 }
                 if pick.is_none() && rode.is_none() {
@@ -392,12 +415,13 @@ pub(super) fn travel(ras0: &Raster, passes: &[Vec<Point2>], joins: &[Option<Retu
 /// The plan's note: how many returns are lifted, over how much.
 pub(super) fn note(l: &Lifted) -> String {
     format!(
-        "adaptive: {} microlift returns ({MICROLIFT:.1} mm or more over the cleared floor, {:.0} mm) replace {:.0} mm of wall riding in cut; {} over the retract plane, {} rides on at the floor, {} retract hops",
+        "adaptive: {} microlift returns ({MICROLIFT:.1} mm or more over the cleared floor, {:.0} mm) replace {:.0} mm of wall riding in cut; {} over the retract plane, {} rides on at the floor, {} leads ridden as cuts, {} retract hops",
         l.joins.iter().filter(|j| j.is_some()).count(),
         l.lift,
         l.dropped,
         l.highs,
         l.rides,
+        l.leads,
         l.hops
     )
 }
