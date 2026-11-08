@@ -52,6 +52,23 @@ fn body(ui: &mut Ui, state: &mut State, target: &str, live_setup: Option<&str>) 
     }
     if state.op_ui.src_kind == 2 {
         chips(ui, state, target);
+        // #187: the 3-2-1 alignment reads the picks as datums - a flat
+        // face for Z, a straight edge for X, a vertex or bore for the
+        // origin. The app builds the frame (or names what to re-pick).
+        let aligned = camcraft_app::pick::align_321(&state.world, &state.op_ui.geo);
+        let tip = match &aligned {
+            Ok(_) => "place the WCS slot chosen in the WCS pane: Z out of the picked flat face, X along the picked \
+                      edge, origin at the picked vertex or bore (else the edge's end), on the face"
+                .to_owned(),
+            Err(why) => format!("3-2-1 alignment: {why}"),
+        };
+        if ui.add_enabled(aligned.is_ok(), egui::Button::new("Align WCS (3-2-1)").small())
+            .on_hover_text(&tip)
+            .on_disabled_hover_text(&tip)
+            .clicked()
+        {
+            crate::vertex_pick::queue_wcs_321(state);
+        }
     }
     let (notes, refusal) =
         operation::selection_account(&state.world, live_setup, &state.op_ui.geo.clone(), &state.op_ui.params.clone());

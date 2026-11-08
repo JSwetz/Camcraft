@@ -119,6 +119,7 @@ mod job;
 pub use job::*;
 mod generate;
 mod cross_entry;
+mod cross_sag;
 mod cross_part;
 mod cross_spindle;
 mod cross_stock;
@@ -132,8 +133,10 @@ pub use spindle_law::{spindle_reading, SpindleReading, SPINDLE_TOL};
 mod rotary_gate;
 mod air_law;
 mod turning_credit;
+mod turning_feeds;
 mod turning_outline;
 mod turning_rapids;
+mod turning_stock;
 pub use air_law::AIR_NOTE;
 pub use generate::*;
 #[cfg(test)]

@@ -18,7 +18,7 @@
 use crate::model;
 use crate::operation::{self, Height, HeightReference, OpStatus, OpParams};
 use crate::post::{self, cnc, engine, Dump};
-use crate::schema::{PostRef, WCS_SLOTS};
+use crate::schema::{PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
 use flecs_ecs::prelude::*;
 use serde_json::Value;
 use std::path::Path;
@@ -166,6 +166,30 @@ pub fn post_set(world: &World, next: &PostRef) {
     world.set(next.clone());
 }
 
+/// The document's post options (issue #34), from the `PostOptions`
+/// singleton; the default when none was ever set.
+#[must_use]
+pub fn post_options(world: &World) -> PostOptions {
+    world.try_get::<&PostOptions>(|p| *p).unwrap_or_default()
+}
+
+/// Write the options singleton. For `SetPostOptions` and the project
+/// reader only.
+pub fn post_options_set(world: &World, next: PostOptions) {
+    world.set(next);
+}
+
+/// The options as the script's `postOptions` object: the words a
+/// script compares against (`Threading`: `"G32"` or `"G76"`).
+#[must_use]
+pub fn options_value(o: PostOptions) -> Value {
+    let threading = match o.threading {
+        ThreadingOutput::G32Passes => "G32",
+        ThreadingOutput::G76Cycle => "G76",
+    };
+    serde_json::json!({ "Threading": threading })
+}
+
 /// The document's post for display: built-in name, or the file path
 /// as chosen. Never touches disk - a pane may draw this every frame,
 /// and it names exactly what `script_source` resolves. One truth,
@@ -277,7 +301,7 @@ pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, 
         return Err(format!("post blocked - {}", report.problems.join("; ")));
     }
     let stream = cnc::serialize(&records);
-    let out = engine::run(cps, &machine_value(world), &stream)
+    let out = engine::run_with(cps, &machine_value(world), &stream, &options_value(post_options(world)))
         .map_err(|e| format!("post engine: {e}"))?;
     if !out.warnings.is_empty() {
         return Err(format!(
@@ -599,6 +623,7 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             part_unload,
             part_transfer,
             probe_tol,
+            coolant: op.coolant,
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

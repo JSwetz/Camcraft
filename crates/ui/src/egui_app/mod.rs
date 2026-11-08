@@ -32,9 +32,11 @@ pub(crate) mod gpu_select;
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
 pub mod contrast;
 mod boundary;
+mod stock_info;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
 pub mod colorvision;
+mod post_options;
 pub mod cvd;
 mod icons;
 mod layout;
@@ -65,6 +67,8 @@ mod params_page;
 mod rotary_page;
 mod turning_more_page;
 mod turning_page;
+// #107: Save / Don't Save / Cancel over unsaved changes.
+mod unsaved_prompt;
 mod panes;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
@@ -92,11 +96,15 @@ mod footer_tests;
 #[cfg(test)]
 mod dialog_tests;
 #[cfg(test)]
+mod coolant_tests;
+#[cfg(test)]
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
 #[cfg(test)]
 mod ribbon_icon_tests;
+
+mod gate_route_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
 /// selects the no-window proof (seeded document, fallback adapter, View3D
