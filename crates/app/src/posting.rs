@@ -16,7 +16,7 @@
 //! so the posted numbers are the machined ones.
 
 use crate::model;
-use crate::operation::{self, Height, HeightReference, OpStatus, OpParams};
+use crate::operation::{self, Height, OpStatus, OpParams};
 use crate::post::{self, cnc, engine, Dump};
 use crate::schema::{PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
 use flecs_ecs::prelude::*;
@@ -279,6 +279,8 @@ mod sim_clause_impl;
 mod per_op;
 #[path = "posting_suppressed.rs"]
 mod suppressed;
+#[path = "posting_wcs_rotation.rs"]
+mod wcs_rotation;
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
@@ -501,6 +503,8 @@ pub fn verification_report(world: &World) -> GateReport {
     // a suppressed op's cut refuses by name - the cut it assumed is not
     // in the program.
     problems.extend(suppressed::suppressed_problems(world));
+    // The rotated-offset clause (#315): the post carries translation only.
+    problems.extend(wcs_rotation::rotated_wcs_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
         match crate::machine::check_document(world, &m) {
@@ -761,14 +765,7 @@ pub(crate) fn wcs_context<'a>(
     setup: Option<&str>,
     params: &'a OpParams,
 ) -> (&'a str, [f64; 3]) {
-    let slot = params
-        .heights()
-        .into_iter()
-        .find_map(|h| match h.reference {
-            HeightReference::WorkOffset(i) if i < WCS_SLOTS.len() => Some(i),
-            _ => None,
-        })
-        .unwrap_or(0);
+    let slot = wcs_rotation::wcs_slot(params);
     let name = WCS_SLOTS[slot];
     let origin = crate::setup::wcs_entity(world, setup, slot)
         .and_then(|e| model::transform_of(world, &e))
