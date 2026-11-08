@@ -33,6 +33,8 @@ pub(crate) mod gpu_select;
 pub mod contrast;
 mod boundary;
 mod debug_info;
+mod status_alert;
+
 mod stock_info;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
@@ -103,6 +105,8 @@ mod coolant_tests;
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
+#[cfg(test)]
+mod ribbon_icon_tests;
 #[cfg(test)]
 mod debug_info_tests;
 #[cfg(test)]
