@@ -85,6 +85,11 @@ pub(crate) fn quit(state: &mut State) {
     state.pending.push_back(CommandKind::Quit);
 }
 
+/// The unsaved-changes prompt's answer (#107), through the same queue.
+pub(crate) fn resolve_unsaved(state: &mut State, choice: crate::unsaved::UnsavedChoice) {
+    state.pending.push_back(CommandKind::ResolveUnsaved(choice));
+}
+
 pub(crate) fn undo(state: &mut State) {
     state.pending.push_back(CommandKind::Undo);
 }

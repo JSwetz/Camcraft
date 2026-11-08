@@ -61,6 +61,9 @@ pub enum CommandKind {
     Select(Option<String>),
     FrameAll,
     Quit,
+    /// The answer to the unsaved-changes prompt (#107): New, Open or Quit
+    /// over a dirty document is held in `unsaved_prompt` until this lands.
+    ResolveUnsaved(crate::unsaved::UnsavedChoice),
     /// The Setup pane's shape+placement draft; the command itself is built
     /// here, so validation and status reporting live in one place.
     SetStock {
@@ -1081,6 +1084,13 @@ pub struct State {
     pub dragging_op: Option<String>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
+    /// #107: a New / Open / Quit held back because the document has
+    /// unsaved changes; while Some, the shell shows the Save / Don't Save
+    /// / Cancel prompt. Ephemeral UI state - never on the history.
+    pub unsaved_prompt: Option<CommandKind>,
+    /// Set only while a held action runs after the user chose to discard
+    /// (or saved first), so the guard lets it through once.
+    pub(crate) discard_confirmed: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
     /// runs `ImportModel::new` off-thread and sends the finished command back.
     import_rx: Option<mpsc::Receiver<Result<ImportModel, CommandError>>>,
@@ -1303,6 +1313,8 @@ impl State {
             dragging_op: None,
             pending: VecDeque::new(),
             request_quit: false,
+            unsaved_prompt: None,
+            discard_confirmed: false,
             import_rx: None,
             import_file: None,
             import_started: None,
@@ -2123,11 +2135,16 @@ impl State {
         }
     }
 
-    fn run(&mut self, action: CommandKind) {
+    pub(crate) fn run(&mut self, action: CommandKind) {
         // Whatever ran, the banner shows only the newest outcome: a later
         // command (even a successful one) retires an old refusal.
         self.feedback = None;
         self.feedback_ctx = None;
+        // #107: New, Open and Quit over unsaved changes wait for the
+        // prompt's answer instead of discarding the document.
+        let Some(action) = self.hold_if_unsaved(action) else {
+            return;
+        };
         match action {
             CommandKind::OpenModelDialog => {
                 if let Some(path) = pick_mesh_file() {
@@ -2232,6 +2249,7 @@ impl State {
             }
             CommandKind::FrameAll => self.frame_all(),
             CommandKind::Quit => self.request_quit = true,
+            CommandKind::ResolveUnsaved(choice) => self.resolve_unsaved(choice),
             CommandKind::DeleteByName(name) => match DeleteEntity::new(&self.world, &name) {
                 Ok(command) => {
                     self.history.execute(&self.world, command);
@@ -3296,6 +3314,8 @@ impl State {
         match project::load(&self.world, &path) {
             Ok(()) => {
                 self.project_path = Some(path.clone());
+                // The loaded document is the new clean point (#107).
+                self.history.mark_clean();
                 self.doc_version += 1;
                 self.status = format!("opened {}", path.display());
             }
@@ -3303,9 +3323,11 @@ impl State {
         }
     }
 
-    fn save_project_path(&mut self, path: PathBuf) {
+    pub(crate) fn save_project_path(&mut self, path: PathBuf) {
         match project::save(&self.world, &path) {
             Ok(()) => {
+                // What is on disk now matches the history position (#107).
+                self.history.mark_clean();
                 self.status = format!("saved {}", path.display());
                 self.project_path = Some(path);
             }
@@ -3316,9 +3338,11 @@ impl State {
     #[must_use]
     pub fn window_title(&self) -> String {
         let filename = self.project_path.as_ref().and_then(|path| path.file_name());
+        // A leading '*' while the document has unsaved changes (#107).
+        let mark = if self.history.is_dirty() { "*" } else { "" };
         match filename {
-            Some(name) => format!("CamCraft - {}", name.to_string_lossy()),
-            None => String::from("CamCraft - Untitled"),
+            Some(name) => format!("{mark}CamCraft - {}", name.to_string_lossy()),
+            None => format!("{mark}CamCraft - Untitled"),
         }
     }
 
@@ -3495,7 +3519,7 @@ fn pick_theme_file() -> Option<PathBuf> {
     dialog.pick_file()
 }
 
-fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().add_filter("CamCraft Project", &["camproj"]);
     if let Some(parent) = current.and_then(Path::parent) {
         dialog = dialog.set_directory(parent);
