@@ -819,6 +819,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
                 line.push_str(&format!(", datum from {}", def.datum_from));
             }
             ui.label(line);
+            super::setup_align_pick::picker(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
     }
