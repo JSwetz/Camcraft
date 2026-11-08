@@ -86,6 +86,7 @@ mod tests {
 
     fn dive(z0: f64, z1: f64) -> Toolpath {
         let mv = |kind, a: f64, b: f64| Move {
+            rotary: None,
             kind,
             from: Point3::new(0.0, 0.0, a),
             to: Point3::new(0.0, 0.0, b),

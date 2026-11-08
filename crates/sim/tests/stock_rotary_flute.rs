@@ -65,8 +65,8 @@ fn tip(deg: f64) -> Point3 {
 
 fn program() -> Vec<Move> {
     vec![
-        Move { kind: MoveKind::Rapid, from: tip(FROM_DEG), to: tip(FROM_DEG), feed: None, arc: None, axis: Some(radial(FROM_DEG)) },
-        Move { kind: MoveKind::Feed, from: tip(FROM_DEG), to: tip(TO_DEG), feed: Some(300.0), arc: None, axis: Some(radial(TO_DEG)) },
+        Move { rotary: None, kind: MoveKind::Rapid, from: tip(FROM_DEG), to: tip(FROM_DEG), feed: None, arc: None, axis: Some(radial(FROM_DEG)) },
+        Move { rotary: None, kind: MoveKind::Feed, from: tip(FROM_DEG), to: tip(TO_DEG), feed: Some(300.0), arc: None, axis: Some(radial(TO_DEG)) },
     ]
 }
 

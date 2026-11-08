@@ -113,6 +113,16 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                         value.as_str().unwrap_or("non-flood")
                     ));
                 }
+                // A C-axis live-tool section (issue #33) posted through a
+                // script that cannot voice it would come out as XYZ for
+                // a tool that is not there: refused by name.
+                if name == "LiveTool" && !s.voices_live_tooling() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}is C-axis live-tool work (the spindle turns as C under a radial live tool), but this post script does not declare liveTooling - use a lathe post that voices the C axis"
+                    ));
+                }
                 s.set_properties(&merged(&base, &BTreeMap::new(), pos))?;
                 s.call("onParameter", &format!("{}, {}", json!(name), value))?;
                 if name == "SpindleSpeed" {

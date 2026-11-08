@@ -29,7 +29,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 fn mv(from: Point3, to: Point3, axis: Option<V3>) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis }
+    Move { rotary: None, kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis }
 }
 
 fn seg2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
@@ -261,6 +261,7 @@ fn parity(a: &Deviation, b: &Deviation, h: f64, label: &str) {
 
 fn programs() -> Vec<(&'static str, Vec<Move>, f64)> {
     let arc = Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from: p(9.0, 6.0, 3.0),
         to: p(3.0, 6.0, 2.0),

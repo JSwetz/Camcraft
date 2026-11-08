@@ -108,7 +108,7 @@ pub fn simulate_rotary_slice(
     match (held, first) {
         (Some(axis), Some(m0)) if m0.axis != Some(axis) => {
             let mut v: Vec<Move> = Vec::with_capacity(op.moves.len() + 1);
-            v.push(Move { kind: MoveKind::Rapid, from: m0.from, to: m0.from, feed: None, arc: None, axis: Some(axis) });
+            v.push(Move { rotary: None, kind: MoveKind::Rapid, from: m0.from, to: m0.from, feed: None, arc: None, axis: Some(axis) });
             v.extend_from_slice(op.moves);
             stock.simulate_rotary(&[SimOp { moves: &v, ..*op }], ax, pose_tol)
         }
