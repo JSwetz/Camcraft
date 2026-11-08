@@ -131,7 +131,7 @@ fn rotary_world() -> World {
     // the program's Z reads below the table plane (the tilt suite's
     // parked-anchor reasoning, done with the work offset instead).
     let g54 = Location { pos: Point3::new(0.0, 0.0, 40.0), rot: IDENTITY_Q };
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", g54).expect("place G54"));
+    history.execute(&world, SetWcsOrigin::new(&world, g54).expect("place G54"));
     assert_eq!(status(&world, "RC1"), OpStatus::Ok, "fixture: fresh");
     assert!(
         silent(&world, "RC1"),

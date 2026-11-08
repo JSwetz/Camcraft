@@ -156,8 +156,8 @@ fn model_bounds_anchors_follow_the_aligned_part() {
 
     // A G54 placed on the SW corner lands on the turned part's corner.
     let sw = model_anchors(&mut state)[0];
-    run(&mut state, CommandKind::SetWcs { slot: "G54".into(), pos: sw, roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 });
-    let g54 = camcraft_app::setup::wcs_entity(&state.world, Some("Setup1"), 0)
+    run(&mut state, CommandKind::SetWcs { pos: sw, roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 });
+    let g54 = camcraft_app::setup::wcs_entity(&state.world, Some("Setup1"))
         .and_then(|e| camcraft_app::model::transform_of(&state.world, &e))
         .map(|l| [l.pos.x, l.pos.y, l.pos.z]);
     assert!(g54.is_some_and(|p| near(p, [-10.0, -20.0, 0.0])), "G54 at {g54:?}");

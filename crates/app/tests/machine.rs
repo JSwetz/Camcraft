@@ -397,7 +397,6 @@ fn a_g54_slide_moves_the_stroke_exactly_like_the_g_code() {
         &world,
         SetWcsOrigin::new(
             &world,
-            "G54",
             Location { pos: Point3::new(100.0, 0.0, 0.0), rot: IDENTITY_Q },
         )
         .expect("slide G54"),

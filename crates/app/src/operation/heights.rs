@@ -67,9 +67,8 @@ pub fn resolve_height(
         HeightReference::TopOfModel => crate::setup_align::solid_aabb_in(world, setup)?.max.z,
         HeightReference::BottomOfModel => crate::setup_align::solid_aabb_in(world, setup)?.min.z,
         HeightReference::WorkOffset => {
-            // #329: the setup's offset, never the height's own.
-            let slot = crate::setup::wcs_slot(world, setup);
-            let entity = crate::setup::wcs_entity(world, setup, slot)?;
+            // #329, #342: the setup's one WCS, never the height's own.
+            let entity = crate::setup::wcs_entity(world, setup)?;
             model::transform_of(world, &entity).unwrap_or_default().pos.z
         }
         HeightReference::TopOfSelection | HeightReference::BottomOfSelection => {
@@ -102,16 +101,9 @@ pub fn missing_source(
         HeightReference::TopOfModel | HeightReference::BottomOfModel => {
             model::solid_world_aabb(world).is_none().then_some("no model loaded")
         }
-        HeightReference::WorkOffset => match crate::setup::wcs_entity_name(
-            world,
-            setup,
-            crate::setup::wcs_slot(world, setup),
-        ) {
-            None => Some("work offset slot out of range (G54..G59)"),
-            Some(name) => model::find_by_name(world, &name)
-                .is_none()
-                .then_some("that work offset has no origin yet - place it in Setup"),
-        },
+        HeightReference::WorkOffset => crate::setup::wcs_entity(world, setup)
+            .is_none()
+            .then_some("the setup's WCS has no origin yet - place it in Setup"),
     }
 }
 
