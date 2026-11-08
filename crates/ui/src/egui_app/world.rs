@@ -154,7 +154,7 @@ fn contour_params() -> OpParams {
         clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
         retract_z: Height::of(HeightReference::TopOfStock, 10.0),
         top_z: Height::of(HeightReference::TopOfModel, 0.0),
-        bottom_z: Height::of(HeightReference::WorkOffset(0), 0.0),
+        bottom_z: Height::of(HeightReference::WorkOffset, 0.0),
         stepdown: 5.0,
         feed: 1200.0,
         plunge_feed: 300.0,

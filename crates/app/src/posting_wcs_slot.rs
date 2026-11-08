@@ -1,17 +1,12 @@
-//! The work-offset slot law (#196): which `G54`..`G59` word an
-//! operation posts at, and the two refusals a per-setup pick brings.
+//! The work-offset slot law (#196, #329): which `G54`..`G59` word an
+//! operation posts at, and the one-file refusal a per-setup pick brings.
 //!
-//! - **The pick governs.** A setup that picked its program offset
-//!   (`SetupDef::work_offset`, set by `SetSetupWorkOffset`) posts every
-//!   one of its operations at that word, measured from that slot's
-//!   placement in the setup. A setup that picked none keeps the
-//!   inferred law every older document posted with: the first slot the
-//!   operation's heights reference, else `G54`.
-//! - **A height on another slot is a conflict, refused by name.** In a
-//!   picked setup, an operation whose heights are measured from a
-//!   DIFFERENT slot would, under the old law, have posted at that slot;
-//!   the pick silently overriding it is an offset the user did not
-//!   choose for that operation, so the gate names both and asks.
+//! - **The setup governs.** Every operation of a setup posts at the
+//!   setup's program offset (`SetupDef::work_offset`, set by
+//!   `SetSetupWorkOffset`; unpicked = `G54`), measured from that slot's
+//!   placement in the setup - [`crate::setup::wcs_slot`] is the law. A
+//!   height measured from the work offset reads the same slot (#329), so
+//!   an operation cannot disagree with its setup by construction.
 //! - **One program, one register per word.** A single NC file in which
 //!   two setups post the same word with different placements would run
 //!   the second setup in the first one's zero - the controller holds one
@@ -25,74 +20,21 @@
 use flecs_ecs::prelude::World;
 
 use crate::model;
-use crate::operation::{HeightReference, OpParams};
-use crate::posting::HeightRefs;
 use crate::schema::{Location, WCS_SLOTS};
 
 /// Placement difference below which two offsets are the same zero:
 /// 1 nm, far under any machine resolution.
 const SAME_MM: f64 = 1e-6;
 
-/// The first WCS slot an operation's heights reference - the inferred
-/// law's answer before its `G54` default.
-fn height_slot(params: &OpParams) -> Option<usize> {
-    params.heights().into_iter().find_map(|h| match h.reference {
-        HeightReference::WorkOffset(i) if i < WCS_SLOTS.len() => Some(i),
-        _ => None,
-    })
-}
-
-/// The work-offset slot an operation of the `setup` context posts at:
-/// the setup's pick, else the first slot its heights reference, else
-/// slot 0 (`G54`). THE law: [`crate::posting::wcs_context`] and every
-/// clause of the gate read it.
-pub(crate) fn wcs_slot(world: &World, setup: Option<&str>, params: &OpParams) -> usize {
-    picked(world, setup)
-        .or_else(|| height_slot(params))
-        .unwrap_or(0)
-}
-
-/// The pick of the effective setup of a declared context.
-fn picked(world: &World, setup: Option<&str>) -> Option<usize> {
-    let s = crate::setup::effective(world, setup)?;
-    crate::setup::work_offset(world, &s)
+/// The work-offset slot an operation of the `setup` context posts at -
+/// the setup's ([`crate::setup::wcs_slot`]). [`crate::posting::wcs_context`]
+/// and the one-file clause read it.
+pub(crate) fn wcs_slot(world: &World, setup: Option<&str>) -> usize {
+    crate::setup::wcs_slot(world, setup)
 }
 
 fn word(slot: usize) -> &'static str {
     WCS_SLOTS.get(slot).copied().unwrap_or("G54")
-}
-
-/// One line per posted operation of a picked setup whose heights are
-/// measured from a different slot than the pick (module header).
-#[must_use]
-pub(super) fn slot_problems(world: &World) -> Vec<String> {
-    let mut out = Vec::new();
-    for (name, e) in crate::setup::operation_order(world) {
-        let Some(op) = model::operation_of(world, &e) else {
-            continue;
-        };
-        if op.suppressed {
-            continue; // not in the program (#110)
-        }
-        let setup = op.setup.as_deref();
-        let (Some(pick), Some(h)) = (picked(world, setup), height_slot(&op.params)) else {
-            continue;
-        };
-        if pick == h {
-            continue;
-        }
-        let s = crate::setup::effective(world, setup).unwrap_or_default();
-        out.push(format!(
-            "{}: its heights are measured from {} but setup {s} posts at {} - measure them \
-             from {} or pick {} for the setup",
-            model::operation_label(world, &name, &e),
-            word(h),
-            word(pick),
-            word(pick),
-            word(h)
-        ));
-    }
-    out
 }
 
 /// The placement a setup's slot is measured from (unplaced = the origin,
@@ -128,7 +70,7 @@ pub(super) fn shared_word_problems(world: &World) -> Vec<String> {
             continue;
         }
         let setup = op.setup.as_deref();
-        let slot = wcs_slot(world, setup, &op.params);
+        let slot = wcs_slot(world, setup);
         let name = crate::setup::effective(world, setup).unwrap_or_default();
         let here = placement(world, setup, slot);
         match seen.iter().find(|(s, n, _)| *s == slot && *n != name) {
