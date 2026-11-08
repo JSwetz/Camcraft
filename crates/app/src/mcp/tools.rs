@@ -28,6 +28,8 @@ const TOOLS: &[Tool] = &[
     Tool { name: "list_operation_types", description: "Every operation kind with its parameter fields, JSON types and default values, and the tool kinds it accepts.", schema: s_empty, run: job::list_operation_types },
     Tool { name: "list_tool_catalog", description: "The built-in tool catalog: names and definitions add_tool can copy into the document.", schema: s_empty, run: job::list_tool_catalog },
     Tool { name: "add_tool", description: "Add a tool to the document, from the catalog by name or from a full definition (the shape get_job shows).", schema: s_add_tool, run: edit::add_tool },
+    Tool { name: "export_tool_library", description: "Write the document's tools to a tool library file (.camtools), the same format the Tool library page's Export writes. Refuses a document with no tools or a path that cannot be written.", schema: s_library, run: export_tool_library },
+    Tool { name: "import_tool_library", description: "Import a tool library file into the document as one undo step, through the same command as the Tool library page's Import: an identical tool is skipped, a clashing name arrives as \"Name (2)\", a malformed or insane file is refused naming the tool.", schema: s_library, run: import_tool_library },
     Tool { name: "set_stock", description: "Set the active setup's stock: a box, a cylinder, or a copy of a model.", schema: s_stock, run: edit::set_stock },
     Tool { name: "add_operation", description: "Add an operation of a kind (see list_operation_types) with a tool, on the stock or a model, seeded with the kind's defaults and an optional params patch. Not generated until generate runs.", schema: s_add_op, run: edit::add_operation },
     Tool { name: "edit_operation", description: "Patch an operation's parameters: the given fields replace the current ones (JSON merge patch over the kind's fields; null clears an optional field). One undo step.", schema: s_edit_op, run: edit::edit_operation },
@@ -106,6 +108,14 @@ fn import_model(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> 
     api::v_import(env, args)
 }
 
+fn export_tool_library(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
+    api::v_export_tools(env, vec![json!(req_str(a, "path")?)])
+}
+
+fn import_tool_library(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
+    api::v_import_tools(env, vec![json!(req_str(a, "path")?)])
+}
+
 fn generate(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
     let args = opt_str(a, "name")?.map(|n| vec![json!(n)]).unwrap_or_default();
     let ops = api::v_generate(env, args)?;
@@ -139,6 +149,10 @@ fn s_path() -> Value {
 
 fn s_opt_path() -> Value {
     obj(json!({ "path": { "type": "string", "description": "File path (optional)." } }), &[])
+}
+
+fn s_library() -> Value {
+    obj(json!({ "path": { "type": "string", "description": "A tool library file (.camtools)." } }), &["path"])
 }
 
 fn s_import() -> Value {
