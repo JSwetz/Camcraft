@@ -1,50 +1,119 @@
 //! The hidden-rest scan (M2.2d) and its budget, split from `scan.rs`
 //! by the 400-line law (M13.1). Provenance: the parity-paired solid
 //! truth of `solid_rest` (ray-crossing parity, the published
-//! point-in-solid test) judged by the envelope's own distance law;
-//! nothing from vendor binaries.
+//! point-in-solid test) judged by the envelope's own distance law,
+//! streamed in row bands (out-of-core scanline practice); nothing
+//! from vendor binaries.
 //!
 //! ## The law here
 //!
 //! - **Over budget is "not judged", never zero** (M13.1, paying the
-//!   M2.2 debt the ROADMAP names): past its cell or claim budget the
-//!   scan cannot answer, and it says so through the report's type
+//!   M2.2 debt the ROADMAP names): past its budget the scan cannot
+//!   answer, and it says so through the report's type
 //!   (`HiddenRest::OverBudget`) instead of the old stated zero that
 //!   read exactly like "no hidden rest". Every consumer shows the
 //!   unjudged state by name.
+//! - **Past the holding budget the scan streams** (M13.1, #24): the
+//!   `cells` / `claims` numbers bound what one pass HOLDS, not what
+//!   the verdict may read. A lattice whose claims do not fit at once
+//!   is counted row by row, cut into bands that do, and judged band
+//!   after band by the very same body - each column sees the same
+//!   claims, the same pairing, the same distance law, so the banded
+//!   answer is the whole-lattice answer, bit for bit (rows ascend,
+//!   ties keep the first worst). Nothing is sampled coarser: a
+//!   skipped column could hide a ledge, and a false clean is a
+//!   gouge-class bug.
+//! - **The walk is bounded too.** Every facet-column visit and every
+//!   ball-center distance is counted against `work`; past it, or when
+//!   one row's claims alone cannot be held, the scan still answers
+//!   `OverBudget` - a stated refusal, never a hang and never a zero.
 
 use super::dexel::fy0;
 use super::scan::dist_pt_seg3;
+use super::scan_near::SegGrid;
 
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
+use crate::solid_rest::Claim;
 
-/// What the hidden-rest scan may spend: lattice cells (the bin
-/// headers, ~30 MB at the shipped 1.2 M) and plane claims within
-/// them (40 M). A stated budget, so a caller can name it.
+/// What the hidden-rest scan may spend: lattice cells held at once
+/// (the bin headers, ~30 MB at the shipped 1.2 M), plane claims held
+/// at once within them (40 M, ~1.6 GB), and the whole walk's `work` -
+/// facet-column visits plus ball-center distances, across every band
+/// (1 G, about ten seconds at worst). A stated budget, so a caller can name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanBudget {
     pub cells: usize,
     pub claims: usize,
+    pub work: usize,
 }
 
 impl ScanBudget {
     /// The budget every shipped verdict scans under.
-    pub const SHIPPED: ScanBudget = ScanBudget { cells: 1_200_000, claims: 40_000_000 };
+    pub const SHIPPED: ScanBudget =
+        ScanBudget { cells: 1_200_000, claims: 40_000_000, work: 1_000_000_000 };
 }
 
 /// Whether the hidden-rest half of an envelope verdict was judged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HiddenRest {
     /// The scan ran (or had nothing to scan): `rest_mm` carries its
-    /// answer, zero included as a real zero.
+    /// answer, zero included as a real zero - banded or not.
     #[default]
     Judged,
     /// The scan stopped at its budget and judged NOTHING: `rest_mm`
     /// speaks for the ridge law alone, and material hidden under an
     /// overhang may stand unreported. `cells` is the lattice, `claims`
-    /// how far the binning got before it stopped.
+    /// the plane claims counted when it stopped (one row's, when that
+    /// row alone cannot be held).
     OverBudget { cells: usize, claims: usize },
+}
+
+/// Why one pass stopped: too many claims to hold, or the walk's work
+/// (with the claims counted by then).
+enum Stop {
+    Claims,
+    Work(usize),
+}
+
+/// A facet's column span `(i0, i1, j0, j1)`.
+type Span = Option<(usize, usize, usize, usize)>;
+
+/// The scan's geometry frame, threaded once.
+struct Frame<'a> {
+    facets: &'a [Triangle],
+    segs: &'a [(Point3, Point3)],
+    grid: Option<SegGrid<'a>>,
+    part: &'a [f64],
+    x0: f64,
+    y0: f64,
+    cell: f64,
+    nx: usize,
+    ny: usize,
+    r: f64,
+    floor: f64,
+}
+
+impl Frame<'_> {
+    /// A facet's span on the lattice, `None` for a non-finite facet
+    /// or one wholly off it.
+    fn span(&self, t: &Triangle) -> Span {
+        let (a, b, c) = (t.a, t.b, t.c);
+        if !(a.is_finite() && b.is_finite() && c.is_finite()) {
+            return None;
+        }
+        let fx = |v: f64| ((v - self.x0) / self.cell).floor();
+        let i0 = fx(a.x.min(b.x).min(c.x)).max(0.0) as usize;
+        let i1 = fx(a.x.max(b.x).max(c.x)).clamp(0.0, self.nx as f64 - 1.0) as usize;
+        let j0 = fy0(a.y.min(b.y).min(c.y), self.y0, self.cell).max(0.0) as usize;
+        let j1 = fy0(a.y.max(b.y).max(c.y), self.y0, self.cell).clamp(0.0, self.ny as f64 - 1.0)
+            as usize;
+        (i0 < self.nx && j0 < self.ny && i0 <= i1 && j0 <= j1).then_some((i0, i1, j0, j1))
+    }
+
+    fn center(&self, ix: usize, iy: usize) -> (f64, f64) {
+        (self.x0 + (ix as f64 + 0.5) * self.cell, self.y0 + (iy as f64 + 0.5) * self.cell)
+    }
 }
 
 /// The hidden-rest scan, paying M2.2b's open debt. Per column the
@@ -57,8 +126,10 @@ pub enum HiddenRest {
 /// one yardstick reading two depths, never two predicates. An odd
 /// column is an open shell - unknown, and unknown never reports
 /// material (law (b)). Work is binned facet-outer (the
-/// `part_surface` shape); over budget the answer is
-/// `Err(HiddenRest::OverBudget)` - not judged, said by name.
+/// `part_surface` shape): the whole lattice at once when it fits, in
+/// row bands when it does not (the module law); past the work
+/// budget the answer is `Err(HiddenRest::OverBudget)` - not judged,
+/// said by name.
 #[allow(clippy::too_many_arguments)] // the scan's whole geometry frame, threaded once from envelope_scan
 pub(super) fn hidden_rest(
     facets: &[Triangle],
@@ -71,50 +142,141 @@ pub(super) fn hidden_rest(
     floor: f64,
     budget: ScanBudget,
 ) -> Result<(f64, Point2), HiddenRest> {
-    if segs.is_empty() || facets.is_empty() {
+    if segs.is_empty() || facets.is_empty() || nx == 0 || ny == 0 {
         return Ok((0.0, Point2::new(0.0, 0.0))); // nothing swept, or nothing to hide: judged
     }
-    if nx.saturating_mul(ny) > budget.cells {
-        return Err(HiddenRest::OverBudget { cells: nx.saturating_mul(ny), claims: 0 });
+    let cells = nx.saturating_mul(ny);
+    if part.len() < cells {
+        return Err(HiddenRest::OverBudget { cells, claims: 0 }); // no ground to judge on
     }
-    let mut bins: Vec<Vec<crate::solid_rest::Claim>> = (0..nx * ny).map(|_| Vec::new()).collect();
-    let mut claims = 0usize;
-    for t in facets {
-        let (a, b, c) = (t.a, t.b, t.c);
-        if !(a.is_finite() && b.is_finite() && c.is_finite()) {
-            continue;
+    let grid = SegGrid::new(segs, r.max(cell * 4.0));
+    let f = Frame { facets, segs, grid, part, x0, y0, cell, nx, ny, r, floor };
+    let spans: Vec<Span> = facets.iter().map(|t| f.span(t)).collect();
+    let mut work = 0usize;
+    if cells <= budget.cells {
+        let all: Vec<usize> = (0..facets.len()).filter(|&k| spans[k].is_some()).collect();
+        match judge_rows(&f, &spans, &all, (0, ny), budget, &mut work) {
+            Ok(v) => return Ok(v),
+            Err(Stop::Work(claims)) => return Err(HiddenRest::OverBudget { cells, claims }),
+            Err(Stop::Claims) => {} // too many to hold at once: stream the bands
         }
-        let fx = |v: f64| ((v - x0) / cell).floor();
-        let i0 = fx(a.x.min(b.x).min(c.x)).max(0.0) as usize;
-        let i1 = fx(a.x.max(b.x).max(c.x)).clamp(0.0, nx as f64 - 1.0) as usize;
-        let j0 = fy0(a.y.min(b.y).min(c.y), y0, cell).max(0.0) as usize;
-        let j1 = fy0(a.y.max(b.y).max(c.y), y0, cell).clamp(0.0, ny as f64 - 1.0) as usize;
-        if i0 >= nx || j0 >= ny {
-            continue;
-        }
-        for iy in j0..=j1 {
+    }
+    banded(&f, &spans, budget, &mut work)
+}
+
+/// The streamed scan (module law): count each row's claims, cut the
+/// rows into bands that fit both holding budgets, judge them in order.
+fn banded(
+    f: &Frame,
+    spans: &[Span],
+    budget: ScanBudget,
+    work: &mut usize,
+) -> Result<(f64, Point2), HiddenRest> {
+    let cells = f.nx.saturating_mul(f.ny);
+    let over = |claims| HiddenRest::OverBudget { cells, claims };
+    let rows_cap = budget.cells / f.nx;
+    if rows_cap == 0 {
+        return Err(over(0)); // one row of bin headers cannot be held
+    }
+    let mut per_row = vec![0usize; f.ny];
+    let mut total = 0usize;
+    for (t, sp) in f.facets.iter().zip(spans) {
+        let Some((i0, i1, j0, j1)) = *sp else { continue };
+        for (iy, row) in per_row.iter_mut().enumerate().take(j1 + 1).skip(j0) {
             for ix in i0..=i1 {
-                let (cx, cy) = (x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
-                if let Some(cl) = crate::solid_rest::plane_claim(&a, &b, &c, cx, cy) {
-                    bins[ix + iy * nx].push(cl);
+                *work = work.saturating_add(1);
+                let (cx, cy) = f.center(ix, iy);
+                if crate::solid_rest::plane_claim(&t.a, &t.b, &t.c, cx, cy).is_some() {
+                    *row += 1;
+                    total += 1;
+                }
+            }
+            if *work > budget.work {
+                return Err(over(total));
+            }
+        }
+    }
+    if let Some(&row) = per_row.iter().find(|&&n| n > budget.claims) {
+        return Err(over(row)); // a single row cannot be held
+    }
+    // Facets by first row: a sweep keeps only those a band can touch.
+    let mut order: Vec<usize> = (0..f.facets.len()).filter(|&k| spans[k].is_some()).collect();
+    order.sort_by_key(|&k| spans[k].map_or(0, |s| s.2));
+    let (mut next, mut active) = (0usize, Vec::<usize>::new());
+    let (mut best, mut at) = (0.0f64, Point2::new(0.0, 0.0));
+    let mut ja = 0usize;
+    while ja < f.ny {
+        let (mut jb, mut held) = (ja, 0usize);
+        while jb < f.ny && jb - ja < rows_cap && held + per_row[jb] <= budget.claims {
+            held += per_row[jb];
+            jb += 1;
+        }
+        while let Some(&k) = order.get(next) {
+            if !spans[k].is_some_and(|s| s.2 < jb) {
+                break;
+            }
+            active.push(k);
+            next += 1;
+        }
+        active.retain(|&k| spans[k].is_some_and(|s| s.3 >= ja));
+        match judge_rows(f, spans, &active, (ja, jb), budget, work) {
+            Ok((rest, p)) => {
+                if rest > best {
+                    best = rest;
+                    at = p;
+                }
+            }
+            Err(_) => return Err(over(total)),
+        }
+        ja = jb;
+    }
+    Ok((best, at))
+}
+
+/// Bin and judge the rows `ja..jb` from the facets `active` - the one
+/// body the whole lattice and every band run (module law).
+fn judge_rows(
+    f: &Frame,
+    spans: &[Span],
+    active: &[usize],
+    (ja, jb): (usize, usize),
+    budget: ScanBudget,
+    work: &mut usize,
+) -> Result<(f64, Point2), Stop> {
+    let nx = f.nx;
+    let mut bins: Vec<Vec<Claim>> = (0..nx * (jb - ja)).map(|_| Vec::new()).collect();
+    let mut claims = 0usize;
+    for &k in active {
+        let (Some(t), Some(Some((i0, i1, j0, j1)))) = (f.facets.get(k), spans.get(k)) else {
+            continue;
+        };
+        for iy in (*j0).max(ja)..=(*j1).min(jb.saturating_sub(1)) {
+            for ix in *i0..=*i1 {
+                *work = work.saturating_add(1);
+                let (cx, cy) = f.center(ix, iy);
+                if let Some(cl) = crate::solid_rest::plane_claim(&t.a, &t.b, &t.c, cx, cy) {
+                    bins[ix + (iy - ja) * nx].push(cl);
                     claims += 1;
                     if claims > budget.claims {
-                        // over budget: NOT judged, and said so - never a zero
-                        return Err(HiddenRest::OverBudget { cells: nx * ny, claims });
+                        return Err(Stop::Claims);
                     }
                 }
+            }
+            if *work > budget.work {
+                return Err(Stop::Work(claims));
             }
         }
     }
     let mut best = 0.0;
     let mut at = Point2::new(0.0, 0.0);
-    for iy in 0..ny {
+    let mut hint = None;
+    for iy in ja..jb {
         for ix in 0..nx {
-            let bin = &bins[ix + iy * nx];
+            let bin = &bins[ix + (iy - ja) * nx];
             if bin.is_empty() {
                 continue;
             }
-            let t = part[ix + iy * nx];
+            let t = f.part[ix + iy * nx];
             if !t.is_finite() {
                 continue; // the field sees nothing here; nor has this scan's ground
             }
@@ -127,25 +289,33 @@ pub(super) fn hidden_rest(
             // surface; every lower one hides under a top above it.
             for c in z.as_chunks::<2>().0 {
                 let hi = c[1];
-                if hi >= t - floor {
+                if hi >= t - f.floor {
                     continue; // not occluded: the ridge law already owns this top
                 }
-                let (cx, cy) = (x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
-                let mut dmin = f64::INFINITY;
-                for (sa, sb) in segs {
-                    let d = dist_pt_seg3(cx, cy, hi, *sa, *sb);
-                    if d < dmin {
-                        dmin = d;
+                let (cx, cy) = f.center(ix, iy);
+                // The nearest ball center, exact (`scan_near`); a top
+                // that cannot raise the worst is let go at its first
+                // proof, which can never change the answer.
+                let dmin = match &f.grid {
+                    Some(g) => g.nearest(Point3::new(cx, cy, hi), (f.r, f.floor, best), &mut hint, work),
+                    None => {
+                        *work = work.saturating_add(f.segs.len());
+                        f.segs
+                            .iter()
+                            .map(|(sa, sb)| dist_pt_seg3(cx, cy, hi, *sa, *sb))
+                            .fold(f64::INFINITY, f64::min)
                     }
-                }
-                let rest = (dmin - r - floor).max(0.0);
+                };
+                let rest = (dmin - f.r - f.floor).max(0.0);
                 if rest > best {
                     best = rest;
                     at = Point2::new(cx, cy);
                 }
             }
+            if *work > budget.work {
+                return Err(Stop::Work(claims));
+            }
         }
     }
     Ok((best, at))
 }
-
