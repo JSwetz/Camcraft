@@ -36,22 +36,29 @@ pub mod contour;
 pub mod face;
 pub mod form;
 pub mod offset;
+pub mod parting;
 pub mod prof;
 pub mod profile;
 pub mod revolve;
+pub mod stock;
 pub mod thread;
 
 pub use blade::{
-    groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams, PartParams,
+    groove_finish, groove_finish_in, groove_rough, groove_rough_in, part, part_in,
+    GrooveFinishParams, GrooveRoughParams, PartParams,
 };
-pub use bore::{bore, BoreParams};
+pub use bore::{bar_spans, bore, centred_nose, BoreParams};
 pub use contour::{
     chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
 };
 pub use face::{facing, FacingParams};
-pub use form::{form, form_warnings, FormParams};
+pub use form::{form, form_in, form_warnings, FormParams};
 pub use offset::profile_offset;
-pub use prof::{profile_finish, profile_rough, ProfileFinishParams, ProfileRoughParams};
+pub use prof::{
+    profile_finish, profile_finish_in, profile_rough, profile_rough_in, ProfileFinishParams,
+    ProfileRoughParams,
+};
 pub use profile::{profile_of, silhouette, Profile};
 pub use revolve::{blade_program_warnings, blade_warnings, BladeLeg, BandMove, Floor};
-pub use thread::{thread, thread_warnings, ThreadParams};
+pub use stock::StockEnv;
+pub use thread::{thread, thread_in, thread_warnings, ThreadParams};

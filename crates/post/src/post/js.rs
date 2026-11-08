@@ -26,11 +26,12 @@ var LINE = "";
 var properties = {};
 var W = properties;
 var currentPosition = { X: 0, Y: 0, Z: 0 };
-var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false };
 // The program's number (#111): 1 for a whole-job program; one file
 // per operation counts 1, 2, 3... in program order. A dialect that
 // writes an O-word reads it at onOpen.
 var programNumber = 1;
+var postOptions = {};
+var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm", spindleRanges: [], rigidTapping: true };
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
 function write(s) { if (s !== undefined) LINE += String(s); }
@@ -126,10 +127,15 @@ pub const HOOKS: &[&str] = &[
     "onDwell",
     "onSpindleSpeed",
     "onRadiusCompensation",
+    "onThreadCycle",
+    "onThreadCycleEnd",
     "onPartLoading",
     "onPartUnloading",
     "onPartTransfer",
     "onProbe",
+    "onProbeMove",
+    "onProbeRetreat",
+    "onProbeResult",
     "onComment",
     "onClose",
 ];
@@ -138,6 +144,13 @@ pub const HOOKS: &[&str] = &[
 pub struct Script {
     ctx: Context,
     present: Vec<(&'static str, bool)>,
+    /// The `coolantModes = true` manifest flag (#150): the script reads
+    /// `PARAM Coolant`. Without it a non-Flood ask is refused by name.
+    coolant_modes: bool,
+    /// The `liveTooling = true` manifest flag (issue #33): the script
+    /// voices C-axis live-tool sections. Without it a `PARAM LiveTool`
+    /// section is refused by name.
+    live_tooling: bool,
 }
 
 impl Script {
@@ -152,6 +165,8 @@ impl Script {
         let mut s = Self {
             ctx,
             present: Vec::new(),
+            coolant_modes: false,
+            live_tooling: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -162,6 +177,14 @@ impl Script {
             present.push((*h, yes));
         }
         s.present = present;
+        s.coolant_modes = s
+            .eval("typeof coolantModes !== \"undefined\" && coolantModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.live_tooling = s
+            .eval("typeof liveTooling !== \"undefined\" && liveTooling === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
         Ok(s)
     }
 
@@ -192,6 +215,12 @@ impl Script {
     pub fn string_global(&mut self, name: &str) -> Result<Option<String>, PostError> {
         let v = self.eval(&format!("(typeof {name} === \"string\") ? {name} : null"))?;
         Ok(v.as_string().map(|s| s.to_std_string_escaped()))
+    }
+
+    /// Publish the document's post options once (issue #34).
+    pub fn set_options(&mut self, o: &Value) -> Result<(), PostError> {
+        self.eval(&format!("postOptions = {o};"))?;
+        Ok(())
     }
 
     /// Publish this record's property object (params + record +
@@ -229,6 +258,18 @@ impl Script {
     /// True when `name` exists (used for the onPlunge preference).
     pub fn hook_exists(&self, name: &str) -> bool {
         self.has(name)
+    }
+
+    /// True when the script declares `coolantModes = true` - it reads
+    /// the section's `PARAM Coolant` (#150).
+    pub fn reads_coolant(&self) -> bool {
+        self.coolant_modes
+    }
+
+    /// True when the script declares `liveTooling = true` - it voices
+    /// a C-axis live-tool section (issue #33).
+    pub fn voices_live_tooling(&self) -> bool {
+        self.live_tooling
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

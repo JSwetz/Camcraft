@@ -299,9 +299,14 @@ fn cylinder_fit_keeps_the_cylinder_choice() {
         panic!("cylinder fit must produce cylinder stock");
     };
     let bounds = model::solid_world_aabb(&state.world).expect("model extent");
-    let diag = ((bounds.max.x - bounds.min.x) + 4.0).hypot((bounds.max.y - bounds.min.y) + 4.0);
     let eps = 1e-9;
-    assert!(diameter >= diag - eps, "{diameter} must reach the padded diagonal");
+    // #230: snug - the models' largest radius from the fit's axis (a cube's
+    // half-diagonal) plus the 2 mm margin, which still contains every corner.
+    let c = [(bounds.min.x + bounds.max.x) * 0.5, (bounds.min.y + bounds.max.y) * 0.5];
+    let r_max = model::solid_world_radius_about(&state.world, c).expect("model radius");
+    let half_diag = 0.5 * (bounds.max.x - bounds.min.x).hypot(bounds.max.y - bounds.min.y);
+    assert!((r_max - half_diag).abs() < 1e-6, "a cube's farthest corner: {r_max} vs {half_diag}");
+    assert!((diameter - 2.0 * (r_max + 2.0)).abs() < eps, "{diameter} is the radius plus the margin, twice");
     assert!(
         height >= (bounds.max.z - bounds.min.z) + 4.0 - eps,
         "{height}"
@@ -612,4 +617,27 @@ fn setup_furniture_stays_out_of_the_model_list() {
         .collect();
     assert!(listed.is_empty(), "{listed:?} must not list Stock or G54");
     assert_eq!(model::named_entities(&state.world).len(), 2, "both still in the world");
+}
+
+/// #230: a round part's fitted bar is R + the allowance - its revolved max
+/// radius about the fit's axis - not the footprint's diagonal (1.41 R).
+#[test]
+fn a_cylinder_fit_round_a_turned_part_is_snug() {
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
+    let mut state = State::new();
+    let bar = camcraft_app::geometry::cylinder(20.0, 40.0, 64);
+    state.history.execute(&state.world, camcraft_app::commands::ImportModel::from_mesh("bar", bar));
+    state.doc_version += 1;
+    state.pending.push_back(CommandKind::StockFit { margin: 2.0, shape: 1 });
+    state.drain_actions();
+    assert_eq!(state.status, "stock fitted to models");
+    let stock = model::find_by_name(&state.world, STOCK_NAME).expect("stock");
+    let Some(StockShape::Cylinder { diameter, height }) = model::stock_def_of(&state.world, &stock) else {
+        panic!("cylinder fit must produce cylinder stock");
+    };
+    assert!((diameter - 24.0).abs() < 1e-9, "R 10 + 2 allowance = 24 mm, got {diameter}");
+    assert!((height - 44.0).abs() < 1e-9, "{height}");
 }

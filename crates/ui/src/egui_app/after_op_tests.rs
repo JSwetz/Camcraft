@@ -38,9 +38,9 @@ fn after_suppress_and_skip_commands_commit_and_undo() {
     assert!(!op(&state).suppressed, "undo unsuppresses");
 
     run(&mut state, CommandKind::SetSkipStops(true));
-    assert!(posting::post_options_of(&state.world).skip_stops);
+    assert!(posting::post_options(&state.world).skip_stops);
     run(&mut state, CommandKind::Undo);
-    assert!(!posting::post_options_of(&state.world).skip_stops, "undo turns the switch off");
+    assert!(!posting::post_options(&state.world).skip_stops, "undo turns the switch off");
 }
 
 /// #111: the Output choice queues `SetPerOpOutput`, rides the history,
@@ -48,16 +48,16 @@ fn after_suppress_and_skip_commands_commit_and_undo() {
 #[test]
 fn output_per_op_commits_undoes_and_posts_into_a_folder() {
     let mut state = opened(face());
-    assert!(!posting::post_options_of(&state.world).per_op, "one program by default");
+    assert!(!posting::post_options(&state.world).per_op, "one program by default");
     run(&mut state, CommandKind::SetSkipStops(true));
     run(&mut state, CommandKind::SetPerOpOutput(true));
-    let opts = posting::post_options_of(&state.world);
+    let opts = posting::post_options(&state.world);
     assert!(opts.per_op && opts.skip_stops, "the two options are independent: {opts:?}");
     run(&mut state, CommandKind::Undo);
-    assert!(!posting::post_options_of(&state.world).per_op, "Ctrl+Z restores one program");
-    assert!(posting::post_options_of(&state.world).skip_stops, "and leaves the other switch");
+    assert!(!posting::post_options(&state.world).per_op, "Ctrl+Z restores one program");
+    assert!(posting::post_options(&state.world).skip_stops, "and leaves the other switch");
     run(&mut state, CommandKind::Redo);
-    assert!(posting::post_options_of(&state.world).per_op);
+    assert!(posting::post_options(&state.world).per_op);
     let generate = camcraft_app::commands::GenerateOperation::new(&state.world, "Op").expect("generate");
     state.history.execute(&state.world, generate);
     let dir = std::env::temp_dir().join(format!("camcraft-egui-per-op-{}", std::process::id()));

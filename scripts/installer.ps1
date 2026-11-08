@@ -1,6 +1,8 @@
 # Installer build (M13.3): compiles scripts/installer/camcraft.iss with
 # Inno Setup against an already-staged dist tree (the zip's) and writes
-# dist/camcraft-<ver>-win-x64-setup.exe beside the zip.
+# dist/camcraft-<ver>-win-x64-setup.exe beside the zip. With a certificate
+# configured (CAMCRAFT_SIGN_*, scripts/sign.ps1) ISCC signs the setup exe
+# and its embedded uninstaller; without one both stay unsigned, as before.
 #
 # Usage: powershell -File scripts/installer.ps1 -Version 0.8.0 `
 #            [-Stage dist/camcraft-0.8.0-win-x64] [-OutDir dist] [-Required]
@@ -53,12 +55,42 @@ $stageAbs = (Resolve-Path $Stage).Path
 $outAbs = (Resolve-Path $OutDir).Path
 $iss = Join-Path $PSScriptRoot "installer\camcraft.iss"
 
-# ---- 3. Compile ---------------------------------------------------------
-$isccArgs = @("/Qp", "/DAppVersion=$Version", "/DStageDir=$stageAbs", "/DOutDir=$outAbs", $iss)
+# ---- 3. Signing: sign.ps1 decides, ISCC calls it ------------------------
+# sign.ps1 -Status is the one reader of CAMCRAFT_SIGN_*. Configured, ISCC
+# gets a sign tool named "camcraft" that runs sign.ps1 on each file it
+# signs ($f = the quoted file, $q = a quote; Inno Setup SignTool syntax),
+# and the .iss turns on SignTool + SignedUninstaller, so the setup exe AND
+# the uninstaller embedded in it are signed by the same signtool command
+# and timestamp server as the release exes. Not configured, no sign tool
+# is passed and the build is byte-for-byte today's unsigned one.
+$signScript = Join-Path $PSScriptRoot "sign.ps1"
+& powershell -NoProfile -ExecutionPolicy Bypass -File $signScript -Status
+$signStatus = $LASTEXITCODE
+$signArgs = @()
+if ($signStatus -eq 0) {
+    # Single-quoted: $q and $f are ISCC's placeholders, not PowerShell's.
+    $tool = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File $q' + $signScript + '$q -Path $f'
+    $signArgs = @("/DSignToolName=camcraft", "/Scamcraft=$tool")
+    Write-Host "installer signing: on (setup exe and embedded uninstaller, via sign.ps1)"
+} elseif ($signStatus -eq 10) {
+    Write-Host "installer signing: off (no certificate configured); setup and uninstaller ship unsigned"
+} else {
+    Fail "sign.ps1 -Status exited with $signStatus (signing half-configured)"
+}
+
+# ---- 4. Compile ---------------------------------------------------------
+$isccArgs = @("/Qp", "/DAppVersion=$Version", "/DStageDir=$stageAbs", "/DOutDir=$outAbs") + $signArgs + @($iss)
 Write-Host "> ISCC $($isccArgs -join ' ')"
 & $iscc @isccArgs
 if ($LASTEXITCODE -ne 0) { Fail "ISCC exited with $LASTEXITCODE" }
 $setup = Join-Path $outAbs "camcraft-$Version-win-x64-setup.exe"
 if (-not (Test-Path $setup)) { Fail "ISCC succeeded but $setup is missing" }
+if ($signArgs.Count -gt 0) {
+    # sign.ps1 already ran signtool verify on each file ISCC handed it; this
+    # catches an ISCC that silently skipped the sign tool.
+    $sig = Get-AuthenticodeSignature $setup
+    if (-not $sig.SignerCertificate) { Fail "signing is configured but $setup carries no signature" }
+    Write-Host "setup signed by: $($sig.SignerCertificate.Subject)"
+}
 Write-Host "Installer: $setup"
 exit 0

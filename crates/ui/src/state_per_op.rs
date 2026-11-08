@@ -12,7 +12,7 @@ use super::{ErrorScope, PostView, State};
 impl State {
     /// The Output choice: `true` writes one file per operation.
     pub(super) fn set_per_op_output(&mut self, per_op: bool) {
-        let next = camcraft_app::schema::PostOptions { per_op, ..posting::post_options_of(&self.world) };
+        let next = camcraft_app::schema::PostOptions { per_op, ..posting::post_options(&self.world) };
         match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
             Ok(command) => {
                 self.history.execute(&self.world, command);
@@ -72,7 +72,7 @@ impl State {
     /// The post's front door: a folder when the Output is one file per
     /// operation, the program file otherwise.
     pub(super) fn post_program_dialog(&mut self) {
-        if posting::post_options_of(&self.world).per_op {
+        if posting::post_options(&self.world).per_op {
             if let Some(dir) = rfd::FileDialog::new().set_title("Post one file per operation into").pick_folder() {
                 self.post_program_folder(dir);
             }

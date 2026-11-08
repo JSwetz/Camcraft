@@ -60,7 +60,7 @@ pub struct PostOutput {
 /// Post a stream text with one script. The machine value is the raw
 /// `.mch` JSON (flattened here); pass `Value::Null` for none.
 pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError> {
-    run_numbered(cps, mch, stream, 1)
+    run_with(cps, mch, stream, &Value::Null)
 }
 
 /// The file extension the script's manifest states (`extension`), or
@@ -74,10 +74,33 @@ pub fn extension_of(cps: &str) -> Result<String, PostError> {
 /// numbers its programs 1, 2, 3..., and a dialect with an O-word
 /// writes it; everything else posts exactly as [`run`].
 pub fn run_numbered(cps: &str, mch: &Value, stream: &str, program: u32) -> Result<PostOutput, PostError> {
+    run_numbered_with(cps, mch, stream, &Value::Null, program)
+}
+
+/// [`run`] with the document's post options (issue #34): a JSON object
+/// the script reads as the global `postOptions` - the user's choices
+/// for this post (e.g. `{"Threading": "G76"}`). `Value::Null` (or any
+/// non-object) leaves the PRELUDE's empty object: every default.
+pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result<PostOutput, PostError> {
+    run_numbered_with(cps, mch, stream, options, 1)
+}
+
+/// The whole seam: post options (issue #34) and the program number
+/// (#111) together - what one file per operation posts each op with.
+pub fn run_numbered_with(
+    cps: &str,
+    mch: &Value,
+    stream: &str,
+    options: &Value,
+    program: u32,
+) -> Result<PostOutput, PostError> {
     let records = super::normalize_program_order(cnc::parse(stream)?);
     let mut s = Script::load(cps)?;
     s.set_machine(&machine::script_props(mch))?;
     s.set_program_number(program)?;
+    if options.is_object() {
+        s.set_options(options)?;
+    }
     s.call("onOpen", "")?;
     let head = s.out_len()?;
 
@@ -106,6 +129,27 @@ pub fn run_numbered(cps: &str, mch: &Value, stream: &str, program: u32) -> Resul
                 // Publish the running param set so `onParameter` (and
                 // `onSpindleSpeed` just below) can actually read the
                 // value the hook names.
+                // A post that does not declare `coolantModes` would post an
+                // Off / Mist / Through-tool ask as its own flood (#150):
+                // refused by name, a counted warning, never silent.
+                if name == "Coolant" && !s.reads_coolant() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}asks {} coolant, but this post script does not declare                          coolantModes (it does not read PARAM Coolant) - set the operation's                          coolant to Flood or use a post that reads it",
+                        value.as_str().unwrap_or("non-flood")
+                    ));
+                }
+                // A C-axis live-tool section (issue #33) posted through a
+                // script that cannot voice it would come out as XYZ for
+                // a tool that is not there: refused by name.
+                if name == "LiveTool" && !s.voices_live_tooling() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}is C-axis live-tool work (the spindle turns as C under a radial live tool), but this post script does not declare liveTooling - use a lathe post that voices the C axis"
+                    ));
+                }
                 s.set_properties(&merged(&base, &BTreeMap::new(), pos))?;
                 s.call("onParameter", &format!("{}, {}", json!(name), value))?;
                 if name == "SpindleSpeed" {
@@ -207,7 +251,7 @@ pub fn run_numbered(cps: &str, mch: &Value, stream: &str, program: u32) -> Resul
                 s.set_properties(&merged(&base, &p, pos))?;
                 s.call("onPartTransfer", "")?;
             }
-            Record::Comp { side, radius_mm } => {
+            Record::Comp { side, radius_mm, wear } => {
                 // Cutter compensation (M13.11): a lifecycle record like
                 // its siblings - no motion, `onCommand` never sees it -
                 // but NOT comment-only by default: the records after it
@@ -231,8 +275,72 @@ pub fn run_numbered(cps: &str, mch: &Value, stream: &str, program: u32) -> Resul
                     };
                     p.insert("Compensation".into(), json!(word));
                     p.insert("CompensationRadius".into(), json!(radius_mm));
+                    // #38: "wear" - the records between are the centre
+                    // path and the register holds the wear delta only;
+                    // "control" - they are the part contour.
+                    p.insert("CompensationType".into(), json!(if *wear { "wear" } else { "control" }));
                     s.set_properties(&merged(&base, &p, pos))?;
                     s.call("onRadiusCompensation", &json!(word).to_string())?;
+                }
+            }
+            Record::Touch(t) => {
+                // A probing move (#108): no PRELUDE default - a script
+                // that cannot write a probing block is refused by name,
+                // because the only fallback (a feed) drives the stylus
+                // through the part.
+                if !s.hook_exists("onProbeMove") {
+                    warnings.push(
+                        "probing: this post script does not define onProbeMove - it cannot write a \
+                         probing (skip) move, so the probe operation is refused"
+                            .into(),
+                    );
+                } else {
+                    s.set_properties(&merged(&base, &t.props(), pos))?;
+                    s.call("onProbeMove", "")?;
+                }
+                // The machine stops where the stylus trips: nominally
+                // the expected point the chain continues from.
+                pos = (t.expect[0], t.expect[1], t.expect[2]);
+            }
+            Record::Retreat(r) => {
+                if !s.hook_exists("onProbeRetreat") {
+                    warnings.push(format!(
+                        "probing: {}: this post script does not define onProbeRetreat - it cannot back \
+                         off a probe trip incrementally, so the probe operation is refused",
+                        op_name(&base)
+                    ));
+                } else {
+                    s.set_properties(&merged(&base, &r.props(), pos))?;
+                    s.call("onProbeRetreat", "")?;
+                }
+                pos = (r.expect[0], r.expect[1], r.expect[2]);
+            }
+            Record::Found(f) => {
+                if !s.hook_exists("onProbeResult") {
+                    warnings.push(
+                        "probing: this post script does not define onProbeResult - it cannot set a \
+                         work offset or stop on a probing result, so the probe operation is refused"
+                            .into(),
+                    );
+                } else {
+                    s.set_properties(&merged(&base, &f.props(), pos))?;
+                    s.call("onProbeResult", "")?;
+                }
+            }
+            Record::Thread(t) => {
+                // A threading cycle (issue #34): a lifecycle record like
+                // COMP - no motion, `onCommand` never sees it. A script
+                // without the hooks posts the explicit passes that
+                // follow, exactly as before the record existed.
+                match t {
+                    Some(t) => {
+                        s.set_properties(&merged(&base, &t.props(), pos))?;
+                        s.set_current(pos.0, pos.1, pos.2)?;
+                        s.call("onThreadCycle", "")?;
+                    }
+                    None => {
+                        s.call("onThreadCycleEnd", "")?;
+                    }
                 }
             }
             Record::Probe { tol_mm } => {
@@ -305,4 +413,13 @@ fn merged(
         m.insert(k.clone(), v.clone());
     }
     m
+}
+
+/// The operation a record belongs to, by the section's `OperationName`
+/// PARAM - what a probing refusal names (#108).
+fn op_name(base: &BTreeMap<String, Value>) -> String {
+    base.get("OperationName")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| "the probe operation".to_string(), |s| format!("operation {s:?}"))
 }

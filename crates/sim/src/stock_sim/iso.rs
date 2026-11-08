@@ -4,8 +4,9 @@
 //! tetrahedral form - each cube split into six tetrahedra around one
 //! main diagonal (marching tetrahedra, as in Bloomenthal's "An Implicit
 //! Surface Polygonizer", Graphics Gems IV, 1994), which needs no case
-//! table and has no ambiguous faces. Our own Rust; nothing from vendor
-//! binaries.
+//! table and has no ambiguous faces; the default extractor is dual
+//! contouring (Ju, Losasso, Schaefer & Warren, SIGGRAPH 2002, `dual`)
+//! over the same samples. Our own Rust; nothing from vendor binaries.
 //!
 //! ## The laws here
 //!
@@ -34,7 +35,7 @@ use super::kernel::StockError;
 pub const MAX_SAMPLES: usize = 1 << 23;
 
 /// Cube corners as (dx, dy, dz) offsets, bit 0 = x, bit 1 = y, bit 2 = z.
-const CORNER: [[usize; 3]; 8] = [
+pub(crate) const CORNER: [[usize; 3]; 8] = [
     [0, 0, 0],
     [1, 0, 0],
     [0, 1, 0],
@@ -55,15 +56,79 @@ const TETS: [[usize; 4]; 6] = [
     [0, 5, 1, 7],
 ];
 
+/// How the d = 0 surface is polygonized. Dual contouring is the
+/// default: it keeps a machined pocket's floor/wall edge sharp where
+/// marching tetrahedra chamfers it; marching tetrahedra stays callable
+/// by name and is the fallback whenever a dual mesh is not closed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IsoMethod {
+    /// Dual contouring of Hermite data (`dual`), one QEF vertex a cell.
+    #[default]
+    Dual,
+    /// Marching tetrahedra: crossings interpolated on the cell edges.
+    Marching,
+}
+
 /// Extract the field's d = 0 surface at the field's own cell.
 pub fn extract(f: &SdfField) -> Result<Vec<Triangle>, StockError> {
-    extract_at(f, f.cell())
+    extract_with(f, f.cell(), IsoMethod::default())
 }
 
 /// Extract at a sample spacing `step`, the grid anchored on the field's
 /// cell centres (`step` = the cell samples each centre exactly once;
 /// coarser skips cells for a lighter mesh).
 pub fn extract_at(f: &SdfField, step: f64) -> Result<Vec<Triangle>, StockError> {
+    extract_with(f, step, IsoMethod::default())
+}
+
+/// Extract at `step` by `method`. A dual mesh that is not closed (a
+/// surface reaching the grid's pad, a fold no quad ring closes) is never
+/// returned: the marching mesh of the same samples stands in, logged.
+pub fn extract_with(f: &SdfField, step: f64, method: IsoMethod) -> Result<Vec<Triangle>, StockError> {
+    let g = sample(f, step)?;
+    match method {
+        IsoMethod::Marching => Ok(marching(&g)),
+        IsoMethod::Dual => {
+            let tris = super::dual::contour(&g);
+            let open = open_edges(&tris);
+            if open == 0 {
+                Ok(tris)
+            } else {
+                eprintln!("iso-surface: the dual mesh has {open} open edges - marching tetrahedra stands in");
+                Ok(marching(&g))
+            }
+        }
+    }
+}
+
+/// The sampled lattice both extractors read: `(n + 1)^3` field values
+/// on cell centres, `n` cells a side, origin `lo`, spacing `step`.
+pub(crate) struct Grid {
+    pub(crate) lo: Point3,
+    pub(crate) step: f64,
+    pub(crate) n: [usize; 3],
+    pub(crate) d: Vec<f64>,
+}
+
+impl Grid {
+    /// World position of sample `s`.
+    pub(crate) fn at(&self, s: [usize; 3]) -> Point3 {
+        let st = self.step;
+        Point3::new(self.lo.x + s[0] as f64 * st, self.lo.y + s[1] as f64 * st, self.lo.z + s[2] as f64 * st)
+    }
+
+    /// The value at sample `s`; NaN off the lattice (never a panic).
+    pub(crate) fn val(&self, s: [usize; 3]) -> f64 {
+        if s.iter().zip(self.n).any(|(&c, n)| c > n) {
+            return f64::NAN;
+        }
+        let i = (s[2] * (self.n[1] + 1) + s[1]) * (self.n[0] + 1) + s[0];
+        self.d.get(i).copied().unwrap_or(f64::NAN)
+    }
+}
+
+/// Sample the field on the extraction lattice; refusals by name.
+pub(crate) fn sample(f: &SdfField, step: f64) -> Result<Grid, StockError> {
     let refuse = |s: String| Err(StockError::Invalid(format!("iso-surface: {s}")));
     if !(step.is_finite() && step > 0.0) {
         return refuse(format!("the sample step must be finite and positive, not {step}"));
@@ -96,32 +161,34 @@ pub fn extract_at(f: &SdfField, step: f64) -> Result<Vec<Triangle>, StockError> 
     let Some(samples) = samples else {
         return refuse(format!("a {}x{}x{} grid is past the {MAX_SAMPLES}-sample budget", n[0], n[1], n[2]));
     };
-    let at = |i: usize, j: usize, k: usize| {
-        Point3::new(lo.x + i as f64 * step, lo.y + j as f64 * step, lo.z + k as f64 * step)
-    };
-    let idx = |i: usize, j: usize, k: usize| (k * (n[1] + 1) + j) * (n[0] + 1) + i;
-    let mut d = vec![0.0f64; samples];
+    let mut g = Grid { lo, step, n, d: Vec::with_capacity(samples) };
     for k in 0..=n[2] {
         for j in 0..=n[1] {
             for i in 0..=n[0] {
-                let v = f.distance(at(i, j, k));
+                let p = g.at([i, j, k]);
+                let v = f.distance(p);
                 if v.is_nan() {
-                    return refuse(format!("the field answered NaN at {:?} - no surface to extract", at(i, j, k)));
+                    return refuse(format!("the field answered NaN at {p:?} - no surface to extract"));
                 }
-                d[idx(i, j, k)] = v;
+                g.d.push(v);
             }
         }
     }
+    Ok(g)
+}
+
+/// Marching tetrahedra over the sampled lattice.
+pub(crate) fn marching(g: &Grid) -> Vec<Triangle> {
     let mut out = Vec::new();
-    for k in 0..n[2] {
-        for j in 0..n[1] {
-            for i in 0..n[0] {
+    for k in 0..g.n[2] {
+        for j in 0..g.n[1] {
+            for i in 0..g.n[0] {
                 let mut p = [Point3::ZERO; 8];
                 let mut v = [0.0f64; 8];
                 for (c, o) in CORNER.iter().enumerate() {
-                    let (a, bb, cc) = (i + o[0], j + o[1], k + o[2]);
-                    p[c] = at(a, bb, cc);
-                    v[c] = d[idx(a, bb, cc)];
+                    let s = [i + o[0], j + o[1], k + o[2]];
+                    p[c] = g.at(s);
+                    v[c] = g.val(s);
                 }
                 if v.iter().all(|x| *x < 0.0) || v.iter().all(|x| *x >= 0.0) {
                     continue;
@@ -132,7 +199,7 @@ pub fn extract_at(f: &SdfField, step: f64) -> Result<Vec<Triangle>, StockError> 
             }
         }
     }
-    Ok(out)
+    out
 }
 
 /// Polygonize one tetrahedron: inside is d < 0.
@@ -205,6 +272,8 @@ mod tests {
         assert!(!tris.is_empty());
         assert_eq!(open_edges(&tris), 0, "the extracted shell is watertight");
         let v = volume(&tris);
+        let mt = volume(&extract_with(&f, 1.0, IsoMethod::Marching).unwrap());
+        eprintln!("box volume: dual {v:.3}, marching {mt:.3}, true 480");
         // Outward normals give a positive volume; faces land exactly on
         // the cell-centre crossing, edges and corners are chamfered by
         // the tetrahedral split, so within 5% of 480.

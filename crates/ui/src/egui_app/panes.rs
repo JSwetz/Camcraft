@@ -382,6 +382,8 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
                         "The document's machine is a {} - {fword} operations do not drive it; mount a {mword} or a mill-turn (Setup > Machine)",
                         machine.word()
                     )
+                } else if !has_stock(state) {
+                    NO_STOCK_TIP.into()
                 } else if let Some(reason) = tool_law_note(i, state) {
                     reason
                 } else if i == 0 {
@@ -428,7 +430,10 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
                 .is_none_or(|k| k.admits(machine));
             // The tool law (M10.1 B): darken, never hide - the cell
             // stays to explain itself, the fix is a library click away.
-            kind_admits && !state.tool_names().is_empty() && tool_law_note(i, state).is_none()
+            // #216: every ribbon-made op machines the active setup's stock
+            // (`SrcRef::Stock`) - without one the door refuses, so the
+            // cell darkens and says so instead of failing on the click.
+            kind_admits && !state.tool_names().is_empty() && has_stock(state) && tool_law_note(i, state).is_none()
         }
         // A dropdown button is live whenever it is on the ribbon; the
         // kinds behind it carry their own gates.
@@ -477,10 +482,82 @@ fn gate_note(c: Cmd, state: &State) -> Option<String> {
                 machine.word(),
             ))
         }
+        None if !has_stock(state) => Some(String::from(
+            "cannot add an operation: no stock in the setup - set up stock first (Setup > Stock)",
+        )),
         None => tool_law_note(i, state).map(|r| {
             let label = camcraft_app::operation::KindInfo::ALL.get(i).map_or("", |k| k.label);
             format!("cannot add a {label} operation: {r}")
         }),
+    }
+}
+
+/// Where a refused Create click leads (#191): the place that fixes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GateRoute {
+    /// No tool, or none that fits the kind: the Tool library page.
+    Tools,
+    /// The mounted machine cannot run the kind's family: the machine
+    /// door's workspace list.
+    Machine,
+    /// The active setup has no stock (#216): the Stock page.
+    Stock,
+}
+
+/// The dark Create cell's tip when the setup has no stock (#216).
+const NO_STOCK_TIP: &str = "No stock yet - set up stock first (Setup > Stock)";
+
+/// Does the active setup have stock? Every ribbon-made operation
+/// machines it (`SrcRef::Stock`), so without it `CreateOperation`
+/// refuses - the same resolution the command door makes.
+fn has_stock(state: &State) -> bool {
+    let active = camcraft_app::setup::active(&state.world);
+    let name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
+    model::find_by_name(&state.world, &name).is_some_and(|e| model::is_stock(&state.world, &e))
+}
+
+/// The fix for a dark Create cell, when it has one ([`gate_note`]'s
+/// cases, in its order).
+pub(super) fn gate_route(c: Cmd, state: &State) -> Option<GateRoute> {
+    let Cmd::Create(i) = c else { return None };
+    if enabled(c, state) {
+        return None;
+    }
+    if state.tool_names().is_empty() {
+        return Some(GateRoute::Tools);
+    }
+    let machine = camcraft_app::machine::kind_of(&state.world);
+    if camcraft_app::operation::KindInfo::ALL.get(i).is_some_and(|k| !k.admits(machine)) {
+        return Some(GateRoute::Machine);
+    }
+    if !has_stock(state) {
+        return Some(GateRoute::Stock);
+    }
+    tool_law_note(i, state).map(|_| GateRoute::Tools)
+}
+
+/// A dark Create cell was clicked anyway (#191): say why on the status
+/// line, then take the user to the fix rather than leave them at the
+/// error - the Tool library, or the machine door opened on its list.
+/// View state only; nothing is created or queued.
+pub(super) fn follow_gate(c: Cmd, state: &mut State) {
+    let Some(why) = gate_note(c, state) else { return };
+    match gate_route(c, state) {
+        Some(GateRoute::Tools) => {
+            actions::target(state, UiTarget::Tool(String::new()));
+            state.status = format!("{why} - opened the tool library");
+        }
+        Some(GateRoute::Stock) => {
+            actions::target(state, UiTarget::Stock);
+            state.status = format!("{why} - opened the Stock page");
+        }
+        Some(GateRoute::Machine) => {
+            state.ribbon_more = None;
+            state.ribbon_view_open = false;
+            state.ribbon_mode_open = true;
+            state.status = format!("{why} - pick a workspace");
+        }
+        None => state.status = why,
     }
 }
 
@@ -512,7 +589,7 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
 /// Command to bundled glyph: the same table the retired imgui icons.rs
 /// store keyed (and ribbon.rs's `Item.icon` chose per cell), so the ribbon,
 /// the browser's `spec.icon` slots and the store name one set of pixels.
-fn icon_of(c: Cmd) -> Option<Icon> {
+pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
     match c {
         Cmd::New => Some(Icon::New),
         Cmd::Model => Some(Icon::OpenModel),
@@ -536,14 +613,27 @@ fn icon_of(c: Cmd) -> Option<Icon> {
                 Some(Icon::Generate)
             }
         },
-        // The overflow button carries no glyph (M6.2): the ellipsis in
-        // its label is the whole affordance, so no asset is minted for
-        // it and no font subset is trusted with a chevron.
-        Cmd::More(_) => None,
-        // The machine door carries no glyph either (the no-new-asset
-        // law): its caption *is* the machine, and every word of it
-        // names a workspace - an icon would repeat the cell's own text.
-        Cmd::Machine => None,
+        // A section door wears its family's signature glyph (#207: with
+        // no pins, glyph-less doors left every Create cell of a fresh
+        // install text-only - users read it as missing icons). No new
+        // asset: an op glyph that says what the family makes, distinct
+        // from the machine door's beside it; the caption still names
+        // the section.
+        Cmd::More(s) => Some(match s {
+            operation::Section::Mill2D => Icon::Pocket,
+            operation::Section::Mill3D => Icon::Finish3D,
+            operation::Section::Drilling => Icon::Drill,
+            operation::Section::MultiAxis => Icon::MultiAxisRough,
+            operation::Section::Turning => Icon::Face,
+        }),
+        // The machine door wears its workspace's glyph (#207), from the
+        // existing set: the face mill for Milling, the turned bar for
+        // Turning, the rotary bar for Mill-turning.
+        Cmd::Machine => Some(match camcraft_app::machine::kind_of(&state.world) {
+            camcraft_app::machine::Kind::Lathe => Icon::RotaryContour,
+            camcraft_app::machine::Kind::MillTurn => Icon::RotaryParallel,
+            camcraft_app::machine::Kind::Mill => Icon::Face,
+        }),
         Cmd::Undo => Some(Icon::Undo),
         Cmd::Redo => Some(Icon::Redo),
         Cmd::Run => Some(Icon::Generate),
@@ -587,6 +677,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Deburr => Icon::Contour,
         OpType::Circular => Icon::Pocket,
         OpType::Drill => Icon::Drill,
+        OpType::Probe => Icon::Probe,
         OpType::Pocket3D => Icon::Pocket,
         OpType::Finish3D => Icon::Finish3D,
         OpType::Contour5D => Icon::Contour5D,
@@ -697,12 +788,11 @@ fn run_cmd(c: Cmd, state: &mut State) {
 }
 
 /// The pin gesture (M6.2): toggle one kind's presence in the document's
-/// pinned list, through the app's `ribbon` seam - the only home of the
-/// singleton write. Deliberately NOT a command: ROADMAP's law for pins
-/// is "layout, not cuts" - undo replays the toolpath edits, and a pin
-/// neither cuts stock nor changes a program. The status line says what
-/// happened, because a silent toggle is a half-answer.
-fn toggle_pin(state: &mut State, i: usize) {
+/// pinned list. The pins are saved with the project, so the toggle is a
+/// `SetRibbonPins` command on the history (issue #143): Ctrl+Z puts the
+/// previous pins back and the document counts as changed. The status
+/// line says what happened, because a silent toggle is a half-answer.
+pub(super) fn toggle_pin(state: &mut State, i: usize) {
     let Some(k) = operation::KindInfo::ALL.get(i) else {
         debug_assert!(false, "toggle_pin({i}) past the kind table");
         eprintln!("ribbon: unknown op kind {i}");
@@ -728,8 +818,15 @@ fn toggle_pin(state: &mut State, i: usize) {
             "pinned"
         }
     };
-    camcraft_app::ribbon::pinned_set(&state.world, &pins);
-    state.status = format!("{verb} {} on the ribbon", k.caption);
+    match camcraft_app::commands::SetRibbonPins::new(&state.world, &pins) {
+        Ok(command) => {
+            state.history.execute(&state.world, command);
+            state.status = format!("{verb} {} on the ribbon", k.caption);
+        }
+        // Unreachable from the toggle (it always changes the list), but a
+        // refusal is named, never swallowed.
+        Err(err) => state.status = format!("ribbon pin not changed: {err}"),
+    }
 }
 
 /// One laid-out ribbon cell: which command, where, and its id salt.
@@ -946,7 +1043,7 @@ pub fn ribbon(
             pal,
             enabled(c, state),
             toggled(c, state),
-            icon_of(c).and_then(|i| icons.and_then(|s| s.texture(i))),
+            icon_of(c, state).and_then(|i| icons.and_then(|s| s.texture(i))),
         );
         // The pin gesture lives at the cell, not in a command: the
         // right-click that answers it names itself in every live tip
@@ -965,10 +1062,8 @@ pub fn ribbon(
         if fired {
             run_cmd(c, state);
         }
-        if gated
-            && let Some(why) = gate_note(c, state)
-        {
-            state.status = why;
+        if gated {
+            follow_gate(c, state);
         }
         if let (Cmd::Create(i), true) = (c, pin) {
             toggle_pin(state, i);
@@ -1079,10 +1174,8 @@ pub fn ribbon(
                     // click into silence is what made the folded
                     // ribbon read as dead - this branch is why it
                     // never is.
-                    if let Some(why) = gate_note(c, state) {
-                        state.status = why;
-                    }
                     state.ribbon_more = None;
+                    follow_gate(c, state);
                 } else if state.ribbon_more == before {
                     // Primary press anywhere outside the door and its
                     // rows closes it (egui's popup law, hand-drawn
@@ -1226,7 +1319,7 @@ pub(super) fn view_rows_of(
 /// writes them all), while command refusals read twice by design: here for
 /// everyone, and on their own pane through `error_for` (M-c). Startup is a
 /// plain empty document; an untouched status reads "ready".
-pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
+pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconSet>) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     // Owned so the button below can reborrow `state` mutably while the
@@ -1246,16 +1339,30 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 && operation::status_of(&state.world, e) == operation::OpStatus::Stale
         })
         .count();
+    // #192: a refusal on the status line must not read like any other
+    // status - error ink, bold, a "!" marker, on an error-tinted band.
+    let alert = super::status_alert::is_alert(state);
+    let line = if alert {
+        let ink = super::colorvision::text_inks(ui, &state.world).error;
+        ui.painter().rect_filled(rect, 0.0, ink.gamma_multiply(0.16));
+        RichText::new(format!("! {text}")).color(ink).strong()
+    } else {
+        // #215: routine status in the body text ink, not egui's "weak"
+        // grey - that read as near-invisible on the dark strip.
+        RichText::new(text.as_str()).color(ui.visuals().text_color())
+    };
     ui.horizontal(|ui| {
-        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(true))
-            .on_hover_text(text.as_str())
-            .context_menu(|ui| {
-                if ui.button("Copy message").clicked() {
-                    ui.ctx().copy_text(text.clone());
-                    ui.close();
-                }
-            });
+        // The right-hand widgets are laid out first so a long status line
+        // can never push them off the strip (#157: the Debug info door
+        // must stay reachable); the line takes what is left, truncated,
+        // with the full text on hover and in "Copy message".
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // #157: the Debug info door, rightmost - the glyph when the
+            // icon set is up, its name when it is not (headless frames
+            // and a failed decode degrade to text, never to nothing).
+            if super::debug_info::button(ui, icons).clicked() {
+                state.debug_info_open = !state.debug_info_open;
+            }
             ui.label(
                 RichText::new("egui shell (M-g) - imgui retired")
                     .color(pal.text_faint)
@@ -1267,6 +1374,16 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                     state.pending.push_back(CommandKind::RegenerateAll);
                 }
             }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(Label::new(line).selectable(true).truncate())
+                    .on_hover_text(text.as_str())
+                    .context_menu(|ui| {
+                        if ui.button("Copy message").clicked() {
+                            ui.ctx().copy_text(text.clone());
+                            ui.close();
+                        }
+                    });
+            });
         });
     });
     ui.allocate_rect(rect, Sense::hover());
@@ -1356,6 +1473,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Thread => "threading insert",
         ToolKind::Form => "form gauge",
         ToolKind::Taper => "chamfer mill",
+        ToolKind::Probe => "touch probe",
     }
 }
 

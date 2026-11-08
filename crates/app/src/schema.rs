@@ -104,6 +104,12 @@ pub struct Wcs;
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct ToolDef {
     pub tool: Tool,
+    /// The controller's number for this tool (#221): what the post writes
+    /// as `T..` / `H..`, matching the machine's tool table. `None` = not
+    /// stated, and the tool posts as its 1-based position in the document's
+    /// tool list (the numbering every earlier document had). Changed only
+    /// through `SetToolNumber`; `ChangeTool` leaves it as it is.
+    pub number: Option<u32>,
 }
 
 /// One machine setup (M3.2 stage A): the named context that says WHICH
@@ -194,10 +200,35 @@ pub struct OperationMeta {
 /// The cached result of generating an operation: the path plus the
 /// warnings `verify` attached to it. Deleting the operation entity frees
 /// both through the Rust-owned drop hooks (AGENTS.md resource invariant).
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+/// `sig` is the path's [`crate::path_sig::of`], computed once in
+/// [`Toolpath::new`], the only way to build one (the field is private),
+/// so the program-ahead digest reads it per frame without a clone
+/// (#109 review B1). The cache is written whole, never edited in place.
+#[derive(Component, Debug, Clone, PartialEq)]
 pub struct Toolpath {
     pub path: ClPath,
     pub warnings: Vec<Warning>,
+    sig: u64,
+}
+
+impl Toolpath {
+    #[must_use]
+    pub fn new(path: ClPath, warnings: Vec<Warning>) -> Self {
+        let sig = crate::path_sig::of(&path.moves);
+        Self { path, warnings, sig }
+    }
+
+    /// The stored signature of `path` (see the type's doc).
+    #[must_use]
+    pub fn path_sig(&self) -> u64 {
+        self.sig
+    }
+}
+
+impl Default for Toolpath {
+    fn default() -> Self {
+        Self::new(ClPath::default(), Vec::new())
+    }
 }
 
 /// The document's display unit, stored as a flecs singleton (M1.1): on
@@ -238,17 +269,35 @@ pub enum PostRef {
     File(String),
 }
 
-/// The post-time options of the document (#110), a flecs singleton
-/// like `PostRef`: setup furniture, saved with the project, switched by
-/// the `SetPostOptions` command. `skip_stops` posts the program without
+/// The user's choices for the document's post (issue #34), a flecs
+/// singleton beside `PostRef`: setup furniture, moved only by
+/// `SetPostOptions` (undoable) or a document load. A script reads the
+/// ones it knows from its `postOptions` global and ignores the rest;
+/// the default is every post's own default, so a document that never
+/// chose writes no key. `skip_stops` (#110) posts the program without
 /// any operation's after-action (no M0 / M1, no trips home) - a
 /// debugged program runs straight through, the ops keep their choices.
 /// `per_op` (#111) is the Output choice: off (the default) posts one
 /// combined program, on writes one standalone program per operation.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PostOptions {
+    /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
+    /// default, or the two-block G76 cycle from the thread record).
+    pub threading: ThreadingOutput,
+    /// Post without any operation's stop or trip home (#110).
     pub skip_stops: bool,
+    /// One standalone program per operation (#111).
     pub per_op: bool,
+}
+
+/// The thread-output choice of [`PostOptions`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThreadingOutput {
+    /// Every pass as synchronized G32 moves - the stream's own passes.
+    #[default]
+    G32Passes,
+    /// One G76 multi-pass threading cycle per thread record.
+    G76Cycle,
 }
 
 /// Which theme the document wears (M6.1 C), a flecs singleton like
@@ -315,9 +364,9 @@ pub struct WorkMaterialDef(pub Option<crate::tools::WorkMaterial>);
 
 /// Ribbon pins (M6.2): the kind indices the user pinned, in pin order -
 /// the ribbon's own Pinned section reads this singleton. A document
-/// SETTING like the theme reference (saved with the project), but NOT
-/// an undoable command: undo replays cuts, not layout, and this is
-/// layout (ROADMAP M6.2's law, stated against the command law). The
+/// SETTING like the theme reference (saved with the project), so like
+/// the theme it changes only through a command - `SetRibbonPins`
+/// (issue #143), undoable and counted as a document change. The
 /// indices are registry-stable - the row order is the product order -
 /// so a pin names its kind the way the theme names its built-in;
 /// an index past the table (a document from a larger registry) is
@@ -350,6 +399,7 @@ pub fn register_schema(world: &World) {
     world.component::<Units>();
     world.component::<MachineDef>();
     world.component::<PostRef>();
+    world.component::<PostOptions>();
     world.component::<ThemeRef>();
     world.component::<PostOptions>();
     world.component::<ColorVision>();

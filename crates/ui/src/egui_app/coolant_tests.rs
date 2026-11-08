@@ -43,3 +43,35 @@ fn the_coolant_row_shows_the_ops_choice_and_its_edit_undoes() {
     state.drain_actions();
     assert_eq!(coolant(state), CoolantMode::Mist, "Ctrl+Y reapplies it");
 }
+
+#[test]
+fn picking_mist_in_the_coolant_dropdown_queues_the_edit_command() {
+    // The owed UI path (#150): the click, not a hand-pushed command.
+    let mut harness = page(opened(face()));
+    harness.run();
+    let row = harness.get_by_label("Coolant").rect();
+    harness
+        .query_all_by(|n| n.role() == Role::ComboBox)
+        .find(|n| {
+            let c = n.rect().center().y;
+            c >= row.top() - 2.0 && c <= row.bottom() + 2.0
+        })
+        .expect("the Coolant combo")
+        .click();
+    harness.run();
+    harness.get_by_label("Mist").click();
+    harness.run();
+    let state = harness.state_mut();
+    assert!(
+        state.pending.iter().any(|c| matches!(
+            c,
+            CommandKind::EditOperationCoolant { name, coolant: CoolantMode::Mist } if name == "Op"
+        )),
+        "the pick queues its command"
+    );
+    state.drain_actions();
+    assert_eq!(coolant(state), CoolantMode::Mist, "and commits through the history");
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert_eq!(coolant(state), CoolantMode::Flood, "one undo unit");
+}

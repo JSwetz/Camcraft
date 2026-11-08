@@ -78,6 +78,19 @@ if (-not $NoTag) { Fail "main is branch-protected (PR only): cut on release/v$Ve
 $existing = git tag --list $tag
 if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
 if ($existing) { Fail "tag $tag already exists" }
+# The publish job of release.yml cuts this version's notes out of
+# RELEASE_NOTES.md as everything before its first "---" line (the file keeps
+# every release, newest first). Apply the same checks here, before the bump:
+# v0.14.0 replaced the file with its own section, the tag went out, and only
+# the publish job refused it (#272).
+$notesLines = @(Get-Content RELEASE_NOTES.md | ForEach-Object { $_.TrimEnd() })
+$notesEnd = [Array]::IndexOf($notesLines, '---')
+if ($notesEnd -lt 0) { Fail "RELEASE_NOTES.md has no '---' line: put this version's section on top of the history, separated by '---'" }
+if ($notesEnd -le 1) { Fail "RELEASE_NOTES.md has no notes for $Version before its first '---'" }
+$notesHead = $notesLines[0].TrimStart([char]0xFEFF)
+if ($notesHead -notmatch [regex]::Escape($Version)) { Fail "RELEASE_NOTES.md's first section is '$notesHead', not $Version" }
+if (-not (($notesLines[1..($notesEnd - 1)] -join "`n").Trim())) { Fail "RELEASE_NOTES.md's $Version section is empty" }
+Write-Host "RELEASE_NOTES.md: $Version section ($($notesEnd - 1) lines) above the history"
 Write-Host "tag $tag is free"
 
 # ---- 2. Gate ------------------------------------------------------------
@@ -204,11 +217,12 @@ if (-not $Installer) {
 } else {
     $installerScript = Join-Path $PSScriptRoot "installer.ps1"
     Run "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $installerScript, "-Version", $Version, "-Stage", $stage, "-OutDir", (Join-Path $root "dist"))
+    # installer.ps1 signs the setup exe and its embedded uninstaller through
+    # ISCC's SignTool when a certificate is configured (sign.ps1 decides), so
+    # no separate sign.ps1 pass on the setup exe here.
     if ($DryRun) {
-        Write-Host "[dry-run] sign.ps1 -Path $setup (if ISCC produced it)"
-    } elseif (Test-Path $setup) {
-        Run "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript, "-Path", $setup)
-    } else {
+        Write-Host "[dry-run] installer.ps1 signs setup + uninstaller via ISCC SignTool if CAMCRAFT_SIGN_* is set"
+    } elseif (-not (Test-Path $setup)) {
         Write-Host "no installer produced (ISCC.exe missing); the zip is the release"
     }
 }

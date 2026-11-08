@@ -1,7 +1,8 @@
-//! camcraft-kernel - the B-rep kernel seam of M12.1, stage 1 (evaluation +
+//! camcraft-kernel - the B-rep kernel seam of M12.1, stages 1-2 (evaluation +
 //! agreement bench). A thin [`Kernel`] trait carries only the operations both
 //! candidate engines can be asked for: primitive construction (box, Z
-//! cylinder), boolean subtract, whole-solid offset, and a [`Measure`]
+//! cylinder), the three booleans (subtract, union, intersect), whole-solid
+//! offset, constant-radius edge blends (round, chamfer), and a [`Measure`]
 //! (volume + bounding box) the bench compares. Nothing else in the workspace
 //! depends on this crate yet; truck stays the live engine.
 //!
@@ -20,6 +21,7 @@
 
 mod error;
 mod measure;
+mod solidcore_blend;
 pub mod solidcore_impl;
 #[cfg(feature = "truck")]
 pub mod truck_impl;
@@ -58,13 +60,48 @@ pub trait Kernel {
         b: Self::Solid,
     ) -> Result<Self::Solid, KernelError>;
 
+    /// `a` united with `b`.
+    fn boolean_union(&mut self, a: Self::Solid, b: Self::Solid) -> Result<Self::Solid, KernelError>;
+
+    /// The common part of `a` and `b`. An empty result is an `Err`.
+    fn boolean_intersect(
+        &mut self,
+        a: Self::Solid,
+        b: Self::Solid,
+    ) -> Result<Self::Solid, KernelError>;
+
     /// Whole-solid offset by `distance` (negative = inset), convex edges
     /// rounded. Engines without an offset return [`KernelError::Unsupported`].
     fn offset(&mut self, s: &mut Self::Solid, distance: f64) -> Result<Self::Solid, KernelError>;
 
+    /// Constant-radius blend of the edges nearest each of `picks` (every
+    /// pick must lie on an edge, within [`PICK_TOL`]; two picks on one edge
+    /// are refused). `Round` is a circular section of `radius`; `Chamfer` a
+    /// flat one with setback `radius` on both faces. Engines without edge
+    /// blends return [`KernelError::Unsupported`].
+    fn blend_edges(
+        &mut self,
+        s: Self::Solid,
+        picks: &[P3],
+        radius: f64,
+        kind: Blend,
+    ) -> Result<Self::Solid, KernelError>;
+
     /// Volume and bounding box of a closed solid.
     fn measure(&mut self, s: &mut Self::Solid) -> Result<Measure, KernelError>;
 }
+
+/// The edge-blend cross-section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blend {
+    /// Circular section (a fillet on a concave edge, a round on a convex one).
+    Round,
+    /// Flat section, equal setback on both faces.
+    Chamfer,
+}
+
+/// How far a blend pick may lie from the edge it names (model units).
+pub const PICK_TOL: f64 = 1e-3;
 
 /// Rejects non-finite coordinates (shared input guard of both impls).
 pub(crate) fn finite_point(op: &'static str, p: P3) -> Result<(), KernelError> {

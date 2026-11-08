@@ -23,6 +23,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 
 fn feed(from: Point3, to: Point3) -> Move {
     Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from,
         to,
@@ -70,8 +71,9 @@ fn a_wide_stepover_leaves_its_scallop_on_the_record() {
     // must stand within it, so the law reads scallops up to 4·tol
     // past the ball and needs a lattice column within reach of both
     // passes - at the r/8 cell that is s <= 2.9 here; a spacing wider
-    // than that (s = 4, 0.606 mm) is a gap outside this law's reach,
-    // the missing-pass law's word, not this one's.
+    // than that (s = 4, 0.606 mm) is outside this law's reach and no
+    // other scan law reads it; a stated spacing at or past 2r is
+    // refused at the generator instead (#37, `scallop_ceiling`).
     let rep = stock_sim::envelope_scan(&plate(), &raster(2.8), R, TOL).expect("scan");
     let cusp = (R * R + 1.96f64).sqrt() - R;
     assert!(rep.gouge_mm <= gate(rep.cell), "a flat ride bites nothing: {}", rep.gouge_mm);

@@ -76,7 +76,11 @@ fn empty_egui_meshes_are_filtered_before_gpu_submission() {
 }
 
 mod face_origin;
+mod spindle_row;
+mod stock_size;
+mod stock_fit_sides;
 mod layout;
+mod unsaved;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -368,7 +372,8 @@ fn file_ops_round_trip_through_commands() {
     let path = std::env::temp_dir().join(format!("camcraft-egui-md-{}.camproj", std::process::id()));
     let saved_title = format!("CamCraft - {}", path.file_name().unwrap().to_string_lossy());
     assert_eq!(harness.state().state.project_path, None);
-    assert_eq!(harness.state().state.window_title(), "CamCraft - Untitled");
+    // The seed is unsaved work: the title carries the '*' (#107).
+    assert_eq!(harness.state().state.window_title(), "*CamCraft - Untitled");
 
     harness
         .state_mut().state.pending
@@ -1671,9 +1676,8 @@ fn headless_run_succeeds() {
 /// The churn gate for the migration: one rendered frame of the whole shell,
 /// compared to `tests/snapshots/egui_app.png` (relative to this crate).
 /// Regenerate deliberately with `UPDATE_SNAPSHOTS=1`; a failure writes
-/// `.new.png`/`.diff.png` beside it for eyes. kittest.toml could loosen the
-/// threshold per OS - not added; if cross-backend drift ever shows, that is
-/// the knob, in this crate's root.
+/// `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
+/// below use a Linux-only threshold for isolated antialiasing differences.
 #[test]
 fn egui_shell_snapshot() {
     let _g = snapshot_guard();
@@ -1712,7 +1716,14 @@ fn egui_shell_snapshot_light() {
     // a theme that cannot be read is a visible refusal, not a style
     // preference - and the light column is not a refusal.
     assert_eq!(contrast::readable(&theme::current()), None, "the light golden's own table reads");
-    harness.snapshot("egui_app_light");
+    // The golden was refreshed on Windows (#66). On Linux its antialiasing
+    // differs at isolated pixels (none exceed 1.0); keep the other OSes'
+    // 0.6 threshold and leave the image itself as the shared reference.
+    harness.snapshot_options(
+        "egui_app_light",
+        &egui_kittest::SnapshotOptions::new()
+            .threshold(egui_kittest::OsThreshold::<f32>::default().linux(1.0)),
+    );
     theme_set(&harness.state_mut().state.world, &ThemeRef::Dark);
     harness.run_steps(1); // leave LIVE dark for whatever frame follows.
 }
@@ -1806,7 +1817,11 @@ fn tool_editor_snapshot() {
     harness.run();
     harness.get_by_label("Edit").click();
     harness.run_steps(3);
-    harness.snapshot("egui_tool_editor");
+    harness.snapshot_options(
+        "egui_tool_editor",
+        &egui_kittest::SnapshotOptions::new()
+            .threshold(egui_kittest::OsThreshold::<f32>::default().linux(1.5)),
+    );
 }
 
 // The S0 one-wgpu proof retired with the imgui renderer at M-g: with
@@ -2223,11 +2238,12 @@ fn a_gated_dropdown_row_click_answers_and_closes() {
 }
 
 /// The pin gesture, at the level its law lives on (M6.2): the
-/// right-click writes the document's pinned list and says so, but
-/// never the history - undo replays the cut, not the layout, and the
-/// pin must still be there after the undo.
+/// right-click changes the document's pinned list and says so. The
+/// pins are saved with the project, so the pin is a command on the
+/// history (issue #143): the first undo takes the pin back, the second
+/// takes the cut back, and redo re-applies them in order.
 #[test]
-fn right_click_pins_and_undo_replays_only_the_cuts() {
+fn right_click_pins_and_undo_takes_the_pin_back() {
     use camcraft_app::operation::Section;
     let mut harness = shell_harness();
     harness.run();
@@ -2279,17 +2295,36 @@ fn right_click_pins_and_undo_replays_only_the_cuts() {
         "the toggle must say so: {}",
         harness.state().state.status
     );
-    // Undo the cut; the pin is layout, not a cut - it survives.
+    // Undo: the pin is the newest change, so it goes first and the cut
+    // stays (issue #143 - a pin is a command, not a side write).
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    assert!(
+        camcraft_app::ribbon::pinned_of(&harness.state().state.world).is_empty(),
+        "the first undo takes the pin back"
+    );
+    assert!(
+        model::find_by_name(&harness.state().state.world, "2D Pocket1").is_some(),
+        "the first undo leaves the cut"
+    );
+    // The second undo takes the cut back; redo twice restores both.
     harness.state_mut().state.pending.push_back(CommandKind::Undo);
     harness.run();
     assert!(
         model::find_by_name(&harness.state().state.world, "2D Pocket1").is_none(),
-        "undo must have taken the operation back"
+        "the second undo takes the operation back"
+    );
+    harness.state_mut().state.pending.push_back(CommandKind::Redo);
+    harness.state_mut().state.pending.push_back(CommandKind::Redo);
+    harness.run();
+    assert!(
+        model::find_by_name(&harness.state().state.world, "2D Pocket1").is_some(),
+        "redo re-cuts the pocket"
     );
     assert_eq!(
         camcraft_app::ribbon::pinned_of(&harness.state().state.world),
         vec![2],
-        "undo replays cuts, not layout (M6.2's pin law)"
+        "redo re-pins it"
     );
     // Right-click again - now at the inline cell the pin created (one
     // home: the bar, not the door too): unpinned, the door takes the
@@ -3014,6 +3049,9 @@ fn a_create_cell_darkens_with_the_tool_laws_reason() {
         let st = &harness.state().state;
         assert!(model::find_by_name(&st.world, "Drill1").is_none(), "a dark cell creates nothing");
         assert!(st.status.contains(&reason), "the click answers with the reason: {}", st.status);
+        // #191: and takes the user to the fix - the tool library.
+        assert_eq!(st.ui_target, UiTarget::Tool(String::new()), "the click opens the tool library");
+        assert!(st.status.ends_with("opened the tool library"), "{}", st.status);
     }
     rack(&mut harness.state_mut().state, &["DR-0400"]);
     harness.run();
@@ -4223,6 +4261,10 @@ fn a_successful_post_opens_the_viewer_and_new_document_retires_it() {
     }
     let _ = std::fs::remove_file(&path);
     harness.state_mut().state.pending.push_back(CommandKind::NewDocument);
+    // The document is unsaved: New waits for the prompt's answer (#107).
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::ResolveUnsaved(crate::unsaved::UnsavedChoice::DontSave));
     harness.run();
     assert!(
         harness.state().state.post_view.is_none(),

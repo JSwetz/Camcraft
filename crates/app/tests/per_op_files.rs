@@ -188,15 +188,15 @@ fn a_refusal_in_op_two_writes_nothing() {
 #[test]
 fn the_output_option_undoes_and_redoes() {
     let (world, mut history) = two_faces(["Face1", "Face2"]);
-    assert!(!posting::post_options_of(&world).per_op, "one program is the default");
+    assert!(!posting::post_options(&world).per_op, "one program is the default");
     let cmd = SetPostOptions::new(&world, PostOptions { per_op: true, ..Default::default() }).expect("switch");
     history.execute(&world, cmd);
-    assert!(posting::post_options_of(&world).per_op);
+    assert!(posting::post_options(&world).per_op);
     assert!(SetPostOptions::new(&world, PostOptions { per_op: true, ..Default::default() }).is_err(), "a no-op is refused");
     history.undo(&world);
-    assert!(!posting::post_options_of(&world).per_op, "undo restores one program");
+    assert!(!posting::post_options(&world).per_op, "undo restores one program");
     history.redo(&world);
-    assert!(posting::post_options_of(&world).per_op, "redo reapplies it");
+    assert!(posting::post_options(&world).per_op, "redo reapplies it");
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn the_output_option_round_trips_and_old_files_load_one_program() {
     let back = new_world();
     camcraft_app::project::load(&back, &path).expect("load");
     let _ = std::fs::remove_file(&path);
-    assert_eq!(posting::post_options_of(&back), PostOptions { skip_stops: false, per_op: true });
+    assert_eq!(posting::post_options(&back), PostOptions { per_op: true, ..PostOptions::default() });
 }
 
 #[test]

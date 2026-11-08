@@ -28,10 +28,12 @@
 
 mod after_op;
 pub mod cnc;
+pub mod cnc_thread;
 mod coolant;
 pub mod engine;
 pub mod js;
 pub mod machine;
+pub mod probe_rec;
 mod program;
 
 pub use after_op::AfterOperation;
@@ -115,6 +117,10 @@ pub struct Dump<'a> {
     /// is the stream's silent default; any other choice rides a
     /// `PARAM AfterOperation`.
     pub after: AfterOperation,
+    /// The probing result (#108): `Some` for a Probe op, whose path
+    /// carries touches - the stream then closes the section with a
+    /// `FOUND` record built from the touches. None for every cutting op.
+    pub probe_result: Option<probe_rec::ProbeResult>,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -139,6 +145,7 @@ impl<'a> Default for Dump<'a> {
             probe_tol: None,
             coolant: CoolantMode::Flood,
             after: AfterOperation::None,
+            probe_result: None,
         }
     }
 }
@@ -176,6 +183,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     if let Some(word) = d.after.param_word() {
         out.push(Record::Param { name: "AfterOperation".into(), value: json!(word) });
+    }
+    // A path stating spindle C angles (issue #33) is live-tool work on
+    // a C turn: the section says so before it opens, so a script can
+    // engage C and the live spindle in its preamble - and the engine
+    // refuses, by name, a script that does not declare `liveTooling`.
+    if t.moves.iter().any(|m| m.rotary.is_some()) {
+        out.push(Record::Param { name: "LiveTool".into(), value: json!("radial") });
     }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
@@ -230,20 +244,87 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // after a lean must be COMMANDED (explicit zero angles), or the
     // machine runs the "upright" move under the old lean.
     let mut tilted = false;
+    // Threading cycles (issue #34) bracket their passes: THREAD before
+    // the span's first move, THREAD END after its last. A record that
+    // does not sit on these moves is not trusted and not written - the
+    // passes then post as themselves, and a script asked for the cycle
+    // refuses by name for want of the record.
+    let mut threads: Vec<&crate::cl::ThreadCycle> = t.threads.iter().filter(|c| c.is_sane(&t.moves)).collect();
+    threads.sort_by_key(|c| c.first);
+    let mut ti = 0usize;
+    let mut open_thread: Option<usize> = None;
+    // Probing touches (#108): a touch that does not sit on its move is
+    // refused by name - its move would post as a plain feed.
+    for p in &t.probes {
+        if !p.is_sane(&t.moves) {
+            out.push(Record::Warn {
+                text: format!("probing: touch at move {} does not run toward its target - refused", p.index),
+            });
+        }
+    }
+    let touches: std::collections::BTreeMap<usize, &crate::cl::ProbeTouch> =
+        t.probes.iter().filter(|p| p.is_sane(&t.moves)).map(|p| (p.index, p)).collect();
+    if d.probe_result.is_some() && touches.is_empty() {
+        out.push(Record::Warn { text: "probing: the probe path carries no touch - refused".into() });
+    }
     for (mi, m, pre) in program::program_order(t, &mut out) {
         while ci < cycles.len() && cycles[ci].first_move <= mi {
             out.push(Record::Cycle(cycles[ci].clone()));
             ci += 1;
         }
+        if open_thread.is_none()
+            && let Some(c) = threads.get(ti).filter(|c| c.first == mi)
+        {
+            out.push(Record::Thread(Some(cnc_thread::ThreadRec::from_cycle(c))));
+            open_thread = Some(c.last);
+            ti += 1;
+        }
         if let Some(r) = pre {
             out.push(r);
         }
-        let abc = match m.axis {
-            Some(a) if !crate::cl::is_vertical(&a) => {
+        // The move straight back off a trip posts incrementally: a part
+        // nearer than the model would otherwise be driven into by an
+        // absolute back-off to the nominal point.
+        if mi > 0
+            && let (Some(prev), Some(f)) = (touches.get(&(mi - 1)), m.feed)
+            && m.arc.is_none()
+            && prev.direction(&t.moves).is_some_and(|d| {
+                let v = m.to - m.from;
+                let len = v.dot(v).sqrt();
+                len > 1e-9 && (v.dot(d) / len + 1.0).abs() < 1e-6
+            })
+        {
+            out.push(Record::Retreat(probe_rec::RetreatRec {
+                delta: [m.to.x - m.from.x, m.to.y - m.from.y, m.to.z - m.from.z],
+                expect: [m.to.x, m.to.y, m.to.z],
+                feed: f,
+            }));
+            continue;
+        }
+        if let (Some(p), Some(f)) = (touches.get(&mi), m.feed) {
+            out.push(Record::Touch(probe_rec::TouchRec {
+                target: [p.target.x, p.target.y, p.target.z],
+                expect: [m.to.x, m.to.y, m.to.z],
+                feed: f,
+                measure: p.measure,
+            }));
+            continue;
+        }
+        // A C-axis live-tool move (issue #33) commands its stated
+        // spindle angle and nothing else: the tool axis is the
+        // station's, fixed in the machine, so A/B hold zero. The C law
+        // (`cl::stamp_c`) is section-scoped - the post disengages C at
+        // the section's end - so no modal lean is left standing.
+        let abc = match (m.rotary, m.axis) {
+            (Some(c), _) => {
+                tilted = false;
+                Some([0.0, 0.0, c])
+            }
+            (None, Some(a)) if !crate::cl::is_vertical(&a) => {
                 tilted = true;
                 Some(crate::cl::axis_to_angles(a))
             }
-            Some(_) if tilted => {
+            (None, Some(_)) if tilted => {
                 tilted = false;
                 Some([0.0, 0.0, 0.0])
             }
@@ -271,6 +352,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             // `.cnc` producers own the letters directly.
             abc,
         }));
+        if open_thread == Some(mi) {
+            out.push(Record::Thread(None));
+            open_thread = None;
+        }
+    }
+    if open_thread.is_some() {
+        out.push(Record::Thread(None));
     }
     for c in &cycles[ci..] {
         out.push(Record::Cycle((*c).clone()));
@@ -282,6 +370,14 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // story is only the handoff. The probe (M5.3 D) sits in front of
     // the handoff: the part is measured where it was last machined,
     // before it changes hands - LOAD, cut, PROBE, TRANSFER, UNLOAD.
+    if let Some(r) = d.probe_result {
+        let axes = probe_rec::found_axes(t);
+        if axes.is_empty() {
+            out.push(Record::Warn { text: "probing: no measuring touch finds an axis - refused".into() });
+        } else {
+            out.push(Record::Found(probe_rec::FoundRec { set_wcs: r.set_wcs, tol_mm: r.tol_mm, axes }));
+        }
+    }
     if let Some(t) = d.probe_tol {
         out.push(Record::Probe { tol_mm: t });
     }

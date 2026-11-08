@@ -1,11 +1,15 @@
 //! M6.2 acceptance: the ribbon's taxonomy is the registry (one
 //! Section column, a derived Family, a machine-filtered section list),
-//! the pins are a document setting that rides no command, and the
-//! project file carries them under the v42 law - absent key = unpinned.
+//! the pins are a document setting changed through the `SetRibbonPins`
+//! command (issue #143: undoable, so it counts as a document change),
+//! and the project file carries them under the v42 law - absent key =
+//! unpinned.
 //!
 //! Gate map (M4.4): covers app::operation (kinds table), app::ribbon,
-//! app::schema (RibbonPins), app::project (pinned key, v42).
+//! app::commands::ribbon_pins, app::schema (RibbonPins), app::project
+//! (pinned key, v42).
 
+use camcraft_app::commands::{History, SetRibbonPins};
 use camcraft_app::machine::Kind;
 use camcraft_app::operation::{self, Family, KindInfo, Section, KIND_COUNT};
 use camcraft_app::project;
@@ -21,8 +25,11 @@ fn sections_partition_the_registry() {
     for s in Section::ORDER {
         let kinds = s.kinds();
         assert!(!kinds.is_empty(), "{s:?} owns no kind");
+        // Display order within a section is table order (#108 lifted
+        // the contiguity law: a new kind APPENDS its id, so stored ids
+        // never move, and still lists in its own section).
         for w in kinds.windows(2) {
-            assert_eq!(w[1], w[0] + 1, "{s:?} is not a contiguous run");
+            assert!(w[1] > w[0], "{s:?} lists out of table order");
         }
         for i in &kinds {
             covered[*i] += 1;
@@ -46,16 +53,10 @@ fn family_is_derived_not_forked() {
     // `KindInfo::family()` cannot drift from `Section::family()`. The
     // boundary is the table's, not a remembered number: a middle
     // insertion moves the rows, not the law (M2.4 B).
-    let turn_start = KindInfo::ALL
-        .iter()
-        .position(|k| k.section == Section::Turning)
-        .expect("turning rows exist");
+    // The family is the section's, wherever the row sits (#108: the
+    // appended Probe row is a mill kind past the turning run).
     for (i, k) in KindInfo::ALL.iter().enumerate() {
-        let want = if i >= turn_start {
-            Family::Turn
-        } else {
-            Family::Mill
-        };
+        let want = if k.section == Section::Turning { Family::Turn } else { Family::Mill };
         assert_eq!(k.family(), want, "row {i} ({}) family drifted", k.label);
     }
     for s in Section::ORDER {
@@ -282,4 +283,47 @@ fn v47_pins_take_the_deburr_seat_shift() {
         operation::OpType::Deburr,
         "Deburr seats in the Mill3D run"
     );
+}
+
+#[test]
+fn the_probe_appends_its_id_and_lists_in_drilling() {
+    // #108: stored kind ids never move - the probe takes the next id,
+    // every older row keeps its own - and the menu still shows it in
+    // the Drilling section, behind the hole cycles.
+    assert_eq!(KindInfo::ALL.len(), KIND_COUNT);
+    assert_eq!(KindInfo::ALL[KIND_COUNT - 1].ty, operation::OpType::Probe);
+    assert_eq!(KindInfo::ALL[13].ty, operation::OpType::Pocket3D, "Pocket3D keeps id 13");
+    assert_eq!(KindInfo::ALL[37].ty, operation::OpType::BoringTurning, "the turning tail keeps 37");
+    let drilling: Vec<operation::OpType> = Section::Drilling.kinds().into_iter().map(|i| KindInfo::ALL[i].ty).collect();
+    assert_eq!(drilling, [operation::OpType::Drill, operation::OpType::Bore, operation::OpType::Probe]);
+    assert!(Section::Drilling.kinds_for(Kind::Mill).contains(&(KIND_COUNT - 1)));
+    assert!(!Section::Drilling.kinds_for(Kind::Lathe).contains(&(KIND_COUNT - 1)), "a lathe has no probe row");
+}
+
+/// Issue #143: a pin goes through the history. Undo puts the previous
+/// pins back, redo re-applies, the list is cleaned like `pinned_set`, and
+/// a list equal to the current one is refused so no no-op lands on the
+/// undo stack.
+#[test]
+fn a_pin_is_a_command_undo_restores_the_previous_pins() {
+    let world = new_world();
+    let mut history = History::default();
+    let pin = SetRibbonPins::new(&world, &[3, 3, KIND_COUNT, 7]).expect("a new pin list");
+    history.execute(&world, pin);
+    assert_eq!(pinned_of(&world), vec![3, 7], "the command writes the cleaned list");
+    assert!(history.can_undo(), "the pin is on the undo stack");
+
+    let unpin = SetRibbonPins::new(&world, &[7]).expect("an unpin");
+    history.execute(&world, unpin);
+    assert_eq!(pinned_of(&world), vec![7]);
+
+    assert!(history.undo(&world));
+    assert_eq!(pinned_of(&world), vec![3, 7], "undo restores the unpinned kind");
+    assert!(history.undo(&world));
+    assert!(pinned_of(&world).is_empty(), "undo restores the unpinned ribbon");
+    assert!(history.redo(&world));
+    assert_eq!(pinned_of(&world), vec![3, 7], "redo re-applies the pin");
+
+    // The same list again (after cleaning) is refused, not pushed.
+    assert!(SetRibbonPins::new(&world, &[3, 7, 3]).is_err(), "a no-op pin is refused");
 }

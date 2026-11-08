@@ -9,6 +9,7 @@
 
 #![allow(dead_code)] // each test binary uses part of the surface
 
+pub mod bore;
 pub mod cl_read;
 pub mod engine_consumers;
 pub mod engine_fixtures;
@@ -164,6 +165,11 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
                 (db * 1000.0).round() as i64,
                 (dc * 1000.0).round() as i64
             ));
+        }
+        // The stated spindle C (issue #33): absent on every golden but
+        // a C-axis live-tool cut, so the dumps stay byte-identical.
+        if let Some(c) = m.rotary {
+            s.push_str(&format!(" SC{}", (c * 1000.0).round() as i64));
         }
         s.push('\n');
     }

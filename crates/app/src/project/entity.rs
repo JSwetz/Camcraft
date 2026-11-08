@@ -21,6 +21,12 @@ pub struct MoveDto {
     /// pre-seam self, and the field skips serialization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis: Option<[f64; 3]>,
+    /// Added with issue #33 (no version bump - the axis-v22 additive
+    /// precedent): the spindle's stated C angle, unwrapped degrees on
+    /// the lattice. Absent on every move but a C-axis live-tool cut,
+    /// so every document without one saves byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotary: Option<f64>,
 }
 
 /// An arc move's center with direction. `kind` stays the motion class
@@ -101,6 +107,16 @@ pub struct PathDto {
     /// before the option. The same additive law as the notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comps: Vec<CompSpanDto>,
+    /// The threading-cycle records (issue #34): the same additive law.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads: Vec<super::thread_dto::ThreadCycleDto>,
+    /// The probing touches (#108, `crate::cl::ProbeTouch`): absent is
+    /// none - every cutting path. A touch lost on load would post as a
+    /// plain feed through the part, so a touch that does not sit on
+    /// its move is dropped AND the path's probe op re-generates (its
+    /// cache no longer matches: see `to_cache`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<super::touch_dto::ProbeTouchDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -112,6 +128,10 @@ pub struct PathDto {
 pub struct CompSpanDto {
     pub side: CompSideDto,
     pub radius: f64,
+    /// Wear compensation (#38): written only when on; absent is the
+    /// control variant, every cache before the option.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wear: bool,
     pub first: u64,
     pub last: u64,
     pub programmed: Vec<MoveDto>,
@@ -132,6 +152,7 @@ impl CompSpanDto {
                 crate::cl::CompSide::Right => CompSideDto::Right,
             },
             radius: crate::cl::lattice(c.radius),
+            wear: c.wear,
             first: c.first as u64,
             last: c.last as u64,
             programmed: c.programmed.iter().map(MoveDto::from_move).collect(),
@@ -145,6 +166,7 @@ impl CompSpanDto {
                 CompSideDto::Right => crate::cl::CompSide::Right,
             },
             radius: self.radius,
+            wear: self.wear,
             first: usize::try_from(self.first).unwrap_or(usize::MAX),
             last: usize::try_from(self.last).unwrap_or(usize::MAX),
             programmed: self.programmed.iter().map(|m| m.to_move()).collect(),
@@ -337,6 +359,7 @@ impl MoveDto {
             axis: m
                 .axis
                 .map(|a| [lattice(a[0]), lattice(a[1]), lattice(a[2])]),
+            rotary: m.rotary.map(lattice),
         }
     }
 
@@ -363,7 +386,10 @@ impl MoveDto {
         // re-normalizing on load would move a saved axis by bits and
         // break the save-load-save byte identity (the lattice snap in
         // from_move is already the normalization gate at write time).
-        m.attach_axis(self.axis)
+        let mut m = m.attach_axis(self.axis);
+        // Verbatim too: the stored angle is already on the lattice.
+        m.rotary = self.rotary.filter(|c| c.is_finite());
+        m
     }
 }
 
@@ -375,6 +401,8 @@ impl PathDto {
             cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
             notes: t.path.notes.clone(),
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
+            threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
+            probes: t.path.probes.iter().map(super::touch_dto::ProbeTouchDto::from_touch).collect(),
         }
     }
 
@@ -396,10 +424,9 @@ impl PathDto {
             .map(CompSpanDto::to_span)
             .filter(|c| c.is_sane(&path.moves))
             .collect();
-        ToolpathCache {
-            path,
-            warnings: self.warnings.clone(),
-        }
+        path.probes = super::touch_dto::load(&self.probes, &path.moves);
+        path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
+        ToolpathCache::new(path, self.warnings.clone())
     }
 }
 

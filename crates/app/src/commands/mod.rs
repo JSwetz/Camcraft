@@ -12,8 +12,11 @@ pub mod load_machine;
 pub mod move_model;
 pub mod operation;
 pub mod post;
+pub mod post_options;
 // M13.11: mesh repair (weld + fill holes) as one undo unit over UpdateModel.
 pub mod repair_model;
+// Issue #143: ribbon pins are saved with the project, so they are a command.
+pub mod ribbon_pins;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
@@ -24,6 +27,8 @@ pub mod theme;
 pub mod color_vision;
 pub mod set_wcs;
 pub mod tool;
+// #221: a tool's controller number.
+pub mod tool_number;
 pub mod update_model;
 
 use flecs_ecs::prelude::World;
@@ -41,8 +46,10 @@ pub use operation::{
     EditOperationParams,
     GenerateOperation, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, SetOperationGeometry,
 };
-pub use post::{SelectPost, SetPostOptions};
+pub use post::SelectPost;
+pub use post_options::SetPostOptions;
 pub use repair_model::RepairModel;
+pub use ribbon_pins::SetRibbonPins;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
@@ -51,6 +58,7 @@ pub use theme::{theme_of, theme_set, SetTheme};
 pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
+pub use tool_number::SetToolNumber;
 pub use update_model::UpdateModel;
 
 #[derive(Debug, thiserror::Error)]
@@ -78,14 +86,31 @@ pub trait Command {
 
 /// Linear undo/redo over executed commands. Executing a fresh command clears
 /// the redo stack (standard history semantics).
-#[derive(Default)]
+///
+/// The history also knows whether the document has unsaved changes (#107):
+/// `saved` is the undo depth at the last save or load. The document is
+/// clean exactly when the current depth equals it - so undoing back to the
+/// saved point is clean again, and redoing past it is dirty again. A fresh
+/// command executed while the saved point sits on the redo stack discards
+/// that state for good, so the saved point becomes unreachable (`None`).
 pub struct History {
     done: Vec<Box<dyn Command>>,
     redo: Vec<Box<dyn Command>>,
+    saved: Option<usize>,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self { done: Vec::new(), redo: Vec::new(), saved: Some(0) }
+    }
 }
 
 impl History {
     pub fn execute(&mut self, world: &World, command: impl Command + 'static) {
+        tracing::debug!(command = command_name(&command), "execute");
+        if self.saved.is_some_and(|depth| depth > self.done.len()) {
+            self.saved = None;
+        }
         command.apply(world);
         self.done.push(Box::new(command));
         self.redo.clear();
@@ -94,6 +119,7 @@ impl History {
     pub fn undo(&mut self, world: &World) -> bool {
         match self.done.pop() {
             Some(command) => {
+                tracing::debug!("undo");
                 command.invert(world);
                 self.redo.push(command);
                 true
@@ -120,9 +146,23 @@ impl History {
     }
 
     /// Drop all history; used when a document replaces the current one.
+    /// The replacing document (blank or loaded) starts clean.
     pub fn clear(&mut self) {
         self.done.clear();
         self.redo.clear();
+        self.saved = Some(0);
+    }
+
+    /// Record the current position as the saved state (after a save or a
+    /// load succeeded).
+    pub fn mark_clean(&mut self) {
+        self.saved = Some(self.done.len());
+    }
+
+    /// True when the document differs from the last save or load: the
+    /// history position is not the recorded saved position.
+    pub fn is_dirty(&self) -> bool {
+        self.saved != Some(self.done.len())
     }
 
     pub fn can_undo(&self) -> bool {
@@ -136,4 +176,11 @@ impl History {
     pub fn is_empty(&self) -> bool {
         self.done.is_empty() && self.redo.is_empty()
     }
+}
+
+/// A command's short type name for the dispatch log (#163):
+/// `camcraft_app::commands::set_wcs::SetWcsOrigin` reads `SetWcsOrigin`.
+fn command_name<T>(_: &T) -> &'static str {
+    let full = std::any::type_name::<T>();
+    full.rsplit("::").next().unwrap_or(full)
 }

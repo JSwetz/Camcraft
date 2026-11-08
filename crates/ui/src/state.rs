@@ -19,7 +19,7 @@ use camcraft_app::commands::{
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
-    SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
+    SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetToolNumber, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
 };
@@ -67,6 +67,9 @@ pub enum CommandKind {
     Select(Option<String>),
     FrameAll,
     Quit,
+    /// The answer to the unsaved-changes prompt (#107): New, Open or Quit
+    /// over a dirty document is held in `unsaved_prompt` until this lands.
+    ResolveUnsaved(crate::unsaved::UnsavedChoice),
     /// The Setup pane's shape+placement draft; the command itself is built
     /// here, so validation and status reporting live in one place.
     SetStock {
@@ -79,6 +82,11 @@ pub enum CommandKind {
     StockFit {
         margin: f64,
         shape: i32,
+    },
+    /// Box stock that wraps every model's world AABB by a separate
+    /// allowance per side (#198): `[-X, +X, -Y, +Y, bottom, top]`, mm.
+    StockFitSides {
+        sides: [f64; 6],
     },
     /// The document's display unit (M1.1): a lens over numbers that all
     /// stay millimeters in the world. Undo restores the previous lens.
@@ -116,6 +124,9 @@ pub enum CommandKind {
     /// is the name, so a registry re-growth never re-points a saved
     /// file's post.
     SelectPostNamed(String),
+    /// The post's user options (issue #34): the undoable
+    /// `SetPostOptions` with the picked value.
+    SetPostOptions(camcraft_app::schema::PostOptions),
     /// The document's theme (M6.1 C), `SelectPost`'s twin: the two
     /// built-ins and a discovered file arrive as a reference (what the
     /// headless tests queue too), and the dialog arm opens the picker.
@@ -149,6 +160,11 @@ pub enum CommandKind {
     ChangeTool {
         name: String,
         tool: Tool,
+    },
+    /// #221: set (`Some`) or clear (`None`) a tool's controller number.
+    SetToolNumber {
+        name: String,
+        number: Option<u32>,
     },
     DeleteTool(String),
     /// The document's workpiece material (M13.2); `None` states none.
@@ -323,6 +339,11 @@ pub struct StockUi {
     pub z: f64,
     pub yaw_deg: f64,
     pub fit_margin: f64,
+    /// #198: fit a box by a separate allowance per side instead of the
+    /// one margin.
+    pub fit_per_side: bool,
+    /// #198: `[-X, +X, -Y, +Y, bottom, top]`, mm.
+    pub fit_sides: [f64; 6],
 }
 
 impl Default for StockUi {
@@ -342,6 +363,8 @@ impl Default for StockUi {
             z: 0.0,
             yaw_deg: 0.0,
             fit_margin: 2.0,
+            fit_per_side: false,
+            fit_sides: [2.0; 6],
         }
     }
 }
@@ -645,6 +668,9 @@ fn fit_circle(pts: &[[f64; 3]]) -> Option<([f64; 2], f64)> {
 pub struct ToolUi {
     pub name: String,
     pub exists: bool,
+    /// The tool's controller number (#221) as the editor shows it: 0 = not
+    /// set, and the tool posts as its position in the tool list.
+    pub number: u32,
     /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore,
     /// 6 turning insert, 7 grooving blade, 8 threading insert,
     /// 9 form gauge, 10 chamfer mill.
@@ -694,6 +720,7 @@ impl ToolUi {
         ToolUi {
             name: name.to_string(),
             exists,
+            number: 0,
             kind: match t.kind {
                 ToolKind::EndMill => 0,
                 ToolKind::BallNose => 1,
@@ -706,6 +733,7 @@ impl ToolUi {
                 ToolKind::Thread => 8,
                 ToolKind::Form => 9,
                 ToolKind::Taper => 10,
+                ToolKind::Probe => 11,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -727,22 +755,34 @@ impl ToolUi {
         }
     }
 
+    /// The draft's kind as the app names it: the inverse of the numbering
+    /// [`ToolUi::from_tool`] writes (anything unknown reads as an end mill).
+    #[must_use]
+    pub fn tool_kind(&self) -> ToolKind {
+        match self.kind {
+            1 => ToolKind::BallNose,
+            2 => ToolKind::BullNose,
+            3 => ToolKind::Drill,
+            4 => ToolKind::Tap,
+            5 => ToolKind::Bore,
+            6 => ToolKind::Turning,
+            7 => ToolKind::Groove,
+            8 => ToolKind::Thread,
+            9 => ToolKind::Form,
+            10 => ToolKind::Taper,
+            11 => ToolKind::Probe,
+            _ => ToolKind::EndMill,
+        }
+    }
+
+    /// The tool this draft states. A ball's corner is saved as its ball
+    /// (#263, [`Tool::tip_corner_r`]), so the document holds the radius
+    /// the readers cut with, not whatever the draft carried over from
+    /// another kind.
     #[must_use]
     pub fn to_tool(&self) -> Tool {
-        Tool {
-            kind: match self.kind {
-                1 => ToolKind::BallNose,
-                2 => ToolKind::BullNose,
-                3 => ToolKind::Drill,
-                4 => ToolKind::Tap,
-                5 => ToolKind::Bore,
-                6 => ToolKind::Turning,
-                7 => ToolKind::Groove,
-                8 => ToolKind::Thread,
-                9 => ToolKind::Form,
-                10 => ToolKind::Taper,
-                _ => ToolKind::EndMill,
-            },
+        let mut tool = Tool {
+            kind: self.tool_kind(),
             diameter: self.diameter,
             corner_r: self.corner_r,
             tip_angle: self.tip_angle,
@@ -760,7 +800,9 @@ impl ToolUi {
             tool_material: self.tool_material,
             flutes: self.flutes,
             center_cutting: self.center_cutting,
-        }
+        };
+        tool.corner_r = tool.tip_corner_r();
+        tool
     }
 }
 
@@ -990,6 +1032,9 @@ pub struct State {
     pub status: String,
     /// Last successfully opened or saved project in this window.
     pub project_path: Option<PathBuf>,
+    /// #225: the Feeds tab shows the spindle speed as surface (cutting)
+    /// speed instead of rpm. View state - never a command, never saved.
+    pub spindle_as_vc: bool,
     /// Bumped whenever documents changed; drives GPU re-upload of meshes.
     pub doc_version: u64,
     /// Bumped whenever selection changed; re-sends the vertex stream (the
@@ -1005,6 +1050,10 @@ pub struct State {
     /// pointer leaves the viewport). View state like the camera and the
     /// drag - not undoable, not saved.
     pub hover: Option<HoverHit>,
+    /// The machined mesh's facet under the pointer (#25), world space:
+    /// set with `hover` when the mesh answers a stock hover, cleared on
+    /// every hover refresh. View state - not undoable, not saved.
+    pub hover_mesh: Option<camcraft_app::geometry::Triangle>,
     /// True when the viewport panel was under the pointer last frame (the
     /// shell writes it, and gates pointer drags on it - a click on a menu
     /// or popup over the image must never orbit).
@@ -1050,6 +1099,12 @@ pub struct State {
     /// M1.7d G-code viewer: None after any document switch or refused
     /// post, `Some` while a posted program is being reviewed.
     pub post_view: Option<PostView>,
+    /// #157: the Debug info window is open. View state - never a
+    /// command, never saved.
+    pub debug_info_open: bool,
+    /// #157: the GPU the window came up on (`gpu::describe`'s line),
+    /// set once by the windowed shell; `None` headless.
+    pub gpu_line: Option<String>,
     /// M2.3 program material sim: None while the Deviate cell is dark,
     /// `Some` while its sheet paints the stock's place. Frozen evidence
     /// of one program state, exactly like [`PostView`]'s text - never a
@@ -1106,6 +1161,13 @@ pub struct State {
     pub dragging_op: Option<String>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
+    /// #107: a New / Open / Quit held back because the document has
+    /// unsaved changes; while Some, the shell shows the Save / Don't Save
+    /// / Cancel prompt. Ephemeral UI state - never on the history.
+    pub unsaved_prompt: Option<CommandKind>,
+    /// Set only while a held action runs after the user chose to discard
+    /// (or saved first), so the guard lets it through once.
+    pub(crate) discard_confirmed: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
     /// runs `ImportModel::new` off-thread and sends the finished command back.
     import_rx: Option<mpsc::Receiver<Result<ImportModel, CommandError>>>,
@@ -1288,11 +1350,15 @@ impl State {
             history: History::default(),
             status,
             project_path: None,
+            debug_info_open: false,
+            gpu_line: None,
+            spindle_as_vc: false,
             doc_version: 0,
             selection_version: 0,
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
             hover: None,
+            hover_mesh: None,
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             boundary_pick: None,
@@ -1328,6 +1394,8 @@ impl State {
             dragging_op: None,
             pending: VecDeque::new(),
             request_quit: false,
+            unsaved_prompt: None,
+            discard_confirmed: false,
             import_rx: None,
             import_file: None,
             import_started: None,
@@ -1390,6 +1458,40 @@ impl State {
         let n = self.tool_names().len() + 1;
         let starter = catalog().remove(0);
         ToolUi::from_tool(&format!("Tool{n}"), &starter.1, false)
+    }
+
+    /// Place a fitted stock (#198 shared it between the single-margin and
+    /// per-side fits): the size and XY/Z placement from the fit, the
+    /// stock's own rotation kept, through the undoable `SetStock`.
+    fn apply_stock_fit(&mut self, fitted: Option<(StockShape, Point3)>) {
+        let Some((shape, pos)) = fitted else {
+            self.refuse(
+                ErrorScope::Setup,
+                String::from("stock fit refused: models have no usable extent"),
+            );
+            return;
+        };
+        // Fit replaces size and XY/Z placement; a deliberately
+        // oriented stock keeps its rotation.
+        // The fit replaces the ACTIVE setup's stock, and keeps
+        // that entity's deliberate rotation (M3.2 A: the name is
+        // resolved here; the command re-resolves at construction).
+        let stock_name = camcraft_app::setup::stock_entity_name(
+            &self.world,
+            camcraft_app::setup::active(&self.world).as_deref(),
+        );
+        let rot = model::find_by_name(&self.world, &stock_name)
+            .and_then(|entity| model::transform_of(&self.world, &entity))
+            .map_or_else(|| Location::default().rot, |loc| loc.rot);
+        let location = Location { pos, rot };
+        match SetStock::new(&self.world, shape, location) {
+            Ok(command) => {
+                self.history.execute(&self.world, command);
+                self.doc_version += 1;
+                self.status = String::from("stock fitted to models");
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("stock not fitted: {err}")),
+        }
     }
 
     /// Record a refusal: status strip for everyone, tagged message for the
@@ -1971,7 +2073,13 @@ impl State {
         }
         match model::find_by_name(&self.world, &ident).and_then(|e| model::tool_of(&self.world, &e))
         {
-            Some(tool) => self.tool_ui = ToolUi::from_tool(&ident, &tool, true),
+            Some(tool) => {
+                self.tool_ui = ToolUi::from_tool(&ident, &tool, true);
+                // #221: the number lives beside the geometry, on ToolDef.
+                self.tool_ui.number = model::find_by_name(&self.world, &ident)
+                    .and_then(|e| model::tool_number_of(&self.world, &e))
+                    .unwrap_or(0);
+            }
             None => self.tool_ui.exists = false,
         }
     }
@@ -2148,11 +2256,16 @@ impl State {
         }
     }
 
-    fn run(&mut self, action: CommandKind) {
+    pub(crate) fn run(&mut self, action: CommandKind) {
         // Whatever ran, the banner shows only the newest outcome: a later
         // command (even a successful one) retires an old refusal.
         self.feedback = None;
         self.feedback_ctx = None;
+        // #107: New, Open and Quit over unsaved changes wait for the
+        // prompt's answer instead of discarding the document.
+        let Some(action) = self.hold_if_unsaved(action) else {
+            return;
+        };
         match action {
             CommandKind::OpenModelDialog => {
                 if let Some(path) = pick_mesh_file() {
@@ -2254,6 +2367,7 @@ impl State {
             }
             CommandKind::FrameAll => self.frame_all(),
             CommandKind::Quit => self.request_quit = true,
+            CommandKind::ResolveUnsaved(choice) => self.resolve_unsaved(choice),
             CommandKind::DeleteByName(name) => match DeleteEntity::new(&self.world, &name) {
                 Ok(command) => {
                     self.history.execute(&self.world, command);
@@ -2357,6 +2471,14 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
+            CommandKind::SetPostOptions(next) => match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = "post options set".into();
+                }
+                Err(err) => self.refuse(ErrorScope::Setup, format!("post options not set: {err}")),
+            },
             CommandKind::SelectTheme(next) => self.select_theme(next),
             CommandKind::SelectColorVision(next) => self.select_color_vision(next),
             CommandKind::SelectThemeDialog => {
@@ -2386,38 +2508,34 @@ impl State {
                     );
                     return;
                 };
-                let Some((shape, pos)) = (if radio == 1 {
-                    stock::fit_cylinder(&bounds, margin)
+                let fitted = if radio == 1 {
+                    // #230: snug about the part - the models' largest
+                    // radius from the fit's axis plus the margin, not the
+                    // footprint's diagonal (1.41 R for a round part).
+                    let c = [(bounds.min.x + bounds.max.x) * 0.5, (bounds.min.y + bounds.max.y) * 0.5];
+                    model::solid_world_radius_about(&self.world, c)
+                        .and_then(|r| stock::fit_cylinder_about(&bounds, r, margin))
                 } else {
                     stock::fit_box(&bounds, margin)
-                }) else {
+                };
+                self.apply_stock_fit(fitted);
+            }
+            CommandKind::StockFitSides { sides } => {
+                if !sides.iter().all(|s| s.is_finite() && *s >= 0.0) {
                     self.refuse(
                         ErrorScope::Setup,
-                        String::from("stock fit refused: models have no usable extent"),
+                        String::from("stock fit refused: every side's allowance must be zero or more"),
+                    );
+                    return;
+                }
+                let Some(bounds) = model::solid_world_aabb(&self.world) else {
+                    self.refuse(
+                        ErrorScope::Setup,
+                        String::from("nothing to fit: no models in the document"),
                     );
                     return;
                 };
-                // Fit replaces size and XY/Z placement; a deliberately
-                // oriented stock keeps its rotation.
-                // The fit replaces the ACTIVE setup's stock, and keeps
-                // that entity's deliberate rotation (M3.2 A: the name is
-                // resolved here; the command re-resolves at construction).
-                let stock_name = camcraft_app::setup::stock_entity_name(
-                    &self.world,
-                    camcraft_app::setup::active(&self.world).as_deref(),
-                );
-                let rot = model::find_by_name(&self.world, &stock_name)
-                    .and_then(|entity| model::transform_of(&self.world, &entity))
-                    .map_or_else(|| Location::default().rot, |loc| loc.rot);
-                let location = Location { pos, rot };
-                match SetStock::new(&self.world, shape, location) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = String::from("stock fitted to models");
-                    }
-                    Err(err) => self.refuse(ErrorScope::Setup, format!("stock not fitted: {err}")),
-                }
+                self.apply_stock_fit(stock::fit_box_sides(&bounds, sides));
             }
             CommandKind::SetWcs {
                 slot,
@@ -2461,6 +2579,19 @@ impl State {
                 }
                 Err(err) => self.refuse(ErrorScope::Tool, format!("tool not added: {err}")),
             },
+            CommandKind::SetToolNumber { name, number } => {
+                match SetToolNumber::new(&self.world, &name, number) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = match number {
+                            Some(n) => format!("tool {name} is now T{n}"),
+                            None => format!("tool {name} posts as its list position"),
+                        };
+                    }
+                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool number not set: {err}")),
+                }
+            }
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {
@@ -2590,7 +2721,7 @@ impl State {
             }
             CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
             CommandKind::SetSkipStops(skip) => {
-                let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options_of(&self.world) };
+                let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
                 match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
@@ -3174,6 +3305,11 @@ impl State {
         }
     }
 
+    /// The shell polls a running import on a timer while otherwise idle.
+    pub(crate) fn import_in_progress(&self) -> bool {
+        self.import_rx.is_some() || !self.import_queue.is_empty()
+    }
+
     /// Drop any live/queued imports because the document is being replaced.
     /// A worker still running finishes in the background and discards itself.
     fn abandon_imports(&mut self) {
@@ -3368,6 +3504,8 @@ impl State {
         match project::load(&self.world, &path) {
             Ok(()) => {
                 self.project_path = Some(path.clone());
+                // The loaded document is the new clean point (#107).
+                self.history.mark_clean();
                 self.doc_version += 1;
                 self.status = format!("opened {}", path.display());
             }
@@ -3375,9 +3513,11 @@ impl State {
         }
     }
 
-    fn save_project_path(&mut self, path: PathBuf) {
+    pub(crate) fn save_project_path(&mut self, path: PathBuf) {
         match project::save(&self.world, &path) {
             Ok(()) => {
+                // What is on disk now matches the history position (#107).
+                self.history.mark_clean();
                 self.status = format!("saved {}", path.display());
                 self.project_path = Some(path);
             }
@@ -3388,9 +3528,11 @@ impl State {
     #[must_use]
     pub fn window_title(&self) -> String {
         let filename = self.project_path.as_ref().and_then(|path| path.file_name());
+        // A leading '*' while the document has unsaved changes (#107).
+        let mark = if self.history.is_dirty() { "*" } else { "" };
         match filename {
-            Some(name) => format!("CamCraft - {}", name.to_string_lossy()),
-            None => String::from("CamCraft - Untitled"),
+            Some(name) => format!("{mark}CamCraft - {}", name.to_string_lossy()),
+            None => format!("{mark}CamCraft - Untitled"),
         }
     }
 
@@ -3567,7 +3709,7 @@ fn pick_theme_file() -> Option<PathBuf> {
     dialog.pick_file()
 }
 
-fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().add_filter("CamCraft Project", &["camproj"]);
     if let Some(parent) = current.and_then(Path::parent) {
         dialog = dialog.set_directory(parent);

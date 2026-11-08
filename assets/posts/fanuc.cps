@@ -14,6 +14,7 @@ minimumRevision = 1;
 extension = "nc";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
+coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -30,6 +31,7 @@ var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
 var lastA = 0, lastB = 0, lastC = 0; // angle words the last block commanded (deg)
@@ -37,6 +39,7 @@ var tiltRefused = false;   // a refusal the gate counts once, not per line
 var compG = "";            // G41/G42/G40 pending for the next straight block (M13.11)
 var compD = "";            // the D word riding the engage block
 var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
+var wearNoted = false;     // the wear-register comment was written this section (#38)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs):
 // the stream speaks world coordinates; the machine measures its program
 // from the work offset. A legacy .cl carries no PARAMs, so these stay 0.
@@ -104,7 +107,10 @@ function tilt(p) {  // words to append, [] if none, null if refused
 // register: the tool library states none, so it is the tool number,
 // the same slot the H word reads. A comp word that would land on a
 // rapid or an arc is refused by name (counted, gate-blocked) - never
-// written where the control would misread it.
+// written where the control would misread it. Wear compensation (#38,
+// properties.CompensationType "wear") writes the same words over the
+// cutter-centre path: the register must hold only the wear delta, so
+// the section says so once, in a comment the operator reads.
 function onRadiusCompensation(side) {
   var s = String(side || properties.Compensation || "off");
   if (s === "off") {
@@ -117,6 +123,10 @@ function onRadiusCompensation(side) {
   compG = (s === "left") ? "G41" : "G42";
   compD = "D" + pad2(tNo);
   compOn = true;
+  if (properties.CompensationType === "wear" && !wearNoted) {
+    block(["(WEAR COMP - " + compD + " HOLDS THE WEAR DELTA ONLY, NOT THE TOOL RADIUS)"]);
+    wearNoted = true;
+  }
 }
 function compRefuse(what) {
   if (compG) {
@@ -125,41 +135,49 @@ function compRefuse(what) {
   }
 }
 
-// The .mch tool-station coolant list carries names + M-codes; the
-// first Flood entry (else the first entry at all) is this machine's
-// cutting-fluid-on code. M9 (stop) is the RS-274 fixed pair.
+// The .mch tool-station coolant list carries names + M-codes. A
+// flood ask takes the machine's Flood entry; failing one, the first
+// coded entry of no other known family (a shop's own "Brine" is its
+// flood); a stated codeless Flood is the operator's own valve, silent.
+// A list that states only other kinds (Mist, Through-spindle) has no
+// flood code: refused by name (#150), never posted as mist or dry. An
+// unstated list stays silent (the unstated-limit law). M9 (stop) is
+// the RS-274 fixed pair.
+var COOLANT_KINDS = ["flood", "mist", "through-spindle", "through-tool"];
+function coolantWho() { return coolantOp ? "operation " + coolantOp + ": " : ""; }
 function coolantCode() {
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
-  var first = "";
+  var other = "", floodNamed = false;
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = (typeof c === "string") ? c : (c.name || "");
-    if (!code) continue;
-    if (name === "Flood") return code;
-    if (!first) first = code;
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
+    if (name === "flood") { if (code) return code; floodNamed = true; continue; }
+    if (code && !other && COOLANT_KINDS.indexOf(name) < 0) other = code;
   }
-  return first;
+  if (other || floodNamed) return other;
+  if (cs.length > 0) msg(coolantWho() + "the machine states no flood coolant code - pick another coolant for the operation (Off cuts dry) or add a Flood entry to the machine");
+  return "";
 }
 
 // The op's coolant ask (#112): the stream says nothing for flood (every
 // older stream), or carries PARAM Coolant off / mist / through-tool. The
 // code is the machine's own entry of that family - the machine is truth;
-// an ask the machine states no code for is refused by name, never
-// silently posted dry.
+// an ask the machine states no code for is refused by name, naming the
+// operation (#150), never silently posted dry.
 function coolantFor(ask) {
   if (ask === "off") return "";
   if (!ask || ask === "flood") return coolantCode();
   var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
-  if (want.length === 0) { msg("unknown coolant ask " + ask); return ""; }
+  if (want.length === 0) { msg(coolantWho() + "unknown coolant ask " + ask); return ""; }
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = String((typeof c === "string") ? c : (c.name || "")).toLowerCase();
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
     if (code && want.indexOf(name) >= 0) return code;
   }
-  msg("the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  msg(coolantWho() + "the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
   return "";
 }
 
@@ -213,6 +231,7 @@ function onOpen() {
 }
 
 function onParameter(name, value) {
+  if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
@@ -250,7 +269,7 @@ function startPreamble() {
     block(["G43", "H" + pad2(tNo)]);
     toolWait = false;
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#108) states no spindle
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
@@ -287,6 +306,7 @@ function endPreamble() {
     msg("cutter compensation still engaged at section end - no cancel block");
     compG = ""; compD = ""; compOn = false;
   }
+  wearNoted = false;
   if (coolant) block(["M9"]);
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
@@ -371,6 +391,72 @@ function onCycle() {
     cycleSig = sig;
   }
   inCycle = true;
+}
+
+// ------------------------------------------------------------ probing
+// #108. A probing move is the G31 skip function (Fanuc's published
+// operator documentation, custom macro B): a straight feed toward the
+// target that stops when the probe's skip signal fires. The skip
+// position lands in system variables #5061-#5063 (X, Y, Z, workpiece
+// coordinates); when no signal fires the block simply ends at its
+// target, so that is checked at once and alarms (#3000) - a probe that
+// never touched must not back off and measure air. A measured trip k is
+// kept in #(100+3k)..#(102+3k). The back-off after a trip is
+// incremental (G91), so a part nearer than the model is never driven
+// into. The offset arithmetic reads the workpiece offsets #5221 + 20 x
+// slot + axis and writes them with G10 L2.
+var probeBase = 100;
+function onProbeMove() {
+  startPreamble();
+  compRefuse("a probing move");
+  var p = properties;
+  block(["G31", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  // The travel axis: where the target and the nominal trip differ most.
+  var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
+  var ai = d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
+  var tgt = [p.X - orgX, p.Y - orgY, p.Z - orgZ][ai];
+  block(["IF[ABS[#" + (5061 + ai) + "-" + fu(tgt) + "]LT0.001]THEN#3000=2(PROBE NO CONTACT)"]);
+  if (has(p.Measure) && p.Measure >= 0) {
+    var b = probeBase + 3 * p.Measure;
+    block(["#" + b + "=#5061"]);
+    block(["#" + (b + 1) + "=#5062"]);
+    block(["#" + (b + 2) + "=#5063"]);
+  }
+}
+function onProbeRetreat() {
+  var p = properties;
+  block(["G91", "G01", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
+  block(["G90"]);
+}
+function slotOf(word) {  // "G55" -> 1
+  var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
+  return n >= 0 && n <= 5 ? n : 0;
+}
+function onProbeResult() {
+  var p = properties;
+  var org = [orgX, orgY, orgZ];
+  var axes = p.Axes || [];
+  var dev = 190;  // #190.. hold each axis's deviation, found - expected
+  for (var i = 0; i < axes.length; i++) {
+    var a = axes[i];
+    var ai = a.Axis === "X" ? 0 : (a.Axis === "Y" ? 1 : 2);
+    var sum = [];
+    for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
+    var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
+    block(["#" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    block(["IF[ABS[#" + (dev + i) + "]GT" + fu(p.Tolerance) + "]THEN#3000=1(PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
+  }
+  if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
+    var act = 5221 + 20 * slotOf(wcsWord);
+    var words = ["G10", "L2", "P" + (Number(p.SetWorkOffset) + 1)];
+    for (var j = 0; j < axes.length; j++) {
+      var aj = axes[j].Axis === "X" ? 0 : (axes[j].Axis === "Y" ? 1 : 2);
+      words.push(axes[j].Axis + "[#" + (act + aj) + "+#" + (dev + j) + "]");
+    }
+    block(words);
+  } else {
+    block(["#3006=1(CHECK PROBE RESULT #" + dev + "..)"]);
+  }
 }
 
 // ------------------------------------------------------------ footer

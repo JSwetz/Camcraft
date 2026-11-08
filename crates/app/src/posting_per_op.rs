@@ -15,7 +15,9 @@
 //! scratch folder first, then moved into place. A refusal anywhere
 //! writes nothing: never a folder with ops 1 and 3 but not 2.
 
-use super::{machine_value, op_streams, script_source, verification_report, viewer_map, Posted};
+use super::{
+    machine_value, op_streams, options_value, post_options, script_source, verification_report, viewer_map, Posted,
+};
 use crate::post::{cnc, engine};
 use flecs_ecs::prelude::World;
 use std::path::{Path, PathBuf};
@@ -90,11 +92,12 @@ pub fn post_per_op_script(
     let ext = engine::extension_of(cps).map_err(|e| format!("post engine: {e}"))?;
     let ext = sanitise(&ext, "nc");
     let mch = machine_value(world);
+    let options = options_value(post_options(world));
     let mut files = Vec::with_capacity(streams.len());
     for (k, (name, records)) in streams.iter().enumerate() {
         let index = k + 1;
         let number = u32::try_from(index).map_err(|_| "too many operations to number".to_owned())?;
-        let out = engine::run_numbered(cps, &mch, &cnc::serialize(records), number)
+        let out = engine::run_numbered_with(cps, &mch, &cnc::serialize(records), &options, number)
             .map_err(|e| format!("{name}: post engine: {e}"))?;
         if !out.warnings.is_empty() {
             return Err(format!(

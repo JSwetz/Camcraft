@@ -11,8 +11,11 @@
 //! a radius long; between them the control offsets the programmed
 //! contour by the register. The centre moves the generator proved stay
 //! the path's truth (the sim and the verifier read them); the
-//! programmed geometry rides beside them in [`CompSpan`]. Our own model;
-//! no vendor material consulted.
+//! programmed geometry rides beside them in [`CompSpan`]. The wear
+//! variant (#38, the handbooks' wear-offset practice) programs those
+//! centre moves themselves under G41/G42, the register holding only
+//! the wear delta: the same engage / cancel blocks, the same lead law.
+//! Our own model; no vendor material consulted.
 
 use crate::cl::{CompSide, CompSpan, Move, MoveKind, PathBuilder};
 use crate::geo2d::{Point2, Region};
@@ -29,6 +32,12 @@ pub(super) fn refused(why: impl std::fmt::Display) -> GenError {
     GenError::Invalid(format!("control compensation {why}"))
 }
 
+/// A refusal named for the mode `p` asks: "control compensation ..."
+/// or "wear compensation ...".
+pub(super) fn refused_as(p: &ContourParams, why: impl std::fmt::Display) -> GenError {
+    GenError::Invalid(format!("{} compensation {why}", p.links.approach.compensation.label()))
+}
+
 fn straight(lead: Lead) -> Option<f64> {
     match lead {
         Lead::Linear { length } | Lead::Perpendicular { length } => Some(length),
@@ -36,9 +45,14 @@ fn straight(lead: Lead) -> Option<f64> {
     }
 }
 
-/// Does `p` ask the control to compensate?
+/// Does `p` ask the control to compensate (control or wear)?
 pub(super) fn wanted(p: &ContourParams) -> bool {
-    p.links.approach.compensation == Compensation::Control
+    p.links.approach.compensation.in_control()
+}
+
+/// Does `p` ask for the wear variant?
+fn wear(p: &ContourParams) -> bool {
+    p.links.approach.compensation == Compensation::Wear
 }
 
 /// The door: every refusal by name, before any geometry is touched.
@@ -50,13 +64,13 @@ pub(super) fn door(p: &ContourParams) -> Result<(), GenError> {
     for (end, lead) in [("in", p.lead), ("out", p.lead_out_shape())] {
         match straight(lead) {
             None => {
-                return Err(refused(format!(
+                return Err(refused_as(p, format!(
                     "needs a straight lead-{end} (Linear or Perpendicular) of at least the tool radius - \
                      the control builds the offset over that move, and an arc or no lead cannot carry G41/G42"
                 )))
             }
             Some(len) if len + 1e-9 < r => {
-                return Err(refused(format!(
+                return Err(refused_as(p, format!(
                     "needs a straight lead-{end} of at least the tool radius ({r:.3} mm) - the lead-{end} is {len:.3} mm"
                 )))
             }
@@ -64,16 +78,16 @@ pub(super) fn door(p: &ContourParams) -> Result<(), GenError> {
         }
     }
     if p.tab_count > 0 {
-        return Err(refused("does not ride tabs - a tab window has no lead to engage on"));
+        return Err(refused_as(p, "does not ride tabs - a tab window has no lead to engage on"));
     }
     if p.blend_turns {
-        return Err(refused("does not ride corner blends - the control rounds the offset corners itself"));
+        return Err(refused_as(p, "does not ride corner blends - the control rounds the offset corners itself"));
     }
     if p.links.approach.overlap > 0.0 {
-        return Err(refused("does not ride an overlap past the start - the cancel block must leave from the ring's seam"));
+        return Err(refused_as(p, "does not ride an overlap past the start - the cancel block must leave from the ring's seam"));
     }
     if p.links.level == Link::KeepDown || p.links.pass == Link::KeepDown {
-        return Err(refused("needs Clearance or Retract links - a keep-down link engages the next cut without a lead"));
+        return Err(refused_as(p, "needs Clearance or Retract links - a keep-down link engages the next cut without a lead"));
     }
     Ok(())
 }
@@ -85,7 +99,9 @@ pub(super) fn programmed_region(region: &Region, p: &ContourParams) -> Result<Op
     if !wanted(p) {
         return Ok(None);
     }
-    if p.stock_to_leave <= 0.0 {
+    // Wear programs the centre walk: the region only marks the ring as
+    // compensated (its seam re-seats mid-run like control's).
+    if wear(p) || p.stock_to_leave <= 0.0 {
         return Ok(Some(region.clone()));
     }
     let d = if p.side == Side::Inside { -p.stock_to_leave } else { p.stock_to_leave };
@@ -162,10 +178,10 @@ pub(super) fn push_span(b: &mut PathBuilder, ctx: &SpanCtx, first: usize, last: 
     let r = p.tool_diameter * 0.5;
     let moves = b.moves();
     let (Some(m_in), Some(m_out)) = (moves.get(first), moves.get(last)) else {
-        return Err(refused("found no lead-in or lead-out move to engage on"));
+        return Err(refused_as(p, "found no lead-in or lead-out move to engage on"));
     };
     if first >= last || m_in.arc.is_some() || m_out.arc.is_some() {
-        return Err(refused("needs straight lead moves to engage and cancel on"));
+        return Err(refused_as(p, "needs straight lead moves to engage and cancel on"));
     }
     let (m_in, m_out) = (*m_in, *m_out);
     let xy = |q: Point3| Point2::new(q.x, q.y);
@@ -175,17 +191,20 @@ pub(super) fn push_span(b: &mut PathBuilder, ctx: &SpanCtx, first: usize, last: 
     for (end, m) in [("in", m_in), ("out", m_out)] {
         let len = dist(xy(m.from), xy(m.to));
         if len + 1e-9 < r {
-            return Err(refused(format!(
+            return Err(refused_as(p, format!(
                 "needs a straight lead-{end} of at least the tool radius ({r:.3} mm) at ({:.3}, {:.3}) - the room law left {len:.3} mm",
                 s_c.x, s_c.y
             )));
         }
     }
     if dist(s_c, e_c) > 1e-6 {
-        return Err(refused(format!("needs a closed ring - the walk from ({:.3}, {:.3}) does not return to its seam", s_c.x, s_c.y)));
+        return Err(refused_as(p, format!("needs a closed ring - the walk from ({:.3}, {:.3}) does not return to its seam", s_c.x, s_c.y)));
     }
     if moves[first + 1..last].iter().any(|m| m.from.z != z || m.to.z != z || m.kind != MoveKind::Feed) {
-        return Err(refused("needs one planar feed walk between its leads"));
+        return Err(refused_as(p, "needs one planar feed walk between its leads"));
+    }
+    if wear(p) {
+        return push_wear(b, p, first, last, s_c);
     }
     let Some((li, ei, s_p, d)) = closest(ctx.prog, s_c) else {
         return Err(refused("found no part contour to program"));
@@ -281,12 +300,34 @@ pub(super) fn push_span(b: &mut PathBuilder, ctx: &SpanCtx, first: usize, last: 
         programmed.push(Move::new(MoveKind::Feed, at, s3, Some(feed)));
     }
     programmed.push(Move::new(MoveKind::Feed, s3, m_out.to, m_out.feed));
-    // Climb travel keeps the material on the left of the cutter (this
-    // generator's law), so the centre stands right of the part contour.
-    let side = if p.climb { CompSide::Right } else { CompSide::Left };
-    let span = CompSpan { side, radius: r, first, last, programmed };
+    let span = CompSpan { side: side_of(p), radius: r, wear: false, first, last, programmed };
     if !span.is_sane(b.moves()) {
         return Err(refused(format!("could not chain its programmed contour at ({:.3}, {:.3})", s_c.x, s_c.y)));
+    }
+    b.push_comp(span);
+    Ok(())
+}
+
+/// Climb travel keeps the material on the left of the cutter (this
+/// generator's law), so the centre stands right of the part contour -
+/// G42 - in control and in wear alike.
+fn side_of(p: &ContourParams) -> CompSide {
+    if p.climb {
+        CompSide::Right
+    } else {
+        CompSide::Left
+    }
+}
+
+/// The wear span (#38): the programmed moves ARE the centre moves
+/// `first..=last` - the engage lead, the centre ring, the cancel lead -
+/// so the control, its register holding the wear delta, runs the
+/// proved path shifted by that delta and nothing more.
+fn push_wear(b: &mut PathBuilder, p: &ContourParams, first: usize, last: usize, s_c: Point2) -> Result<(), GenError> {
+    let programmed: Vec<Move> = b.moves().get(first..=last).map(<[Move]>::to_vec).unwrap_or_default();
+    let span = CompSpan { side: side_of(p), radius: p.tool_diameter * 0.5, wear: true, first, last, programmed };
+    if !span.is_sane(b.moves()) {
+        return Err(refused_as(p, format!("could not chain its centre walk at ({:.3}, {:.3})", s_c.x, s_c.y)));
     }
     b.push_comp(span);
     Ok(())

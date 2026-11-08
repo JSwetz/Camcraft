@@ -53,6 +53,7 @@ const POSTS: &[(&str, &str, &str)] = &[
     ("Siemens 840D", "sinumerik", "sinumerik"),
     ("Heidenhain", "heidenhain", "heidenhain"),
     ("Mazak", "mazak", "mazak"),
+    ("Tormach PathPilot", "tormach", "tormach"),
 ];
 
 /// (post stem, golden, named reason): a golden a dialect must REFUSE
@@ -336,6 +337,43 @@ fn every_builtin_registry_entry_compiles() {
         assert!(
             camcraft_app::posting::LATHE_POSTS.contains(n),
             "{n} is a turning dialect in the registry's own table"
+        );
+    }
+}
+
+/// (.cps file, the file extension its manifest declares). The engine
+/// never reads `extension`, so nothing else would catch a wrong one:
+/// #52 - a TNC ISO program is a `.I` file (HEIDENHAIN "TNC 640 User's
+/// Manual, ISO programming", ID 892909-25, p. 143); the rest write `.nc`.
+const EXTENSIONS: &[(&str, &str)] = &[
+    ("fanuc", "nc"),
+    ("haas", "nc"),
+    ("sinumerik", "nc"),
+    ("heidenhain", "I"),
+    ("mazak", "nc"),
+    ("tormach", "nc"),
+    ("fanuc-lathe", "nc"),
+];
+
+/// The top-level `extension = "..."` manifest line's value.
+fn declared_extension(script: &str) -> Option<&str> {
+    script
+        .lines()
+        .find_map(|l| l.strip_prefix("extension = \"")?.split_once('"').map(|(e, _)| e))
+}
+
+#[test]
+fn every_builtin_declares_its_controls_file_extension() {
+    let mut stems: Vec<&str> = POSTS.iter().map(|(_, s, _)| *s).collect();
+    stems.extend(LATHE_POSTS.iter().map(|(_, s)| *s));
+    let pinned: Vec<&str> = EXTENSIONS.iter().map(|(s, _)| *s).collect();
+    assert_eq!(pinned, stems, "every shipped post has its extension pinned");
+    for (stem, want) in EXTENSIONS {
+        let cps = read(&format!("assets/posts/{stem}.cps"));
+        assert_eq!(
+            declared_extension(&cps),
+            Some(*want),
+            "{stem}.cps declares the .{want} extension"
         );
     }
 }

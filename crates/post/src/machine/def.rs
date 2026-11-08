@@ -73,6 +73,13 @@ pub struct Coolant {
     pub m_code: String,
 }
 
+/// The coolant names the shipped posts read (#150), in editor order:
+/// `Flood` serves a Flood op, `Mist` a Mist op, `Through-spindle` or
+/// `Through-tool` a Through-tool op. The posts compare case-blind with
+/// spaces and underscores read as hyphens ("Through spindle" reads); any
+/// other name is a shop's own flood (the first coded one serves).
+pub const COOLANT_KINDS: [&str; 4] = ["Flood", "Mist", "Through-spindle", "Through-tool"];
+
 /// A machine, as parsed from a `.mch` file. The identity strings are
 /// display data; every limit is optional by the unstated-limits law.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -130,6 +137,44 @@ pub struct Machine {
     /// claims no inventory of steel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spindles: Option<usize>,
+    /// The length unit the file states (#131): `Some("inch")` when its
+    /// kinematics are in inches, `None` for mm (the default). Every
+    /// number above is mm whatever this says - the parser scales on the
+    /// way in - so this only tells a post which unit the machine is
+    /// programmed in (`machine.units`, G20 vs G21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<String>,
+    /// The spindle's speed ranges, rpm, `(low, high)` each (#170): the
+    /// belt or gear positions a machine changes by hand. A post names
+    /// the range a speed needs when only one serves it. Empty = unstated
+    /// (one range, or the file says nothing): no range is named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spindle_ranges: Vec<(f64, f64)>,
+    /// Whether the spindle can rigid-tap (#170): `Some(false)` when the
+    /// file says it cannot, and a post refuses a rigid tap cycle by name.
+    /// Unstated reads as "not limited", the unstated-limit law.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_tapping: Option<bool>,
+    /// The builder's codes for C-axis live-tool work (issue #33), or
+    /// None - unstated, and a post refuses a C-axis section by name
+    /// rather than guess a builder-specific M word.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_tool: Option<LiveToolCodes>,
+}
+
+/// The words a control needs around C-axis live-tool work (issue
+/// #33): engage the spindle as a positioned C axis and release it,
+/// start the live tool (the post appends `S<rpm>`) and stop it. They
+/// are BUILDER-specific - no public standard fixes them - so they are
+/// the machine file's statement (`tool_station.live_tool`), never a
+/// post's default. All four or none: a partial set reads as unstated.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LiveToolCodes {
+    pub c_axis_on: String,
+    pub c_axis_off: String,
+    pub spindle_on: String,
+    pub spindle_off: String,
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -

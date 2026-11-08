@@ -1,9 +1,6 @@
 %
 O0001 (TestBench lathe)
 G21 G18 G40 G80 G99
-(F1: rapid move 11 travels below the clearance plane inside stock)
-(F1: rapid move 15 travels below the clearance plane inside stock)
-(F1: rapid move 19 travels below the clearance plane inside stock)
 (F1: finish envelope near move 2: 0.8000 mm gouge, 0.0092 mm rest)
 G54
 T0101
@@ -11,23 +8,23 @@ G50 S12000
 G97 S3000 M03
 M8
 G01 X14.6 Z16.8 F0.0267
-G00 X11.6 Z16.8
+G01 X13.6 Z16.8 F0.05
 G01 X0 Z16.8 F0.05
 G00 X14.6 Z16.8
 G01 X14.6 Z16.3 F0.0267
-G00 X11.6 Z16.3
+G01 X13.6 Z16.3 F0.05
 G01 X0 Z16.3 F0.05
 G00 X14.6 Z16.3
 G01 X14.6 Z15.8 F0.0267
-G00 X11.6 Z15.8
+G01 X13.6 Z15.8 F0.05
 G01 X0 Z15.8 F0.05
 G00 X14.6 Z15.8
 G01 X14.6 Z15.3 F0.0267
-G00 X11.6 Z15.3
+G01 X13.6 Z15.3 F0.05
 G01 X0 Z15.3 F0.05
 G00 X14.6 Z15.3
 G01 X14.6 Z14.8 F0.0267
-G00 X11.6 Z14.8
+G01 X13.6 Z14.8 F0.05
 G01 X0 Z14.8 F0.05
 G00 X14.6 Z14.8
 G00 X14.6 Z25.8

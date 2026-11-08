@@ -19,8 +19,20 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`. All are text; the engine reads none of them, but the
-file-viewer's about box does, and every shipped post carries them.
+`capabilities`, `coolantModes`, `liveTooling`, `afterModes`. All but the last three are
+text the engine reads none of; `liveTooling = true` (issue #33) says the
+script voices a `PARAM LiveTool` section - C-axis live-tool work, the
+stream's X Y Z the part-frame tip and C the stated spindle angle - and
+without it the engine refuses such a section by name (only
+fanuc-lathe.cps sets it); `coolantModes = true` says the script reads `PARAM
+Coolant` (#150) - without it the engine refuses a section asking Off,
+Mist or Through tool by name, since the script would post its own
+flood. Every shipped post sets it. `afterModes = true` says the script
+reads `PARAM AfterOperation` (#110) - without it the engine refuses a
+section asking Optional stop, Program stop or Go home by name, since
+the script would run straight on into the next tool. The six posts
+that write it set it. The file-viewer's about box reads
+the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
 
@@ -39,7 +51,8 @@ argument semantics in `docs/CNC-INTERMEDIATE.md`):
 | `onRapid` / `onLinear` / `onCircular` / `onPlunge` | the motion kinds (`onPlunge` only if defined, else `onLinear`) |
 | `onCycle` → `onCyclePoint` → `onDwell(s)` → `onCycleEnd` | per canned cycle |
 | `onComment(text)` | per `WARN` (the PRELUDE default echoes it verbatim) |
-| `onRadiusCompensation(side)` | per `COMP` (M13.11): `"left"` / `"right"` engage G41 / G42 on the NEXT motion record (a straight lead at least a radius long, by the generator's law; `properties.CompensationRadius` is the register's radius), `"off"` cancels (G40) on the next one. The records between are the PART contour, so a post that cannot write the words must `message()` a refusal — the engine refuses a script that lacks the hook outright |
+| `onRadiusCompensation(side)` | per `COMP` (M13.11): `"left"` / `"right"` engage G41 / G42 on the NEXT motion record (a straight lead at least a radius long, by the generator's law; `properties.CompensationRadius` is the register's radius), `"off"` cancels (G40) on the next one. The records between are the PART contour - or, when `properties.CompensationType` is `"wear"` (#38), the cutter-centre path with the register holding only the wear delta - so a post that cannot write the words must `message()` a refusal — the engine refuses a script that lacks the hook outright |
+| `onThreadCycle` / `onThreadCycleEnd` | per `THREAD` / `THREAD END` (issue #34): a threading cycle's numbers bracket its explicit passes; a script that writes the cycle (G76) skips the passes itself, one that does not define the hooks posts them. `postOptions` (global) carries the document's post options |
 | `onClose` | once, after all records (retract + `%`-end here) |
 
 Output is only what `writeln`/`write`/`writeBlock` push into `OUT`;
@@ -59,10 +72,16 @@ write (the gate), so the released program never carries one.
   `through-tool`, flood when unstated (#112) - picks the machine's
   entry of that family instead, refused by `message()` when the
   machine states no code for it; the ask resets to flood at section
-  end; a section's `PARAM AfterOperation` - `optional-stop`,
-  `stop`, `home` (#110) - is written after its spindle stop in the
-  dialect's own words, a home the dialect cannot trust is refused by
-  `message()`, and the ask resets there too), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  end; a flood ask on a machine whose list states only other kinds is
+  refused the same way, and every coolant refusal names the section's
+  `OperationName` (#150); names compare case-blind, spaces and
+  underscores read as hyphens; a section's `PARAM AfterOperation` -
+  `optional-stop`, `stop`, `home` (#110) - is written after its
+  spindle stop in the dialect's own words, a home the dialect cannot
+  trust is refused by `message()` naming the operation, and the ask
+  resets there too; a script that writes it declares
+  `afterModes = true`, and the engine refuses any stop or home ask,
+  by operation name, for a script that does not), `machine.rtcp` and `machine.rotaries` (RTCP may be
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.

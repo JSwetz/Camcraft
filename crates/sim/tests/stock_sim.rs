@@ -34,6 +34,7 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
 
 fn feed(from: Point3, to: Point3) -> Move {
     Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from,
         to,
@@ -120,6 +121,7 @@ fn arc_chords_under_sweep_so_the_sim_only_over_reports() {
     // reported that isn't there, never a gouge that isn't.
     let mut d = Dexel::block(0.0, 0.0, 6.0, 6.0, 2.0, 1.0).unwrap();
     let m = Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from: p(5.0, 0.0, -1.0),
         to: p(0.0, 5.0, -1.0),
@@ -346,8 +348,12 @@ fn hidden_rest_over_budget_says_not_judged() {
     let full = stock_sim::envelope_scan(&f, &raster(10.0), 3.0, 0.1).expect("scan");
     assert_eq!(full.hidden, stock_sim::HiddenRest::Judged, "the shipped budget judges this fixture");
     for (budget, what) in [
-        (stock_sim::ScanBudget { cells: usize::MAX, claims: 10 }, "claims"),
-        (stock_sim::ScanBudget { cells: 100, claims: usize::MAX }, "cells"),
+        // M13.1 (#24): past the holding budget the scan streams in row
+        // bands, so these starve what ONE ROW needs (a row's ~128
+        // claims, a row's ~50 bin headers) or the walk itself.
+        (stock_sim::ScanBudget { cells: usize::MAX, claims: 10, work: usize::MAX }, "claims"),
+        (stock_sim::ScanBudget { cells: 10, claims: usize::MAX, work: usize::MAX }, "cells"),
+        (stock_sim::ScanBudget { cells: usize::MAX, claims: usize::MAX, work: 100 }, "work"),
     ] {
         let rep = stock_sim::envelope_scan_within(&f, &raster(10.0), 3.0, 0.1, budget).expect("scan");
         let stock_sim::HiddenRest::OverBudget { cells, claims } = rep.hidden else {
@@ -420,6 +426,7 @@ fn program_chains_ops_in_order() {
     let o1 = [feed(p(-3.0, 0.0, 2.0), p(2.0, 0.0, 2.0))];
     let o2 = [
         Move {
+            rotary: None,
             kind: MoveKind::Rapid,
             from: p(4.5, 4.5, 10.0),
             to: p(4.5, 4.5, 0.5),

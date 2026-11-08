@@ -4,7 +4,7 @@ members = ["crates/app", "crates/cl", "crates/motion", "crates/post", "crates/si
   "crates/tools", "crates/ui", "crates/geometry", "crates/kernel"]
 
 [workspace.package]
-version = "0.13.0"
+version = "0.14.0"
 edition = "2024"
 rust-version = "1.90"
 
@@ -24,12 +24,18 @@ flecs_ecs = { version = "=0.2.2", default-features = false, features = ["flecs_b
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 # Data-parallel batch generation (M5.3 B): rayon's ordered collect keeps a
 # parallel RegenerateAll byte-identical to the serial one. MIT OR
 # Apache-2.0; pure Rust (its deps included), no build scripts of concern.
 rayon = "1"
+
+# Diagnostics to the launching terminal (#163): `tracing` events at the
+# app's seams, printed by `tracing-subscriber`'s fmt layer on stderr and
+# filtered by CAMCRAFT_LOG / RUST_LOG. Both MIT, pure Rust.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi", "std", "tracing-log"] }
 
 # The JS engine - one in the tree (M5.3 F): the post's sandbox (post/js.rs)
 # and the job-script host (app/script) run the same hard-pinned boa.
@@ -44,7 +50,7 @@ rfd = "0.15"
 pollster = "0.4"
 
 # The shell (M1.4.2 graduation; was the M1.4.1 spike, decision in
-# ROADMAP.md): egui stack, MIT OR Apache-2.0 (egui_dock: MIT) - notices in
+# docs/spike-egui-go-no-go.md): egui stack, MIT OR Apache-2.0 (egui_dock: MIT) - notices in
 # assets/ui/LICENSES.md.
 # Hard-pinned AS A SET: egui_dock 0.21.1 wants egui ^0.36 (not 0.37), and
 # 0.36.2 pins wgpu ^30.0 / winit ^0.30.13 - exactly our lock (30.0.1 /

@@ -78,6 +78,29 @@ impl Cutter {
         self.atoms().first().filter(|a| !a.is_flat()).map_or(0.0, |a| a.z1)
     }
 
+    /// Height above the tip at which the cutting surface stands at
+    /// radial distance `rho` from the axis (#106): 0 inside a square
+    /// end or a bull's flat, the corner arc's rise outside it (a ball
+    /// is a bull with no flat), `rho / tan(half angle)` up a point
+    /// cone. A `rho` past the tip atom, or a stack that describes no
+    /// tool, reads 0 - the tip plane, which can only over-report.
+    #[must_use]
+    pub fn lift_at(&self, rho: f64) -> f64 {
+        if !(rho.is_finite() && rho > 0.0) {
+            return 0.0;
+        }
+        let Some(a) = self.atoms().into_iter().next() else { return 0.0 };
+        let s = match a.prof {
+            Prof::Flat(_) => 0.0,
+            Prof::Bull { flat, cr } => {
+                let e = rho - flat;
+                if e <= 0.0 { 0.0 } else if e >= cr { a.z1 } else { cr - (cr * cr - e * e).max(0.0).sqrt() }
+            }
+            Prof::Cone { k, .. } => rho / k,
+        };
+        if s.is_finite() { s.clamp(0.0, a.z1.max(0.0)) } else { 0.0 }
+    }
+
     /// The atoms bottom-up, heights above the tip. Empty when the
     /// numbers describe no tool (the caller fails closed).
     pub(super) fn atoms(&self) -> Vec<Atom> {

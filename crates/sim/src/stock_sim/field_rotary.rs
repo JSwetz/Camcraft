@@ -36,6 +36,26 @@
 //!   true pose by at most `α` - a displacement growing linearly up
 //!   the axis (`L·α` at height `L`), which is why `R_far` counts the
 //!   shank: at the shank's far end the displacement is the stated sag.
+//! - **The flute-rotation bound (#20).** Any tool point at distance
+//!   `w` from the tool's reference (the ball center, the flat tip)
+//!   stands off its true-pose place by at most `w·2·sin(β/2)`, `β ≤
+//!   half_angle` the angle between the true pose and the sub-chord's
+//!   mid pose (each letter a rotation, so `β` is at most the letters'
+//!   summed half-step). Only points inside the field can cut, so `w`
+//!   is capped by `L`, the farthest field-bounds corner from the
+//!   reference at either station (never more than the shank).
+//!   `RotaryChordStats::flute_shift` states `L·2·sin(half/2)`; with
+//!   the reference error (`center_sag`, zero for a flat tool) it is
+//!   a two-sided Hausdorff bound: every point of the true sweep has a
+//!   chorded point within `center_sag + flute_shift`, and back. A
+//!   caller that needs the flank at a class finer than the chord law
+//!   gives a flute tolerance ([`ChordLaw::flute_tol`],
+//!   [`Stock::simulate_rotary_bounded`]) and the count also meets
+//!   `L·2·sin(half/2) ≤ flute_tol` - more sub-chords, refused by name
+//!   past [`MAX_SUBCHORDS`], never coarsened. The rigid-motion law is
+//!   the textbook one (Craig, "Introduction to Robotics", ch. 2: a
+//!   point at `w` from the pivot turned by `β` moves the chord
+//!   `2·w·sin(β/2)`).
 //! - **Nothing silent.** A turn that would need more than
 //!   [`MAX_SUBCHORDS`] chords, an arc move that turns, a degenerate
 //!   axis, a non-finite move or tolerance: refused by name before a
@@ -47,7 +67,7 @@ use super::cut::{check_ops, SimOp};
 use super::kernel::StockError;
 
 use crate::cl::{angles_to_axis, axis_to_angles, Move, MoveKind};
-use crate::geometry::Point3;
+use crate::geometry::{Aabb, Point3};
 use crate::verify::RotaryAxis;
 
 /// The column engine's refusal of a rotary program, said once.
@@ -70,6 +90,26 @@ pub struct RotaryChordStats {
     /// zero for a flat tool (whose tip is exact and whose disc edge
     /// is off by up to `r·half_angle` instead).
     pub center_sag: f64,
+    /// The flute-rotation bound, mm: `L·2·sin(half_angle/2)`, the
+    /// farthest any tool point inside the field stands from its
+    /// true-pose place (module docs). With `center_sag`, the two-sided
+    /// distance between the chorded sweep and the true one.
+    pub flute_shift: f64,
+}
+
+/// The chord law's inputs: tool radius, the flute length the sweep
+/// carries, the sag tolerance at the farthest reach, the flute-
+/// rotation tolerance (`None`: stated in the stats, not enforced) and
+/// the box only inside which a tool point can cut (`None`: the shank
+/// alone caps the flute's reach).
+#[derive(Clone, Copy, Debug)]
+pub struct ChordLaw {
+    pub r: f64,
+    pub shank: f64,
+    pub pose_tol: f64,
+    pub ball: bool,
+    pub flute_tol: Option<f64>,
+    pub reach: Option<Aabb>,
 }
 
 const UP: [f64; 3] = [0.0, 0.0, 1.0];
@@ -85,19 +125,36 @@ impl Stock {
         ax: &RotaryAxis,
         pose_tol: f64,
     ) -> Result<RotaryChordStats, StockError> {
+        self.simulate_rotary_bounded(ops, ax, pose_tol, None)
+    }
+
+    /// [`Stock::simulate_rotary`] with the flute-rotation bound
+    /// enforced when `flute_tol` is given: every sub-chord short
+    /// enough that no tool point inside the field stands farther than
+    /// `flute_tol` from its true-pose place.
+    pub fn simulate_rotary_bounded(
+        &mut self,
+        ops: &[SimOp],
+        ax: &RotaryAxis,
+        pose_tol: f64,
+        flute_tol: Option<f64>,
+    ) -> Result<RotaryChordStats, StockError> {
         let Some(f) = self.field() else {
             return Err(StockError::Invalid(ROTARY_COLUMN_REFUSAL.into()));
         };
         check_ops(ops)?;
         let shank = spanning_flank(f);
+        let reach = Some(f.bounds());
         let mut stats = RotaryChordStats::default();
         let mut chorded: Vec<Vec<Move>> = Vec::with_capacity(ops.len());
         for (i, op) in ops.iter().enumerate() {
-            let (moves, s) = rotary_chords(op.moves, ax, op.radius, shank, pose_tol, op.ball).map_err(|e| named_op(i, e))?;
+            let law = ChordLaw { r: op.radius, shank, pose_tol, ball: op.ball, flute_tol, reach };
+            let (moves, s) = rotary_chords_law(op.moves, ax, &law).map_err(|e| named_op(i, e))?;
             stats.sub_chords += s.sub_chords;
             stats.turning_moves += s.turning_moves;
             stats.half_angle = stats.half_angle.max(s.half_angle);
             stats.center_sag = stats.center_sag.max(s.center_sag);
+            stats.flute_shift = stats.flute_shift.max(s.flute_shift);
             chorded.push(moves);
         }
         let sim_ops: Vec<SimOp> = ops.iter().zip(&chorded).map(|(op, m)| SimOp { moves: m, ..*op }).collect();
@@ -118,6 +175,16 @@ pub fn rotary_chords(
     pose_tol: f64,
     ball: bool,
 ) -> Result<(Vec<Move>, RotaryChordStats), StockError> {
+    rotary_chords_law(moves, ax, &ChordLaw { r, shank, pose_tol, ball, flute_tol: None, reach: None })
+}
+
+/// [`rotary_chords`] under the full [`ChordLaw`]: the flute-rotation
+/// bound stated, and enforced when `law.flute_tol` is given.
+pub fn rotary_chords_law(moves: &[Move], ax: &RotaryAxis, law: &ChordLaw) -> Result<(Vec<Move>, RotaryChordStats), StockError> {
+    let ChordLaw { r, shank, pose_tol, ball, flute_tol, reach } = *law;
+    if let Some(t) = flute_tol.filter(|t| !(t.is_finite() && *t > 0.0)) {
+        return Err(StockError::Invalid(format!("rotary chords: flute tolerance {t} must be finite and positive")));
+    }
     let dir = unit(ax.dir).ok_or_else(|| StockError::Invalid("rotary chords: the rotary axis direction is not a finite nonzero vector".into()))?;
     if !ax.origin.is_finite() {
         return Err(StockError::Invalid("rotary chords: the rotary axis origin is not finite".into()));
@@ -159,7 +226,13 @@ pub fn rotary_chords(
                 "rotary chords: move {k} turns {dth} rad at reach {r_far}: no finite chord half-angle at tolerance {pose_tol}"
             )));
         }
-        let n_f = (dth / (2.0 * alpha)).ceil();
+        let flute = flute_reach(m, r, shank, ball, reach);
+        // The flute law: L·2·sin(β/2) ≤ flute_tol at β the half-step.
+        let beta = match flute_tol {
+            Some(t) if flute > 0.0 => 2.0 * (t / (2.0 * flute)).min(1.0).asin(),
+            _ => f64::INFINITY,
+        };
+        let n_f = (dth / (2.0 * alpha.min(beta))).ceil();
         if !(n_f.is_finite() && n_f <= MAX_SUBCHORDS as f64) {
             return Err(StockError::Invalid(format!(
                 "rotary chords: move {k} turns {dth:.4} rad at reach {r_far:.2} and would need {n_f} sub-chords at tolerance {pose_tol}; at most {MAX_SUBCHORDS} - refused, never coarsened"
@@ -173,6 +246,7 @@ pub fn rotary_chords(
         if ball {
             stats.center_sag = stats.center_sag.max(r * (1.0 - half.cos()));
         }
+        stats.flute_shift = stats.flute_shift.max(flute * 2.0 * (0.5 * half).sin());
         for j in 0..n {
             let (s0, s1) = (j as f64 / n as f64, (j + 1) as f64 / n as f64);
             let a_mid = pose(la, lb, 0.5 * (s0 + s1));
@@ -184,10 +258,32 @@ pub fn rotary_chords(
                 p0 = shift(p0, a0, a_mid, r);
                 p1 = shift(p1, a1, a_mid, r);
             }
-            out.push(Move { kind: m.kind, from: p0, to: p1, feed: m.feed, arc: None, axis: Some(a_mid) });
+            out.push(Move { rotary: None, kind: m.kind, from: p0, to: p1, feed: m.feed, arc: None, axis: Some(a_mid) });
         }
     }
     Ok((out, stats))
+}
+
+/// `L`: how far from the tool's reference (ball center, flat tip) a
+/// tool point can be and still cut - the shank plus the radius,
+/// capped by the farthest corner of the reach box from the reference
+/// over the move (every point of a box lies within its farthest
+/// corner's distance of any point; the tip runs the chord between the
+/// stations, convex, so its ends bound it; a ball's center stands
+/// within `r` of the tip).
+fn flute_reach(m: &Move, r: f64, shank: f64, ball: bool, reach: Option<Aabb>) -> f64 {
+    let full = shank + r;
+    let Some(b) = reach else { return full };
+    let far = |p: Point3| {
+        let d = |v: f64, lo: f64, hi: f64| (v - lo).abs().max((hi - v).abs());
+        d(p.x, b.min.x, b.max.x).hypot(d(p.y, b.min.y, b.max.y)).hypot(d(p.z, b.min.z, b.max.z))
+    };
+    let corner = far(m.from).max(far(m.to)) + if ball { r } else { 0.0 };
+    if corner.is_finite() {
+        corner.min(full)
+    } else {
+        full
+    }
 }
 
 fn bad_axis(k: usize) -> StockError {

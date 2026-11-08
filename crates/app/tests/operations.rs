@@ -761,7 +761,7 @@ fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
     );
     assert_eq!(status(&world, "Slot1"), OpStatus::Ok);
     let before = cache(&world, "Slot1").expect("cached").path;
-    assert!(before.notes.is_empty(), "the wall dive says nothing: {:?}", before.notes);
+    assert!(before.notes.len() == 1 && before.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "no entry fallback, only the independent Top/stock warning: {:?}", before.notes);
     assert_eq!(
         before.moves.iter().filter(|m| m.arc.is_some()).count(),
         0,
@@ -798,7 +798,7 @@ fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
         after.moves.iter().any(|m| m.arc.is_some()),
         "a channel this wide certifies the orbit - it must land"
     );
-    assert!(after.notes.is_empty(), "certified, nothing to say: {:?}", after.notes);
+    assert!(after.notes.len() == 1 && after.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "a certified orbit adds no entry note; only the Top/stock warning remains: {:?}", after.notes);
     assert_ne!(
         before.moves, after.moves,
         "the entry edit changed the path, not just the stamp"
@@ -1227,6 +1227,9 @@ fn regenerate_all_fixes_the_whole_job_in_one_undo_unit() {
     assert_eq!(cmd.regenerated(), 2);
     assert!(cmd.skipped().is_empty());
     history.execute(&world, cmd);
+    // #145: Contour1 sorts ahead of Face1 and the face's verdict reads
+    // it (#109) - the batch's second round re-runs the face against
+    // the contour's new path, so one click converges.
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
 
@@ -1386,14 +1389,12 @@ fn the_shell_switch_sends_the_pocket_to_the_offset_engine() {
 #[test]
 fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
     // M5.3 B's determinism claim, tested as a law: `RegenerateAll`
-    // stages every stale job against the frozen world, then FINISHES
-    // the jobs on rayon workers; the serial loop it replaces ran
-    // stage+finish op by op against that same frozen world (the old
-    // batch accumulated its parts and applied them only at the end,
-    // so no job ever saw another's writes). Constructors never write
-    // the world, so "in parallel" cannot change what "before" means:
-    // both roads must write down identical bytes - paths, warnings,
-    // stamps - in identical tree order.
+    // stages each round's stale jobs against the world as it stands,
+    // then FINISHES them on rayon workers; its rounds (#145) re-run an
+    // op whose program ahead was regenerated in the same batch. The
+    // serial loop it must equal generates and applies op by op in
+    // program order: both roads must write down identical bytes -
+    // paths, warnings, stamps - in identical tree order.
     let build = || {
         let world = new_world();
         let mut history = History::default();
@@ -1456,9 +1457,9 @@ fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
     assert!(batch.skipped().is_empty(), "{:?}", batch.skipped());
     history_a.execute(&world_a, batch);
 
-    // The serial loop: each stale op's constructor stage-and-finishes
-    // in turn against the untouched world; the commands apply after,
-    // in tree order - exactly what the batch's loop did before rayon.
+    // The serial loop: each stale op generated and applied in program
+    // order, so every op reads the program ahead as regenerated (#109,
+    // #145) - the job the batch's rounds converge to.
     let (world_b, mut history_b) = build();
     let stale: Vec<String> = camcraft_app::setup::operation_order(&world_b)
         .into_iter()
@@ -1466,12 +1467,13 @@ fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
         .map(|(n, _)| n)
         .collect();
     assert_eq!(stale.len(), 3);
-    let mut parts = Vec::new();
     for name in &stale {
-        parts.push(GenerateOperation::new(&world_b, name).expect("serial generate"));
-    }
-    for part in parts {
+        let part = GenerateOperation::new(&world_b, name).expect("serial generate");
         history_b.execute(&world_b, part);
+    }
+    for name in &stale {
+        assert_eq!(status(&world_a, name), OpStatus::Ok, "{name}: one batch converges");
+        assert_eq!(status(&world_b, name), OpStatus::Ok, "{name}: the ordered loop converges");
     }
 
     // Bit-for-bit: the path bytes, the warnings, and the stamps agree.
@@ -4140,7 +4142,7 @@ fn ramp_flag_case(bottom_z: f64) {
         GenerateOperation::new(&world, "Ramp1").expect("regen"),
     );
     let t = cache(&world, "Ramp1").expect("cached").path;
-    assert!(t.notes.is_empty(), "a gentle tangent says nothing: {:?}", t.notes);
+    assert!(t.notes.len() == 1 && t.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "a gentle tangent adds no entry note; only the Top/stock warning remains: {:?}", t.notes);
     assert_eq!(t.moves, base.moves, "silent skip means the same path");
 
     // Undo the regen, then the edit: the default flag is a digest
@@ -4211,7 +4213,7 @@ fn ladder_number_case(bottom_z: f64) {
         GenerateOperation::new(&world, "L1").expect("regen"),
     );
     let t = cache(&world, "L1").expect("cached").path;
-    assert!(t.notes.is_empty(), "an inert word says nothing: {:?}", t.notes);
+    assert!(t.notes.len() == 1 && t.notes.iter().all(|n| n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING)), "the inert word adds no note; only the Top/stock warning remains: {:?}", t.notes);
     assert_eq!(t.moves, base.moves, "inert means the same path");
 
     // Two steps back lands on the unstamped digest again.
@@ -7539,7 +7541,7 @@ fn deburr_refuses_a_cone_that_rules_no_chamfer() {
     );
     model::spawn(&world, "FLAT-CONE")
         .entity_view(&world)
-        .set(ToolDef { tool: flat });
+        .set(ToolDef { tool: flat, number: None });
     history.execute(&world, ImportModel::from_mesh("brick", deburr_brick()));
     history.execute(
         &world,

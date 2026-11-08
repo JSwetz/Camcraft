@@ -174,6 +174,17 @@ impl PlayWorker {
         Some(self.shown.load(Ordering::Relaxed)).filter(|&a| a != usize::MAX)
     }
 
+    /// Whether the UI should keep polling for a requested or published frame.
+    /// A paused playhead at its displayed target needs no redraw timer.
+    #[must_use]
+    pub fn needs_poll(&self) -> bool {
+        let target = lock(&self.shared.req).map(|g| g.target.min(self.index.total()));
+        if target.is_none() || self.shown_at() != target {
+            return true;
+        }
+        lock(&self.shared.out).is_none_or(|g| g.latest.is_some())
+    }
+
     /// Publications so far.
     #[must_use]
     pub fn published(&self) -> u64 {

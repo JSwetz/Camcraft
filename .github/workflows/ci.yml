@@ -78,7 +78,7 @@ jobs:
 
   # M4.2 WASM rung: the post engine (CPS scripts in, NC out) must keep
   # compiling for the web target; its runtime harness belongs to the
-  # web-sys-mvp rung, not this check.
+  # web-sys-mvp rung, not this check. Manual only, like every job here.
   wasm:
     name: wasm compile
     runs-on: ubuntu-latest
@@ -89,3 +89,9 @@ jobs:
       - name: Post engine for wasm32-unknown-unknown
         shell: bash
         run: cargo check -p camcraft-post -p camcraft-cl -p camcraft-geometry --target wasm32-unknown-unknown
+      # #31 (M13.3) rung 1: the domain layer, flecs' C included, builds and
+      # links for wasm32 through the pinned wasi-sysroot (web/build-app-wasm.sh
+      # says why each workaround is there). The UI is not on this rung yet.
+      - name: App (flecs + domain) for wasm32-unknown-unknown
+        shell: bash
+        run: web/build-app-wasm.sh

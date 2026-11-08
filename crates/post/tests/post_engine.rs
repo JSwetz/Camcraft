@@ -349,6 +349,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
     for i in 0..4 {
         let (kind, z) = if i % 2 == 0 { (MoveKind::Rapid, 10.0) } else { (MoveKind::Plunge, -5.0) };
         t.moves.push(camcraft_post::cl::Move {
+            rotary: None,
             kind,
             from: Point3 { x: 0.0, y: 0.0, z: 10.0 },
             to: Point3 { x: i as f64, y: 0.0, z },
@@ -399,6 +400,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         probe_tol: None,
         coolant: Default::default(),
         after: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -463,6 +465,7 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         probe_tol: None,
         coolant: Default::default(),
         after: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -748,6 +751,7 @@ fn dump_brackets_the_section_with_the_feeder() {
         probe_tol: None,
         coolant: Default::default(),
         after: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -846,6 +850,7 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
         probe_tol: None,
         coolant: Default::default(),
         after: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| {
@@ -944,6 +949,7 @@ fn dump_places_the_probe_after_the_cut_before_the_handoff() {
         probe_tol: Some(0.05),
         coolant: Default::default(),
         after: Default::default(),
+        probe_result: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| recs.iter().position(pat).expect("record present");

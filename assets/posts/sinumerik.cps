@@ -13,6 +13,7 @@ minimumRevision = 1;
 extension = "nc";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
+coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -27,7 +28,12 @@ var inCycle = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
+var compG = "";            // G41/G42/G40 pending for the next straight block (#39)
+var compD = "";            // the D word riding the engage block ("" when the tool call selects it)
+var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
+var compNoted = false;     // the section's operator note was written
 var orgX = 0, orgY = 0, orgZ = 0;
 var nLine = 0;             // the numbered-block dialect: every written
                            // block advances N by 10 (gap left for hand edits)
@@ -66,42 +72,49 @@ function tiltOk(p) {  // RTCP words are Fanuc-family; this dialect refuses them
   return false;
 }
 
-// The .mch tool-station coolant list carries names + M-codes; the
-// first Flood entry (else the first entry at all) is this machine's
-// cutting-fluid-on code. M9 (stop) is the fixed pair - the machine
-// file speaks, the post transcribes.
+// The .mch tool-station coolant list carries names + M-codes. A
+// flood ask takes the machine's Flood entry; failing one, the first
+// coded entry of no other known family (a shop's own "Brine" is its
+// flood); a stated codeless Flood is the operator's own valve, silent.
+// A list that states only other kinds (Mist, Through-spindle) has no
+// flood code: refused by name (#150), never posted as mist or dry. An
+// unstated list stays silent (the unstated-limit law). M9 (stop) is
+// the RS-274 fixed pair.
+var COOLANT_KINDS = ["flood", "mist", "through-spindle", "through-tool"];
+function coolantWho() { return coolantOp ? "operation " + coolantOp + ": " : ""; }
 function coolantCode() {
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
-  var first = "";
+  var other = "", floodNamed = false;
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = (typeof c === "string") ? c : (c.name || "");
-    if (!code) continue;
-    if (name === "Flood") return code;
-    if (!first) first = code;
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
+    if (name === "flood") { if (code) return code; floodNamed = true; continue; }
+    if (code && !other && COOLANT_KINDS.indexOf(name) < 0) other = code;
   }
-  return first;
+  if (other || floodNamed) return other;
+  if (cs.length > 0) msg(coolantWho() + "the machine states no flood coolant code - pick another coolant for the operation (Off cuts dry) or add a Flood entry to the machine");
+  return "";
 }
 
 // The op's coolant ask (#112): the stream says nothing for flood (every
 // older stream), or carries PARAM Coolant off / mist / through-tool. The
 // code is the machine's own entry of that family - the machine is truth;
-// an ask the machine states no code for is refused by name, never
-// silently posted dry.
+// an ask the machine states no code for is refused by name, naming the
+// operation (#150), never silently posted dry.
 function coolantFor(ask) {
   if (ask === "off") return "";
   if (!ask || ask === "flood") return coolantCode();
   var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
-  if (want.length === 0) { msg("unknown coolant ask " + ask); return ""; }
+  if (want.length === 0) { msg(coolantWho() + "unknown coolant ask " + ask); return ""; }
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = String((typeof c === "string") ? c : (c.name || "")).toLowerCase();
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
     if (code && want.indexOf(name) >= 0) return code;
   }
-  msg("the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  msg(coolantWho() + "the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
   return "";
 }
 
@@ -145,14 +158,46 @@ function onOpen() {
   writeln("; " + nm);
 }
 
-// Cutter compensation in the control (M13.11): this dialect does not
-// state it yet - refused by name, never a centre path under a
-// Control op (the stream's contour is the PART contour).
-function onRadiusCompensation() {
-  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
+// Cutter radius compensation in the control (#39; DIN 66025 / ISO 6983
+// G41 left / G42 right / G40 cancel, and the family's published
+// programming fundamentals: the radius is the ACTIVE cutting edge's -
+// the D the tool call already selected (T n D n) - so no D word rides
+// the engage block; the approach NORM runs straight to the first point
+// and stands the tool perpendicular to the path tangent at that start
+// point, the start-up the generator's lead law assumes - stated on the
+// engage block, never left to a modal KONT). The stream's COMP
+// record says which side; the NEXT motion record is the engage (or
+// cancel) block, a straight lead at least a radius long. A comp word
+// that would land on a rapid or an arc is refused by name (counted,
+// gate-blocked) - never written where the control would misread it.
+// Under wear (CompensationType "wear", the centre path) the edge must
+// hold only the wear delta: the section says so once, in a comment.
+function onRadiusCompensation(side) {
+  var s = String(side || properties.Compensation || "off");
+  if (s === "off") {
+    compG = compOn ? "G40" : "";
+    compD = "";
+    compOn = false;
+    return;
+  }
+  if (inCycle) { msg("cutter compensation inside a canned-cycle group"); return; }
+  compG = ((s === "left") ? "G41" : "G42") + " NORM";  // NORM stated, never a stale KONT
+  compD = "";
+  compOn = true;
+  if (properties.CompensationType === "wear" && !compNoted) {
+    block(["; WEAR COMP - D" + ni(tNo) + " HOLDS THE WEAR DELTA ONLY, NOT THE TOOL RADIUS"]);
+    compNoted = true;
+  }
+}
+function compRefuse(what) {
+  if (compG) {
+    msg("cutter compensation must engage or cancel on a straight G1 move, not " + what);
+    compG = ""; compD = ""; compOn = false;
+  }
 }
 
 function onParameter(name, value) {
+  if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
@@ -219,6 +264,11 @@ function endPreamble() {
   sectionOpen = false;
   if (inCycle) block(["G80"]);
   inCycle = false;
+  if (compOn || compG) {
+    msg("cutter compensation still engaged at section end - no cancel block");
+    compG = ""; compD = ""; compOn = false;
+  }
+  compNoted = false;
   if (coolant) block(["M9"]);
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
@@ -235,16 +285,21 @@ function onSectionEnd() { endPreamble(); }
 // not a second copy of output.
 function onRapid() {
   startPreamble();
+  compRefuse("a rapid");
   if (!tiltOk(properties) || inCycle) return;
   block(["G0"].concat(xyz(properties)));
 }
 function onLinear() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
-  block(["G1"].concat(xyz(properties), [fw(properties.FeedRate)]));
+  // The pending comp word rides this straight block (#39).
+  var cg = compG, cd = compD;
+  compG = ""; compD = "";
+  block(["G1", cg].concat(xyz(properties), [cd, fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
+  compRefuse("an arc");
   if (!tiltOk(properties) || inCycle) return;
   var p = properties;
   block([

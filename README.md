@@ -15,6 +15,21 @@ text, assets or post processors were used.
 > cannot be proven safe is refused by name. Still, check every program in
 > your machine's own simulation and dry-run it before cutting metal.
 
+> **Experimental work in progress - use with caution.** CamCraft is under
+> heavy, fast-moving development. Features land daily, some are half-built
+> on purpose, and a release can change behaviour you relied on yesterday.
+> Treat every posted program as a first draft: simulate it, dry-run it with
+> the spindle off and the Z raised, and keep a hand on the feed hold. Our
+> unofficial testing philosophy, borrowed from a certain tiny lord with a
+> very large castle:
+>
+> *"Some of you may die, but it's a sacrifice I am willing to make."*
+>
+> Please don't let that be your spindle, your vise or your fingers. Report
+> anything odd as an issue - a crash, a toolpath that looks wrong, or a
+> refusal you think is mistaken - so the next person doesn't find it the
+> hard way.
+
 ## What it does
 
 - **Import** STL, OBJ and STEP models; repair meshes (weld vertices, fill
@@ -122,8 +137,9 @@ Actions runs only on a pushed release tag; the CI and nightly workflows in
 
 ## Project documents
 
-- `ROADMAP.md`: the frozen milestone archive, kept for history and design
-  context. Work is tracked as GitHub issues.
+- The roadmap is the repo's open GitHub issues. The old milestone archive,
+  `ROADMAP.md`, was retired; read it from git history
+  (`git show v0.14.0:ROADMAP.md`).
 - `RECOMMENDED.md`: the decision ledger, with what was chosen, why, and
   what was dropped.
 - `AGENTS.md`: engineering rules (clean-room protocol, the never-crash /
@@ -179,6 +195,15 @@ gouge, crash, data loss), then `P1` (wrong behaviour a user hits), then `P2`
 (owed polish), oldest first. Each issue carries one `P*` label and one or
 more `area:*` labels. Issues opened by an agent also carry `source:agent`.
 
+**`needs-research` issues are not work items yet.** The label marks a large
+idea with open questions (a new machine type, a documentation site, a new
+kernel): research and decisions come first, and the outcome is a set of
+smaller, concrete issues, each with its own `P*`, `area:*` and a "Done means"
+line. Nobody claims a `needs-research` issue to write code. Its work is
+answering the open questions in comments and filing the sub-issues; once
+every sub-issue is filed and linked from it, it is closed, and the
+sub-issues are picked up like any other issue.
+
 1. **Claim before you code.** Comment
    `claimed: <name> · <UTC time> · branch <name> · plan: <one line>`. The
    maintainer adds the `claimed` label and assignee for contributors who
@@ -210,6 +235,50 @@ more `area:*` labels. Issues opened by an agent also carry `source:agent`.
   refuse bad input by name), every UI change as an undoable command, files
   under about 400 lines, and a provenance line on new modules.
 
+### Draft first, then ready for review: the gates
+
+Every pull request opens as a **draft** (`gh pr create --draft`) and stays a
+draft while work, testing and fixes land on it. A draft is never reviewed
+and never merged. It is flagged **ready for review** (`gh pr ready <N>`)
+only when one of these holds:
+
+1. **The maintainer says so**, or
+2. **Its own gates pass:**
+   - **Mergeable** - it merges cleanly with current `main` (merge `main`
+     in and re-test if not);
+   - **Tested** - the quick gate is green on its final commit
+     (`scripts/gate.ps1 -Tier quick` / `scripts/gate.sh quick`), with the
+     pinning tests named in the description;
+   - **Complete description** - what changed, how it was tested, what was
+     *not* exercised, a `Changelog:` line, and `Fixes #N` / `Refs #N` when
+     it works an issue (a docs or process PR the maintainer asked for
+     directly has none);
+   - **Laws** - the `AGENTS.md` rules above (clean-room, no panics,
+     commands for UI changes, ~400-line files; post scripts
+     `assets/posts/*.cps` are exempt from the line limit).
+
+   A quick pass over these points is enough to flag a PR ready: it reads
+   the PR, its stated test results and its mergeability, and does not
+   rebuild (the author ran the quick gate). The full independent review
+   comes after, on the ready PR.
+
+**Once ready, the branch takes no more pushes.** A late fix, a needed merge
+of `main` or any other change first turns it back into a draft
+(`gh pr ready <N> --undo`), says why in a PR comment, is pushed and
+re-tested, and only then is flagged ready again.
+
+**Review labels.** The review of a ready PR sets one colour:
+
+| Label | Meaning | What happens |
+|---|---|---|
+| `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
+| `needs-rework` (red) | review found blockers | a maintainer PR goes back to draft; fix, push, flag ready again (a fork PR stays as its contributor set it; the review comment says what to fix) |
+| `conflicts` (orange) | no longer merges with `main` | a maintainer PR goes back to draft; merge `main`, re-test, flag ready again (a fork PR: the contributor merges `main`) |
+
+When a PR comes back from draft with a new head, that head gets a fresh
+review; the marker `<!-- pr-reviewer: <head sha> -->` in the review comment
+ties each verdict to the commit it judged.
+
 ### Review and merge: a manual gate
 
 `main` is protected. Every change reaches it through a pull request, admins
@@ -223,9 +292,11 @@ be resolved; only merge commits are allowed.
   gets a fresh review. A PR that touches build scripts, CI workflows,
   scripts or dependencies is not built by the reviewer; it is flagged for
   the maintainer instead.
-- **Review of the maintainers' own PRs.** Issue PRs are reviewed at the
-  release cut by a subagent that did not write them; findings are fixed on
-  the branch before it merges.
+- **Review of the maintainers' own PRs.** Once flagged ready, an owner PR
+  is reviewed by a subagent that did not write it (the same `PR-reviewer`,
+  one review at a time) and labelled as above; findings are fixed on the
+  branch (back to draft first) before it merges - a `fix` once clean, a
+  `feat` at the release cut.
 - **Approval is manual.** GitHub requires 0 approvals (the agents and the
   maintainer share one account, which cannot approve its own PR), so the
   gate is the maintainer's manual merge: the maintainer reads the review and

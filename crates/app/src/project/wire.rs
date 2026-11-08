@@ -55,7 +55,10 @@ pub fn collect(world: &World) -> ProjectFile {
                 None
             };
             let stock = model::stock_def_of(world, &entity).map(|s| StockDto::from_shape(&s));
-            let tool = model::tool_of(world, &entity).map(|t| ToolDto::from_tool(&t));
+            let tool = model::tool_of(world, &entity).map(|t| ToolDto {
+                number: model::tool_number_of(world, &entity),
+                ..ToolDto::from_tool(&t)
+            });
             // The setup payload only ever rides a setup row (the kind test
             // above and the component below are the same SetupDef).
             let setup = if matches!(kind, Some(EntityKind::Setup)) {
@@ -167,6 +170,17 @@ pub fn collect(world: &World) -> ProjectFile {
         active_setup: crate::setup::stored_active(world),
         // The default post matches every pre-v23 document, so it
         // writes no key (the mute-machine law, worn in the post's clothes).
+        // The default options write no key (issue #34, the post's law);
+        // the #110 / #111 switches ride their own top-level keys below.
+        post_options: {
+            let o = crate::posting::post_options(world);
+            (o.threading != crate::schema::ThreadingOutput::default()).then(|| PostOptionsDto {
+                threading: match o.threading {
+                    crate::schema::ThreadingOutput::G32Passes => None,
+                    crate::schema::ThreadingOutput::G76Cycle => Some("g76".into()),
+                },
+            })
+        },
         post: match crate::posting::post_of(world) {
             crate::schema::PostRef::Builtin => None,
             crate::schema::PostRef::Named(name) => Some(PostDto::Named(name)),
@@ -186,25 +200,43 @@ pub fn collect(world: &World) -> ProjectFile {
         // No stated material writes no key (the theme's law again).
         material: crate::cutting::material_of(world).map(|m| m.word().to_owned()),
         // Off writes no key (the material's law, #110).
-        skip_stops: crate::posting::post_options_of(world).skip_stops,
+        skip_stops: crate::posting::post_options(world).skip_stops,
         // One combined program writes no key (#111).
-        per_op_files: crate::posting::post_options_of(world).per_op,
+        per_op_files: crate::posting::post_options(world).per_op,
         entities,
     }
 }
 
 pub fn save(world: &World, path: &Path) -> Result<(), ProjectError> {
     let file = collect(world);
-    let text = serde_json::to_string_pretty(&file).map_err(|e| corrupt(e.to_string()))?;
-    std::fs::write(path, text)?;
+    let text = serde_json::to_string_pretty(&file).map_err(|e| {
+        tracing::warn!(file = %crate::logging::file_name(path), "project not saved: {e}");
+        corrupt(e.to_string())
+    })?;
+    if let Err(e) = std::fs::write(path, &text) {
+        tracing::warn!(file = %crate::logging::file_name(path), "project not saved: {e}");
+        return Err(e.into());
+    }
+    tracing::info!(file = %crate::logging::file_name(path), bytes = text.len(), entities = file.entities.len(), "project saved");
     Ok(())
 }
 
 /// Rebuild world content from a project file. Not a command: opening a
 /// project replaces the document and clears the history (M1.2 wires that).
 pub fn load(world: &World, path: &Path) -> Result<(), ProjectError> {
-    let text = std::fs::read_to_string(path)?;
-    open(world, &text)
+    let text = std::fs::read_to_string(path).inspect_err(|e| {
+        tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
+    })?;
+    match open(world, &text) {
+        Ok(()) => {
+            tracing::info!(file = %crate::logging::file_name(path), bytes = text.len(), "project opened");
+            Ok(())
+        }
+        Err(e) => {
+            tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
+            Err(e)
+        }
+    }
 }
 
 pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {

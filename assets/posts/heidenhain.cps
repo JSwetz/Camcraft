@@ -14,9 +14,12 @@ vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
 minimumRevision = 1;
-extension = "nc";
+// TNC 640 User's Manual, ISO programming (ID 892909-25) p. 143: an
+// ISO program carries the .I extension (#52).
+extension = "I";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
+coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -30,6 +33,7 @@ var tNo = 0;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
 var modalWait = false;  // G40 G90 rides the section's first motion block
 var pendingDwell = null; // {z, s}: the open hole's dwell, owed at its bottom
@@ -92,42 +96,49 @@ function tiltOk(p) {  // RTCP words are Fanuc-family; this dialect refuses them
   return false;
 }
 
-// The .mch tool-station coolant list carries names + M-codes; the
-// first Flood entry (else the first entry at all) is this machine's
-// cutting-fluid-on code. M9 (stop) is the fixed pair - the machine
-// file speaks, the post transcribes.
+// The .mch tool-station coolant list carries names + M-codes. A
+// flood ask takes the machine's Flood entry; failing one, the first
+// coded entry of no other known family (a shop's own "Brine" is its
+// flood); a stated codeless Flood is the operator's own valve, silent.
+// A list that states only other kinds (Mist, Through-spindle) has no
+// flood code: refused by name (#150), never posted as mist or dry. An
+// unstated list stays silent (the unstated-limit law). M9 (stop) is
+// the RS-274 fixed pair.
+var COOLANT_KINDS = ["flood", "mist", "through-spindle", "through-tool"];
+function coolantWho() { return coolantOp ? "operation " + coolantOp + ": " : ""; }
 function coolantCode() {
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
-  var first = "";
+  var other = "", floodNamed = false;
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = (typeof c === "string") ? c : (c.name || "");
-    if (!code) continue;
-    if (name === "Flood") return code;
-    if (!first) first = code;
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
+    if (name === "flood") { if (code) return code; floodNamed = true; continue; }
+    if (code && !other && COOLANT_KINDS.indexOf(name) < 0) other = code;
   }
-  return first;
+  if (other || floodNamed) return other;
+  if (cs.length > 0) msg(coolantWho() + "the machine states no flood coolant code - pick another coolant for the operation (Off cuts dry) or add a Flood entry to the machine");
+  return "";
 }
 
 // The op's coolant ask (#112): the stream says nothing for flood (every
 // older stream), or carries PARAM Coolant off / mist / through-tool. The
 // code is the machine's own entry of that family - the machine is truth;
-// an ask the machine states no code for is refused by name, never
-// silently posted dry.
+// an ask the machine states no code for is refused by name, naming the
+// operation (#150), never silently posted dry.
 function coolantFor(ask) {
   if (ask === "off") return "";
   if (!ask || ask === "flood") return coolantCode();
   var want = ask === "mist" ? ["mist"] : (ask === "through-tool" ? ["through-spindle", "through-tool"] : []);
-  if (want.length === 0) { msg("unknown coolant ask " + ask); return ""; }
+  if (want.length === 0) { msg(coolantWho() + "unknown coolant ask " + ask); return ""; }
   var cs = (typeof machine !== "undefined" && machine.coolants) || [];
   for (var i = 0; i < cs.length; i++) {
     var c = cs[i];
     var code = (typeof c === "string") ? "" : (c.mCode || "");
-    var name = String((typeof c === "string") ? c : (c.name || "")).toLowerCase();
+    var name = String((typeof c === "string") ? c : (c.name || "")).trim().toLowerCase().replace(/[\s_]+/g, "-");
     if (code && want.indexOf(name) >= 0) return code;
   }
-  msg("the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
+  msg(coolantWho() + "the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
   return "";
 }
 
@@ -144,11 +155,18 @@ function onOpen() {
   writeln("%" + pgmName + " G71 *");
 }
 
-// Cutter compensation in the control (M13.11): this dialect does not
-// state it yet - refused by name, never a centre path under a
-// Control op (the stream's contour is the PART contour).
+// Cutter compensation in the control (M13.11, #39): refused by name,
+// never a centre path under a Control op (the stream's contour is the
+// PART contour). The TNC's documented engage rule (the manuals: the
+// block that activates G41/G42 ends with the tool perpendicular to the
+// programmed point, compensation taking effect only at its end) is
+// not stated against the next element the way the Fanuc start-up is,
+// so a perpendicular lead's engage point would be a guess; and the
+// radius is always the tool table's R plus DR, so the wear variant's
+// "the register holds only the wear delta" has no TNC form.
+// docs/decisions/39-comp-dialects.md records the call.
 function onRadiusCompensation() {
-  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
+  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc, Haas, Mazak or Siemens 840D post");
 }
 
 // #50: in this mode G54 is DATUM SHIFT with axis values and G55 a
@@ -158,6 +176,7 @@ function onRadiusCompensation() {
 // (preset selection is cycle G247, whose parameters this post was
 // not specced from), never posted as a word the TNC reads otherwise.
 function onParameter(name, value) {
+  if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
   if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) {

@@ -229,6 +229,17 @@ pub fn tool_of(world: &World, entity: &Entity) -> Option<Tool> {
     entity.entity_view(world).try_get::<&ToolDef>(|t| t.tool.clone())
 }
 
+/// The tool's own controller number (#221), if one was set. `None` both
+/// for an unnumbered tool and for a non-tool; `tool_numbers` decides what
+/// an unnumbered tool posts as.
+#[must_use]
+pub fn tool_number_of(world: &World, entity: &Entity) -> Option<u32> {
+    entity
+        .entity_view(world)
+        .try_get::<&ToolDef>(|t| t.number)
+        .flatten()
+}
+
 /// The operation definition, if this entity is an operation.
 #[must_use]
 pub fn operation_of(world: &World, entity: &Entity) -> Option<Operation> {
@@ -299,6 +310,31 @@ pub fn entity_world_aabb(world: &World, entity: &Entity) -> Option<Aabb> {
         min: Point3::new(min[0], min[1], min[2]),
         max: Point3::new(max[0], max[1], max[2]),
     })
+}
+
+/// The models' largest horizontal distance from the vertical line through
+/// `c` (world XY) - for a turned part standing on its axis there, its
+/// revolved max radius (#230's snug cylinder fit). Stock and WCS are
+/// excluded as in [`solid_world_aabb`]; `None` with no model geometry.
+#[must_use]
+pub fn solid_world_radius_about(world: &World, c: [f64; 2]) -> Option<f64> {
+    let mut r_max: Option<f64> = None;
+    for (_, entity) in model_entities(world) {
+        let Some(tris) = facets_of(world, &entity) else {
+            continue;
+        };
+        let loc = transform_of(world, &entity).unwrap_or_default();
+        for t in tris.iter() {
+            for p in [t.a, t.b, t.c] {
+                let p = transform_point(p, loc.pos, loc.rot);
+                let r = (p.x - c[0]).hypot(p.y - c[1]);
+                if r.is_finite() {
+                    r_max = Some(r_max.map_or(r, |m| m.max(r)));
+                }
+            }
+        }
+    }
+    r_max
 }
 
 /// World-space bounding box of all model geometry. Stock and WCS are excluded

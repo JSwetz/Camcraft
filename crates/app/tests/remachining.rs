@@ -288,7 +288,7 @@ fn the_mask_only_ever_removes_cuts() {
 }
 
 #[test]
-fn a_params_edit_converges_in_two_regenerate_rounds() {
+fn a_params_edit_converges_in_one_regenerate_all() {
     let (world, mut history) = job_world();
     create(&world, &mut history, "A", pocket(12.0));
     generate(&world, &mut history, "A");
@@ -313,24 +313,14 @@ fn a_params_edit_converges_in_two_regenerate_rounds() {
         OpStatus::Ok,
         "the recorded-stamp law: an unregenerated A moves nobody's rest"
     );
-    // Round 1 brings A current. B was Ok when the batch was built - it
-    // is not in it - and only A's APPLY moves the stamp B digests.
+    // One Regenerate All brings the job current (#145): its first round
+    // regenerates A, and the next round reads A's new cut, finds B
+    // Stale and regenerates it - one undo unit, B never posted stale.
     let r1 = RegenerateAll::new(&world);
-    assert_eq!(r1.regenerated(), 1, "just A");
+    assert_eq!(r1.regenerated(), 2, "A, then B behind it");
+    assert!(r1.skipped().is_empty(), "{:?}", r1.skipped());
     history.execute(&world, r1);
     assert_eq!(status(&world, "A"), OpStatus::Ok);
-    assert_eq!(status(&world, "B"), OpStatus::Stale);
-    let why = operation::stale_reason(&world, &model::find_by_name(&world, "B").expect("B"));
-    assert!(
-        why.as_ref().is_some_and(|w| w.contains("ahead of it in the program")),
-        "B's reason names the program: {why:?}"
-    );
-    // Round 2 re-generates B against A's new cut and converges. B was
-    // honestly Stale between the rounds, never silently wrong.
-    let r2 = RegenerateAll::new(&world);
-    assert_eq!(r2.regenerated(), 1);
-    assert!(r2.skipped().is_empty(), "{:?}", r2.skipped());
-    history.execute(&world, r2);
     assert_eq!(status(&world, "B"), OpStatus::Ok);
     let zs = planar_z(&cache(&world, "B").expect("B"));
     assert!(
@@ -340,43 +330,44 @@ fn a_params_edit_converges_in_two_regenerate_rounds() {
 }
 
 #[test]
-fn program_order_is_the_posts_order_not_the_creation_order() {
-    // The documented wart: "Operation10" sorts before "Operation2" by
-    // name, and the rest law inherits exactly that order, because it is
-    // the order the post will emit.
+fn program_order_is_the_creation_order_not_the_name_order() {
+    // The wart #167 retired: "Operation10" sorts before "Operation2" by
+    // name, but a new operation is appended to its setup's program, so
+    // Operation2 - MADE first - runs first, and the rest law reads
+    // exactly that order, because it is the order the post will emit.
     let (world, mut history) = job_world();
-    create(&world, &mut history, "Operation2", pocket(10.0)); // made first
-    create(&world, &mut history, "Operation10", pocket(12.0)); // runs first
-    generate(&world, &mut history, "Operation2");
-    let zs = planar_z(&cache(&world, "Operation2").expect("op2 cache"));
-    assert!(zs.contains(&20.0), "Operation10 is still Never: a full path");
+    create(&world, &mut history, "Operation2", pocket(12.0)); // made first, runs first
+    create(&world, &mut history, "Operation10", pocket(10.0)); // made second
     generate(&world, &mut history, "Operation10");
+    let zs = planar_z(&cache(&world, "Operation10").expect("op10 cache"));
+    assert!(zs.contains(&20.0), "Operation2 is still Never: a full path");
+    generate(&world, &mut history, "Operation2");
     assert_eq!(
-        status(&world, "Operation10"),
+        status(&world, "Operation2"),
         OpStatus::Ok,
-        "nothing sorts before Operation10, though Operation2 was MADE first"
+        "nothing runs before Operation2, though Operation10 sorts first by name"
     );
-    // ...and Operation2 was generated against an empty program, while the
-    // post would run Operation10 first: the associativity chain catches
-    // up exactly there.
-    assert_eq!(status(&world, "Operation2"), OpStatus::Stale);
+    // ...and Operation10 was generated against an empty program, while the
+    // post runs Operation2 first: the associativity chain catches up
+    // exactly there.
+    assert_eq!(status(&world, "Operation10"), OpStatus::Stale);
     let why = operation::stale_reason(
         &world,
-        &model::find_by_name(&world, "Operation2").expect("op2"),
+        &model::find_by_name(&world, "Operation10").expect("op10"),
     );
     assert!(
-        why.as_ref().is_some_and(|w| w.contains("Operation10")),
+        why.as_ref().is_some_and(|w| w.contains("Operation2")),
         "the reason names the operation ahead by name: {why:?}"
     );
     let batch = RegenerateAll::new(&world);
     assert_eq!(batch.regenerated(), 1);
     assert!(batch.skipped().is_empty());
     history.execute(&world, batch);
-    assert_eq!(status(&world, "Operation2"), OpStatus::Ok);
-    let zs = planar_z(&cache(&world, "Operation2").expect("op2 re-cached"));
+    assert_eq!(status(&world, "Operation10"), OpStatus::Ok);
+    let zs = planar_z(&cache(&world, "Operation10").expect("op10 re-cached"));
     assert!(
         !zs.contains(&20.0),
-        "now masked by Operation10's skim: {zs:?}"
+        "now masked by Operation2's skim: {zs:?}"
     );
 }
 

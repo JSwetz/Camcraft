@@ -35,6 +35,8 @@ pub(crate) enum Icon {
     Slot,
     Trace,
     Drill,
+    /// The touch probe (#108): original artwork, a stylus over its ball.
+    Probe,
     Finish3D,
     Contour5D,
     Parallel5D,
@@ -56,11 +58,13 @@ pub(crate) enum Icon {
     EyeOff,
     Simulate,
     Fixture,
+    /// The status strip's Debug info door (#157), an original glyph.
+    DebugInfo,
 }
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 35] = [
+    pub(crate) const ALL: [Icon; 37] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -75,6 +79,7 @@ impl Icon {
         Icon::Slot,
         Icon::Trace,
         Icon::Drill,
+        Icon::Probe,
         Icon::Finish3D,
         Icon::Contour5D,
         Icon::Parallel5D,
@@ -96,6 +101,7 @@ impl Icon {
         Icon::EyeOff,
         Icon::Simulate,
         Icon::Fixture,
+        Icon::DebugInfo,
     ];
 
     fn png(self) -> &'static [u8] {
@@ -119,6 +125,7 @@ impl Icon {
             // drill - shank, shouldered body, one helix wrap, cone
             // point - in the set's stroke weight. Ours to give.
             Icon::Drill => include_bytes!("../../../../assets/ui/drill.png"),
+            Icon::Probe => include_bytes!("../../../../assets/ui/probe.png"),
             // Original drawing (no Tabler waterline glyph exists): nested
             // contour rings tightening toward the high point - the map
             // reading of a waterline finish. Ours to give.
@@ -177,6 +184,7 @@ impl Icon {
             // jaws, screw shaft and round knob of a machine vise, in the
             // set's stroke weight. Ours to give.
             Icon::Fixture => include_bytes!("../../../../assets/ui/fixture.png"),
+            Icon::DebugInfo => include_bytes!("../../../../assets/ui/debug-info.png"),
         }
     }
 
@@ -198,6 +206,7 @@ impl Icon {
             Icon::Slot => "icon-slot",
             Icon::Trace => "icon-trace",
             Icon::Drill => "icon-drill",
+            Icon::Probe => "icon-probe",
             Icon::Finish3D => "icon-finish3d",
             Icon::Contour5D => "icon-contour5d",
             Icon::Parallel5D => "icon-parallel5d",
@@ -219,6 +228,7 @@ impl Icon {
             Icon::EyeOff => "icon-eye-off",
             Icon::Simulate => "icon-simulate",
             Icon::Fixture => "icon-fixture",
+            Icon::DebugInfo => "icon-debug-info",
         }
     }
 }

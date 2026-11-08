@@ -363,11 +363,12 @@ mod height_row_tests {
     }
 
     #[test]
-    fn fresh_depth_operations_default_to_the_part_and_g54() {
-        // The contract behind issue 2: a new operation's Bottom rides the
-        // selected work offset and its Top is the part itself - the
-        // number the newcomer sees is where the material actually is,
-        // never an arbitrary 5 under the stock top.
+    fn fresh_depth_operations_default_to_the_part_top_and_bottom() {
+        // The contract behind issue 2: a new operation's numbers are where
+        // the material actually is, never an arbitrary 5 under the stock
+        // top - its Top is the part's top and its Bottom the part's floor.
+        // #214: the Bottom used to ride G54's plane, which is zero depth
+        // (refused at creation) wherever G54 Z is zeroed on the part top.
         for kind in [1usize, 2, 3, 4] {
             let p = quick_params(kind);
             assert_eq!(
@@ -377,8 +378,8 @@ mod height_row_tests {
             );
             assert_eq!(
                 operation::bottom_of(&p).map(|h| (h.reference, h.offset)),
-                Some((HeightReference::WorkOffset(0), 0.0)),
-                "kind {kind} bottoms out at G54",
+                Some((HeightReference::BottomOfModel, 0.0)),
+                "kind {kind} bottoms out at the part's floor",
             );
             assert_eq!(
                 p.clearance().reference,

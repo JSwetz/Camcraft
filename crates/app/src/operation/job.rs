@@ -23,6 +23,9 @@ use super::*;
 /// their generation-time call sites, so a batch surfaces exactly the
 /// error the serial path surfaces, in the same precedence.
 pub struct GenJob {
+    /// The operation's own name, for the generation log (#163) - "" for
+    /// a preview with no entity.
+    pub(super) op_name: String,
     pub(super) tool: crate::tools::Tool,
     /// The op's tool NAME as the component stored it - the error
     /// strings of the tilted kinds quote it verbatim.
@@ -36,6 +39,8 @@ pub struct GenJob {
     pub(super) hs: ResolvedHeights,
     pub(super) stock_facets: Option<Vec<Triangle>>,
     pub(super) stock_aabb: Option<(Point3, Point3)>,
+    // Sampled mesh stock can miss narrow features; only analytic stock credits this advisory.
+    pub(super) analytic_stock: bool,
     pub(super) section_z: Option<Result<f64, GenError>>,
     pub(super) picked_region: Option<Result<Region, GenError>>,
     pub(super) contour_sel:
@@ -48,6 +53,10 @@ pub struct GenJob {
     /// tilted or turned op (whose verify runs in another frame or the
     /// meridian), or an unreadable stock - all the raw-stock reading.
     pub(super) verify_prior: Option<crate::rest::PriorPlan>,
+    /// The Drill ops ahead, for the turned family's rapid law (#103).
+    pub(super) drills_ahead: Vec<crate::rest::DrillAhead>,
+    /// The turning ops ahead, for the same law (#159).
+    pub(super) turned_ahead: Vec<crate::rest::TurnedAhead>,
     pub(super) is_mill: bool,
     /// The document's machine kind (M13.5): the lathe routes the Drill
     /// kind down the spindle axis, and the rotary kinds read their
@@ -122,6 +131,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         }
     };
     let stock_aabb = model::stock_world_aabb_for(world, setup).map(|b| (b.min, b.max));
+    let analytic_stock = model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
+        .and_then(|e| model::stock_def_of(world, &e))
+        .is_some_and(|s| matches!(s, crate::stock::StockShape::Box { .. } | crate::stock::StockShape::Cylinder { .. }));
 
     // The height seam, refused by name before anything else (as the old
     // head refused it, `resolve_params` being the first fallible read
@@ -199,7 +211,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // Verify's prior reading (#96 review): collected here, cut on the
     // job thread only when a dive was convicted. An unreadable stock
     // grid is logged and read as the raw stock - convictions stand.
-    let verify_prior = if frame.is_none() && op.params.kind().info().section != super::kinds::Section::Turning {
+    // The turned family reads it too (#103): its axial rapids are judged
+    // against the stock the program ahead faced.
+    let verify_prior = if frame.is_none() {
         match crate::rest::prior_plan(world, op_name, setup, tool.diameter * 0.5) {
             Ok(p) => p,
             Err(e) => {
@@ -210,6 +224,11 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     } else {
         None
     };
+    // The axial pilots ahead (#103): a bore pass's approach runs down
+    // the hole the drill made, which the facing-only prior cannot read.
+    let turned = op.params.kind().info().section == super::kinds::Section::Turning;
+    let drills_ahead = if turned { crate::rest::drills_ahead(world, op_name, setup) } else { Vec::new() };
+    let turned_ahead = if turned { crate::rest::turned_ahead(world, op_name, setup) } else { Vec::new() };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
     let machine_kind = crate::machine::kind_of(world);
     // The lathe spindle law (issue #62): every kind that turns about the
@@ -241,6 +260,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     });
 
     Ok(GenJob {
+        op_name: op_name.to_owned(),
         tool,
         tool_name: op.tool.clone(),
         params: op.params.clone(),
@@ -250,12 +270,15 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         hs,
         stock_facets,
         stock_aabb,
+        analytic_stock,
         section_z,
         picked_region,
         contour_sel,
         drive_chains,
         prior,
         verify_prior,
+        drills_ahead,
+        turned_ahead,
         is_mill,
         machine_kind,
         machine_rotaries,

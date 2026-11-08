@@ -4,8 +4,10 @@
 //! from the published algorithm (Möller & Trumbore, J. Graphics Tools 1997);
 //! no third-party code.
 
+pub mod align;
 pub mod face;
 
+pub use align::{Alignment, align_321};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
 
 use flecs_ecs::prelude::World;

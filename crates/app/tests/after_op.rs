@@ -219,10 +219,10 @@ fn skip_pauses_and_homes_mutes_every_after_action_and_undoes() {
     assert_eq!(op(&world, "Face1").after, AfterOperation::ProgramStop, "the op keeps its choice");
     assert!(SetPostOptions::new(&world, PostOptions { skip_stops: true, ..Default::default() }).is_err(), "a no-op is refused");
     history.undo(&world);
-    assert!(!posting::post_options_of(&world).skip_stops, "undo restores the switch");
+    assert!(!posting::post_options(&world).skip_stops, "undo restores the switch");
     assert!(cnc::serialize(&posting::stream_records(&world).expect("streams")).contains("AfterOperation"));
     history.redo(&world);
-    assert!(posting::post_options_of(&world).skip_stops, "redo reapplies it");
+    assert!(posting::post_options(&world).skip_stops, "redo reapplies it");
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn after_suppressed_and_skip_round_trip_and_old_files_load_defaults() {
     assert_eq!(op(&back, "Face1").after, AfterOperation::GoHome);
     assert!(!op(&back, "Face1").suppressed);
     assert!(op(&back, "Face2").suppressed);
-    assert!(posting::post_options_of(&back).skip_stops);
+    assert!(posting::post_options(&back).skip_stops);
 
     // A file written before the fields existed loads with the defaults.
     let old: String = text
@@ -319,7 +319,7 @@ fn after_suppressed_and_skip_round_trip_and_old_files_load_defaults() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(op(&legacy, "Face1").after, AfterOperation::None);
     assert!(!op(&legacy, "Face2").suppressed);
-    assert!(!posting::post_options_of(&legacy).skip_stops);
+    assert!(!posting::post_options(&legacy).skip_stops);
 }
 
 /// Drop a comma left dangling before a closing bracket by the line strip.

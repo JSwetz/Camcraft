@@ -32,9 +32,14 @@ pub(crate) mod gpu_select;
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
 pub mod contrast;
 mod boundary;
+mod debug_info;
+mod status_alert;
+
+mod stock_info;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
 pub mod colorvision;
+mod post_options;
 pub mod cvd;
 mod icons;
 mod layout;
@@ -43,6 +48,7 @@ mod load_field;
 // type (M3.3 stage C), so state.rs has to see through the door.
 pub(crate) mod machine_editor;
 mod feeds_page;
+mod spindle_row;
 mod approach_page;
 mod lead_page;
 mod op_tabs;
@@ -55,6 +61,7 @@ mod fields;
 mod geo_page;
 mod heights_page;
 mod holes_page;
+mod probe_page;
 mod kind_editors;
 mod mill2d_more_page;
 mod mill2d_page;
@@ -65,6 +72,8 @@ mod params_page;
 mod rotary_page;
 mod turning_more_page;
 mod turning_page;
+// #107: Save / Don't Save / Cancel over unsaved changes.
+mod unsaved_prompt;
 mod panes;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
@@ -97,6 +106,20 @@ mod coolant_tests;
 mod after_op_tests;
 #[cfg(test)]
 mod colorvision_tests;
+#[cfg(test)]
+mod pin_tests;
+#[cfg(test)]
+mod ribbon_icon_tests;
+#[cfg(test)]
+mod debug_info_tests;
+#[cfg(test)]
+mod fresh_op_tests;
+#[cfg(test)]
+mod tool_number_tests;
+#[cfg(test)]
+mod ball_corner_tests;
+#[cfg(test)]
+mod gate_route_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
 /// selects the no-window proof (seeded document, fallback adapter, View3D

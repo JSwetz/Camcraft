@@ -71,14 +71,29 @@ unstated capability into existence.
     second station on a one-spindle machine is a named refusal at the
     program gate). A file stating no spindle keeps `None`: the
     unstated-limit law again, never a guessed `Some(1)`.
+  - `live_tool` (issue #33), on the tool station: `{ "c_axis_on",
+    "c_axis_off", "spindle_on", "spindle_off" }` - the builder's words
+    that engage the spindle as a positioned C axis, release it, start
+    the live tool (the post appends `S<rpm>`) and stop it. No public
+    standard fixes them, so a post never guesses: all four non-empty,
+    or the machine states none and a C-axis live-tool section is
+    refused by name. The mirror carries them as
+    `head.liveTool { cAxisOn, cAxisOff, spindleOn, spindleOff }`.
   - `coolants`: entries are `{ "name": "Flood", "mCode": "M8" }` (the
     M-code is the machine's own word — string `"M8"` or bare number
     `8`, both normalized to `M8`; `mcode` spelling reads too) or a
     bare NAME string: a named option with no code rides CODELESS, and
     a post that cannot find the code stays silent rather than invent
     `M8`. The stop pair is the fixed M9, not a per-machine number.
-    The first Flood entry is what posts use. A file that keeps its
-    list at `tooling.coolants` instead of on the station also reads.
+    The names the posts read are `Flood`, `Mist`, `Through-spindle`
+    and `Through-tool` (`machine::COOLANT_KINDS`, the machine editor's
+    pick list; #150) - compared case-blind, spaces and underscores
+    reading as hyphens, so `Through spindle` reads. A Flood op takes
+    the first Flood entry, else the first coded entry of no other known
+    kind (a shop's own `Brine`); a list stating only other kinds has no
+    flood code and a Flood op on it is refused by name. A file that
+    keeps its list at `tooling.coolants` instead of on the station also
+    reads.
 - `controller.synced_configuration.parts` is keyed BY LETTER:
   `{ "coordinate": i, "max_normal_speed": r, "max_rapid_speed": r }`.
   The kinematics tree decides WHICH axes exist; this table says how

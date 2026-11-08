@@ -47,6 +47,7 @@ fn center_hit(pv: &preview::Preview, w: u32) -> (f64, f32, f32) {
 /// driven down the box's axis (a Feed move - rapids touch nothing).
 fn pocket(floor_z: f64) -> Vec<Move> {
     vec![Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from: p(5.0, 5.0, 6.0),
         to: p(5.0, 5.0, floor_z),

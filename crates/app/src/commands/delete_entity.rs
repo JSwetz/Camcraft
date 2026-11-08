@@ -20,6 +20,8 @@ pub struct DeleteEntity {
     stock: Option<StockShape>,
     wcs: bool,
     tool: Option<Tool>,
+    /// #221: a deleted tool's number, restored with it on undo.
+    tool_number: Option<u32>,
     operation: Option<Operation>,
     operation_meta: Option<OperationMeta>,
     /// A model deleted from the tree keeps its fixture marker (M3.2
@@ -47,6 +49,7 @@ impl DeleteEntity {
             stock: model::stock_def_of(world, &entity),
             wcs: model::is_wcs(world, &entity),
             tool: model::tool_of(world, &entity),
+            tool_number: model::tool_number_of(world, &entity),
             operation: model::operation_of(world, &entity),
             operation_meta: model::is_operation(world, &entity)
                 .then(|| model::operation_meta_of(world, &entity)),
@@ -83,7 +86,7 @@ impl Command for DeleteEntity {
         if let Some(tool) = &self.tool {
             entity
                 .entity_view(world)
-                .set(ToolDef { tool: tool.clone() });
+                .set(ToolDef { tool: tool.clone(), number: self.tool_number });
         }
         if let Some(operation) = &self.operation {
             entity.entity_view(world).set(operation.clone());
