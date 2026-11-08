@@ -13,7 +13,7 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     ActivateSetup, AddTool, CommandError, CreateOperation, CreateSetup, GenerateOperation, History,
-    SetFixtureFixed, SetStock, SetWcsOrigin, TagFixture,
+    ReorderOperation, SetFixtureFixed, SetStock, SetWcsOrigin, TagFixture,
 };
 use camcraft_app::geometry::{IDENTITY_Q, Point3, Triangle};
 use camcraft_app::machine::{self, AxisLimits, Machine};
@@ -214,14 +214,21 @@ fn implicit_document_sheet_labels_it_so() {
 
 #[test]
 fn sheet_orders_ops_by_the_program_law() {
-    // Created B before A; the program law (setup rank, then name) still
-    // puts A first - the sheet follows the post's order, not history.
+    // Created B then A, then A moved ahead of B: the program law (setup
+    // rank, then position - #167) puts A first - the sheet follows the
+    // post's order, not history.
     let world = new_world();
     let mut history = History::default();
     box_stock(&world, &mut history, 60.0, 60.0, 20.0);
     add_tool(&world, &mut history, "EM-0400-2FL");
     create_face(&world, &mut history, "B_Face", 19.5);
     create_face(&world, &mut history, "A_Face", 19.5);
+    let before = setup_sheet::render(&world, None).expect("sheet");
+    assert!(
+        before.find("B_Face") < before.find("A_Face"),
+        "created B then A: B runs first (#167):\n{before}"
+    );
+    history.execute(&world, ReorderOperation::new(&world, "A_Face", "B_Face", false).expect("reorder"));
 
     let sheet = setup_sheet::render(&world, None).expect("sheet");
     let a = sheet.find("A_Face").expect("A on the sheet");

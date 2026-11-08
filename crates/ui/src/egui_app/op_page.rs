@@ -165,6 +165,7 @@ fn header_rows(ui: &mut Ui, state: &mut State, target: &str, live: Option<&Opera
         }
     }
     ui.end_row();
+    coolant_row(ui, state, target, live);
 
     // Source: the stock or one of the user's parts - never a work
     // offset (G54...), a setup or a fixture (user review 2026-11-06).
@@ -231,6 +232,28 @@ fn header_rows(ui: &mut Ui, state: &mut State, target: &str, live: Option<&Opera
         {
             state.pending.push_back(CommandKind::SetOperationSetup { name: target.to_owned(), setup: Some(n.clone()) });
         }
+    }
+    ui.end_row();
+}
+
+/// The Coolant row (#112), under the tool it feeds: the fluid the post
+/// switches on for this operation. A committed operation only - a draft
+/// takes the default (Flood) at creation and offers the row once it
+/// exists, so the row never edits a value no command would carry.
+fn coolant_row(ui: &mut Ui, state: &mut State, target: &str, live: Option<&Operation>) {
+    let Some(op) = live else { return };
+    use camcraft_app::operation::CoolantMode;
+    ui.label("Coolant").on_hover_text(
+        "the cutting fluid the post switches on for this operation - the machine's own code for it; a choice the machine states no code for blocks the post by name",
+    );
+    let labels: Vec<String> = CoolantMode::ALL.iter().map(|m| m.label().to_owned()).collect();
+    let mut idx = CoolantMode::ALL.iter().position(|m| *m == op.coolant).unwrap_or(1);
+    let before = idx;
+    combo_owned(ui, "op_coolant", &mut idx, &labels);
+    if idx != before
+        && let Some(m) = CoolantMode::ALL.get(idx)
+    {
+        state.pending.push_back(CommandKind::EditOperationCoolant { name: target.to_owned(), coolant: *m });
     }
     ui.end_row();
 }
