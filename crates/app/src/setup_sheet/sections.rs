@@ -64,16 +64,16 @@ pub(super) fn render_stock(world: &World, ctx: Option<&str>, out: &mut String) {
 }
 
 pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
-    out.push_str("WCS OFFSETS\n");
-    let mut any = false;
-    for (slot, word) in WCS_SLOTS.iter().enumerate() {
-        if let Some(entity) = setup::wcs_entity(world, ctx, slot) {
-            any = true;
+    // #342: one WCS per setup, labelled with the word the post writes.
+    let label = setup::wcs_label(world, ctx);
+    out.push_str("WCS\n");
+    match setup::wcs_entity(world, ctx) {
+        Some(entity) => {
             let loc = model::transform_of(world, &entity).unwrap_or_default();
             let pos = loc.pos;
             let entity_name = model::name_of(world, &entity).unwrap_or_default();
             out.push_str(&format!(
-                "  {word}  X {}  Y {}  Z {}   (entity {entity_name})\n",
+                "  {label}  X {}  Y {}  Z {}   (entity {entity_name})\n",
                 mm(pos.x),
                 mm(pos.y),
                 mm(pos.z)
@@ -89,13 +89,11 @@ pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
                 ),
             }
         }
+        None => out.push_str(&format!("  {label}  (not placed - at the origin)\n")),
     }
-    if !any {
-        out.push_str("  (none placed)\n");
-    }
-    // #196, #329: the one word the setup's program runs in and its
-    // work-offset heights measure from: the setup's word, G54 when unset.
-    let slot = ctx.and_then(|s| setup::work_offset(world, s)).unwrap_or(0);
+    // #196, #329: the one word the setup's program runs in: the setup's
+    // label, G54 when unset.
+    let slot = setup::wcs_slot(world, ctx);
     out.push_str(&format!(
         "  program offset: {}\n",
         WCS_SLOTS.get(slot).copied().unwrap_or("G54")
