@@ -325,6 +325,12 @@ Phase 4 refactors the codebase for reuse; work in the shape it is heading to:
 
 - **400-line files.** No source file grows past ~400 LOC; split along the
   domain seam instead of stacking another section onto a large file.
+  **Exempt: post-processor scripts** (`assets/posts/*.cps`; user, 2026-11-08:
+  "CPS files cannot follow the 400 line rules as its a script to be
+  executed by a post processor, and it needs what it needs"). A post script
+  is one file the post engine loads and runs for one machine dialect, so it
+  stays whole at whatever length its dialect needs; review it for
+  correctness, not length.
 - **One concern per subcrate.** Motion types, operations, tool management,
   heights/offsets, movement and simulation become isolated subcrates (M4.1).
   Until the split lands, keep those boundaries honest inside `app`: new code
