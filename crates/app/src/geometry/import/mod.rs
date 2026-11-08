@@ -7,6 +7,7 @@
 
 pub mod obj;
 pub mod step;
+mod step_units;
 pub mod stl;
 
 use std::path::{Path, PathBuf};
