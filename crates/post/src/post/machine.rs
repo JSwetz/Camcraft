@@ -141,6 +141,8 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
         "kinematics": { "static": { "axes": axes, "rotaries": rotaries, "head": Value::Object(head) } },
         "rapidRate": rapid,
         "feedRateMax": feed,
+        // #131: the unit the machine is programmed in (numbers stay mm).
+        "units": m.units.as_deref().unwrap_or("mm"),
     })
 }
 
@@ -264,7 +266,18 @@ pub fn script_props(m: &Value) -> Value {
         "rotaries": rotaries,
         "rtcp": rtcp,
         "spindles": spindles.map_or(Value::Null, |n| json!(n)),
+        "units": if units_inch(m) { "inch" } else { "mm" },
     })
+}
+
+/// Whether the machine is programmed in inches (#131): the mirror's
+/// `units` word, or - through the raw door - the `.mch` file's own
+/// `kinematics.default.units.length`. Anything else, or nothing, is mm.
+fn units_inch(m: &Value) -> bool {
+    let word = get(m, &["units"])
+        .and_then(Value::as_str)
+        .or_else(|| get(m, &["kinematics", "default", "units", "length"]).and_then(Value::as_str));
+    matches!(word, Some("inch" | "inches"))
 }
 
 /// Count `type: "head"` parts stating a spindle, depth-first - the
