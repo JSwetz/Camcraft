@@ -97,12 +97,26 @@ makepkg -si
 ```
 
 The recipe installs the desktop app, command-line tools, and assets together.
-Publishing the recipe to the AUR is a separate step after its Arch build is
-validated.
+The release workflow builds and checks the Arch package after its Linux job
+and attaches the package to tagged releases. Publishing the recipe to the
+AUR is a separate step after its Arch build is validated.
 
-Windows, Linux, and macOS desktop releases are built on GitHub. The core
-crates also build and test on macOS, and the post engine compiles for
-`wasm32-unknown-unknown`.
+### FreeBSD package
+
+On FreeBSD amd64, build the desktop app and command-line tools, then package
+them with their assets:
+
+```sh
+cargo build --locked --release -p camcraft-ui -p camcraft-app -p camcraft-post
+scripts/package-freebsd.sh
+```
+
+The release workflow runs this in a FreeBSD VM. Manual workflow runs upload
+the `freebsd-amd64.tar.gz` archive as an artifact; tagged runs attach it to
+the release.
+
+Windows, Linux, macOS, and FreeBSD desktop releases are built on GitHub.
+The core crates also build and test on macOS.
 
 ## Workspace layout
 

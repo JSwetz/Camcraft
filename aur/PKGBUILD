@@ -1,7 +1,7 @@
 # CamCraft source package for Arch Linux and the AUR.
 # Provenance: Arch Linux Rust package guidelines and CamCraft's release layout.
 pkgname=camcraft
-pkgver=0.12.1
+pkgver=0.14.0
 pkgrel=1
 pkgdesc='Computer-aided manufacturing application'
 arch=('x86_64')
@@ -15,7 +15,7 @@ makedepends=('cargo' 'pkgconf')
 options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         'camcraft.desktop')
-sha256sums=('3b36cfef889001d3692d079a99db3b51fa313737782169519144564dd61c66a6'
+sha256sums=('42181d48268d93a4bd972332fca252a2153f62fc1004f8ea2e1d1ed53d558295'
             '55fc7185f3f84c3db22e4210e049f1838c3ace8c158c4f20cebed4ce31b44621')
 
 prepare() {
