@@ -239,6 +239,18 @@ pub fn multi_pass_in(facets: &[Triangle], p: &MultiPassParams, stock: Option<Sto
             win.1,
         )?);
     }
+    // The clipped window may miss the part's deepest radius. As in
+    // profile_rough_in, discard roughing rungs that never reach stock;
+    // keep the leave floor and append every finishing ride afterwards.
+    if let Some(e) = StockEnv::usable(stock, prof_pd.r_max) {
+        let last = blocks.len().saturating_sub(1);
+        let mut k = 0usize;
+        blocks.retain(|cl| {
+            let keep = k == last || cl.iter().map(|q| q.1).fold(f64::INFINITY, f64::min) - p.nose_radius < e.r_out;
+            k += 1;
+            keep
+        });
+    }
     let passes = p.passes as f64;
     for k in 1..=p.passes {
         let d = p.nose_radius + p.stock_to_leave * (passes - k as f64) / passes;
