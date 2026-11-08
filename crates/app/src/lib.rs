@@ -37,6 +37,8 @@ pub mod ribbon;
 pub mod schema;
 pub mod script;
 pub mod setup;
+// #326: the part's alignment per setup.
+pub mod setup_align;
 pub mod setup_sheet;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;

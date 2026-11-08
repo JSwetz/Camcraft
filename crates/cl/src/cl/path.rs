@@ -101,11 +101,15 @@ impl Toolpath {
         self.moves.iter().filter(|m| m.arc.is_some()).count()
     }
 
-    /// True when no move asks the tool to lean: every stated axis (if
-    /// any) is the Z column itself. The generators' own verdict, and
-    /// the consumer's shortcut for "today's ordinary path" (M5.1 A).
+    /// True when no move asks the tool to lean and no move turns the
+    /// part: every stated axis (if any) is the Z column itself, and no
+    /// move states a spindle C angle (#295 - a C-live cut is not a
+    /// 3-axis program, whatever its pose). The generators' own verdict,
+    /// and the consumer's shortcut for "today's ordinary path" (M5.1 A).
     pub fn is_prismatic(&self) -> bool {
-        self.moves.iter().all(|m| m.axis.is_none_or(|a| is_vertical(&a)))
+        self.moves
+            .iter()
+            .all(|m| m.rotary.is_none() && m.axis.is_none_or(|a| is_vertical(&a)))
     }
 
     /// The status line after a successful generate, counted from the

@@ -68,7 +68,8 @@ pub fn face_origin(world: &World, entity: &str, sel: FeatureSel) -> Result<FaceO
     let e = model::find_by_name(world, entity).ok_or("the picked entity is gone - re-pick it")?;
     let features = model::features_of(world, &e).ok_or("the picked entity carries no geometry")?;
     let tris = model::facets_of(world, &e).ok_or("the picked entity carries no geometry")?;
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    // #326: the face where the active setup holds the part.
+    let loc = crate::setup_align::view_pose(world, &e).unwrap_or_default();
     let (facets, normal): (Vec<usize>, Option<[f64; 3]>) = match sel {
         FeatureSel::Face(fid) => {
             let f = features.faces.iter().find(|f| f.id == fid).ok_or(gone)?;

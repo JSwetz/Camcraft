@@ -90,7 +90,7 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
         let Some(features) = model::features_of(&state.world, entity) else {
             continue;
         };
-        let loc = model::transform_of(&state.world, entity).unwrap_or_default();
+        let loc = camcraft_app::setup_align::view_pose(&state.world, entity).unwrap_or_default(); // #326
         for vi in feature::corner_verts(&features) {
             let (Some(v), Some(id)) = (features.verts.get(vi as usize), feature::vertex_id(&features, vi)) else {
                 continue;
@@ -115,7 +115,7 @@ pub(crate) fn vertex_world(state: &State, entity: &str, id: VertexId) -> Option<
     let features = model::features_of(&state.world, &found)?;
     let vi = feature::resolve_vertex(&features, id)?;
     let v = features.verts.get(vi as usize)?;
-    let loc = model::transform_of(&state.world, &found).unwrap_or_default();
+    let loc = camcraft_app::setup_align::view_pose(&state.world, &found).unwrap_or_default(); // #326
     let w = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
     Some([w.x, w.y, w.z])
 }
