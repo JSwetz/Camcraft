@@ -331,3 +331,18 @@ fn the_pocket_and_face_kinds_cut_the_flipped_part_and_post() {
     assert!(path.path.moves.iter().any(|m| m.to.z < 19.9), "the pocket cuts");
     post(&world, "kinds").expect("the flipped program posts");
 }
+
+/// Review of PR #341: the setup sheet tells the operator how the part is
+/// clamped in an aligned setup, and says nothing as modelled.
+#[test]
+fn the_setup_sheet_names_the_part_alignment() {
+    let (world, mut h) = document(60.0);
+    let plain = camcraft_app::setup_sheet::render(&world, Some("Setup1")).expect("sheet");
+    assert!(!plain.contains("PART ALIGNMENT"), "{plain}");
+    align(&world, &mut h, AlignPreset::FlipX);
+    let sheet = camcraft_app::setup_sheet::render(&world, Some("Setup1")).expect("sheet");
+    assert!(sheet.contains("PART ALIGNMENT\n  Flip over X - clamp the part this way up"), "{sheet}");
+    align(&world, &mut h, AlignPreset::TurnZ90);
+    let sheet = camcraft_app::setup_sheet::render(&world, Some("Setup1")).expect("sheet");
+    assert!(sheet.contains("  Turn 90° about Z - clamp"), "{sheet}");
+}

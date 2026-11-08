@@ -278,6 +278,40 @@ pub fn is_identity_rot(q: [f64; 4]) -> bool {
     q[3].abs() >= 1.0 - 1e-12
 }
 
+/// The preset a stored rotation is, if any (a quaternion and its negation
+/// are one rotation).
+#[must_use]
+pub fn preset_of(rot: [f64; 4]) -> Option<AlignPreset> {
+    AlignPreset::ALL.into_iter().find(|p| {
+        // q^-1 * rot is the identity when they are the same turn.
+        rotation_from_angles(p.angles()).is_some_and(|q| is_identity_rot(quat_mul(quat_conjugate(q), rot)))
+    })
+}
+
+/// A stored alignment as (about X, about Y, about Z) degrees, rounded to
+/// a millionth so a quarter turn reads 90, not 89.99999999.
+#[must_use]
+pub fn angles_of(a: Option<Location>) -> [f64; 3] {
+    let Some(a) = a else { return [0.0; 3] };
+    let (r, p, y) = crate::geometry::quat_to_euler(a.rot);
+    [r, p, y].map(|v| {
+        let d = (v.to_degrees() * 1e6).round() / 1e6;
+        if d == 0.0 { 0.0 } else { d } // no "-0"
+    })
+}
+
+/// The plain words for a setup's alignment - a preset's name, or the
+/// three angles - shared by the Setups page and the setup sheet.
+#[must_use]
+pub fn describe(a: Option<Location>) -> String {
+    let Some(loc) = a else { return AlignPreset::AsModelled.label().to_owned() };
+    if let Some(p) = preset_of(loc.rot) {
+        return p.label().to_owned();
+    }
+    let [x, y, z] = angles_of(a);
+    format!("turned X {x}°, Y {y}°, Z {z}°")
+}
+
 /// The parts' bounds centre in the DOCUMENT frame - the pivot every
 /// preset and numeric turn rotates about. `None` with no part geometry.
 #[must_use]

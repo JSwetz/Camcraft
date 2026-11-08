@@ -9,47 +9,13 @@
 
 use egui::{ComboBox, DragValue, Ui};
 
-use camcraft_app::geometry::{quat_mul, quat_to_euler};
-use camcraft_app::schema::Location;
 use camcraft_app::setup_align::{self, AlignPreset};
 
 use crate::state::{CommandKind, State};
 
-/// The preset a stored rotation is, if any (a quaternion and its negation
-/// are one rotation).
-fn preset_of(rot: [f64; 4]) -> Option<AlignPreset> {
-    AlignPreset::ALL.into_iter().find(|p| {
-        setup_align::rotation_from_angles(p.angles()).is_some_and(|q| {
-            // q^-1 * rot is the identity when they are the same turn.
-            let d = quat_mul([-q[0], -q[1], -q[2], q[3]], rot);
-            setup_align::is_identity_rot(d)
-        })
-    })
-}
-
-/// The stored alignment as (about X, about Y, about Z) degrees, rounded
-/// to a millionth so a quarter turn reads 90, not 89.99999999.
-#[must_use]
-pub(crate) fn angles_of(a: Option<Location>) -> [f64; 3] {
-    let Some(a) = a else { return [0.0; 3] };
-    let (r, p, y) = quat_to_euler(a.rot);
-    [r, p, y].map(|v| {
-        let d = (v.to_degrees() * 1e6).round() / 1e6;
-        if d == 0.0 { 0.0 } else { d } // no "-0"
-    })
-}
-
-/// The plain words for a setup's alignment: a preset's name, or the
-/// three angles.
-#[must_use]
-pub(crate) fn align_text(a: Option<Location>) -> String {
-    let Some(loc) = a else { return AlignPreset::AsModelled.label().to_owned() };
-    if let Some(p) = preset_of(loc.rot) {
-        return p.label().to_owned();
-    }
-    let [x, y, z] = angles_of(a);
-    format!("turned X {x}°, Y {y}°, Z {z}°")
-}
+/// The words and angles for a stored alignment live in the app (the
+/// setup sheet prints the same words); the page reads them from there.
+pub(crate) use camcraft_app::setup_align::{angles_of, describe as align_text};
 
 /// One setup row's control: the quick-choice combo, then the typed angles
 /// with an Apply button.

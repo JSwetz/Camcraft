@@ -340,7 +340,7 @@ pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Result<Vec<Trian
         [] => Ok(crate::setup_align::parts_facets_in(world, crate::setup::active(world).as_deref())),
         [one] => Ok(crate::setup_align::parts_facets_in(world, one.as_deref())),
         many if many.iter().any(|s| crate::setup_align::alignment(world, s.as_deref()).is_some()) => Err(
-            "the program spans setups that hold the part differently (part alignment) - the sim cannot              carry the cut stock from one alignment into the next yet"
+            "the program spans setups that hold the part differently (part alignment) - the sim cannot carry the cut stock from one alignment into the next yet"
                 .into(),
         ),
         _ => Ok(part_facets_as_modelled(world)),
