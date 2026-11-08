@@ -19,8 +19,12 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`, `coolantModes`. All but the last are text the engine
-reads none of; `coolantModes = true` says the script reads `PARAM
+`capabilities`, `coolantModes`, `liveTooling`. All but the last two are
+text the engine reads none of; `liveTooling = true` (issue #33) says the
+script voices a `PARAM LiveTool` section - C-axis live-tool work, the
+stream's X Y Z the part-frame tip and C the stated spindle angle - and
+without it the engine refuses such a section by name (only
+fanuc-lathe.cps sets it); `coolantModes = true` says the script reads `PARAM
 Coolant` (#150) - without it the engine refuses a section asking Off,
 Mist or Through tool by name, since the script would post its own
 flood. Every shipped post sets it. The file-viewer's about box reads

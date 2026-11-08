@@ -85,6 +85,7 @@ fn field() -> SdfField {
 
 fn mv(kind: MoveKind, from: Point3, to: Point3, axis: Option<V3>) -> Move {
     Move {
+        rotary: None,
         kind,
         from,
         to,

@@ -224,7 +224,15 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
             // with its rotaries - by name, never silently. Absence
             // is the ordinary case (prismatic), checked exact so no
             // float dust enters this branch from a normal path.
-            if let Some(a) = mv.axis
+            // A C-axis live-tool move (issue #33) states the spindle's
+            // angle; its pose is the fixed station's, so the letter it
+            // asks for is C alone - read here, never re-derived from
+            // the part-frame axis (whose A/B the machine does not have).
+            if let Some(c) = mv.rotary {
+                if let Some(msg) = c_letter_problem(machine, i, c) {
+                    say(&mut out, format!("{name}: {msg}"));
+                }
+            } else if let Some(a) = mv.axis
                 && !crate::cl::is_vertical(&a)
             {
                 if !can_tilt(machine) {
@@ -357,4 +365,16 @@ fn say(out: &mut MachineCheck, s: String) {
     } else {
         out.more += 1;
     }
+}
+
+/// The C letter gate (issue #33): a move stating spindle C angle `c`
+/// needs a rotary named C on the machine, and a stated C travel must
+/// hold the unwrapped angle. None when it is fine.
+fn c_letter_problem(machine: &Machine, i: usize, c: f64) -> Option<String> {
+    let Some(ax) = machine.axes.iter().find(|x| x.rotary && x.name.eq_ignore_ascii_case("C")) else {
+        return Some(format!("move {i} turns the spindle as C {c:.3} deg; {} states no C axis", machine.model));
+    };
+    let (lo, hi) = ax.travel?;
+    (c < lo - 1e-9 || c > hi + 1e-9)
+        .then(|| format!("move {i} commands C {c:.3} deg, the travel is {lo:.3}..{hi:.3}"))
 }

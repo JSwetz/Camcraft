@@ -23,6 +23,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 
 fn feed(from: Point3, to: Point3) -> Move {
     Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from,
         to,

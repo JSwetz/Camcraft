@@ -24,7 +24,7 @@ const FLOOR: f64 = 6.2;
 const AXIS_Y: f64 = 5.3;
 
 fn feed(from: Point3, to: Point3) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis: None }
+    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis: None, rotary: None }
 }
 
 fn slotted() -> SdfField {
