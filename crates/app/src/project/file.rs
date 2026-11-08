@@ -322,6 +322,9 @@ pub enum ToolKindDto {
     /// (the cone's INCLUDED angle, the Drill's law restated) has been
     /// filed since v10.
     Taper,
+    /// The touch probe (#108): an additive word in the v50 grammar - no
+    /// older file names it, so no rung is needed to read one.
+    Probe,
 }
 
 impl ToolDto {
@@ -339,6 +342,7 @@ impl ToolDto {
                 ToolKind::Thread => ToolKindDto::Thread,
                 ToolKind::Form => ToolKindDto::Form,
                 ToolKind::Taper => ToolKindDto::Taper,
+                ToolKind::Probe => ToolKindDto::Probe,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -378,6 +382,7 @@ impl ToolDto {
                 ToolKindDto::Thread => ToolKind::Thread,
                 ToolKindDto::Form => ToolKind::Form,
                 ToolKindDto::Taper => ToolKind::Taper,
+                ToolKindDto::Probe => ToolKind::Probe,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,

@@ -714,6 +714,7 @@ impl ToolUi {
                 ToolKind::Thread => 8,
                 ToolKind::Form => 9,
                 ToolKind::Taper => 10,
+                ToolKind::Probe => 11,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -749,6 +750,7 @@ impl ToolUi {
                 8 => ToolKind::Thread,
                 9 => ToolKind::Form,
                 10 => ToolKind::Taper,
+                11 => ToolKind::Probe,
                 _ => ToolKind::EndMill,
             },
             diameter: self.diameter,
@@ -3210,6 +3212,11 @@ impl State {
         {
             self.begin_import(next);
         }
+    }
+
+    /// The shell polls a running import on a timer while otherwise idle.
+    pub(crate) fn import_in_progress(&self) -> bool {
+        self.import_rx.is_some() || !self.import_queue.is_empty()
     }
 
     /// Drop any live/queued imports because the document is being replaced.

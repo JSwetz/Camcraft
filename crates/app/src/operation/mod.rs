@@ -88,6 +88,8 @@ mod material_source;
 mod footprint;
 pub use footprint::machined_footprint;
 mod probe;
+// #108: the Probe operation's generation and protected-move law.
+pub mod probe_op;
 pub(crate) use probe::*;
 mod selection;
 pub use selection::*;
@@ -132,6 +134,8 @@ pub(crate) mod spindle_law;
 pub use spindle_law::{spindle_reading, SpindleReading, SPINDLE_TOL};
 mod rotary_gate;
 mod air_law;
+mod top_stock;
+pub use top_stock::TOP_STOCK_WARNING;
 mod turning_credit;
 mod turning_feeds;
 mod turning_outline;

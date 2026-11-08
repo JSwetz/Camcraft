@@ -144,6 +144,17 @@ pub struct Machine {
     /// programmed in (`machine.units`, G20 vs G21).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub units: Option<String>,
+    /// The spindle's speed ranges, rpm, `(low, high)` each (#170): the
+    /// belt or gear positions a machine changes by hand. A post names
+    /// the range a speed needs when only one serves it. Empty = unstated
+    /// (one range, or the file says nothing): no range is named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spindle_ranges: Vec<(f64, f64)>,
+    /// Whether the spindle can rigid-tap (#170): `Some(false)` when the
+    /// file says it cannot, and a post refuses a rigid tap cycle by name.
+    /// Unstated reads as "not limited", the unstated-limit law.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_tapping: Option<bool>,
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -

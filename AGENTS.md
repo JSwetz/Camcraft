@@ -45,9 +45,12 @@ afterwards - the work must not bother them.
 
 Since 2026-11-07 (user: "move off the roadmap and track work as ISSUES") the
 work list is the repo's open GitHub issues, read and written with `gh`.
-`ROADMAP.md` is a frozen archive (`DONE.md` was retired - it lives in git
-history and in every tag up to v0.8.1): read it for history and
-design context, never add work to them. Decisions go to a per-PR file in
+`ROADMAP.md` is retired (2026-11-08) the way `DONE.md` was before it: both
+are gone from the tree and live on in git history - `ROADMAP.md` in every
+tag up to v0.14.0 (`git show v0.14.0:ROADMAP.md`), `DONE.md` up to v0.8.1
+(`git show v0.8.1:DONE.md`). Read them for history and design context only;
+every item they still owed is an open issue, and no work is added anywhere
+but the issues. Decisions go to a per-PR file in
 `docs/decisions/` (gathered into `RECOMMENDED.md` at the cut); shipped changes
 go to `CHANGELOG.md`.
 
@@ -57,8 +60,9 @@ go to `CHANGELOG.md`.
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review"`
-  and take the highest priority first: `P0` (wrong output, gouge, crash,
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research"`
+  (then drop any whose comments hold a live contributor claim - "A claim
+  comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
@@ -103,19 +107,59 @@ go to `CHANGELOG.md`.
   `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
   `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
   worktree/branch <name> · plan: <one line>"`. Never work an issue that
-  carries `claimed` unless its last claim comment is older than 4 hours with
-  no newer comment from the claimant - then it is stale: comment "reclaimed
-  from <old claimant> (stale)" and take it.
+  carries `claimed` unless its last claim comment is an agent's and older
+  than 4 hours with no newer comment from the claimant - then it is stale:
+  comment "reclaimed from <old claimant> (stale)" and take it. A
+  contributor's claim comment never goes stale on a timer ("A claim comment
+  is a claim", below).
 - **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
   an Agent should have the tag source:agent"). Every issue an agent opens
   carries the `source:agent` label alongside its `P*` and `area:*` labels -
   including a bug the user reported in chat and an agent filed for them.
   An issue a human opens on GitHub never gets it. Agents and the user share
   one GitHub account, so the label, not the author, tells them apart.
-- **Outside contributors' claims count.** A claim comment from a
-  contributor without label rights is a claim: the main session sets
-  `claimed` and the assignee for them and replies, and their issue is not
-  picked while the claim is fresh (4 h rule).
+- **A claim comment is a claim** (user, 2026-11-08: "a comment should
+  suffice ... if we come across a claimed issue thru comment we should
+  just label it as such - and vice versa if they remove their comment,
+  remove their claim label for em as part of maintenance.. Otherwise the
+  comment stands as claimed."). Only collaborators can set labels, so
+  anyone else claims an issue by commenting on it with a line starting
+  `claimed:` (or `/claim`). The comment is the claim; the label only
+  mirrors it.
+  - **Check before claiming.** Before `Claim before any code`, read the
+    issue's comments (`gh issue view N --comments`). A claim comment by
+    anyone other than the owner account (agents post as the owner) means
+    the issue is taken: do not work it, even if it has no `claimed` label -
+    unless that same person later commented `unclaim` (a withdrawn claim).
+  - **Mirror it.** An issue found with such a comment but without the
+    label gets `claimed` and the claimant as assignee (if GitHub refuses
+    the assignee, the label alone), plus one reply: "Claim recorded for
+    @<login> - label and assignee set (only collaborators can set labels;
+    your comment is the claim)."
+  - **Withdrawn = deleted.** A contributor's claim stands for as long as
+    their claim comment exists - the 4 h stale rule is for agent claims
+    only. If the comment is deleted, or the claimant comments `unclaim`,
+    the claim is gone: remove `claimed` and their assignment, and comment
+    "claim by @<login> withdrawn (comment removed) - issue is free again".
+  - **Maintenance.** Every `/review-prs` run (step 4) and every issue pick
+    does this sweep for the issues it touches: label the comment-only
+    claims, and drop the label where the only claim comment behind it is
+    gone. A `claimed` label backed by an agent's claim comment follows the
+    4 h rule above instead.
+- **`needs-research` is research, not code** (user, 2026-11-08: "the new
+  label needs-research ... covers larger open questioned issues that needs
+  to be broken down into issues and closed, before work can be picked up").
+  An issue labelled `needs-research` is a large idea with open questions
+  (e.g. #290 Wire/Sinker EDM, #291 documentation site). Pick never takes it
+  for code. Researching it is claimed like any issue ("Claim before any
+  code", with `plan: research`), but takes no branch, no PR and no lane
+  slot. Working it means: answer the open questions in issue comments
+  (research, recorded decisions), then file the concrete sub-issues it
+  lists - each with one `P*`, `area:*`, `source:agent` when an agent files
+  it, a "Done means" line and "Part of #N" - and link them back from the
+  umbrella. When every sub-issue is filed, drop `needs-research` and close
+  the umbrella with a comment naming them - it is not kept open, so Pick
+  can never take it for code. Only the sub-issues are picked for code.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
@@ -148,9 +192,15 @@ go to `CHANGELOG.md`.
   user saids its ok or the tests are done. Once its been flagged ready to
   review no more pushes should be performed"). A PR is created with
   `--draft` and stays a draft while work, gating and review fixes land on
-  it. It is flagged ready (`gh pr ready <M>`) only when the user says so,
-  or when its gate tier is green on its final head and its independent
-  review is clean. Once ready, its branch takes **no more pushes**: a late
+  it. It is flagged ready (`gh pr ready <M>`) when the user says so, or
+  when a **quick pass** confirms its gates hold (user, 2026-11-08: "the
+  quickpass was to make em ready for review.. so flag em"): it merges
+  cleanly with `main`, its author's quick gate is green on its final head
+  with the pinning tests named, its body is complete (what changed, how
+  tested, what was not exercised, `Changelog:`, `Fixes`/`Refs`), and it
+  keeps this file's laws. The quick pass reads the PR, it does not
+  rebuild; the full independent review comes after, on the ready PR
+  (`/review-prs`, "Outside PRs are reviewed" below). Once ready, its branch takes **no more pushes**: a late
   finding, a needed `git merge origin/main` or any other change first turns
   it back into a draft (`gh pr ready <M> --undo`), says why in a PR
   comment, is pushed and re-gated, and only then is flagged ready again.
@@ -298,6 +348,12 @@ Phase 4 refactors the codebase for reuse; work in the shape it is heading to:
 
 - **400-line files.** No source file grows past ~400 LOC; split along the
   domain seam instead of stacking another section onto a large file.
+  **Exempt: post-processor scripts** (`assets/posts/*.cps`; user, 2026-11-08:
+  "CPS files cannot follow the 400 line rules as its a script to be
+  executed by a post processor, and it needs what it needs"). A post script
+  is one file the post engine loads and runs for one machine dialect, so it
+  stays whole at whatever length its dialect needs; review it for
+  correctness, not length.
 - **One concern per subcrate.** Motion types, operations, tool management,
   heights/offsets, movement and simulation become isolated subcrates (M4.1).
   Until the split lands, keep those boundaries honest inside `app`: new code
@@ -537,15 +593,21 @@ run on demand (`/review-prs`, or `/review-prs <N>` for one PR) and on a loop
 its own worktree, builds, runs the suites it touches and clippy, checks this
 file's laws, and posts a plain review **comment** whose first line is
 `<!-- pr-reviewer: <head sha> -->` (the marker that stops a second review of
-the same push). It never approves, requests changes, merges, pushes or labels:
+the same push), and sets the review label (below). It never approves, requests changes, merges or pushes:
 the user approves and merges an outside PR by hand ("make sure u leave a
 comment and allow us to approve it manually"). **Never two PR reviews at
 once** ("make sure we are not running concurrent PR reviews"): one PR per
 `/review-prs` run, guarded by the lock `.claude/pr-review.lock` (`<N> <sha>
 <UTC>`) - a run that finds a lock younger than 90 min stops; an older one is
 stale and is cleared with its leftover `../cc-pr<N>-review` worktree. Our own
-issue PRs are not reviewed here; a fix PR is reviewed before it merges
-(below), a `feat` or breaking PR at the cut (step 1 above).
+issue PRs are reviewed here too once flagged ready (user, 2026-11-08: "All
+PR*s made by owner should be reviewd and tagged"); a fix PR merges once
+that review is clean, a `feat` or breaking PR at the cut (step 1 above).
+**Review labels**, one colour per state: green `merge-ready` (clean review
+and mergeable), red `needs-rework` (blockers), orange `conflicts` (no
+longer merges with `main`). On red or orange the reviewer turns one of our
+own PRs back into a draft; a fork PR is left as its contributor set it,
+and the review comment says what to fix.
 
 `fix` / `perf` / `refactor` PRs and docs-, process- and CI-only PRs (no release) merge once
 reviewed by a subagent that did not write them (and, for `fix` / `perf` /

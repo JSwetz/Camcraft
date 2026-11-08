@@ -4,7 +4,7 @@
 //! stock mesh, so a square bar drills no air above the face, its Auto
 //! pecks and its reach depth (#84) are read from the face, and a valid
 //! hole is not falsely refused. The station-change hops still swing
-//! around the corners, and a round bar's chain is unchanged bit for bit.
+//! around the corners, and a round bar keeps its ordered numeric chain.
 //!
 //! Gate map (M4.4): covers app::operation (cross_stock's per-hole entry
 //! and rapid proof, cross_spindle, drill_reach's cross_reach).
@@ -14,6 +14,7 @@
 //! raw stock); no vendor material.
 
 mod punched_bar;
+mod cross_chain_reference;
 
 use flecs_ecs::prelude::World;
 
@@ -241,33 +242,10 @@ fn the_station_change_hop_still_clears_the_box_corners() {
     }
 }
 
-/// FNV-1a over the chain's bits: kind, both ends, the pose.
-fn fingerprint(t: &Toolpath) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut eat = |v: u64| {
-        for b in v.to_le_bytes() {
-            h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    };
-    for m in &t.moves {
-        eat(m.kind as u64);
-        for p in [m.from, m.to] {
-            for c in [p.x, p.y, p.z] {
-                eat(c.to_bits());
-            }
-        }
-        for c in m.axis.unwrap_or([0.0; 3]) {
-            eat(c.to_bits());
-        }
-    }
-    h
-}
-
-/// A round raw bar keeps the chain it had before #85, bit for bit: the
-/// three-station job and an off-centre hole on a d40 bar, fingerprints
-/// taken from the pre-#85 build.
+/// The three-station and off-centre chains captured before #151,
+/// compared with a coordinate tolerance rather than raw float bits.
 #[test]
-fn a_cylinder_stock_chain_is_unchanged_bit_for_bit() {
+fn a_cylinder_stock_chain_matches_its_numeric_reference() {
     let three = vec![
         hole(Point3::new(PART_R, 0.0, 10.0), Point3::new(-1.0, 0.0, 0.0), -6.0),
         hole(Point3::new(0.0, PART_R, 0.0), Point3::new(0.0, -1.0, 0.0), -6.0),
@@ -279,16 +257,11 @@ fn a_cylinder_stock_chain_is_unchanged_bit_for_bit() {
     // bar; the off-centre one (y 7..11) would be a notch in it, so it
     // runs over an r6 core it never reaches - the same chain.
     let parts = [punched_bar::punched_bar(PART_R, punched_bar::FOOT, punched_bar::TOP, &three), bar(6.0)];
-    let got: Vec<u64> = [three, off]
-        .into_iter()
-        .zip(parts)
-        .map(|(cross, part)| {
-            let (world, _h) = world_with("mill-turn", StockShape::Cylinder { diameter: 40.0, height: 40.0 }, part, |_| {});
-            let (t, _) = operation::generate(&world, &op(cross), "").expect("the round bar drills");
-            fingerprint(&t)
-        })
-        .collect();
-    assert_eq!(got, vec![2202346499980779381, 1828336726059972913], "the round-bar chains moved");
+    for (case, (cross, part)) in [three, off].into_iter().zip(parts).enumerate() {
+        let (world, _h) = world_with("mill-turn", StockShape::Cylinder { diameter: 40.0, height: 40.0 }, part, |_| {});
+        let (t, _) = operation::generate(&world, &op(cross), "").expect("the round bar drills");
+        cross_chain_reference::assert_chain(&t, case);
+    }
 }
 
 /// The drilled r10 bar with a block (a modelling error) poking out

@@ -211,6 +211,10 @@ pub(super) fn contour_leads_editor(ui: &mut Ui, u: Unit, a: &mut Approach) {
 pub(crate) fn entry_status_lines(notes: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for n in notes {
+        if n.starts_with(camcraft_app::operation::TOP_STOCK_WARNING) {
+            out.push(format!("warning: {n}"));
+            continue;
+        }
         let fix = if n.contains("not centre-cutting") {
             "fix: a centre-cutting tool, or a Helix / Ramp entry that fits"
         } else if n.contains("second dive") {
@@ -228,4 +232,13 @@ pub(crate) fn entry_status_lines(notes: &[String]) -> Vec<String> {
         out.push(format!("Entry: {body} - {fix}"));
     }
     out
+}
+
+#[cfg(test)]
+mod top_stock_tests {
+    #[test]
+    fn the_top_stock_note_is_a_visible_warning_not_an_entry_fallback() {
+        let note = format!("{} top Z5.000, stock Z10.000 - raise Top or face first", camcraft_app::operation::TOP_STOCK_WARNING);
+        assert_eq!(super::entry_status_lines(std::slice::from_ref(&note)), vec![format!("warning: {note}")]);
+    }
 }
