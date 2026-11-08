@@ -75,3 +75,38 @@ fn a_refused_pick_changes_nothing_and_says_why() {
     assert!(camcraft_app::setup::names(&state.world).is_empty());
     assert!(!state.history.can_undo());
 }
+
+/// #329: the Heights page's Work offset reference offers no slot of its
+/// own - one combo (From), and the setup's offset shown read-only with
+/// the pointer to the Setups page. Picking G55 on the setup changes what
+/// the row shows; the height itself is untouched.
+#[test]
+fn the_heights_page_shows_the_setups_offset_with_no_wcs_choice() {
+    use camcraft_app::operation::{Height, HeightReference};
+    let frame = |ui: &mut egui::Ui, st: &mut (State, Height)| {
+        let (state, height) = st;
+        super::heights_page::height_editor(ui, "Cut Z", &state.world, Some("Setup1"), height, "t.cut");
+    };
+    let height = Height::of(HeightReference::WorkOffset, 0.0);
+    let combos = |h: &Harness<'static, (State, Height)>| {
+        h.query_all_by(|n| n.role() == Role::ComboBox).count()
+    };
+    let shown = |h: &Harness<'static, (State, Height)>, text: &str| {
+        h.query_all_by(|n| {
+            n.label().is_some_and(|l| l.contains(text)) || n.value().is_some_and(|v| v.contains(text))
+        })
+        .count()
+            > 0
+    };
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(500.0, 300.0))
+        .build_ui_state(frame, (with_setup(), height));
+    h.run();
+    assert_eq!(combos(&h), 1, "only the From combo - no per-height WCS choice");
+    assert!(shown(&h, "G54 (setup Setup1 - set on the Setups page)"), "the setup's default");
+    run(&mut h.state_mut().0, CommandKind::SetSetupWorkOffset { setup: "Setup1".into(), slot: Some(1) });
+    h.run();
+    assert_eq!(combos(&h), 1);
+    assert!(shown(&h, "G55 (setup Setup1 - set on the Setups page)"), "follows the setup's pick");
+    assert_eq!(h.state().1, Height::of(HeightReference::WorkOffset, 0.0), "the height is untouched");
+}

@@ -793,12 +793,22 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 let chip = if p.src.is_fixed() {
                     format!("{} · {} {}", state.op_ui.name, p.name, units::len(p.z, u, 2))
                 } else {
+                    // A work-offset plane names the setup's word (#329) -
+                    // the setup context `height_planes` resolved it in.
+                    let source = match p.src.reference {
+                        camcraft_app::operation::HeightReference::WorkOffset => camcraft_app::schema::WCS_SLOTS
+                            .get(camcraft_app::setup::wcs_slot(&state.world, None))
+                            .copied()
+                            .unwrap_or("G54")
+                            .to_owned(),
+                        r => r.to_string(),
+                    };
                     format!(
                         "{} · {} {} ({} {})",
                         state.op_ui.name,
                         p.name,
                         units::len(p.z, u, 2),
-                        p.src.reference,
+                        source,
                         units::len_signed(p.src.offset, u, 2),
                     )
                 };

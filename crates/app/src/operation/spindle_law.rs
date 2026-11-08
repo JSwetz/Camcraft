@@ -254,7 +254,7 @@ pub(crate) fn post_problem(world: &World, name: &str, e: &Entity) -> Option<Stri
         return None;
     }
     let setup = op.setup.as_deref();
-    let (slot, origin) = crate::posting::wcs_context(world, setup, &op.params);
+    let (slot, origin) = crate::posting::wcs_context(world, setup);
     // A material that cannot be read is a source that moved or went:
     // the freshness check right after this names that, as it always has.
     let m = super::material_of(world, setup, &op.src).ok()?;

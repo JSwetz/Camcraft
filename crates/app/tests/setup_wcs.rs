@@ -2,9 +2,10 @@
 //! The pick is an undoable command, saved with the project (old files
 //! read the inferred per-operation law), and posting reads it for every
 //! operation of the setup: the G-word changes and every coordinate moves
-//! by exactly the offset's placement, nothing else. Conflicts refuse by
-//! name: a height measured from another slot than the pick, and two
-//! setups of one program posting one word from different placements.
+//! by exactly the offset's placement, nothing else. A height measured
+//! from the work offset reads the setup's slot (#329), so it follows the
+//! pick and its undo. Two setups of one program posting one word from
+//! different placements refuse by name.
 //! Provenance: our own fixtures over RS-274 work-offset semantics.
 //!
 //! Gate map (#196): covers app::posting (wcs_context, verification_report,
@@ -205,27 +206,45 @@ fn the_pick_round_trips_and_old_files_read_the_inferred_law() {
 }
 
 #[test]
-fn a_height_on_another_slot_than_the_pick_is_refused_by_name() {
+fn work_offset_heights_follow_the_setups_pick_and_its_undo() {
+    // #329: a height names no slot - it reads the setup's. Picking G56
+    // moves every work-offset height of the setup onto G56's plane, the
+    // op goes stale and posts at G56; undoing the pick moves them back.
     let (world, mut h) = faced_block();
     let mut p = face_params();
-    if let OpParams::Face { clearance_z, .. } = &mut p {
-        *clearance_z = Height::of(HeightReference::WorkOffset(2), 25.0);
+    if let OpParams::Face { clearance_z, cut_z, .. } = &mut p {
+        *clearance_z = Height::of(HeightReference::WorkOffset, 25.0);
+        *cut_z = Height::of(HeightReference::WorkOffset, 19.5);
     }
-    place(&world, &mut h, "G56", 0.0, 0.0, 0.0);
+    place(&world, &mut h, "G54", 0.0, 0.0, 0.0);
+    place(&world, &mut h, "G56", 0.0, 0.0, -3.0);
     h.execute(&world, EditOperationParams::new(&world, "Face1", p).expect("edit"));
     generate(&world, &mut h, "Face1");
-    // Unpicked: the height's slot is the program offset (the old law).
-    assert!(post(&world, "g56").expect("posts").contains("G56"));
-    pick(&world, &mut h, "Setup1", Some(1));
-    generate(&world, &mut h, "Face1");
-    let err = post(&world, "conflict").expect_err("a height on G56 in a G55 setup");
-    assert!(
-        err.contains("Face1: its heights are measured from G56 but setup Setup1 posts at G55"),
-        "{err}"
-    );
+    let ctx = Some("Setup1");
+    let cut = Height::of(HeightReference::WorkOffset, 19.5);
+    assert_eq!(cut.z_for(&world, ctx), Some(19.5), "unpicked: G54's plane");
+    let g54 = post(&world, "wo-g54").expect("posts");
+    assert!(g54.contains("G54") && !g54.contains("G56"), "{g54}");
+
     pick(&world, &mut h, "Setup1", Some(2));
+    assert_eq!(cut.z_for(&world, ctx), Some(16.5), "picked: G56's plane, every height");
+    let face = camcraft_app::model::find_by_name(&world, "Face1").expect("op");
+    assert_ne!(
+        camcraft_app::operation::status_of(&world, &face),
+        camcraft_app::operation::OpStatus::Ok,
+        "the heights moved, so the cached path is stale"
+    );
     generate(&world, &mut h, "Face1");
-    assert!(post(&world, "agree").expect("pick and height agree").contains("G56"));
+    let g56 = post(&world, "wo-g56").expect("the op and its setup agree by construction");
+    assert!(g56.contains("G56") && !g56.contains("G54"), "{g56}");
+
+    // Undo the generate, then the pick: the heights are G54's again.
+    assert!(h.undo(&world));
+    assert!(h.undo(&world));
+    assert_eq!(setup::work_offset(&world, "Setup1"), None);
+    assert_eq!(cut.z_for(&world, ctx), Some(19.5), "undo moved every height reference back");
+    assert!(h.redo(&world));
+    assert_eq!(cut.z_for(&world, ctx), Some(16.5), "and redo moves them again");
 }
 
 #[test]
@@ -261,7 +280,7 @@ fn two_setups_on_one_word_from_different_placements_refuse_one_file() {
 fn the_setup_sheet_names_the_program_offset() {
     let (world, mut h) = faced_block();
     let sheet = setup_sheet::render(&world, Some("Setup1")).expect("sheet");
-    assert!(sheet.contains("program offset: per operation"), "{sheet}");
+    assert!(sheet.contains("program offset: G54 (the default - not picked)"), "{sheet}");
     pick(&world, &mut h, "Setup1", Some(4));
     let sheet = setup_sheet::render(&world, Some("Setup1")).expect("sheet");
     assert!(sheet.contains("program offset: G58 (picked for this setup)"), "{sheet}");

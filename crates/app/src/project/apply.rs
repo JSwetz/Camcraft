@@ -5,6 +5,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     // before any entity touches the world. Anything newer than this build
     // remains refused. The chain must run its steps sequentially - a v1
     // file passes through v2's effects before v3's are applied.
+    let from = file.version;
     if file.version == 1 {
         // v1 -> v2: entities gained `rotation`; v1 had translation-only
         // placements, so identity is the exact migration. Kind and stock
@@ -483,6 +484,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // v50 setups pick no program offset; the absent key reads as
         // the inferred per-operation law they posted with (#196).
         file.version = 51;
+    }
+    if file.version == 51 || file.version == 52 {
+        // v51 -> v52 (#329): a work-offset height stops naming its own
+        // slot - the setup's is program zero. Agreeing setups take the
+        // slot, disagreeing ones refuse by name; a v52 file is checked
+        // slot-free (`wcs_migrate`).
+        super::wcs_migrate::settle(&mut file, from)?;
+        file.version = 52;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

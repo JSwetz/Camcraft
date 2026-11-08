@@ -124,10 +124,12 @@ pub struct ToolDef {
 /// sheet, inert for every stamp (the clones themselves carry the data).
 /// `work_offset` is the setup's PICKED program offset (#196), an index
 /// into [`WCS_SLOTS`]: every operation of the setup posts at that word,
-/// measured from that slot's placement. `None` - every pre-#196 document
-/// and the default - is "not picked": each operation keeps the inferred
-/// law (the first slot its heights reference, else `G54`), so old files
-/// post byte-identical. Written only by `SetSetupWorkOffset`.
+/// measured from that slot's placement, and every work-offset height of
+/// its operations reads that slot (#329). `None` - the default - is
+/// "not picked" and reads `G54` ([`crate::setup::wcs_slot`]). The loader
+/// lifts an older file's per-height slots onto this field when the whole
+/// setup agreed (`project::wcs_migrate`). Written only by
+/// `SetSetupWorkOffset` and that migration.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,

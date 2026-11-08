@@ -1,7 +1,7 @@
 //! The Setups page's work-offset picker (#196): which `G54`..`G59` word
-//! a setup's program runs in. "Auto" is the per-operation law (the first
-//! offset an operation's heights reference, else G54) - the default, and
-//! what every older document reads as. A pick queues the undoable
+//! a setup's program runs in and every work-offset height of its
+//! operations measures from (#329 - the Heights page only shows it).
+//! Unpicked is the `G54` default. A pick queues the undoable
 //! `SetSetupWorkOffset`; nothing here writes the world.
 //!
 //! Provenance: our own UI over RS-274 / ISO 6983 work-offset selection;
@@ -18,7 +18,7 @@ use crate::state::{CommandKind, State};
 pub(super) fn pick_text(slot: Option<usize>) -> &'static str {
     match slot.and_then(|i| WCS_SLOTS.get(i)) {
         Some(w) => w,
-        None => "Auto (from heights, else G54)",
+        None => "G54 (default)",
     }
 }
 
@@ -40,7 +40,8 @@ pub(super) fn picker(ui: &mut Ui, state: &mut State, setup: &str) {
             .response
             .on_hover_text(
                 "The G-word this setup's program runs in; every operation of the setup \
-                 posts at it, measured from that offset's placement here.",
+                 posts at it and measures its work-offset heights from that offset's \
+                 placement here.",
             );
     });
     if chosen != current {

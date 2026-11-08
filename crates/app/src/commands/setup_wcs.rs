@@ -1,6 +1,6 @@
 //! `SetSetupWorkOffset` (#196): pick the program offset (`G54`..`G59`)
-//! a setup posts at, or clear the pick back to the inferred
-//! per-operation law.
+//! a setup posts at - and every work-offset height of its operations
+//! measures from (#329) - or clear the pick back to the `G54` default.
 //!
 //! Provenance: our own design; RS-274 / ISO 6983 work-offset selection
 //! (one of six controller zero registers per clamping) is general
@@ -40,7 +40,7 @@ impl SetSetupWorkOffset {
         if prev == slot {
             return Err(CommandError::Invalid(format!(
                 "setup '{setup}' already posts at {}",
-                slot.and_then(|i| WCS_SLOTS.get(i)).copied().unwrap_or("its inferred offset")
+                slot.and_then(|i| WCS_SLOTS.get(i)).copied().unwrap_or("the default G54")
             )));
         }
         Ok(SetSetupWorkOffset {

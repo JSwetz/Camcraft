@@ -239,7 +239,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // (The post reads it again, against the origin it is handed then.)
     // The mill-turn's cross drill joins it (issue #67): its standoffs
     // are measured about that same line.
-    let (slot, wcs_origin) = crate::posting::wcs_context(world, setup, &op.params);
+    let (slot, wcs_origin) = crate::posting::wcs_context(world, setup);
     let spindle_note = if super::spindle_law::turns(world, &op.params) {
         super::spindle_law::check(&material.facets, wcs_origin, slot)?
     } else {
