@@ -118,7 +118,7 @@ pub(super) fn face_ride(
     let cl = offset::profile_offset(pts, nose, tol * 0.25, win.0, win.1)?;
     let rho_clear = cl.iter().map(|q| q.1).fold(0.0f64, f64::max) + tol;
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(clearance_z)));
-    prof::ride(&mut b, f, &cl, rho_clear, feed, plunge_feed);
+    prof::ride(&mut b, f, &cl, rho_clear, feed, plunge_feed, prof::Exit::Rapid);
     b.push(
         MoveKind::Rapid,
         f.point(rho_clear, f.station_of(clearance_z)),
