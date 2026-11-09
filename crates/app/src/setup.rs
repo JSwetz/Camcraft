@@ -1,5 +1,5 @@
-//! Multiple setups: who machines against which stock and which offsets
-//! (M3.2 stage A).
+//! Multiple setups: who machines against which stock and which WCS
+//! (M3.2 stage A; one WCS per setup since #342).
 //!
 //! Provenance: our own design; the setup/WCS concept is standard
 //! machine-shop practice (a setup is one clamping of the part against one
@@ -11,7 +11,7 @@
 //!
 //! - **The implicit-setup law.** A world with no `SetupDef` entity
 //!   resolves exactly the way it did before this module existed: stock
-//!   is the entity named `STOCK_NAME`, offsets are `G54`..`G59`. The
+//!   is the entity named `STOCK_NAME`, the WCS is the entity `G54`. The
 //!   first `CreateSetup` on such a world MATERIALIZES `Setup1` pointing
 //!   at those same existing entities - nothing is renamed, so every
 //!   path, stamp and saved file predating setups keeps working
@@ -86,8 +86,9 @@ pub fn def_of(world: &World, name: &str) -> Option<SetupDef> {
         .and_then(|e| e.entity_view(world).try_get::<&SetupDef>(|d| d.clone()))
 }
 
-/// The program offset a setup PICKED (#196), as a [`WCS_SLOTS`] index;
-/// `None` when it picked none (the `G54` default, [`wcs_slot`]) or the
+/// The work-offset word a setup is LABELLED with (#196, #342), as a
+/// [`WCS_SLOTS`] index; `None` when it names none (the `G54` default,
+/// [`wcs_slot`]) or the
 /// name wears no setup. An out-of-range stored index reads as no pick -
 /// `SetSetupWorkOffset` and the loader refuse one, so it cannot arise.
 #[must_use]
@@ -95,12 +96,12 @@ pub fn work_offset(world: &World, name: &str) -> Option<usize> {
     def_of(world, name)?.work_offset.filter(|i| *i < WCS_SLOTS.len())
 }
 
-/// THE work-offset law (#196, #329): the `WCS_SLOTS` index every
-/// operation of the declared setup context posts at AND measures its
-/// work-offset heights from - the setup's pick, else `G54` (slot 0).
-/// A height carries no slot of its own, so one setup is one program
-/// zero by construction. A document without setups (or a context naming
-/// no setup) has no pick and reads `G54`.
+/// THE work-offset word law (#196, #329, #342): the `WCS_SLOTS` index of
+/// the word every operation of the declared setup context posts - the
+/// setup's label, else `G54` (slot 0). It is only the word: the origin
+/// is the setup's one WCS ([`wcs_entity`]) whatever the word, so one
+/// setup is one program zero by construction. A document without setups
+/// (or a context naming no setup) has no label and reads `G54`.
 #[must_use]
 pub fn wcs_slot(world: &World, setup: Option<&str>) -> usize {
     effective(world, setup)
@@ -199,19 +200,31 @@ pub fn stock_entity_name(world: &World, declared: Option<&str>) -> String {
     }
 }
 
-/// The WCS slot entity NAME for a declared setup context; `None` when
-/// the slot index is out of range (nothing to name). The G-code WORD
-/// stays `WCS_SLOTS[slot]` no matter what the entity is called - only
-/// the lookup follows the setup.
+/// The suffix a setup's own WCS entity wears (`Setup2/WCS`, #342).
+pub const WCS_SUFFIX: &str = "WCS";
+
+/// The WCS entity NAME for a declared setup context (#342): the setup's
+/// one work coordinate system. A document without setups keeps the
+/// legacy `G54` entity (the implicit-setup law); a setup names its own
+/// (`SetupDef::wcs`), `<setup>/WCS` when it names none. The G-code WORD
+/// is never this name - it is the setup's label ([`wcs_slot`]).
 #[must_use]
-pub fn wcs_entity_name(world: &World, declared: Option<&str>, slot: usize) -> Option<String> {
-    let base = *WCS_SLOTS.get(slot)?;
-    Some(match effective(world, declared) {
+pub fn wcs_entity_name(world: &World, declared: Option<&str>) -> String {
+    match effective(world, declared) {
         Some(s) => def_of(world, &s)
-            .and_then(|d| d.wcs.get(slot).cloned())
-            .unwrap_or_else(|| format!("{s}/{base}")),
-        None => base.to_string(),
-    })
+            .map(|d| d.wcs)
+            .filter(|w| !w.is_empty())
+            .unwrap_or_else(|| format!("{s}/{WCS_SUFFIX}")),
+        None => WCS_SLOTS[0].to_string(),
+    }
+}
+
+/// The WCS word a setup context posts, for display: `"WCS (G55)"` where
+/// the word matters (#342) - the tree says plain "WCS".
+#[must_use]
+pub fn wcs_label(world: &World, declared: Option<&str>) -> String {
+    let word = WCS_SLOTS.get(wcs_slot(world, declared)).copied().unwrap_or("G54");
+    format!("WCS ({word})")
 }
 
 /// The stock ENTITY for a declared setup, when one exists.
@@ -221,31 +234,29 @@ pub fn stock_entity(world: &World, declared: Option<&str>) -> Option<flecs_ecs::
     model::is_stock(world, &e).then_some(e)
 }
 
-/// The WCS slot ENTITY for a declared setup, when it has been placed.
+/// The setup's WCS ENTITY, when it has been placed.
 #[must_use]
-pub fn wcs_entity(
-    world: &World,
-    declared: Option<&str>,
-    slot: usize,
-) -> Option<flecs_ecs::prelude::Entity> {
-    model::find_by_name(world, &wcs_entity_name(world, declared, slot)?)
+pub fn wcs_entity(world: &World, declared: Option<&str>) -> Option<flecs_ecs::prelude::Entity> {
+    let e = model::find_by_name(world, &wcs_entity_name(world, declared))?;
+    model::is_wcs(world, &e).then_some(e)
 }
 
-/// Does a setup OTHER than `except` name this entity as its stock or a
-/// WCS slot? The `DeleteSetup` sharing test: furniture two setups point
+/// Does a setup OTHER than `except` name this entity as its stock or
+/// its WCS? The `DeleteSetup` sharing test: furniture two setups point
 /// at is nobody's to delete with one of them.
 #[must_use]
 pub fn is_furniture_of_other(world: &World, entity: &str, except: &str) -> bool {
     setups(world).into_iter().any(|(n, _)| {
         n != except
             && def_of(world, &n).is_some_and(|d| {
-                d.stock == entity || d.wcs.iter().any(|w| w == entity)
+                d.stock == entity || d.wcs == entity
             })
     })
 }
 
 /// Does this name follow the private-furniture convention - some
-/// prefix, then `/Stock` or a `/G5x` slot (M3.2 A)? A shape test, with
+/// prefix, then `/Stock`, `/WCS` (#342) or a pre-v54 `/G5x` slot (M3.2
+/// A)? A shape test, with
 /// no world to consult: what the declared setups actually name is
 /// [`stock_entity_name`] / [`wcs_entity_name`] per setup. Shared by
 /// [`crate::commands::AddTool`]'s refusal and the project file's
@@ -253,6 +264,7 @@ pub fn is_furniture_of_other(world: &World, entity: &str, except: &str) -> bool 
 #[must_use]
 pub fn is_furniture_shape(name: &str) -> bool {
     name.ends_with("/Stock")
+        || name.ends_with(&format!("/{WCS_SUFFIX}"))
         || name
             .rsplit_once('/')
             .is_some_and(|(_, slot)| WCS_SLOTS.contains(&slot))

@@ -283,6 +283,7 @@ mod suppressed;
 mod wcs_rotation;
 #[path = "posting_wcs_slot.rs"]
 mod wcs_slot;
+pub(crate) use wcs_rotation::{offset_frame, OffsetFrame};
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
@@ -512,6 +513,8 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
+        // #373 until #374: an inverted axis would take standard-sign code.
+        problems.extend(m.inverted_post_refusal());
         match crate::machine::check_document(world, &m) {
             Ok(c) if !c.is_ok() => {
                 let more = if c.more > 0 { format!(" (+{} more)", c.more) } else { String::new() };
@@ -718,7 +721,17 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             _ => None,
         };
         let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
+        // Commentary for the program (#257): kinds by their panel
+        // labels, the setup by the resolution law (implicit members
+        // name the first setup, as the setup sheet does).
+        let op_kind = op.params.kind().to_string();
+        let tool_kind = tool.kind.to_string();
+        let setup_name = crate::setup::effective(world, setup).unwrap_or_default();
         let d = Dump {
+            op_kind: &op_kind,
+            setup_name: &setup_name,
+            tool_kind: &tool_kind,
+            tool_corner_r: tool.corner_r,
             probe_result,
             op_name: &display_name,
             part_load,
@@ -756,19 +769,18 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
 }
 
 /// The work offset an operation of the `setup` context posts to: the
-/// setup's slot (#196, #329: its pick, else `G54` - heights carry none)
-/// and that slot's origin as the machine would measure it. `pub(crate)` so the
+/// setup's word (#196, #342: its label, else `G54`) and the setup's one
+/// WCS origin as the machine would measure it. `pub(crate)` so the
 /// machine-limit travel check (M2.3 C) reads program coordinates by
 /// exactly this law, not by a second copy of it.
 ///
 /// The G-code WORD is always `WCS_SLOTS[slot]` - the machine's register
 /// names do not take setup suffixes. The ENTITY the origin is measured
-/// from follows the setup (M3.2 A): `Setup2/G54` is the same machine
-/// offset word, re-placed for that setup's clamping.
+/// from is the setup's WCS (M3.2 A, #342), whatever word it is labelled.
 pub(crate) fn wcs_context(world: &World, setup: Option<&str>) -> (&'static str, [f64; 3]) {
     let slot = wcs_slot::wcs_slot(world, setup);
     let name = WCS_SLOTS[slot];
-    let origin = crate::setup::wcs_entity(world, setup, slot)
+    let origin = crate::setup::wcs_entity(world, setup)
         .and_then(|e| model::transform_of(world, &e))
         .map_or([0.0; 3], |t| [t.pos.x, t.pos.y, t.pos.z]);
     (name, origin)
