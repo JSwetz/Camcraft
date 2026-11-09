@@ -12,7 +12,13 @@
 //!
 //! - **Validated at construction, refused by name.** Everything
 //!   `fixture_locate::plan` refuses, plus "nothing would move". The
-//!   interpenetration check runs here once and is carried as a warning.
+//!   interpenetration check runs here once and is carried as a warning -
+//!   the part against the fixture, and the setup's stock against it.
+//! - **A square stock stays square (#561 review).** The part write is
+//!   `MoveModel::locating` / `AlignPartToSetup::locating`: a box or
+//!   cylinder stock square to the setup keeps its orientation and its
+//!   allowance on each side round the located part (`crate::stock_follow`)
+//!   - the vise holds the blank square, it does not turn it with the part.
 //! - **The part moves as part alignment moves it.** In a setup that holds
 //!   the part as modelled the locate is a `MoveModel` (the document
 //!   placement; the stock follows the part); in a setup that holds the
@@ -67,14 +73,21 @@ impl LocatePart {
         let setup = crate::setup::effective(world, plan.setup.as_deref());
         let aligned = setup.as_deref().and_then(|s| setup_align::stored(world, s).map(|a| (s, a)));
         let write = match aligned {
-            Some((s, a)) => PartWrite::Align(Box::new(AlignPartToSetup::new(world, s, Some(setup_align::compose(plan.delta, a)))?)),
+            Some((s, a)) => PartWrite::Align(Box::new(AlignPartToSetup::locating(world, s, Some(setup_align::compose(plan.delta, a)))?)),
             None => {
                 let e = model::find_by_name(world, &spec.part).ok_or_else(|| CommandError::NotFound(spec.part.clone()))?;
                 let loc = model::transform_of(world, &e).unwrap_or_default();
-                PartWrite::Move(MoveModel::new(world, &spec.part, setup_align::compose(plan.delta, loc))?)
+                PartWrite::Move(MoveModel::locating(world, &spec.part, setup_align::compose(plan.delta, loc))?)
             }
         };
-        let warning = fixture_locate::interpenetration(world, spec, &plan);
+        let stocks = match &write {
+            PartWrite::Move(c) => c.moved_stock(world),
+            PartWrite::Align(c) => c.moved_stock(),
+        };
+        let warning = fixture_locate::join_warnings(
+            fixture_locate::interpenetration(world, spec, &plan),
+            fixture_locate::stock_interpenetration(world, spec, &plan, &stocks),
+        );
         Ok(LocatePart { write, plan, warning })
     }
 
@@ -122,7 +135,10 @@ impl LocateFixture {
         let loc = model::transform_of(world, &e).unwrap_or_default();
         let next = setup_align::compose(setup_align::inverse(plan.delta), loc);
         let write = MoveFixture::new(world, &spec.fixture, next)?;
-        let warning = fixture_locate::interpenetration(world, spec, &plan);
+        let warning = fixture_locate::join_warnings(
+            fixture_locate::interpenetration(world, spec, &plan),
+            fixture_locate::stock_interpenetration(world, spec, &plan, &fixture_locate::stock_carried(world, &plan)),
+        );
         Ok(LocateFixture { write, plan, warning })
     }
 

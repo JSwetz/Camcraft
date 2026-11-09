@@ -33,6 +33,39 @@
   it. Cost of the choice: in an unaligned multi-setup document a locate
   moves the part in every setup that reads the document placement; the
   fix later is per-setup part placement (a follow-up, not filed here).
+- **A located part's square stock stays square (review fix).** A box or
+  cylinder stock whose axes lie along the setup's (any quarter turn) is
+  not turned with the part by a locate: it keeps its own orientation and
+  is re-fitted round the part's new place with the allowance it had on
+  each side, measured in the stock's own frame before the move (top
+  stays top, the -X side stays the -X side; a cylinder keeps its radial
+  and end allowance and its axis offset from the part's footprint).
+  Why: the vise clamps the blank square - a box stock set square round
+  a turned part ended tilted and 17 mm under the vise floor, and a Face
+  op faced air. A pure translation moves the block by exactly the part's
+  shift (same size), so a locate with no turn reads as before. Considered
+  and dropped: translate-only keeping the old size (a quarter turn leaves
+  the block the wrong shape round the part); carrying each allowance
+  round with the part's faces (a 30-degree turn cannot carry them, and a
+  "+2 on top for facing" allowance would end up on a side). A stock that
+  is off the axes (it was turned with the part before) or copied from
+  the model still follows rigidly. A refit that cannot keep its
+  allowance (a stock that did not wrap the part) is refused by name.
+  Lives in `crate::stock_follow`; the locate writes through
+  `MoveModel::locating` / `AlignPartToSetup::locating` (main setup only;
+  linked setups #316 follow as before).
+- **Plain `MoveModel` keeps its rigid follow.** A part turned on the
+  Model page still carries its stock with it (pinned by
+  `commands_undo::moving_one_part_carries_existing_stock_and_undo_restores_both`).
+  Considered: the same square rule for every move - consistent, but it
+  changes a shipped behaviour outside this issue and its pinned tests;
+  worth its own issue (a Model-page turn of a square stock by a non-quarter
+  angle still tilts the block).
+- **The stock is judged against the fixture too.** The interpenetration
+  warning now also checks the setup's stock where the locate leaves it
+  (or, for `LocateFixture`, against the moved fixture) and names it: "the
+  stock '<name>' would sink into the fixture '<vise>' (near ...)". A
+  warning, not a refusal, for the same reason as the part's.
 - **Staleness follows the existing laws.** A moved part changes the
   stamps' inputs, so the setup's ops read Stale and undo returns them to
   Ok (pinned). A moved fixture does NOT stale a toolpath: the

@@ -162,6 +162,46 @@ pub fn interpenetration(world: &World, spec: &LocateSpec, plan: &Plan) -> Option
     ))
 }
 
+/// The warning, by name, when the setup's stock would sink into the
+/// fixture where the locate leaves it (#561) - a blank with an allowance
+/// under the part mated on the floor goes through the floor. `stocks`
+/// are the moved stock bodies (setup frame) with the fixture where it
+/// will stand; the same sampled check as [`interpenetration`].
+#[must_use]
+pub fn stock_interpenetration(world: &World, spec: &LocateSpec, plan: &Plan, stocks: &[(String, Vec<Triangle>)]) -> Option<String> {
+    let fe = model::find_by_name(world, &spec.fixture)?;
+    let steel = model::world_facets(world, &fe)?;
+    let own = crate::setup::stock_entity_name(world, plan.setup.as_deref());
+    stocks.iter().filter(|(n, _)| *n == own).find_map(|(name, body)| {
+        let hit = sunk(body, &steel).or_else(|| sunk(&steel, body))?;
+        Some(format!(
+            "the stock '{name}' would sink into the fixture '{}' (near {:.2}, {:.2}, {:.2}) - check its allowance \
+             under the mated faces, or set the stock again",
+            spec.fixture, hit[0], hit[1], hit[2]
+        ))
+    })
+}
+
+/// The setup's stock as it stands, carried by `delta` - the relative
+/// placement a `LocateFixture` gives it against the moved fixture.
+#[must_use]
+pub fn stock_carried(world: &World, plan: &Plan) -> Vec<(String, Vec<Triangle>)> {
+    let name = crate::setup::stock_entity_name(world, plan.setup.as_deref());
+    model::find_by_name(world, &name)
+        .and_then(|e| model::world_facets(world, &e))
+        .map(|t| vec![(name, t.into_iter().map(|t| place(t, plan.delta)).collect())])
+        .unwrap_or_default()
+}
+
+/// Both warnings, joined.
+#[must_use]
+pub fn join_warnings(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+        (a, b) => a.or(b),
+    }
+}
+
 fn place(t: Triangle, d: Location) -> Triangle {
     Triangle::new(
         transform_point(t.a, d.pos, d.rot),

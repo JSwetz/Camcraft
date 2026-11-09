@@ -60,6 +60,8 @@ pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;
 pub mod stock_sim;
 pub mod stock_export;
+// #561: a square stock keeps its allowance round a located part.
+pub mod stock_follow;
 pub mod stock_play;
 pub mod stock_play_worker;
 pub mod stock_view;
