@@ -31,6 +31,8 @@ pub mod pick;
 pub use camcraft_post::post;
 pub mod path_sig;
 pub mod posting;
+// #155: standalone Pause / Home entries in the operation list.
+pub mod program_entry;
 pub use camcraft_motion::probing;
 pub mod project;
 // #182: the CPU rasteriser behind the MCP stock render.

@@ -65,23 +65,23 @@ pub struct ReorderOperation {
 
 impl ReorderOperation {
     pub fn new(world: &World, key: &str, target: &str, after: bool) -> Result<Self, CommandError> {
+        // #155: a Pause / Home entry reorders like an operation, and
+        // every position is counted over the list it stands in.
+        use crate::program_entry::{effective_setup, is_sequenced, sequence};
         let source = model::find_by_name(world, key)
-            .filter(|e| model::is_operation(world, e))
+            .filter(|e| is_sequenced(world, e))
             .ok_or_else(|| CommandError::NotFound(key.to_owned()))?;
         let destination = model::find_by_name(world, target)
-            .filter(|e| model::is_operation(world, e))
+            .filter(|e| is_sequenced(world, e))
             .ok_or_else(|| CommandError::NotFound(target.to_owned()))?;
-        let source_setup = model::operation_of(world, &source)
-            .and_then(|op| setup::effective(world, op.setup.as_deref()));
-        let target_setup = model::operation_of(world, &destination)
-            .and_then(|op| setup::effective(world, op.setup.as_deref()));
+        let source_setup = effective_setup(world, &source);
+        let target_setup = effective_setup(world, &destination);
         if source_setup != target_setup {
             return Err(CommandError::Invalid("operations can only be reordered within one setup".into()));
         }
-        let original: Vec<String> = setup::operation_order(world)
+        let original: Vec<String> = sequence(world)
             .into_iter()
-            .filter(|(_, e)| model::operation_of(world, e)
-                .and_then(|op| setup::effective(world, op.setup.as_deref())) == source_setup)
+            .filter(|(_, e)| effective_setup(world, e) == source_setup)
             .map(|(name, _)| name)
             .collect();
         let mut reordered = original.clone();

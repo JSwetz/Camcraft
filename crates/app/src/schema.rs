@@ -269,6 +269,22 @@ pub struct OperationMeta {
     pub order: Option<u32>,
 }
 
+/// A standalone Pause or Home entry in the operation list (#155): an
+/// after-action with no tool and no toolpath, placed between operations
+/// by the same `OperationMeta::order` its siblings use. It is not an
+/// `Operation`, so every program walk that needs a tool or a toolpath
+/// (`setup::operation_order` and all who walk it) never sees it; the
+/// post folds it into the gap it stands in (`program_entry`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ProgramEntry {
+    /// What the machine does here - never `AfterOperation::None`.
+    pub action: AfterOperation,
+    /// The setup it stands in, the `Operation::setup` law.
+    pub setup: Option<String>,
+    /// Left out of the posted program, like a suppressed operation.
+    pub suppressed: bool,
+}
+
 /// The cached result of generating an operation: the path plus the
 /// warnings `verify` attached to it. Deleting the operation entity frees
 /// both through the Rust-owned drop hooks (AGENTS.md resource invariant).
@@ -468,6 +484,7 @@ pub fn register_schema(world: &World) {
     world.component::<ToolBody>();
     world.component::<Operation>();
     world.component::<OperationMeta>();
+    world.component::<ProgramEntry>();
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();

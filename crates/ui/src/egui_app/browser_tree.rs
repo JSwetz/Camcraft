@@ -56,12 +56,14 @@ pub(crate) enum Leaf {
     Model(String),
     Tool(String),
     Op(String),
+    /// A Pause / Home entry of the operation list (#155).
+    Entry(String),
 }
 
 /// Append one tree row and its parallel leaf. `icon` is the bundled glyph
 /// for the row's subject, `None` for headers (and the setup radio).
 #[allow(clippy::too_many_arguments)]
-fn push_row(
+pub(super) fn push_row(
     rows: &mut Vec<painted::Row>,
     leaves: &mut Vec<Leaf>,
     label: String,
@@ -226,7 +228,11 @@ fn setup_children(
         push_row(rows, leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, depth + 1, Leaf::Section);
     }
     for (key, entity) in ops {
-        op_row(state, t, &key, &entity, depth + 1, rows, leaves);
+        if camcraft_app::program_entry::is_entry(w, &entity) {
+            super::tree_entry::entry_row(state, &key, &entity, depth + 1, rows, leaves);
+        } else {
+            op_row(state, t, &key, &entity, depth + 1, rows, leaves);
+        }
     }
 }
 
@@ -238,13 +244,15 @@ fn count(n: usize, word: &str) -> String {
     }
 }
 
-/// The setup's operations in program order (`None` - every operation).
+/// The setup's operations in program order (`None` - every operation),
+/// its Pause / Home entries among them (#155).
 fn setup_ops(state: &State, ctx: Option<&str>) -> Vec<(String, flecs_ecs::prelude::Entity)> {
-    setup::operation_order(&state.world)
+    let w = &state.world;
+    camcraft_app::program_entry::sequence(w)
         .into_iter()
         .filter(|(_, e)| {
             ctx.is_none_or(|s| {
-                model::operation_of(&state.world, e).is_some_and(|op| setup::belongs(&state.world, op.setup.as_deref(), s))
+                setup::belongs(w, camcraft_app::program_entry::declared_setup(w, e).as_deref(), s)
             })
         })
         .collect()

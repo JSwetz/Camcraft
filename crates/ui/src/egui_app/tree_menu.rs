@@ -13,6 +13,7 @@ use crate::actions;
 use crate::state::{CommandKind, State, TreeMenuTarget, UiTarget};
 
 use super::browser_tree::Leaf;
+use super::tree_entry;
 use super::panes::{DROP_GAP, DROP_W};
 use super::theme::Tokens;
 
@@ -63,15 +64,30 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
     let row_ix = leaves.iter().position(|leaf| match (&target, leaf) {
         (TreeMenuTarget::Operation(name), Leaf::Op(row)) => name == row,
         (TreeMenuTarget::Operations, Leaf::SetupOps(setup)) => *setup == active,
+        (TreeMenuTarget::Entry(name), Leaf::Entry(row)) => name == row,
         _ => false,
     }).or_else(|| match target {
         TreeMenuTarget::Operations => leaves.iter().position(|leaf| matches!(leaf, Leaf::SetupOps(_))),
-        TreeMenuTarget::Operation(_) => None,
+        TreeMenuTarget::Operation(_) | TreeMenuTarget::Entry(_) => None,
     });
     let Some(ix) = row_ix else {
         state.tree_menu = None;
         state.retype_confirm = None;
         return;
+    };
+    // #155: a Pause / Home entry's own menu (gone - the menu closes).
+    let entry = match &target {
+        TreeMenuTarget::Entry(n) => {
+            let Some(e) = model::find_by_name(&state.world, n)
+                .and_then(|e| camcraft_app::program_entry::entry_of(&state.world, &e))
+            else {
+                state.tree_menu = None;
+                state.retype_confirm = None;
+                return;
+            };
+            Some((n.clone(), e))
+        }
+        _ => None,
     };
     let name = match &target {
         TreeMenuTarget::Operation(name) => {
@@ -85,7 +101,7 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
             }
             Some(name.as_str())
         }
-        TreeMenuTarget::Operations => None,
+        TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => None,
     };
     let here = name.and_then(|name| model::find_by_name(&state.world, name))
         .and_then(|entity| model::operation_of(&state.world, &entity))
@@ -125,6 +141,9 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
         // undoable edit), so the menu grows by two rows, not six.
         lines.push((after_row_label(flow.map_or(operation::AfterOperation::None, |(_, a)| a)), true, Some(MENU_AFTER)));
     }
+    // #155: a Pause / Home entry after this row (a setup's: at its end),
+    // last of the verbs so every row above keeps its place.
+    lines.extend(tree_entry::add_lines());
     let here_section = here.and_then(|index| operation::KindInfo::ALL.get(index).map(|k| k.section));
     for s in operation::Section::ORDER.into_iter().filter(|_| name.is_some()) {
         // The current kind's own section keeps every row (dark where
@@ -144,6 +163,9 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
                 lines.push((k.label, k.admits(machine), Some(i)));
             }
         }
+    }
+    if let Some((_, e)) = &entry {
+        lines = tree_entry::entry_lines(e);
     }
     let anchor = egui::Pos2::new(
         rect.left(),
@@ -215,7 +237,11 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
             }
         });
     if let Some(i) = chosen {
-        if i == MENU_PASTE {
+        if let Some((n, e)) = &entry {
+            tree_entry::act(state, i, n, e);
+        } else if tree_entry::add(state, i, name) {
+            // queued: the add rows of an operation or a setup's list
+        } else if i == MENU_PASTE {
             actions::paste_operation(state);
         } else if let Some(name) = name {
             if i == MENU_RENAME {

@@ -14,7 +14,9 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             dto.name
         )));
     }
+    super::program_entry_dto::validate(dto, kind)?; // #155
     match kind {
+        EntityKind::Entry => {}
         EntityKind::Model => {
             if dto.stock.is_some()
                 || dto.tool.is_some()

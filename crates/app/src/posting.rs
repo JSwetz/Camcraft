@@ -734,6 +734,8 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
     }
 
     let skip_stops = post_options(world).skip_stops;
+    // #155: Pause / Home entries fold into the gap they stand in.
+    let afters = crate::program_entry::posted_afters(world, &ops, skip_stops)?;
     let mut streams = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
@@ -814,8 +816,8 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             probe_tol,
             coolant: op.coolant,
             // "Skip pauses and homes" (#110) mutes every after-action
-            // at post; the ops keep their choices.
-            after: if skip_stops { operation::AfterOperation::None } else { op.after },
+            // at post; the ops keep their choices. Entries ride it (#155).
+            after: afters.get(name).copied().unwrap_or_default(),
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,
