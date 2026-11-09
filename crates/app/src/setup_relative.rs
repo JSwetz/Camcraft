@@ -249,7 +249,7 @@ pub fn wcs_view_pose(world: &World, wcs_name: &str, stored: Location) -> Result<
         .into_iter()
         .filter(|s| setup::wcs_entity_name(world, Some(s)) == wcs_name)
         .collect();
-    if owners.is_empty() || owners.iter().any(|s| *s == active) {
+    if owners.is_empty() || owners.contains(&active) {
         return Ok(None); // not a setup's WCS, or the active setup's own
     }
     // A WCS two setups share sits in each one's frame alike only when they
