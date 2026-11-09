@@ -19,7 +19,7 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`, `coolantModes`, `liveTooling`, `afterModes`. All but the last three are
+`capabilities`, `coolantModes`, `liveTooling`, `afterModes`, `axisInversion`. All but the last four are
 text the engine reads none of; `liveTooling = true` (issue #33) says the
 script voices a `PARAM LiveTool` section - C-axis live-tool work, the
 stream's X Y Z the part-frame tip and C the stated spindle angle - and
@@ -31,7 +31,12 @@ flood. Every shipped post sets it. `afterModes = true` says the script
 reads `PARAM AfterOperation` (#110) - without it the engine refuses a
 section asking Optional stop, Program stop or Go home by name, since
 the script would run straight on into the next tool. The six posts
-that write it set it. The file-viewer's about box reads
+that write it set it. `axisInversion = true` (#374) says the script's
+output on the engine's mirrored stream (an inverted X / Y: negated
+coordinates, centres and origin, CW/CCW reversed in a plane holding one
+inverted axis, the comp side swapped) is verified by goldens and the
+controller-interpretation test - without it a machine with an inverted
+axis is refused by name. Fanuc and Haas set it. The file-viewer's about box reads
 the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).

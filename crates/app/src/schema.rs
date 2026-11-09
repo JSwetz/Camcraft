@@ -158,6 +158,12 @@ pub struct ToolBody {
 /// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
 /// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
 /// carries it) and the project loader.
+/// `machine` and `post` (#343) are the setup's OWN machine and post:
+/// `None` - the default, and every file before v55 - follows the
+/// document's (`MachineDef` / `PostRef` singletons), so an untouched
+/// document mounts and posts exactly as before. Read through
+/// [`crate::setup_mount`]; written only by `SetSetupMachine` /
+/// `SetSetupPost` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
@@ -165,6 +171,8 @@ pub struct SetupDef {
     pub datum_from: String,
     pub work_offset: Option<usize>,
     pub part_alignment: Option<Location>,
+    pub machine: Option<MachineDef>,
+    pub post: Option<PostRef>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the

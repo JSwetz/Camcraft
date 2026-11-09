@@ -1,4 +1,4 @@
-//! The file mirror of a tool's modelled body (#368, project v55): the
+//! The file mirror of a tool's modelled body (#368, project v56): the
 //! placed facets (tool frame) and the placement they landed with. The
 //! envelope is never written - it is re-derived from the facets on
 //! load, so file and judgement cannot disagree, and a body the build's

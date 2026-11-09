@@ -210,7 +210,13 @@ fn draw_direction(ui: &mut Ui, i: usize, a: &mut machine::AxisLimits) {
             ui.selectable_value(&mut a.direction, AxisDirection::Inverted, inv_word);
         });
     if !a.direction.is_standard() {
-        ui.label("(posting refused until inverted axes post, #374)");
+        // #374: the post mirrors an inverted X / Y; anything else refuses.
+        let note = if matches!(a.name.trim(), "X" | "Y") {
+            "(posted mirrored: Fanuc / Haas posts only)"
+        } else {
+            "(posting refused for this axis)"
+        };
+        ui.label(note);
     }
 }
 

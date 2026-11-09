@@ -271,6 +271,12 @@ pub struct SetupDto {
     /// modelled - is the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_alignment: Option<AlignmentDto>,
+    /// v55 (#343): the setup's own machine. Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<SetupMachineDto>,
+    /// v55 (#343): the setup's own post. Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<SetupPostDto>,
 }
 
 /// A setup's WCS as files hold it. v54 (#342) writes one entity name
