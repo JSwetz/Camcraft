@@ -84,6 +84,7 @@ mod stock_size;
 mod stock_fit_sides;
 mod layout;
 mod machines_pane;
+mod machines_edit;
 mod unsaved;
 mod post_refusal;
 mod gcode_viewer;
