@@ -109,6 +109,31 @@ fn the_corner_depth_is_not_45_only() {
 }
 
 #[test]
+fn the_chamfer_declares_the_break_it_was_asked_to_cut() {
+    // #303: the ride states its break beside the moves - the picked
+    // loop at the top plane, the face's depth and slope from width and
+    // angle - so the program sim judges the cut against the promise.
+    let mut p = chamfer_params();
+    p.width = 3.0;
+    p.angle_deg = 30.0;
+    let t = chamfer_path(&p);
+    assert_eq!(t.breaks.len(), 1, "one picked loop, one break: {:?}", t.breaks);
+    let b = &t.breaks[0];
+    let tan = 30f64.to_radians().tan();
+    assert!((b.depth - 3.0 * tan).abs() < 1e-12 && (b.slope - tan).abs() < 1e-12, "{b:?}");
+    assert!((b.width() - 3.0).abs() < 1e-9, "the bevel meets the top plane at the stated width");
+    assert!(b.edge.iter().all(|q| q.z == 20.0), "the edge stands at the top plane: {b:?}");
+    assert_eq!(b.edge.first(), b.edge.last(), "the loop closes on its start");
+    // The bevel itself: at the wall it is the corner depth, `width` in
+    // it is the top plane, and past the width nothing is declared.
+    let (wall, _) = b.floor_at(0.0, 30.0).expect("on the wall");
+    assert!((wall - p.corner_z()).abs() < 1e-9, "{wall}");
+    let (mid, edge_z) = b.floor_at(1.5, 30.0).expect("inside the width");
+    assert!((mid - (p.corner_z() + 1.5 * tan)).abs() < 1e-9 && edge_z == 20.0, "{mid}");
+    assert!(b.floor_at(3.5, 30.0).is_none(), "past the stated width nothing is the op's");
+}
+
+#[test]
 fn chamfer_refuses_its_own_numbers_by_name() {
     // The kernel's doors - the four the Tool cannot be blamed for.
     let mut p = chamfer_params();

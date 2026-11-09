@@ -11,6 +11,8 @@ pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
 pub mod fixture_carried;
+pub mod fixture_struck;
+pub mod fixture_view;
 pub use camcraft_motion::finishing3d;
 pub use camcraft_geometry::geo2d;
 pub mod geometry;

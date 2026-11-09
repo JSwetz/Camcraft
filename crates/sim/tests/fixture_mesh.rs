@@ -2,8 +2,8 @@
 //! jaws with a gap, and its world box is one block. A path down the gap
 //! was a false crash under the box; under the mesh it is clean, while a
 //! flute clipping a jaw corner, a rapid dipping into a jaw, and a tool
-//! standing wholly inside steel still convict. Open, non-finite and
-//! posed cases keep the box verdict.
+//! standing wholly inside steel still convict. Open and non-finite
+//! meshes keep the box verdict.
 //! Provenance: our own geometry; the law is the Prime Directive's.
 
 use std::sync::Arc;
@@ -226,12 +226,14 @@ fn an_open_or_broken_mesh_keeps_the_box_verdict_by_name() {
 }
 
 #[test]
-fn posed_moves_and_unpaired_boxes_keep_the_box_verdict() {
+fn unpaired_boxes_keep_the_box_verdict_and_posed_moves_are_read() {
     let f = fixture(vise());
+    // Slice 3: a posed pass down the gap is the mesh's to read too
+    // (tests/fixture_mesh_posed.rs holds the posed laws).
     let path = Toolpath::new(vec![feed(p(-60.0, 0.0, 25.0), p(60.0, 0.0, 25.0)).with_axis([0.0, 0.1, 0.995])]);
     let (boxed, meshed) = judge(&path, &f);
     assert!(!boxed.is_empty());
-    assert_eq!(boxed, meshed, "a posed move is the box laws' to judge");
+    assert!(meshed.is_empty(), "leaning 6 deg in the gap, the stack clears both jaws: {meshed:?}");
 
     // A box no fixture owns (the machine table) stays a box.
     let upright = Toolpath::new(vec![feed(p(-60.0, 0.0, 25.0), p(60.0, 0.0, 25.0))]);

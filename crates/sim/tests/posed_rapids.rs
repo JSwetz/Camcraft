@@ -88,7 +88,7 @@ fn judge(p: &Toolpath, top: f64, x1: f64) -> Vec<Warning> {
 fn rapid(x0: f64, z: f64, axis: Option<[f64; 3]>) -> Toolpath {
     let mut m = Move::new(MoveKind::Rapid, Point3::new(x0, 0.0, z), Point3::new(13.0, 0.0, z), None);
     m.axis = axis;
-    Toolpath { moves: vec![m], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() }
+    Toolpath { moves: vec![m], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() }
 }
 
 /// A 60-degree lean toward -Y: the flute tops out 2 mm above the tip

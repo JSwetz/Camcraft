@@ -68,7 +68,9 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&Icon
     }
     // Operation rows offer the operation verbs; a setup's Operations row
     // offers Paste even when it has no operation rows yet (activating
-    // the setup, so the menu anchors on the row that was clicked).
+    // the setup, so the menu anchors on the row that was clicked). Model
+    // rows offer Use / Stop using as fixture, a setup's Fixtures node
+    // Import fixture… (#339 slice 4).
     if let Some(ix) = hit.menu {
         let target = match leaves.get(ix) {
             Some(Leaf::Op(name)) => Some(TreeMenuTarget::Operation(name.clone())),
@@ -76,6 +78,12 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&Icon
             Some(Leaf::SetupOps(setup)) => {
                 focus(state, setup);
                 Some(TreeMenuTarget::Operations)
+            }
+            // #339 slice 4: the fixture verbs.
+            Some(Leaf::Model(name)) => Some(TreeMenuTarget::Model { name: name.clone(), row: ix }),
+            Some(Leaf::Page(setup, SetupPage::Fixtures)) => {
+                focus(state, setup);
+                Some(TreeMenuTarget::Fixtures(setup.clone()))
             }
             _ => None,
         };

@@ -97,6 +97,16 @@ pub(crate) fn model_row_marks(is_fixture: bool, hidden: bool) -> (String, painte
     )
 }
 
+/// A Fixtures child row's suffix (#339 slice 4): how the gate judges
+/// the steel - `mesh`, or `box only: <reason>` - then the hidden marker.
+pub(crate) fn fixture_row_suffix(mesh: Option<camcraft_app::fixture_view::MeshState>, hidden: bool) -> String {
+    let mut suffix = mesh.map(|m| m.label()).unwrap_or_default();
+    if hidden {
+        suffix.push_str(" (hidden)");
+    }
+    suffix
+}
+
 pub(crate) fn kind_name(k: ToolKind) -> &'static str {
     match k {
         ToolKind::EndMill => "end mill",
@@ -217,7 +227,7 @@ fn setup_children(
     for (fixture, entity) in fixtures {
         let hidden = state.hidden_models.contains(&fixture);
         let selected = matches!(t, UiTarget::Model(n) if *n == fixture) || model::is_selected(w, &entity);
-        let suffix = if hidden { " (hidden)".to_owned() } else { String::new() };
+        let suffix = fixture_row_suffix(state.fixture_mesh_state(&fixture), hidden);
         push_row(rows, leaves, fixture.clone(), suffix, painted::Kind::Fixture, Some(Icon::Fixture), selected, hidden, depth + 1, Leaf::Model(fixture));
     }
     let ops = setup_ops(state, ctx);
