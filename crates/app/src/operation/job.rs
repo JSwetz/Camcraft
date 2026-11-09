@@ -148,12 +148,6 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     if let Some(why) = crate::setup_align::generation_problem(world, op) {
         return Err(GenError::Invalid(why));
     }
-    // #343: the mounted machine and post are the active setup's - an op
-    // of a setup mounting other steel is refused by name, never cut
-    // against the wrong machine.
-    if let Some(why) = crate::setup_mount::generation_problem(world, op) {
-        return Err(GenError::Invalid(why));
-    }
     let material = material_of(world, setup, &op.src)?;
     let part_solid = part_solid_of(world, setup, &op.src, &material);
     // Setup stock, when it is not the source itself: the swarf column
@@ -284,7 +278,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let drills_ahead = if turned { crate::rest::drills_ahead(world, op_name, setup) } else { Vec::new() };
     let turned_ahead = if turned { crate::rest::turned_ahead(world, op_name, setup) } else { Vec::new() };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
-    let machine_kind = crate::machine::kind_of(world);
+    // #388: the op's own setup's machine, active or not.
+    let machine_kind = crate::machine::kind_of_setup(world, setup);
     // The lathe spindle law (issue #62): every kind that turns about the
     // fitted axis - the turning family, and the lathe's axial Drill -
     // must have that axis ON the spindle the post programs (world Z
@@ -294,7 +289,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // The mill-turn's cross drill joins it (issue #67): its standoffs
     // are measured about that same line.
     let (slot, wcs_origin) = crate::posting::wcs_context(world, setup);
-    let spindle_note = if super::spindle_law::turns(world, &op.params) {
+    let spindle_note = if super::spindle_law::turns(world, setup, &op.params) {
         super::spindle_law::check(&material.facets, wcs_origin, slot)?
     } else {
         None
@@ -303,7 +298,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);
     let rotary_axis = crate::fixture::rotary_axis_of(world, op);
-    let mounted = crate::machine::of(world).1;
+    let mounted = crate::machine::of_setup(world, setup).1;
     let spindle = mounted
         .as_ref()
         .and_then(|m| m.spindle_d.zip(m.spindle_len))

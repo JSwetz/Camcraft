@@ -138,8 +138,11 @@ fn post(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
         opts["cps"] = json!(p);
     }
     let mut out = api::v_post(env, vec![opts])?;
-    // What v_post itself reports as written, not the path asked for.
-    out["files"] = json!([out.get("path").cloned().unwrap_or_else(|| json!(to))]);
+    // #388: a program over several mounts names its files itself;
+    // otherwise what v_post itself reports as written, not the path asked for.
+    if out.get("files").is_none() {
+        out["files"] = json!([out.get("path").cloned().unwrap_or_else(|| json!(to))]);
+    }
     Ok(out)
 }
 
