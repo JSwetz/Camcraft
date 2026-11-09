@@ -60,11 +60,22 @@ go to `CHANGELOG.md`.
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research"`
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research -label:\"P?\""`
   (then drop any whose comments hold a live contributor claim - "A claim
   comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
+- **`P?` is paused, not prioritised** (user, 2026-11-09: "a P? label that
+  holds an issue paused until maintainer tells it to be changed"). An issue
+  labelled `P?` is held by the maintainer: Pick never takes it, no lane
+  slot works it, no agent claims, researches, files sub-issues for or
+  re-prioritises it, and the bug/enhancement lanes skip it the same way.
+  It carries `P?` *instead of* a `P0`/`P1`/`P2` label, never beside one -
+  an agent that finds both reports it rather than choosing. Only the
+  maintainer swaps `P?` for a real priority (or closes the issue); until
+  then agents may only read it, link it, and comment facts that belong on
+  it (e.g. a duplicate or a related fix), without changing its labels.
+  An agent filing a new issue never uses `P?` - it picks `P0`/`P1`/`P2`.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
   limit to 2 bugs 2 enhancements.. as we are now just working on the latest
   issues and not the old ones"). At most four issues are worked at once: two
@@ -435,6 +446,20 @@ pre-push, never per-edit. The ignore reason names its lane. Coverage must
 not ride the split away: `#[test]` count before and after must match, and
 the ignored set keeps its golden asserts. UI snapshot binaries resolve their
 goldens from `crates/ui` - run them with that CWD.
+
+**Pixel snapshots are release-lane** (#255). The UI's PNG goldens
+(`crates/ui/tests/snapshots/*.png`) are `#[ignore]`d out of quick and
+batch and run only in the release tier's ui snapshot lane (debug,
+`--ignored snapshot`, CWD `crates/ui`). A PR never changes a snapshot
+PNG - not to "refresh" a conflict, not to accept a new render - and a
+`UPDATE_SNAPSHOTS=1` refresh on merge is no longer a habit: the goldens
+are regenerated once at the minor/major cut, in one commit on the release
+branch, after a human look at the `.diff.png`. What a snapshot guards is
+asserted in the default suite by its structural twin
+(`crates/ui/src/egui_app/tests/structural.rs`): AccessKit labels, roles,
+enabled/disabled state and window presence, plus the painted strips' text
+and coarse placement - text-only, so it holds on every OS and merges like
+code. A UI change updates those assertions, not the PNGs.
 
 `VisualRunner` is auto-enabled: windows show, run fast, and stay open if closed
 early; hidden runs cap at 30s; auto-close after 10s when no test is pending; on

@@ -37,6 +37,8 @@ use camcraft_app::{machine, model, posting, project, world::new_world};
 
 #[path = "state_per_op.rs"]
 mod per_op;
+#[path = "state_tool_library.rs"]
+mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
 #[path = "state_fixture.rs"]
@@ -44,6 +46,15 @@ mod fixture_view;
 #[path = "state_fixture_library.rs"]
 mod fixture_library;
 pub use fixture_library::{FixtureLibDialog, InsertFixtureDraft, LibraryRow, SaveFixtureDraft};
+#[path = "state_program_entry.rs"]
+mod program_entry;
+pub use program_entry::EntryVerb;
+#[path = "state_tool_body.rs"]
+mod tool_body_ui;
+pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
+#[path = "state_tool_profile.rs"]
+mod tool_profile_ui;
+pub use tool_profile_ui::{ToolColumn, ToolProfileUi, is_spun_kind, parametric_points};
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -184,6 +195,19 @@ pub enum CommandKind {
         number: Option<u32>,
     },
     DeleteTool(String),
+    /// #371: set (`Some`) or clear (`None`) a tool's modelled body - the
+    /// tool editor's Apply body / Clear body, one `SetToolBody`.
+    SetToolBody {
+        name: String,
+        body: Option<BodyDraft>,
+    },
+    /// #93: set a milling tool's drawn spun holder (`Some` points) or
+    /// return it to its parametric cylinder (`None`) - the tool editor's
+    /// Apply profile, one `SetToolBody::spun`.
+    SetToolProfile {
+        name: String,
+        points: Option<Vec<camcraft_app::spun::SpunPoint>>,
+    },
     /// The document's workpiece material (M13.2); `None` states none.
     SetWorkMaterial(Option<camcraft_app::tools::WorkMaterial>),
     /// The op page's "Apply suggestion" (M13.2): feed + spindle speed
@@ -224,6 +248,9 @@ pub enum CommandKind {
     /// The op menu's Suppress / Unsuppress row (#110): left out of the
     /// posted program, toolpath kept - one undo unit.
     SuppressOperation { name: String, suppressed: bool },
+    /// The operation list's Pause / Home entries (#155): add, change,
+    /// suppress - each one undo unit.
+    ProgramEntry(EntryVerb),
     /// The post page's "Skip pauses and homes" switch (#110).
     SetSkipStops(bool),
     /// The post page's Output choice (#111): `true` = one file per op.
@@ -1105,6 +1132,8 @@ pub enum TreeMenuTarget {
     /// A setup's Fixtures node (`""` - the implicit setup): "Import
     /// fixture…".
     Fixtures(String),
+    /// A Pause / Home entry row (#155).
+    Entry(String),
 }
 
 pub struct State {
@@ -1332,6 +1361,12 @@ pub struct State {
     /// when the named tool vanishes (the ghost law, mirrored from
     /// [`State::pane_target`]).
     pub tool_editor: Option<String>,
+    /// #371: the tool editor's body draft (imported mesh, placement,
+    /// pick mode). Ephemeral like `tool_ui`; Apply body is the command.
+    pub tool_body_ui: ToolBodyUi,
+    /// #93: the tool editor's spun-profile draft (Parametric/Custom, the
+    /// points). Ephemeral like `tool_body_ui`; Apply profile is the command.
+    pub tool_profile_ui: ToolProfileUi,
     /// The machine editor window (M3.3 stage C): `None` closed. An
     /// ephemeral draft like [`State::tool_editor`] - the numbers under
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
@@ -1558,6 +1593,8 @@ impl State {
                 ..ToolUi::default()
             },
             tool_editor: None,
+            tool_body_ui: ToolBodyUi::default(),
+            tool_profile_ui: ToolProfileUi::default(),
             machine_editor: None,
             machines_pane: Default::default(),
             theme_cache: theme_files::Cache::new(),
@@ -2202,6 +2239,8 @@ impl State {
     pub(crate) fn close_tool_editor_window(&mut self) {
         self.tool_editor = None;
         self.tool_synced = (String::new(), self.doc_version);
+        self.tool_body_ui = ToolBodyUi::default();
+        self.tool_profile_ui = ToolProfileUi::default();
     }
 
     pub(crate) fn copy_operation(&mut self, name: &str) {
@@ -2658,6 +2697,8 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Tool, format!("tool number not set: {err}")),
                 }
             }
+            CommandKind::SetToolBody { name, body } => self.run_set_tool_body(&name, body),
+            CommandKind::SetToolProfile { name, points } => self.run_set_tool_profile(&name, points),
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {
@@ -2786,6 +2827,7 @@ impl State {
                 }
             }
             CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
+            CommandKind::ProgramEntry(verb) => self.program_entry_verb(verb),
             CommandKind::SetSkipStops(skip) => {
                 let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
                 match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
@@ -3686,8 +3728,17 @@ impl State {
     /// refused post leaves both the document and any previous program on
     /// disk exactly as they were.
     fn post_program_path(&mut self, path: PathBuf) {
-        match posting::post_setup(&self.world, &path) {
-            Ok(posted) => {
+        // #388: setups on different machines or posts write one file each.
+        match posting::post_mounts(&self.world, &path) {
+            Ok(files) if files.len() > 1 => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
+                self.show_posted_mounts(files);
+            }
+            Ok(files) => {
+                let Some(first) = files.into_iter().next() else { return };
+                let (path, posted) = (first.path, first.posted);
                 // A program went out: an earlier refusal no longer
                 // describes the document's post (#265).
                 self.post_refusal = None;

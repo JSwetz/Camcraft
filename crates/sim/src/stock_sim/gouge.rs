@@ -2,6 +2,7 @@
 
 use super::kernel::StockError;
 
+use super::scan_arc::ScanArc;
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 /// The facet gouge law: how deep the model's own surface stands
@@ -42,6 +43,7 @@ use crate::geometry::{Point3, Triangle};
 pub(super) fn facet_gouge(
     facets: &[Triangle],
     segs: &[(Point3, Point3)],
+    arcs: &[Option<ScanArc>],
     r: f64,
     x0: f64,
     y0: f64,
@@ -85,6 +87,11 @@ pub(super) fn facet_gouge(
     let mut pops = 0usize;
     for (si, (sa, sb)) in segs.iter().enumerate() {
         let epoch = si as u32;
+        // An XY arc piece (#413, `scan_arc`) reaches past its chord by
+        // its bulge: the walk grows by it, the distance is the arc's.
+        let arc = arcs.get(si).copied().flatten();
+        let bulge = arc.map_or(0.0, |a| a.bulge());
+        let r_walk = r + bulge;
         // (u, v): the band walk's axes, u the one the segment runs
         // mostly along - so slices are few and per-slice bands thin
         // (slope at most 1, so a slice's band costs O(r/cell)).
@@ -100,11 +107,11 @@ pub(super) fn facet_gouge(
         // Columns whose grown window can reach the segment at all:
         // left of these, every facet point sits farther than r from
         // every segment point and can only contribute dev <= 0.
-        let (k0, k1) = (fx(umin - r, u0, o_u), fx(umax + r, u0, o_u));
+        let (k0, k1) = (fx(umin - r_walk, u0, o_u), fx(umax + r_walk, u0, o_u));
         for k in k0..=k1 {
             let (w0, w1) = (
-                (u0 + k as f64 * cell - r).max(umin),
-                (u0 + (k + 1) as f64 * cell + r).min(umax),
+                (u0 + k as f64 * cell - r_walk).max(umin),
+                (u0 + (k + 1) as f64 * cell + r_walk).min(umax),
             );
             if w0 > w1 {
                 continue; // outside the path's reach in u
@@ -118,7 +125,7 @@ pub(super) fn facet_gouge(
                 (0.0, 1.0) // a plunge: the whole segment is one u
             };
             let (vy0, vy1) = (va + dv * ta, va + dv * tb);
-            let (l0, l1) = (fx(vy0.min(vy1) - r, v0, o_v), fx(vy0.max(vy1) + r, v0, o_v));
+            let (l0, l1) = (fx(vy0.min(vy1) - r_walk, v0, o_v), fx(vy0.max(vy1) + r_walk, v0, o_v));
             for l in l0..=l1 {
                 let (ix, iy) = if xmajor { (k, l) } else { (l, k) };
                 for fi in bins[ix + iy * nx].iter().copied() {
@@ -133,7 +140,13 @@ pub(super) fn facet_gouge(
                         )));
                     }
                     let t = &facets[fi as usize];
-                    let dev = r - dist_seg_tri(*sa, *sb, t);
+                    let dc = dist_seg_tri(*sa, *sb, t);
+                    let d = match arc {
+                        // A chord a bulge past the ball: the arc is too.
+                        Some(a) if dc - bulge < r => a.dist_tri(t),
+                        _ => dc,
+                    };
+                    let dev = r - d;
                     if dev > best {
                         best = dev;
                         at = Point2::new(

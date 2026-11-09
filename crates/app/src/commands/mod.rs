@@ -16,6 +16,8 @@ pub mod move_model;
 pub mod operation;
 pub mod post;
 pub mod post_options;
+// #155: Pause / Home entries of the operation list.
+pub mod program_entry;
 // M13.11: mesh repair (weld + fill holes) as one undo unit over UpdateModel.
 pub mod repair_model;
 // Issue #143: ribbon pins are saved with the project, so they are a command.
@@ -42,6 +44,8 @@ pub mod set_wcs;
 pub mod tool;
 // #368: a tool's modelled body.
 pub mod tool_body;
+// #300: a tool library file imported as one undo unit.
+pub mod tool_import;
 // #221: a tool's controller number.
 pub mod tool_number;
 pub mod update_model;
@@ -65,6 +69,7 @@ pub use operation::{
 };
 pub use post::SelectPost;
 pub use post_options::SetPostOptions;
+pub use program_entry::{AddProgramEntry, EditProgramEntry};
 pub use repair_model::RepairModel;
 pub use ribbon_pins::SetRibbonPins;
 pub use select_entity::SelectEntity;
@@ -81,6 +86,7 @@ pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
 pub use tool_body::{LatheBodySpec, SetToolBody, ToolBodySpec};
+pub use tool_import::{ImportReport, ImportTools};
 pub use tool_number::SetToolNumber;
 pub use update_model::UpdateModel;
 

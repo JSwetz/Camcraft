@@ -6,16 +6,18 @@
 //! reported unresolved, never guessed).
 //!
 //! Gate map (M4.4): covers app::fixture_view, app::fixture_struck,
-//! app::commands::import_fixture, app::commands::fixture, app::posting.
+//! app::commands::import_fixture, app::commands::fixture, app::posting
+//! (fixture_findings: each op judged on its own setup's spindle, #388).
 
 use camcraft_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportFixture, ImportModel, MoveFixture, SetStock,
-    TagFixture, UntagFixture,
+    AddTool, CreateOperation, CreateSetup, GenerateOperation, History, ImportFixture, ImportModel, MoveFixture,
+    SetSetupMachine, SetStock, TagFixture, UntagFixture,
 };
 use camcraft_app::fixture;
 use camcraft_app::fixture_struck;
 use camcraft_app::fixture_view::{self, BoxReason, MeshError, MeshState, MeshStateCache};
 use camcraft_app::geometry::{Mesh, Point3, Triangle};
+use camcraft_app::machine::Machine;
 use camcraft_app::model;
 use camcraft_app::operation::{Height, OpParams, SrcRef};
 use camcraft_app::posting;
@@ -233,4 +235,91 @@ fn an_op_without_fixture_warnings_resolves_to_nothing() {
     let (world, _history) = face_world();
     assert_eq!(fixture_struck::struck_by(&world, "Face1"), None);
     assert_eq!(fixture_struck::struck_by(&world, "NoSuchOp"), None);
+}
+
+/// A mill stating only its spindle housing, `d` across and `len` long
+/// - no travel, so no derived table joins the steel.
+fn housing(d: f64) -> Machine {
+    Machine {
+        model: format!("Spindle {d}"),
+        kind: Some("mill".into()),
+        spindle_d: Some(d),
+        spindle_len: Some(200.0),
+        ..Default::default()
+    }
+}
+
+fn face_params() -> OpParams {
+    OpParams::Face {
+        holes: Default::default(),
+        tilt: None,
+        blend_turns: false,
+        stepover: 3.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    }
+}
+
+/// One setup on a mill with spindle housing `d`: the face world's stock
+/// and pass (`op`), and a tall clamp standing `gap` mm off the pass's
+/// high-x edge, tagged to that setup alone.
+fn housing_setup(world: &World, history: &mut History, setup: &str, op: &str, d: f64, gap: f64) {
+    history.execute(world, CreateSetup::new(world, None, None).expect("setup"));
+    let mch = Some((format!("spindle-{d}.mch"), Some(housing(d))));
+    history.execute(world, SetSetupMachine::new(world, setup, mch).expect("machine"));
+    let stock = SetStock::new(world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Location::default());
+    history.execute(world, stock.expect("stock"));
+    history.execute(world, CreateOperation::new(world, op, "EM-0400-2FL", SrcRef::Stock, face_params()).expect("op"));
+    history.execute(world, GenerateOperation::new(world, op).expect("generate"));
+    let e = model::find_by_name(world, op).expect("op");
+    let path = model::toolpath_of(world, &e).expect("generated").path;
+    let x1 = path.moves.iter().flat_map(|m| [m.from.x, m.to.x]).fold(f64::MIN, f64::max);
+    let clamp = format!("Clamp{op}");
+    let c = model::spawn(world, &clamp);
+    model::set_facets(world, &c, cube(p(x1 + gap, -200.0, -5.0), p(x1 + gap + 20.0, 200.0, 400.0)).into());
+    model::set_rev(world, &c, 1);
+    history.execute(world, TagFixture::new(world, &clamp, Some(setup)).expect("tagged"));
+    history.execute(world, GenerateOperation::new(world, op).expect("regenerate"));
+}
+
+#[test]
+fn the_struck_check_judges_each_op_on_its_own_setups_spindle() {
+    let world = new_world();
+    let mut history = History::default();
+    let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0400-2FL").map(|(_, t)| t).expect("catalog");
+    history.execute(&world, AddTool::new(&world, "EM-0400-2FL", tool).expect("tool"));
+    // The same pass beside the same clamp, 60 mm off: only a 300 mm
+    // housing (150 mm radius) reaches it, never a 20 mm one. Setup2 (the
+    // small housing) is active last, so a global-machine read would
+    // acquit both.
+    housing_setup(&world, &mut history, "Setup1", "FaceBig", 300.0, 60.0);
+    housing_setup(&world, &mut history, "Setup2", "FaceSmall", 20.0, 60.0);
+
+    let findings = posting::fixture_findings(&world).expect("fresh program");
+    assert!(findings.unjudged.is_empty(), "{:?}", findings.unjudged);
+    let convicted: Vec<&str> = findings.hits.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(convicted.contains(&"FaceBig"), "the big housing strikes the clamp: {convicted:?}");
+    assert!(!convicted.contains(&"FaceSmall"), "the small housing clears it: {convicted:?}");
+
+    // op_hits itself, the law the viewport tint shares: same verdicts.
+    let hits_of = |name: &str| {
+        let e = model::find_by_name(&world, name).expect("op");
+        let op = model::operation_of(&world, &e).expect("operation");
+        let path = model::toolpath_of(&world, &e).expect("generated").path;
+        let (turning, fixed) = fixture::workholding_for(&world, op.setup.as_deref());
+        let meshes = fixture::meshes_for(&world, op.setup.as_deref());
+        fixture_struck::op_hits(&world, &op, &path, &turning, &fixed, &meshes).expect("judged")
+    };
+    assert!(!hits_of("FaceBig").is_empty());
+    assert!(hits_of("FaceSmall").is_empty());
+
+    // The tint names the clamp for the big setup's op only.
+    let s = fixture_struck::struck_by(&world, "FaceBig").expect("the big-housing pass warns");
+    assert_eq!(s.fixtures, vec!["ClampFaceBig".to_owned()], "{s:?}");
+    assert_eq!(fixture_struck::struck_by(&world, "FaceSmall"), None);
 }

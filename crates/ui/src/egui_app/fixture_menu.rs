@@ -52,7 +52,7 @@ pub(crate) fn menu_rows(state: &State, target: &TreeMenuTarget) -> Vec<(String, 
             ("Save fixture to library…".to_owned(), Some(CommandKind::FixtureLibrarySaveDialog(s.clone()))),
             ("Insert from library…".to_owned(), Some(CommandKind::FixtureLibraryInsertDialog(s.clone()))),
         ],
-        TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations => Vec::new(),
+        TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => Vec::new(),
     }
 }
 
@@ -65,7 +65,7 @@ fn anchor_row(target: &TreeMenuTarget, leaves: &[Leaf]) -> Option<usize> {
             })
         }
         TreeMenuTarget::Fixtures(s) => leaves.iter().position(|l| *l == Leaf::Page(s.clone(), SetupPage::Fixtures)),
-        TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations => None,
+        TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => None,
     }
 }
 

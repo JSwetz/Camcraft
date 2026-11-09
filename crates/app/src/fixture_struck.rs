@@ -47,7 +47,8 @@ pub fn op_hits(
     if turning.is_empty() && fixed.is_empty() {
         return Ok(Vec::new());
     }
-    let spindle = crate::machine::of(world)
+    // #388: the op's own setup's machine, never the active one.
+    let spindle = crate::machine::of_setup(world, op.setup.as_deref())
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
         .map(|(d, l)| (d * 0.5, l));
@@ -143,7 +144,7 @@ pub fn struck_by(world: &World, op_name: &str) -> Option<Struck> {
             judge(name, vec![b], Vec::new(), meshes);
         }
     }
-    if let Some(t) = fixture::table_box(world) {
+    if let Some(t) = fixture::table_box(world, ctx) {
         judge(MACHINE_TABLE.to_string(), Vec::new(), vec![t], Vec::new());
     }
     let unresolved = warned.iter().copied().filter(|a| !covered.contains(a)).collect();
