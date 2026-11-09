@@ -188,7 +188,8 @@ pub struct TreeHit {
     pub radio: Option<usize>,
 }
 
-/// A tree row's (label, suffix) ink (#506). The label is body text; the
+/// A tree row's (label, suffix) ink (#506); the row's icon takes the
+/// label ink and its eye the suffix ink (#524). The label is body text; the
 /// suffix and a hidden row step down to the dim tier - never the faint
 /// (disabled) one, which reads ~3:1 on the light strip. A selected row is
 /// all body text: the dim tier does not clear the selection fill. Every
@@ -263,14 +264,17 @@ pub fn tree(
         }
         // PNG first (browser.rs: the tree icon rides the row, dimmed to
         // 0.55 when hidden), the painted glyph as the no-GPU twin.
+        // The glyphs are white masks: tinted with the row's own inks
+        // (#524), as the ribbon tints its icons, never a white wash
+        // that vanishes on a light panel.
+        let (icon_ink, eye_ink) = row_inks(pal, row.hidden, row.selected);
         let tex = icons.and_then(|s| row.icon.map(|i| s.texture(i))).flatten();
         if let Some(tex) = tex {
-            let dim = if row.hidden { 140 } else { 255 };
             painter.image(
                 tex.id(),
                 Rect::from_center_size(Pos2::new(gx, rr.center().y), Vec2::splat(TREE_INK)),
                 UV_FULL,
-                Color32::from_white_alpha(dim),
+                icon_ink,
             );
         }
         let mut shapes = Vec::new();
@@ -293,7 +297,7 @@ pub fn tree(
                         id,
                         er.shrink(2.0),
                         UV_FULL,
-                        Color32::from_white_alpha(if row.hidden { 140 } else { 217 }),
+                        eye_ink,
                     );
                 }
                 None => super::tree_glyphs::eye_glyph(&mut shapes, er, row.hidden, pal),
