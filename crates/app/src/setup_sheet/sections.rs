@@ -13,6 +13,7 @@ use crate::stock::StockShape;
 
 pub(super) fn render_stock(world: &World, ctx: Option<&str>, out: &mut String) {
     out.push_str("STOCK\n");
+    render_source(world, ctx, out);
     let name = setup::stock_entity_name(world, ctx);
     let Some(entity) = setup::stock_entity(world, ctx) else {
         out.push_str(&format!("  {name}: (none)\n\n"));
@@ -61,6 +62,32 @@ pub(super) fn render_stock(world: &World, ctx: Option<&str>, out: &mut String) {
         mm(loc.pos.y),
         mm(loc.pos.z)
     ));
+}
+
+/// #320: where a setup after the first takes its stock from, and what
+/// reaches it when it takes what the setup before leaves. The first
+/// setup prints nothing (sheets of one-setup documents unchanged).
+fn render_source(world: &World, ctx: Option<&str>, out: &mut String) {
+    use crate::setup_stock::{self, StockSource};
+    let Some(name) = setup::effective(world, ctx) else { return };
+    let Some(words) = setup_stock::describe(world, &name) else { return };
+    out.push_str(&format!("  source   {words}\n"));
+    if setup_stock::effective(world, &name) != Some(StockSource::FromPrevious) {
+        return;
+    }
+    match setup_stock::incoming(world, &name) {
+        Ok(i) => out.push_str(&format!(
+            "  incoming min ({}, {}, {})  max ({}, {}, {})  volume {} mm3 - the block below is not cut from\n",
+            mm(i.min[0]),
+            mm(i.min[1]),
+            mm(i.min[2]),
+            mm(i.max[0]),
+            mm(i.max[1]),
+            mm(i.max[2]),
+            mm(i.volume),
+        )),
+        Err(why) => out.push_str(&format!("  incoming not known: {why}\n")),
+    }
 }
 
 pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {

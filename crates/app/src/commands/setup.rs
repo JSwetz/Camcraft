@@ -124,6 +124,7 @@ impl CreateSetup {
                 machine: None,
                 post: None,
                 relative_to: None,
+                stock_source: None,
             }
         } else {
             SetupDef {
@@ -145,6 +146,8 @@ impl CreateSetup {
                 // transform between them is the identity) but links nothing:
                 // the clone does not follow the source's later edits.
                 relative_to: None,
+                // #320: a new setup takes the default stock source.
+                stock_source: None,
             }
         };
         let mut stock = None;

@@ -65,14 +65,15 @@
   envelope bands). No-body digests do not move, so no churn. Unlike
   workholding, a body is part of the tool: it changes generated paths
   (the multi-axis dodge, drill reach), so it rides the stamp.
-- **Project v57.** `body` is an optional key on the tool row
+- **Project v58.** `body` is an optional key on the tool row
   (`ToolBodyDto`: source, axis, offset, placed facets). The envelope is
   never written; it is re-derived on load, and a body the envelope law
   refuses makes the file refuse by name. The loader does not need the
-  bump. **The old-reader law does:** a v56 build would silently drop the
+  bump. **The old-reader law does:** a v57 build would silently drop the
   key and judge the smaller cylinder (the v51/v53 reasoning). PR #354
-  (one WCS per setup), #343 (per-setup machine/post) and #316 (setup
-  links) merged first and took v54-v56, so this rung is v57; it rides the
+  (one WCS per setup), #343 (per-setup machine/post), #316 (setup links)
+  and #320 (stock source) merged first and took v54-v57, so this rung is
+  v58; it rides the
   `53..=PROJECT_VERSION` block and needs no rewrite.
 - **Undo/delete:** `SetToolBody` snapshots prev/next (set, replace,
   clear). `DeleteTool` and `DeleteEntity` snapshot the body and restore
