@@ -114,10 +114,13 @@ pub(super) fn law_points(m: &Move, chord_tol: f64) -> Vec<Point2> {
 /// is one segment, an arc its chord segments), never sampled at law
 /// points: an 8 mm jaw standing between two far endpoints is exactly the
 /// thing this law exists for, and erring toward HIT means not sampling
-/// past it. The shank band and holder band stand at [min(from,to).z +
-/// above, + band_len]; above the holder, the spindle housing band when
-/// the machine file states its body geometry; below them all, the flute
-/// column at the tool radius over [min(from,to).z, + flute_len].
+/// past it. Each band is judged over its true z span along the move
+/// (#425, [`super::stack_span`]): the shank band and holder band over
+/// [min(from,to).z + above, max(from,to).z + above + band_len] - their
+/// windows at both ends, min to max, so a ramp's high end is read too;
+/// above the holder, the spindle housing band when the machine file
+/// states its body geometry; below them all, the flute column at the
+/// tool radius over [min(from,to).z, max(from,to).z + flute_len].
 ///
 /// The law (c) annulus is empty over the flute because the flute cuts its
 /// own kerf in STOCK - but a fixture standing in that window was never
@@ -171,16 +174,11 @@ pub fn bands_vs_fixtures(
             continue;
         }
         let z_deep = m.from.z.min(m.to.z);
-        // The move's xy trace as segments: one for a straight, the
-        // chords for an arc - what the cylinders actually sweep.
-        let segs: Vec<(f64, f64, f64, f64)> = match &m.arc {
-            None => vec![(m.from.x, m.from.y, m.to.x, m.to.y)],
-            Some(_) => m
-                .chords(chord_tol)
-                .into_iter()
-                .map(|(a, b)| (a.x, a.y, b.x, b.y))
-                .collect(),
-        };
+        // The move's trace as pieces: one for a straight, the chords
+        // for an arc - what the cylinders actually sweep - each with
+        // its true z span, floored at the move's deepest end (#425:
+        // a ramp's high end lifts the whole stack with it).
+        let segs = super::stack_span::pieces(m, chord_tol, z_deep);
         // Pose (M5.1 stage A): a leaning move turns each band from a
         // vertical column into a tilted cylinder. This law encloses
         // the lean in a vertical column that is never smaller: the
@@ -202,72 +200,15 @@ pub fn bands_vs_fixtures(
             if band_len <= 0.0 {
                 continue;
             }
-            let (offx, offy, r_use, bz0, bz1) = match lean {
-                None => (0.0, 0.0, band_r, z_deep + above, z_deep + above + band_len),
-                Some(a) => {
-                    let mid = above + band_len * 0.5;
-                    let spread = (band_len * 0.5) * (a[0] * a[0] + a[1] * a[1]).sqrt();
-                    let za = z_deep + above * a[2];
-                    let zb = z_deep + (above + band_len) * a[2];
-                    (
-                        mid * a[0],
-                        mid * a[1],
-                        band_r + spread,
-                        za.min(zb) - band_r,
-                        za.max(zb) + band_r,
-                    )
-                }
-            };
-            if fixtures.iter().any(|b| {
-                segs.iter().any(|&(ax, ay, bx, by)| {
-                    crate::fixture::band_hits_box(
-                        ax + offx,
-                        ay + offy,
-                        bx + offx,
-                        by + offy,
-                        bz0,
-                        bz1,
-                        r_use,
-                        b,
-                    )
-                })
-            }) {
+            if super::stack_span::band_struck(&segs, lean, above, band_r, band_len, fixtures) {
                 struck = Some(part);
                 break; // once per move, first (worst) element struck
             }
         }
-        if struck.is_none() {
-            let (offx, offy, r_use, bz0, bz1) = match lean {
-                None => (0.0, 0.0, tool.radius, z_deep, z_deep + tool.flute_len),
-                Some(a) => {
-                    let mid = tool.flute_len * 0.5;
-                    let spread = (tool.flute_len * 0.5) * (a[0] * a[0] + a[1] * a[1]).sqrt();
-                    let zb = z_deep + tool.flute_len * a[2];
-                    (
-                        mid * a[0],
-                        mid * a[1],
-                        tool.radius + spread,
-                        z_deep.min(zb) - tool.radius,
-                        z_deep.max(zb) + tool.radius,
-                    )
-                }
-            };
-            if fixtures.iter().any(|b| {
-                segs.iter().any(|&(ax, ay, bx, by)| {
-                    crate::fixture::band_hits_box(
-                        ax + offx,
-                        ay + offy,
-                        bx + offx,
-                        by + offy,
-                        bz0,
-                        bz1,
-                        r_use,
-                        b,
-                    )
-                })
-            }) {
-                struck = Some(FixturePart::Flute);
-            }
+        if struck.is_none()
+            && super::stack_span::band_struck(&segs, lean, 0.0, tool.radius, tool.flute_len, fixtures)
+        {
+            struck = Some(FixturePart::Flute);
         }
         if let Some(part) = struck.or(posed.get(i).copied().flatten()) {
             warns.push(Warning::FixtureHit {
@@ -280,7 +221,10 @@ pub fn bands_vs_fixtures(
 }
 
 /// Rapids against fixtures (M3.2 stage B): the tool disc swept along a
-/// rapid's whole segment against every box of the setup's fixtures. No
+/// rapid's whole segment against every box of the setup's fixtures,
+/// then the rest of the upright stack (#424: shank, holder, the flute
+/// column above the tip - each over the rapid's true z span, a band
+/// struck reported by name, the flute column as the rapid). No
 /// clearance gate and no vertical exemption - law (d) stands those down
 /// because the air under the clearance plane and the kerf below a retract
 /// are REMOVED MATERIAL; a fixture is steel that was never meant to move,
@@ -288,8 +232,9 @@ pub fn bands_vs_fixtures(
 /// runs. The z law is the strict-dip rule of `fixture::rapid_hits_box`: a
 /// retract lifting off exactly the mounting surface stays silent (mating
 /// surfaces contact by design); anything deeper than float dust reports.
-/// First hit per move, once. Region-free - see [`bands_vs_fixtures`] for
-/// why that matters. No spindle housing: see
+/// The strict-dip rule holds for every band: each stands at or above
+/// the tip. First hit per move, once. Region-free - see
+/// [`bands_vs_fixtures`] for why that matters. No spindle housing: see
 /// [`rapids_vs_fixtures_spindle`] for the stack with it.
 pub fn rapids_vs_fixtures(
     path: &Toolpath,
@@ -302,8 +247,8 @@ pub fn rapids_vs_fixtures(
 /// [`rapids_vs_fixtures`] with the machine's spindle housing band
 /// (radius, length - the bands law's own `spindle`) riding on the
 /// holder's top: a posed rapid sweeps the whole stack, the housing
-/// nose included (M13.8 (1)). The upright laws read the flute only,
-/// as before - their verdicts are unchanged.
+/// nose included (M13.8 (1)), and an upright rapid carries the housing
+/// band over its true z span with the rest of its stack (#424).
 pub fn rapids_vs_fixtures_spindle(
     path: &Toolpath,
     tool: &ToolGeom,
@@ -317,6 +262,8 @@ pub fn rapids_vs_fixtures_spindle(
     // The posed sweep (M13.8): a leaning rapid's whole stack - not
     // only its flute - along its real pose ([`super::posed_steel`]).
     let posed = super::posed_steel::posed_hits(path, tool, fixtures, spindle, 0.01, true);
+    // The bands above the flute an upright rapid carries (#424).
+    let upper = super::stack_span::upper_bands(tool, spindle);
     for (i, m) in path.moves.iter().enumerate() {
         if m.kind != MoveKind::Rapid {
             continue;
@@ -341,14 +288,22 @@ pub fn rapids_vs_fixtures_spindle(
         // law's own history: same `rapid_hits_box`, same sums.
         match m.axis.filter(|a| !is_vertical(a)) {
             None => {
-                if fixtures
+                // The flute disc first, its verdict as ever; then the
+                // rest of the stack (#424) - shank, holder, the housing
+                // when stated, the flute column - each over the rapid's
+                // true z span ([`super::stack_span`]), under the same
+                // strict z rule: a retract off a mounting face keeps
+                // every band at or above the steel.
+                let part = if fixtures
                     .iter()
                     .any(|b| crate::fixture::rapid_hits_box(&m.from, &m.to, tool.radius, b))
                 {
-                    warns.push(Warning::FixtureHit {
-                        at: i,
-                        fixture_part: FixturePart::Rapid,
-                    });
+                    Some(FixturePart::Rapid)
+                } else {
+                    super::stack_span::upright_rapid_struck(m, tool, &upper, fixtures)
+                };
+                if let Some(fixture_part) = part {
+                    warns.push(Warning::FixtureHit { at: i, fixture_part });
                 }
             }
             Some(a) => {
