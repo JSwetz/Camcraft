@@ -513,7 +513,8 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
-        // #373 until #374: an inverted axis would take standard-sign code.
+        // #374: an inverted axis the post cannot translate (Z, any letter
+        // but X/Y) would take standard-sign code; X/Y the engine mirrors.
         problems.extend(m.inverted_post_refusal());
         match crate::machine::check_document(world, &m) {
             Ok(c) if !c.is_ok() => {
