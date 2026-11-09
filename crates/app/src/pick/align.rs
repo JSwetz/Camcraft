@@ -141,7 +141,8 @@ fn flat_face(world: &World, g: &GeoSel, pose: PoseOf) -> Result<Option<Plane>, S
 }
 
 /// A planar face's outward unit normal, placed by `pose`; `None` when the
-/// face is not planar (or the pick is not a face).
+/// face is not planar (or the pick is not a face). Refused by name when
+/// the face's body is inside-out, open, non-manifold or mixed (#366).
 pub(super) fn outward_normal(world: &World, g: &GeoSel, pose: PoseOf) -> Result<Option<[f64; 3]>, String> {
     let FeatureSel::Face(fid) = g.feature else { return Ok(None) };
     let e = model::find_by_name(world, &g.entity).ok_or_else(|| gone(g))?;
@@ -151,6 +152,12 @@ pub(super) fn outward_normal(world: &World, g: &GeoSel, pose: PoseOf) -> Result<
         return Ok(None);
     }
     let tris = model::facets_of(world, &e).ok_or_else(|| gone(g))?;
+    // #366: the winding is only the outside when the face's body is closed
+    // and wound outward; anything else is refused by name, never guessed.
+    let verdict = super::winding::verdict_for(&super::winding::winding_of(&tris), &f.facets);
+    if let Some(why) = super::winding::refusal(verdict) {
+        return Err(format!("{} of '{}' {why}", g.feature, g.entity));
+    }
     let mut wind = Point3::new(0.0, 0.0, 0.0);
     for &i in &f.facets {
         if let Some(t) = tris.get(i as usize) {

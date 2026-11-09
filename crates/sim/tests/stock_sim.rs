@@ -1,7 +1,7 @@
 //! M2.1b: the dexel material model. The laws here are the ones the rest
 //! pass and the stock report stand on: the exact reach-interval cut of a
-//! chord, rapids touching nothing, chord conservatism for arcs (over-
-//! report rest, never invent a gouge), the `above` mask in region
+//! chord, rapids touching nothing, XY arcs swept exactly (no chord
+//! sagitta on either side, #402), the `above` mask in region
 //! clothing, and the part surface read straight off the mesh.
 //! Provenance: published CAM simulation practice (Z-map subtraction),
 //! our own code, per the Clean-Room Protocol.
@@ -111,14 +111,15 @@ fn rapids_touch_nothing_and_non_finite_touches_nothing() {
 }
 
 #[test]
-fn arc_chords_under_sweep_so_the_sim_only_over_reports() {
-    // A quarter arc R = 5 about the origin at z = -1, cut coarse: a
-    // tol of 2.0 exceeds the quarter's sagitta of 1.46, so the arc
-    // rides its single sagitta chord (5,0)-(0,5). The cell center at
-    // (3.5,3.5) sits ~0.05 under the true arc but 1.41 from the chord:
-    // a real tool would have cut it to -1, the chord sim leaves it
-    // standing. That is the conservatism law made visible - rest
-    // reported that isn't there, never a gouge that isn't.
+fn xy_arcs_sweep_the_true_arc_whatever_the_chord_budget() {
+    // A quarter arc R = 5 about the origin at z = -1, handed a chord
+    // budget of 2.0 - more than the quarter's whole sagitta of 1.46.
+    // The chord sim rode the one chord (5,0)-(0,5) and left the cell
+    // at (3.5,3.5) standing, ~0.05 under the true arc. That was never
+    // conservative: the same sagitta band cut toward the arc's centre
+    // where the tool never went (#402's false gouge on a convex
+    // corner) and stopped short of a concave wall (a real gouge
+    // hidden). XY arcs now sweep the true arc: the budget is unread.
     let mut d = Dexel::block(0.0, 0.0, 6.0, 6.0, 2.0, 1.0).unwrap();
     let m = Move {
         rotary: None,
@@ -130,14 +131,11 @@ fn arc_chords_under_sweep_so_the_sim_only_over_reports() {
         axis: None,
     };
     d.subtract(&m, 1.0, 2.0);
+    assert!(near(top_of(&d, 3, 3), -1.0), "the true arc cuts its midline");
+    assert!(near(top_of(&d, 4, 0), -1.0), "and the cell beside its start");
     assert!(
-        near(top_of(&d, 3, 3), 2.0),
-        "the chord never reaches the arc's midline - rest over-reported"
-    );
-    assert!(
-        top_of(&d, 4, 0) < 2.0,
-        "on the chord line the cell IS cut: {:?}",
-        top_of(&d, 4, 0)
+        near(top_of(&d, 0, 0), 2.0) && near(top_of(&d, 1, 1), 2.0),
+        "the centre side beyond r stands: no sagitta band inward"
     );
     assert!(
         d.tops().all(|z| z >= -1.0),
