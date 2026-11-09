@@ -140,6 +140,10 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity: hit.entity, feature: sel };
+    if state.locate_pick.is_some() {
+        crate::locate_pick::take(state, pick); // #561: a point mate
+        return;
+    }
     if state.boundary_pick.is_some() {
         // A point bounds nothing: refused by name, never drafted.
         state.status = format!("{} of '{}' is a point - a boundary takes faces or edges", pick.feature, pick.entity);

@@ -1,0 +1,141 @@
+//! #561 in the surface: the Fixtures page's "Locate part…" verb and the
+//! Model page's "Locate in <fixture>…" arm the mate draft; a Face or
+//! Vertex pick lands in the draft (never in an operation), part first,
+//! then fixture; Apply queues `Locate` and the drain lands it as one
+//! undo unit; picks that do not solve leave Apply disabled with the why.
+//! Provenance: our own page law; no vendor material consulted.
+
+use egui::accesskit::Role;
+use egui::{Event, Key, Modifiers, Vec2};
+use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::Harness;
+
+use camcraft_app::commands::{ImportModel, MoveModel, TagFixture};
+use camcraft_app::geometry::{Point3, cube, feature};
+use camcraft_app::model;
+use camcraft_app::operation::{FeatureSel, GeoSel};
+use camcraft_app::pick::facets_centroid;
+use camcraft_app::schema::Location;
+
+use crate::state::State;
+
+/// A 20 x 10 x 8 part well away from a 100 x 60 floor block marked as
+/// the fixture "vise" (its top at Z 0).
+fn with_vise() -> State {
+    let mut state = State::new();
+    let w = &state.world;
+    state.history.execute(w, ImportModel::from_mesh("part", cube(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 10.0, 8.0))));
+    let away = Location { pos: Point3::new(150.0, 80.0, 30.0), ..Location::default() };
+    state.history.execute(w, MoveModel::new(w, "part", away).expect("placed"));
+    state.history.execute(w, ImportModel::from_mesh("vise", cube(Point3::new(0.0, 0.0, -10.0), Point3::new(100.0, 60.0, 0.0))));
+    state.history.execute(w, TagFixture::new(w, "vise", None).expect("marked"));
+    state
+}
+
+/// The face of `name` whose facets centre on the LOCAL point `c`.
+fn face(state: &State, name: &str, c: [f64; 3]) -> GeoSel {
+    let e = model::find_by_name(&state.world, name).expect("entity");
+    let f = model::features_of(&state.world, &e).expect("features");
+    let tris = model::facets_of(&state.world, &e).expect("facets");
+    let id = f
+        .faces
+        .iter()
+        .find(|f| {
+            facets_centroid(&tris, f.facets.iter().map(|&i| i as usize))
+                .is_some_and(|m| (0..3).all(|k| (m[k] - c[k]).abs() < 1e-6))
+        })
+        .map(|f| f.id)
+        .expect("a face there");
+    GeoSel { entity: name.into(), feature: FeatureSel::Face(id) }
+}
+
+fn loc(state: &State, name: &str) -> Location {
+    let e = model::find_by_name(&state.world, name).expect("entity");
+    model::transform_of(&state.world, &e).unwrap_or_default()
+}
+
+fn key(h: &mut Harness<'static, State>, k: Key) {
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::COMMAND));
+    h.input_mut().events.push(Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND });
+    h.run_steps(2);
+}
+
+fn apply_enabled(h: &Harness<'static, State>) -> bool {
+    !h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply locate")).accesskit_node().is_disabled()
+}
+
+fn fixtures_frame(ui: &mut egui::Ui, st: &mut State) {
+    super::panes::shortcuts(ui, st);
+    st.drain_actions();
+    super::pages::fixtures_section(ui, st, None);
+}
+
+fn model_frame(ui: &mut egui::Ui, st: &mut State) {
+    super::panes::shortcuts(ui, st);
+    st.drain_actions();
+    super::locate_form::model_row(ui, st, "part");
+}
+
+#[test]
+fn the_fixtures_page_locates_the_part_by_a_face_mate_through_the_command() {
+    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(fixtures_frame, with_vise());
+    h.run();
+    assert!(h.state().pending.is_empty(), "drawing the page queues nothing");
+    h.get_by_label("Locate part…").click();
+    h.run();
+    let d = h.state().locate_pick.clone().expect("the draft is armed");
+    assert_eq!((d.fixture.as_str(), d.part.as_str()), ("vise", "part"), "the only part is the one located");
+    assert!(!apply_enabled(&h), "no mate yet: nothing to apply");
+
+    // A fixture pick first, and an edge, are said by name and drafted nowhere.
+    let top = face(h.state(), "vise", [50.0, 30.0, 0.0]);
+    crate::locate_pick::take(h.state_mut(), top.clone());
+    assert!(h.state().status.contains("pick the part's face or point first"), "{}", h.state().status);
+    let e = model::find_by_name(&h.state().world, "part").expect("part");
+    let f = model::features_of(&h.state().world, &e).expect("features");
+    let chain = feature::chains(&f).first().map(|c| c.id).expect("an edge");
+    crate::locate_pick::take(h.state_mut(), GeoSel { entity: "part".into(), feature: FeatureSel::Chain(chain) });
+    assert!(h.state().status.contains("is not a mate"), "{}", h.state().status);
+
+    let bottom = face(h.state(), "part", [10.0, 5.0, 0.0]);
+    crate::locate_pick::take(h.state_mut(), bottom);
+    crate::locate_pick::take(h.state_mut(), top);
+    h.run();
+    assert!(h.state().op_ui.geo.is_empty(), "a mate pick is not an operation pick");
+    assert!(h.query_by_label_contains("Mate 1:").is_some(), "the mate is listed");
+    assert!(apply_enabled(&h), "one face mate solves");
+    h.get_by_label("Apply locate").click();
+    h.run();
+    let l = loc(h.state(), "part");
+    assert!(l.pos.z.abs() < 1e-9, "the bottom sits on the floor at Z 0: {:?}", l.pos);
+    assert!(h.state().locate_pick.is_none(), "a landed locate ends the picks");
+    assert!(h.state().status.contains("located part in vise"), "{}", h.state().status);
+    key(&mut h, Key::Z);
+    assert!((loc(h.state(), "part").pos.z - 30.0).abs() < 1e-9, "undo puts the part back");
+    key(&mut h, Key::Y);
+    assert!(loc(h.state(), "part").pos.z.abs() < 1e-9, "redo locates it again");
+}
+
+#[test]
+fn the_model_page_brings_the_fixture_to_the_part() {
+    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(model_frame, with_vise());
+    h.run();
+    h.get_by_label("Locate in vise…").click();
+    h.run();
+    assert!(h.state().locate_pick.as_ref().is_some_and(|d| d.part == "part"), "armed for this part");
+    let bottom = face(h.state(), "part", [10.0, 5.0, 0.0]);
+    let top = face(h.state(), "vise", [50.0, 30.0, 0.0]);
+    crate::locate_pick::take(h.state_mut(), bottom);
+    crate::locate_pick::take(h.state_mut(), top);
+    h.run();
+    h.get_by_label("Move the fixture").click();
+    h.run();
+    let part_before = loc(h.state(), "part");
+    h.get_by_label("Apply locate").click();
+    h.run();
+    assert_eq!(loc(h.state(), "part"), part_before, "the part keeps its place");
+    assert!((loc(h.state(), "vise").pos.z - 30.0).abs() < 1e-9, "the floor top rises to the part's bottom at Z 30");
+    assert!(h.state().status.contains("located vise on part"), "{}", h.state().status);
+    key(&mut h, Key::Z);
+    assert_eq!(loc(h.state(), "vise"), Location::default(), "undo puts the vise back");
+}

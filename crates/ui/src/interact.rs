@@ -157,6 +157,10 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity, feature: sel };
+    if state.locate_pick.is_some() {
+        crate::locate_pick::take(state, pick); // #561: the locate mates
+        return;
+    }
     if state.plane_pick.is_some() {
         crate::plane_pick::take(state, pick); // #330: the Setups page's draft
         return;
@@ -233,6 +237,10 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         facet,
         feature: Some(sel),
     });
+    if state.locate_pick.is_some() {
+        crate::locate_pick::take(state, GeoSel { entity, feature: sel }); // #561: refuses an edge by name
+        return;
+    }
     if state.plane_pick.is_some() {
         crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #330
         return;
@@ -1645,6 +1653,12 @@ pub(crate) fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
 pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     // #330: while the Setups page collects a lay-on-a-plane pick, its
     // draft picks are the ones drawn.
+    // #561: the locate draft's mates and its waiting half.
+    if let Some(d) = &state.locate_pick {
+        let picks: Vec<GeoSel> =
+            d.mates.iter().flat_map(|m| [m.part.clone(), m.fixture.clone()]).chain(d.half.clone()).collect();
+        return feature_lines(state, &picks);
+    }
     if let Some(draft) = &state.plane_pick {
         return feature_lines(state, &draft.picks);
     }

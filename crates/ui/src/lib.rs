@@ -15,6 +15,7 @@ pub mod edge_pick;
 pub mod egui_app;
 pub mod feedback;
 pub mod interact;
+pub mod locate_pick;
 pub mod machined;
 pub mod operations;
 pub mod path_lines;

@@ -1689,6 +1689,8 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
             apply_model_draft(state);
         }
     });
+    // #561: the part into a fixture (or a fixture onto the part) by mates.
+    super::locate_form::model_row(ui, state, &name);
     // Mesh repair (M13.11): weld and fill on the user's say-so, never on
     // import. The button queues `RepairModel`; the report lands in the
     // status line and stays here while this model is on the page.

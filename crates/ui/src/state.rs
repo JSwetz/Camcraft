@@ -43,6 +43,8 @@ mod tool_library_io;
 mod setup_mount;
 #[path = "state_fixture.rs"]
 mod fixture_view;
+#[path = "state_locate.rs"]
+mod locate_ui;
 #[path = "state_program_entry.rs"]
 mod program_entry;
 pub use program_entry::EntryVerb;
@@ -365,6 +367,12 @@ pub enum CommandKind {
     },
     DeleteFixture(String),
     ImportFixtureDialog,
+    /// Locate the part in a fixture, or the fixture on the part, by mates
+    /// (#561): one undoable `Locate` (`LocatePart` / `LocateFixture`).
+    Locate {
+        spec: camcraft_app::fixture_locate::LocateSpec,
+        mover: camcraft_app::fixture_locate::Mover,
+    },
     /// Part orientation (M5.2 G): a model's full rigid placement -
     /// position plus yaw-pitch-roll degrees (R = Rz ⊗ Ry ⊗ Rx, the
     /// `SetWcs` voice). The world stores a unit quaternion; the
@@ -1313,6 +1321,9 @@ pub struct State {
     /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
     /// Face/Edge picks into it ahead of the boundary and the selection.
     pub plane_pick: Option<crate::plane_pick::PlanePick>,
+    /// The locate-in-fixture mate draft (#561); `Some` routes Face and
+    /// Vertex picks into it ahead of everything else.
+    pub locate_pick: Option<crate::locate_pick::LocateDraft>,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1502,6 +1513,7 @@ impl State {
             geo_pick: GeoPick::Model,
             boundary_pick: None,
             plane_pick: None,
+            locate_pick: None,
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
@@ -3145,6 +3157,7 @@ impl State {
                     }
                 }
             }
+            CommandKind::Locate { spec, mover } => self.dispatch_locate(&spec, mover),
             CommandKind::DeleteFixture(name) => match DeleteFixture::new(&self.world, &name) {
                 Ok(command) => {
                     self.history.execute(&self.world, command);
