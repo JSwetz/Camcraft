@@ -272,6 +272,9 @@ pub(super) fn status_text(state: &State, target: &str) -> (String, super::layout
     let st = ent.as_ref().map(|e| operation::status_of(&state.world, e));
     let mut details: Vec<String> = fold_warnings(&warnings);
     details.extend(super::approach_page::entry_status_lines(&notes));
+    // #339 slice 4: who the fixture warnings strike, or that no single
+    // fixture reproduces them - said, never guessed.
+    details.extend(state.struck_lines(target));
     let n = details.len();
     let tail = match n {
         0 => String::new(),

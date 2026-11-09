@@ -593,10 +593,6 @@ fn fixture_problems(world: &World) -> Vec<String> {
     let Ok(ops) = program_ops(world) else {
         return out;
     };
-    let spindle = crate::machine::of(world)
-        .1
-        .and_then(|m| m.spindle_d.zip(m.spindle_len))
-        .map(|(d, l)| (d * 0.5, l));
     let mut mesh_cache: std::collections::HashMap<Option<String>, Vec<crate::fixture::MeshedFixture>> =
         std::collections::HashMap::new();
     for (name, e) in ops {
@@ -606,56 +602,20 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
-        let Some((tool_entity, tool)) = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t).map(|d| (t, d)))
-        else {
-            continue;
-        };
-        // #368: the body's enclosing cylinder and band stack; a body
-        // that no longer fits its tool is itself the problem, by name.
-        let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
-            Ok(v) => v,
-            Err(e) => {
-                out.push(format!("{name}: tool {}: {e}", op.tool));
-                continue;
-            }
-        };
-        // `boxes_for` already folds in the machine-derived table, so an
-        // empty list means no steel this op could strike at all (the
-        // spindle band is tested against that list, never on its own).
         // Split by whether the steel turns with the part (M13.8 (2)):
         // fixed boxes are judged in the machine frame where the op's
         // rotary axis is known, in the path frame otherwise.
         let (turning, fixed) = crate::fixture::workholding_for(world, op.setup.as_deref());
-        if turning.is_empty() && fixed.is_empty() {
-            continue;
-        }
         // #339: the tagged models' meshes, indexed once per setup and
         // shared by every op in it.
         let meshes = mesh_cache
             .entry(crate::setup::effective(world, op.setup.as_deref()))
             .or_insert_with(|| crate::fixture::meshes_for(world, op.setup.as_deref()));
-        let wh = crate::verify::Workholding {
-            turning: &turning,
-            fixed: &fixed,
-            axis: crate::fixture::rotary_axis_of(world, &op),
-        };
-        let geom = tool.geom();
-        let holder = crate::tool_body::stack(&geom, body.as_ref());
-        // #339: each law's hits on a meshed fixture re-read against its
-        // closed mesh - the mesh only ever acquits.
-        let stack = crate::verify::steel_stack(&geom, &holder, spindle);
-        let steel = crate::verify::MeshSteel { fixtures: meshes, stack: &stack, chord_tol: operation::GOUGE_TOL };
-        let path = &cache.path;
-        let mut hits = crate::verify::mesh_refined(path, &wh, &steel, false, |w| {
-            crate::verify::bands_vs_workholding_held(path, &geom, &holder, w, spindle, operation::GOUGE_TOL)
-        });
-        // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::mesh_refined(path, &wh, &steel, true, |w| {
-            crate::verify::rapids_vs_workholding_held(path, &geom, &holder, w, spindle)
-        }));
-        for hit in hits {
-            out.push(format!("{name}: {hit}"));
+        // The one per-op law, shared with the viewport's struck-fixture
+        // view (#339 slice 4) so the two can never disagree.
+        match crate::fixture_struck::op_hits(world, &op, &cache.path, &turning, &fixed, meshes) {
+            Ok(hits) => out.extend(hits.into_iter().map(|hit| format!("{name}: {hit}"))),
+            Err(why) => out.push(format!("{name}: {why}")),
         }
     }
     for meshes in mesh_cache.values() {

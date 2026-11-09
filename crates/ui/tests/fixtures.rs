@@ -1,6 +1,7 @@
 //! The fixture and setup-sheet commands through the UI queue (M3.2
 //! stages B-D): the dialog arms, the refuse wording, and the law that
-//! an import-as-fixture lands as two undo units. No window, no modal
+//! an import-as-fixture lands as ONE undo unit (#339 slice 4; it was
+//! two before). No window, no modal
 //! picker - the file arms and the public `import_as_fixture` hand-off
 //! stand in for the dialogs.
 //! Provenance: our own harness; behavior specced from the pages.
@@ -98,9 +99,10 @@ fn delete_fixture_takes_the_solid_and_undo_brings_it_back_marked() {
 }
 
 #[test]
-fn import_as_fixture_lands_as_two_undo_units() {
-    // The dialog hands the worker a binding; the tag rides after the
-    // import, each independently invertible.
+fn import_as_fixture_lands_as_one_undo_unit() {
+    // #339 slice 4: the dialog hands the worker a binding; the landed
+    // mesh and the marker are one command (`ImportFixture`), so one
+    // undo takes the whole import away and one redo brings it back marked.
     let mut state = State::new();
     state.import_as_fixture = Some(None);
     state.pending.push_back(CommandKind::ImportFile(cube_path()));
@@ -111,16 +113,14 @@ fn import_as_fixture_lands_as_two_undo_units() {
         state.status
     );
     assert!(is_fixture(&state, "cube"));
+    assert!(state.import_as_fixture.is_none(), "the binding is spent");
 
-    // One undo trades away the marker only - the model stands.
     state.pending.push_back(CommandKind::Undo);
     state.drain_actions();
-    assert!(!is_fixture(&state, "cube"));
-    assert!(model::find_by_name(&state.world, "cube").is_some(), "model stays");
-    // The second undo takes the model itself.
-    state.pending.push_back(CommandKind::Undo);
+    assert!(model::find_by_name(&state.world, "cube").is_none(), "one undo takes model and marker");
+    state.pending.push_back(CommandKind::Redo);
     state.drain_actions();
-    assert!(model::find_by_name(&state.world, "cube").is_none());
+    assert!(is_fixture(&state, "cube"), "one redo brings it back marked");
 }
 
 #[test]

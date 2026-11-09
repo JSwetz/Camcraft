@@ -884,6 +884,10 @@ pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>
                 }
             });
         });
+        // #339 slice 4: how the gate judges this steel, and why a box.
+        if let Some(m) = state.fixture_mesh_state(&name) {
+            ui.label(format!("    Collision: {}", m.detail()));
+        }
         // Whether the steel turns with the part (M13.8 (2)): a chuck
         // rides the rotary, a tailstock or a table stands still and is
         // judged in the machine frame. The box edits a copy - the flag
