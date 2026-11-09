@@ -504,9 +504,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
         // origin of the slot it posts, slots no setup posts are dropped
         // with a note; a v54+ file is checked one-WCS (`wcs_one`).
         // v54 -> v55 (#343): a setup may own its machine and post;
-        // absent follows the document's. v55 -> v56 (#368): a tool may
-        // carry a modelled body; absent is the holder cylinder every
-        // older tool judged. Neither rung needs a rewrite.
+        // absent follows the document's. v55 -> v56 (#316): a setup may
+        // be placed relative to another; absent links nothing. v56 -> v57
+        // (#368): a tool may carry a modelled body; absent is the holder
+        // cylinder every older tool judged. None of these rungs needs a
+        // rewrite.
         notes = super::wcs_one::settle(&mut file, from)?;
         file.version = PROJECT_VERSION;
     }
@@ -539,6 +541,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
     }
+    super::setup_links::check(&file)?;
     let keys: std::collections::HashSet<&str> = file.entities.iter()
         .filter(|e| e.kind == Some(EntityKind::Operation))
         .map(|e| e.name.as_str()).collect();
@@ -773,6 +776,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     part_alignment,
                     machine,
                     post: sdto.post.as_ref().map(SetupPostDto::to_ref),
+                    relative_to: sdto.relative_to.clone(),
                 });
             }
         }

@@ -833,6 +833,10 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
             }
         }
     }
+    // #375: an inverted machine axis is noted once, on the first triad
+    // (the setup's own offset before the world axes) - the arrow is the
+    // program frame and is never flipped.
+    let mut notes = crate::axis_note::triad_notes(state);
     for gizmo in gizmos(state) {
         let base = Point3::new(gizmo.pos[0], gizmo.pos[1], gizmo.pos[2]);
         for (axis, (rgb, dir)) in AXES.iter().enumerate() {
@@ -854,6 +858,9 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 *rgb
             };
             out.push((uv, c, AXIS_NAMES[axis].to_string()));
+            if let Some(note) = notes.get_mut(axis).and_then(Option::take) {
+                out.push(([uv[0], uv[1] + crate::axis_note::NOTE_DROP_UV], c, note));
+            }
         }
     }
     out
