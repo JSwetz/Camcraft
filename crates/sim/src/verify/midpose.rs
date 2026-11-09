@@ -89,6 +89,19 @@ pub(super) fn change(from: Pose, to: Pose) -> Option<([f64; 3], [f64; 3])> {
 /// Empty when the move is nowhere (non-finite) - a caller that must
 /// fail closed reads the move's endpoints itself.
 pub(super) fn intervals(m: &Move, a: [f64; 3], b: [f64; 3], reach: f64, chord_tol: f64) -> Vec<Interval> {
+    walk(m, a, b, reach, chord_tol, true)
+}
+
+/// [`intervals`] cut by the pose's turn alone - [`STEP`] of travel at
+/// the stack's far end from the TURN, none from the tip's own run: for
+/// a law that sweeps the tip segment exactly (the fixture mesh law,
+/// #339 slice 3) and needs the intervals only to bound the swing. A
+/// constant pose is one interval per chord piece.
+pub(super) fn turn_intervals(m: &Move, a: [f64; 3], b: [f64; 3], reach: f64, chord_tol: f64) -> Vec<Interval> {
+    walk(m, a, b, reach, chord_tol, false)
+}
+
+fn walk(m: &Move, a: [f64; 3], b: [f64; 3], reach: f64, chord_tol: f64, by_travel: bool) -> Vec<Interval> {
     if !(m.from.is_finite() && m.to.is_finite()) {
         return Vec::new();
     }
@@ -107,7 +120,7 @@ pub(super) fn intervals(m: &Move, a: [f64; 3], b: [f64; 3], reach: f64, chord_to
         let len = dist(*pa, *pb);
         let frac = |s: f64| if total > 0.0 { (done + len * s) / total } else { s };
         let turn = angle(pose(la, lb, frac(0.0)), pose(la, lb, frac(1.0)));
-        let span = len + reach * turn;
+        let span = if by_travel { len + reach * turn } else { reach * turn };
         let n = if span.is_finite() { ((span / STEP).ceil() as usize).clamp(1, MAX_STEPS) } else { 1 };
         for j in 0..n {
             let (t0, t1) = (j as f64 / n as f64, (j + 1) as f64 / n as f64);

@@ -541,4 +541,8 @@ pub struct EntityDto {
     /// of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixture: Option<FixtureDto>,
+    /// A Pause / Home entry (#155); present exactly when
+    /// `kind == Some(Entry)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<super::program_entry_dto::ProgramEntryDto>,
 }

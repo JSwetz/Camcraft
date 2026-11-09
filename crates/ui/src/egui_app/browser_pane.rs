@@ -72,6 +72,7 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&Icon
     if let Some(ix) = hit.menu {
         let target = match leaves.get(ix) {
             Some(Leaf::Op(name)) => Some(TreeMenuTarget::Operation(name.clone())),
+            Some(Leaf::Entry(name)) => Some(TreeMenuTarget::Entry(name.clone())),
             Some(Leaf::SetupOps(setup)) => {
                 focus(state, setup);
                 Some(TreeMenuTarget::Operations)
@@ -155,6 +156,8 @@ pub(super) fn click(state: &mut State, leaf: Leaf) {
             actions::target(state, UiTarget::Operation(n.clone()));
             state.pending.push_back(CommandKind::Select(Some(n)));
         }
+        // #155: selected, so Del deletes it (undoable); no page of its own.
+        Leaf::Entry(n) => state.pending.push_back(CommandKind::Select(Some(n))),
     }
 }
 
@@ -162,7 +165,7 @@ pub(super) fn click(state: &mut State, leaf: Leaf) {
 /// line and the `ReorderOperation` command use the same target row.
 fn drag_ops(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[Leaf], started: Option<usize>) {
     if let Some(ix) = started
-        && let Some(Leaf::Op(name)) = leaves.get(ix)
+        && let Some(Leaf::Op(name) | Leaf::Entry(name)) = leaves.get(ix)
     {
         state.dragging_op = Some(name.clone());
     }
@@ -172,11 +175,11 @@ fn drag_ops(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[
     let (released, pointer) = ui.input(|i| (i.pointer.any_released(), i.pointer.hover_pos()));
     let drop = pointer.filter(|p| rect.contains(*p)).and_then(|p| {
         let ix = ((p.y - rect.top()) / pal.row_height) as usize;
-        let Leaf::Op(target) = leaves.get(ix)? else { return None };
+        let (Leaf::Op(target) | Leaf::Entry(target)) = leaves.get(ix)? else { return None };
+        // #155: entries drag and take drops like operations.
         let setup_of = |name: &str| {
             model::find_by_name(&state.world, name)
-                .and_then(|e| model::operation_of(&state.world, &e))
-                .and_then(|op| setup::effective(&state.world, op.setup.as_deref()))
+                .and_then(|e| camcraft_app::program_entry::effective_setup(&state.world, &e))
         };
         let after = p.y > rect.top() + (ix as f32 + 0.5) * pal.row_height;
         (source != *target && setup_of(&source) == setup_of(target)).then_some((ix, target.clone(), after))

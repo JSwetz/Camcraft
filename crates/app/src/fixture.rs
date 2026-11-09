@@ -32,6 +32,13 @@
 //!   reality. Fixtures are never gouge-relevant (they are not cut
 //!   material), so a false hit merely annoys while a false negative is a
 //!   silent crash: every tolerance here errs toward HIT.
+//! - **The mesh acquits, the box convicts (#339).** The box laws stay
+//!   the broad phase; a tagged model's closed world mesh
+//!   ([`meshes_for`]) then clears the moves its box flagged but its
+//!   real steel does not meet - a path down a vise's gap, upright, posed
+//!   or under a rotary (slice 3, `verify::mesh_posed`). The mesh
+//!   never adds a hit, and an open or refused mesh keeps its box
+//!   verdict (`camcraft_sim::verify::mesh_refined`).
 //! - **Steel is not kerf.** A retract through its own hole in STOCK is
 //!   safe (the material was removed); a retract or rapid dipping through
 //!   a fixture box is a crash, so the rapid law's vertical exemption
@@ -55,6 +62,7 @@ use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.
 use flecs_ecs::prelude::{Entity, World};
 
 pub use camcraft_sim::fixture::*;
+pub use camcraft_sim::fixture_mesh::MeshedFixture;
 
 use crate::geometry::Point3;
 use crate::schema::FixtureDef;
@@ -94,9 +102,18 @@ pub fn tagged(world: &World, declared: Option<&str>) -> Vec<(String, Entity)> {
 /// stated Z-travel minimum. Any of the three unstated - or no machine
 /// loaded - means no table (the unstated-limit law; a machine whose Z
 /// axis does not reach down is not a machine we can collide-check).
+/// The table of the machine the `declared` setup context mounts (#388):
+/// an inactive setup's ops are checked against their own machine's.
 #[must_use]
-pub fn table_box(world: &World) -> Option<FixtureBox> {
-    let m = machine::of(world).1?;
+pub fn table_box(world: &World, declared: Option<&str>) -> Option<FixtureBox> {
+    table_of(&machine::of_setup(world, declared).1?)
+}
+
+/// [`table_box`] of one machine, read straight off its axes - for a
+/// caller that already holds the machine (the MCP machine tools name
+/// the document's own, which no setup context resolves to).
+#[must_use]
+pub fn table_of(m: &machine::Machine) -> Option<FixtureBox> {
     let span = |n: &str| {
         m.axes
             .iter()
@@ -130,7 +147,7 @@ pub fn boxes_for(world: &World, declared: Option<&str>) -> Vec<FixtureBox> {
             })
         })
         .collect();
-    out.extend(table_box(world));
+    out.extend(table_box(world, declared));
     out
 }
 
@@ -150,8 +167,35 @@ pub fn workholding_for(world: &World, declared: Option<&str>) -> (Vec<FixtureBox
             turning.push(b);
         }
     }
-    fixed.extend(table_box(world));
+    fixed.extend(table_box(world, declared));
     (turning, fixed)
+}
+
+/// Every tagged model's world mesh, paired with the very box
+/// [`boxes_for`] reports for it (#339): the mesh law's input. The BVH is
+/// built only when a box law first flags that fixture
+/// ([`camcraft_sim::fixture_mesh::MeshedFixture::mesh`]).
+#[must_use]
+pub fn meshes_for(world: &World, declared: Option<&str>) -> Vec<MeshedFixture> {
+    tagged(world, declared)
+        .into_iter()
+        .filter_map(|(name, e)| {
+            let b = model::entity_world_aabb(world, &e)?;
+            let tris = model::world_facets(world, &e)?;
+            Some(MeshedFixture::new(name, FixtureBox { min: b.min, max: b.max }, tris.into()))
+        })
+        .collect()
+}
+
+/// Log every fixture whose mesh was asked to judge and refused (#339):
+/// it was judged by its box instead - conservative, but the user should
+/// know why a path through its gap still reports.
+pub fn log_mesh_refusals(fixtures: &[MeshedFixture]) {
+    for f in fixtures {
+        if let Some(why) = f.refusal() {
+            tracing::info!(fixture = %f.name, "fixture judged by its bounding box: {why}");
+        }
+    }
 }
 
 /// The rotary axis line a rotary kind turns its part about, in the
@@ -186,7 +230,7 @@ pub fn rotary_axis_of(
 #[must_use]
 pub fn list(world: &World, declared: Option<&str>) -> Vec<String> {
     let mut out: Vec<String> = tagged(world, declared).into_iter().map(|(n, _)| n).collect();
-    if table_box(world).is_some() {
+    if table_box(world, declared).is_some() {
         out.push(MACHINE_TABLE.to_string());
     }
     out

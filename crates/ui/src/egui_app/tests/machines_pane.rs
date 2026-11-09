@@ -14,12 +14,20 @@ use super::*;
 use crate::state::Panel;
 
 fn blank_harness() -> Harness<'static, ShellUi> {
-    Harness::builder()
-        .with_size(Vec2::new(1280.0, 720.0))
-        .build_ui_state(frame, ShellUi::blank())
+    harness_with_user_dir(None)
 }
 
-fn click(h: &mut Harness<'static, ShellUi>, at: egui::Pos2) {
+/// A blank shell whose Machines pane lists `dir` as the user machines
+/// folder (`None`: no user folder) - never the tester's real one.
+pub(super) fn harness_with_user_dir(dir: Option<std::path::PathBuf>) -> Harness<'static, ShellUi> {
+    let mut sh = ShellUi::blank();
+    sh.state.machines_pane.user_dir = Some(dir);
+    Harness::builder()
+        .with_size(Vec2::new(1280.0, 720.0))
+        .build_ui_state(frame, sh)
+}
+
+pub(super) fn click(h: &mut Harness<'static, ShellUi>, at: egui::Pos2) {
     set_pos(h, at);
     button_at(h, egui::PointerButton::Primary, at, true);
     button_at(h, egui::PointerButton::Primary, at, false);
@@ -28,7 +36,7 @@ fn click(h: &mut Harness<'static, ShellUi>, at: egui::Pos2) {
 
 /// Open the Machines pane the way a user does: the ribbon's View door,
 /// then its "Machines" row.
-fn open_machines(h: &mut Harness<'static, ShellUi>) {
+pub(super) fn open_machines(h: &mut Harness<'static, ShellUi>) {
     let strip =
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::super::shell::RIBBON_H));
     let (cells, _) = mill_plan_at(1280.0);
@@ -48,7 +56,7 @@ fn open_machines(h: &mut Harness<'static, ShellUi>) {
     click(h, at);
 }
 
-fn assert_no_commands(h: &Harness<'static, ShellUi>) {
+pub(super) fn assert_no_commands(h: &Harness<'static, ShellUi>) {
     let st = &h.state().state;
     assert!(st.pending.is_empty(), "the pane queued a command: {:?}", st.pending);
     assert!(st.history.is_empty(), "the pane landed in the history");
