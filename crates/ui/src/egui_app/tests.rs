@@ -89,6 +89,8 @@ mod setup_tree;
 mod tool_body;
 // #93: the tool editor's spun-profile (Profile) section.
 mod tool_profile;
+// #441: the Theme ribbon door; the Stock page shows stock only.
+mod theme_door;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -2578,6 +2580,7 @@ fn tips_match_the_imgui_table() {
             Cmd::View,
             "Show or hide the browser and properties panes, or reset the layout",
         ),
+        (Cmd::Theme, "Pick the document's theme and colour-vision mode (undoable)"),
     ];
     for (c, want) in rows {
         assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");
@@ -4895,7 +4898,8 @@ fn vertex_mode_hover_and_click_pick_a_corner() {
 
 // ------------------------------------------------ M13.5 B: the post offer
 
-/// The Setup pane's post offer (M13.5 B): a lathe mounted over a
+/// The Post node's post offer (M13.5 B; on the setup's Post node since
+/// #441): a lathe mounted over a
 /// document holding a mill post gets one warning line naming the
 /// registry's lathe post, never a switch on the mount itself; the
 /// button queues the same `SelectPost` the combo queues, so the post
@@ -4907,7 +4911,18 @@ fn a_lathe_over_a_mill_post_offers_the_lathe_post_and_rides_undo() {
     use camcraft_app::posting;
     use camcraft_app::schema::PostRef;
     let mut harness = shell_harness();
-    harness.state_mut().state.ui_target = UiTarget::Stock;
+    // #441: the post group lives on the setup's Post node, not the
+    // Stock page.
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.run_steps(2);
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Post),
+    );
     harness.run();
     assert!(
         harness.query_by_label_contains("the current post serves").is_none(),
@@ -4931,9 +4946,8 @@ fn a_lathe_over_a_mill_post_offers_the_lathe_post_and_rides_undo() {
         "the offer names the lathe post (status: {})",
         harness.state().state.status
     );
-    // The post group sits low on the Stock page: bring the button
-    // into the scroll area's view before the press, as the pane's
-    // other deep rows are pressed.
+    // Bring the button into the scroll area's view before the press,
+    // as the pane's other deep rows are pressed.
     harness.get_by_label("Switch post").scroll_to_me();
     harness.run();
     harness.get_by_label("Switch post").click();
