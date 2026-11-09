@@ -3668,8 +3668,17 @@ impl State {
     /// refused post leaves both the document and any previous program on
     /// disk exactly as they were.
     fn post_program_path(&mut self, path: PathBuf) {
-        match posting::post_setup(&self.world, &path) {
-            Ok(posted) => {
+        // #388: setups on different machines or posts write one file each.
+        match posting::post_mounts(&self.world, &path) {
+            Ok(files) if files.len() > 1 => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
+                self.show_posted_mounts(files);
+            }
+            Ok(files) => {
+                let Some(first) = files.into_iter().next() else { return };
+                let (path, posted) = (first.path, first.posted);
                 // A program went out: an earlier refusal no longer
                 // describes the document's post (#265).
                 self.post_refusal = None;

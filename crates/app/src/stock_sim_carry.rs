@@ -107,7 +107,9 @@ pub(crate) fn one_machine(
 pub(crate) fn carry_turn(world: &flecs_ecs::prelude::World, from: &str, to: &str) -> Result<LatticeTurn, String> {
     let head = carry_head(from, to);
     // #404: the machine is the two setups' own (#343), never the active
-    // setup's - the body never crosses a machine change.
+    // setup's - the body never crosses a machine change. #388: with both
+    // ends on that one machine, its kind is both ends' kind - a carry off
+    // or onto a machine that is not a mill is the same unverified turn.
     let m_to = one_machine(world, from, to)?;
     if crate::machine::kind(m_to.1.as_ref()) != crate::machine::Kind::Mill {
         return Err(format!("{head}: {CARRY_MACHINE_REFUSAL}"));

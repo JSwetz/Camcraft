@@ -101,7 +101,7 @@ impl CreateOperation {
         if let Some(msg) = crate::operation::side_sane(&params, &src) {
             return Err(CommandError::Invalid(msg));
         }
-        family_gate(world, &params)?;
+        family_gate(world, setup.as_deref(), &params)?;
         tool_gate(world, &params, tool)?;
         area_gate(world, setup.as_deref(), &src, &params)?;
         let (reordered, order) = append_position(world, setup.as_deref())?;
@@ -173,7 +173,7 @@ impl PasteOperation {
         if let Some(msg) = crate::operation::side_sane(&operation.params, &operation.src) {
             return Err(CommandError::Invalid(msg));
         }
-        family_gate(world, &operation.params)?;
+        family_gate(world, context, &operation.params)?;
         tool_gate(world, &operation.params, &operation.tool)?;
         area_gate(world, context, &operation.src, &operation.params)?;
         operation.stamp = None;

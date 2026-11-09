@@ -160,6 +160,12 @@ pub struct Script {
     /// engine's mirrored stream for an inverted X / Y axis. Without it a
     /// machine with an inverted axis is refused by name.
     axis_inversion: bool,
+    /// The `probeAxisInversion = true` manifest flag (#392): the script's
+    /// probing blocks (skip move, trip read, back-off, deviation, work
+    /// offset write) are verified on the mirrored stream by a macro
+    /// interpreter on a simulated inverted machine. Without it probing
+    /// on an inverted axis is refused by name.
+    probe_axis_inversion: bool,
 }
 
 impl Script {
@@ -178,6 +184,7 @@ impl Script {
             live_tooling: false,
             after_modes: false,
             axis_inversion: false,
+            probe_axis_inversion: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -202,6 +209,10 @@ impl Script {
             .unwrap_or(false);
         s.axis_inversion = s
             .eval("typeof axisInversion !== \"undefined\" && axisInversion === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.probe_axis_inversion = s
+            .eval("typeof probeAxisInversion !== \"undefined\" && probeAxisInversion === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         Ok(s)
@@ -301,6 +312,12 @@ impl Script {
     /// on the engine's mirrored stream for an inverted axis (#374).
     pub fn translates_inverted_axes(&self) -> bool {
         self.axis_inversion
+    }
+
+    /// True when the script declares `probeAxisInversion = true` - its
+    /// probing blocks are verified on the mirrored stream (#392).
+    pub fn translates_inverted_probing(&self) -> bool {
+        self.probe_axis_inversion
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

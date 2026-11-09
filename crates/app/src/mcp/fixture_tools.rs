@@ -84,8 +84,9 @@ fn workholding_view(env: &Env) -> Vec<Value> {
                     })
                 })
                 .collect();
-            let table = fixture::table_box(w).map(|b| bounds([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]));
-            json!({ "setup": s, "fixtures": fixtures, "table": table })
+            let table = fixture::table_box(w, d).map(|b| bounds([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]));
+            let machine = crate::machine::of_setup(w, d).1.map(|m| m.model);
+            json!({ "setup": s, "machine": machine, "fixtures": fixtures, "table": table })
         })
         .collect()
 }
@@ -94,6 +95,8 @@ fn get_fixture_findings(env: &mut Env, _a: &Map<String, Value>) -> Result<Value,
     let w = &env.world;
     let mut out = json!({
         "workholding": workholding_view(env),
+        // The active setup's machine (kept for older callers); each
+        // workholding entry names its own setup's machine (#388).
         "machine": crate::machine::of(w).1.map(|m| m.model),
     });
     match crate::posting::fixture_findings(w) {

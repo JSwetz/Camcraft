@@ -147,8 +147,8 @@ fn world_for(kind: Kind, dia: f64, clearance: f64) -> World {
     let op = CreateOperation::new(&world, "OP", "BN-0600", SrcRef::Entity("bar".into()), params(kind, clearance));
     h.execute(&world, op.expect("create"));
     h.execute(&world, GenerateOperation::new(&world, "OP").expect("generate"));
-    // The tilting head owns the letters; its Z stroke runs -500..0, so
-    // G54 sits above the work (the tilt suite's parked-anchor law).
+    // The tilting head owns the letters; G54 sits above the work (the
+    // tilt suite's parked-anchor law; inside its -500..500 band, #457).
     let asset = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/machines/tilthead.mch");
     h.execute(&world, LoadMachine::from_file(&world, &asset).expect("mount"));
     let g54 = Location { pos: Point3::new(0.0, 0.0, 60.0), rot: IDENTITY_Q };

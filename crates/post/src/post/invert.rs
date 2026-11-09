@@ -17,13 +17,23 @@
 //!   (CW <-> CCW, i.e. G2 <-> G3);
 //! - cutter compensation in the XY plane (the plane every mill
 //!   generator compensates in) swaps sides (G41 <-> G42) when exactly
-//!   one of X and Y is inverted.
+//!   one of X and Y is inverted;
+//! - probing (#392), for a script that declares `probeAxisInversion =
+//!   true`: a touch's target and nominal trip, a back-off's incremental
+//!   delta and nominal end, and each found axis's expected value negate
+//!   on the inverted axis. The script's trip read, deviation (found -
+//!   expected) and work-offset write then all run in the controller's
+//!   frame, where the register holds the part datum negated on that
+//!   axis - so the correction it adds is the physical one, negated with
+//!   it (proved by the macro interpreter in the app's
+//!   `inverted_probe` suite on a simulated inverted machine).
 //!
 //! Refused by name, never translated: an inverted Z or any letter but
 //! X / Y (machine level, [`crate::machine::untranslated_inversion`]), a
 //! script that does not declare `axisInversion = true` (dialects not
 //! covered by goldens), helical arcs, threading cycles, tilted (A/B/C)
-//! moves, C-axis live tooling and probing. A refusal is a hard error:
+//! moves, C-axis live tooling, and probing through a script that does
+//! not declare `probeAxisInversion = true`. A refusal is a hard error:
 //! nothing is posted, so no caller can write a half-translated program.
 
 use super::cnc::Record;
@@ -134,12 +144,20 @@ pub fn apply(records: Vec<Record>, mch: &Value, script: &Script) -> Result<Vec<R
         )));
     }
     let flip = Flip { x: refs.contains(&"X"), y: refs.contains(&"Y"), z: refs.contains(&"Z") };
-    translate(records, flip).map_err(|why| PostError::Refused(format!("{what}: {}", why.join("; "))))
+    translate_with(records, flip, script.translates_inverted_probing())
+        .map_err(|why| PostError::Refused(format!("{what}: {}", why.join("; "))))
 }
 
-/// The record-by-record mirror. `Err` lists every refusal by name
-/// (once each), so one run tells the user everything at once.
+/// The record-by-record mirror, probing refused. `Err` lists every
+/// refusal by name (once each), so one run tells the user everything at
+/// once.
 pub fn translate(records: Vec<Record>, f: Flip) -> Result<Vec<Record>, Vec<String>> {
+    translate_with(records, f, false)
+}
+
+/// [`translate`], with `probing` true for a script whose probing blocks
+/// are verified on the mirrored stream (`probeAxisInversion = true`).
+pub fn translate_with(records: Vec<Record>, f: Flip, probing: bool) -> Result<Vec<Record>, Vec<String>> {
     if !f.any() {
         return Ok(records);
     }
@@ -257,18 +275,34 @@ pub fn translate(records: Vec<Record>, f: Flip) -> Result<Vec<Record>, Vec<Strin
                 refuse(&op, "a threading cycle");
                 Record::Thread(Some(t))
             }
-            Record::Touch(t) => {
-                refuse(&op, "probing");
+            Record::Touch(mut t) => {
+                if !probing {
+                    refuse(&op, NO_PROBING);
+                }
                 pos = (t.expect[0], t.expect[1], t.expect[2]);
+                t.target = mirror(t.target, f);
+                t.expect = mirror(t.expect, f);
                 Record::Touch(t)
             }
-            Record::Retreat(t) => {
-                refuse(&op, "probing");
+            Record::Retreat(mut t) => {
+                if !probing {
+                    refuse(&op, NO_PROBING);
+                }
                 pos = (t.expect[0], t.expect[1], t.expect[2]);
+                // An increment flips with the axis exactly as a point
+                // does: the controller's +X is the physical -X.
+                t.delta = mirror(t.delta, f);
+                t.expect = mirror(t.expect, f);
                 Record::Retreat(t)
             }
-            Record::Found(t) => {
-                refuse(&op, "probing");
+            Record::Found(mut t) => {
+                if !probing {
+                    refuse(&op, NO_PROBING);
+                }
+                for a in &mut t.axes {
+                    let on = [f.x, f.y, f.z].get(a.axis).copied().unwrap_or(false);
+                    a.expected *= Flip::sign(on);
+                }
                 Record::Found(t)
             }
             other => other,
@@ -283,6 +317,16 @@ pub fn translate(records: Vec<Record>, f: Flip) -> Result<Vec<Record>, Vec<Strin
     } else {
         Err(refused)
     }
+}
+
+/// The refusal for probing through a script not verified for it (#392).
+const NO_PROBING: &str =
+    "probing with a post script that does not declare probeAxisInversion = true (Fanuc does)";
+
+/// A point or increment in the controller's frame: negated on each
+/// inverted axis.
+fn mirror(p: [f64; 3], f: Flip) -> [f64; 3] {
+    [Flip::sign(f.x) * p[0], Flip::sign(f.y) * p[1], Flip::sign(f.z) * p[2]]
 }
 
 /// A PARAM's value in the controller's frame: the axis coordinates the
