@@ -723,12 +723,20 @@ fn sink(t: Toolpath, dz: f64) -> Toolpath {
 fn envelope_verdict_follows_the_stated_tol() {
     // Two halves, one law: the verifier judges against the user's
     // budget, and never against the measurement's own yardstick.
-    // First half - the clean rings at tol 0.01 stay SILENT. An earlier
+    // First half - the clean rings at tol 0.01 raise no envelope
+    // verdict. An earlier
     // draft of this test read 0.1155 here and called it the
     // generator's chord error; it was the scan's - the cell/4 chord
     // sagitta E1's tol/4 budget retired (with ~0.010 of 96-gon
     // planarization). Tightening the yardstick must not invent a
-    // defect, so the silence is the phantom-trench guard, stated.
+    // defect, so the envelope's silence is the phantom-trench guard,
+    // stated. What the tighter budget DOES read since #212 is the
+    // rings' own spacing: a 45-degree cone laddered for tol 0.1 leaves
+    // ~0.1 cusps between rings (0.085 at the lattice, at rho 16.8 on
+    // the flank), past the 0.01 budget - the flank's reach used to
+    // stop at 4·tol past the ball (0.04 here) and read nothing. That
+    // is the non-blocking scallop note, real, and under the 0.1
+    // promise the rings were laddered to.
     // Second half - what DOES follow the budget is a real deviation:
     // the same rings sunk 0.09, which on the 45-degree cone stands
     // ~0.064 of surface inside the envelope. Under the 0.1 promise
@@ -739,10 +747,13 @@ fn envelope_verdict_follows_the_stated_tol() {
     let r = rect(-20.0, -20.0, 20.0, 20.0);
     let tool = ball();
     let t = cone_waterline();
-    assert_eq!(
-        verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.01))),
-        Vec::new(),
-        "a tighter yardstick must prove no defect it cannot resolve - and invent none"
+    let tight = verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.01)));
+    let [Warning::Scallop { mm, gate_mm, .. }] = tight.as_slice() else {
+        panic!("a tighter yardstick must prove no defect it cannot resolve - and invent none: {tight:?}");
+    };
+    assert!(
+        *mm > *gate_mm && *mm <= 0.1 + (3.0f64 / 8.0).powi(2) / 6.0,
+        "the rings' own cusp, over the 0.01 budget and under the 0.1 they were laddered to: {tight:?}"
     );
     let sunk = sink(t, 0.09);
     let ws = verify(&sunk, &env_ctx(&r, Some(&f), &tool, Some(0.1)));

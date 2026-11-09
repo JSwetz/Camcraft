@@ -33,6 +33,7 @@
 use crate::cl::Move;
 use crate::fixture::{band_hits_box, FixtureBox};
 use crate::tools::ToolGeom;
+use camcraft_tools::holder_profile::HolderStack;
 
 use super::types::FixturePart;
 
@@ -122,23 +123,15 @@ pub(super) fn band_struck(
 /// it, riding on the holder's top - each `(part, above, r, len)`, the
 /// shape law (c2) builds. A modelled holder body (#368's `HolderStack`)
 /// replaces the one holder cylinder here exactly as it does in (c2).
-pub(super) fn upper_bands(tool: &ToolGeom, spindle: Option<(f64, f64)>) -> Vec<(FixturePart, f64, f64, f64)> {
-    let mut out = vec![
-        (FixturePart::Shank, tool.flute_len, tool.shank_radius, tool.shank_len),
-        (
-            FixturePart::Holder,
-            tool.flute_len + tool.shank_len,
-            tool.holder_radius,
-            tool.holder_len,
-        ),
-    ];
+pub(super) fn upper_bands(
+    tool: &ToolGeom,
+    holder: &HolderStack,
+    spindle: Option<(f64, f64)>,
+) -> Vec<(FixturePart, f64, f64, f64)> {
+    let mut out = vec![(FixturePart::Shank, tool.flute_len, tool.shank_radius, tool.shank_len)];
+    out.extend(holder.bands.iter().map(|b| (FixturePart::Holder, b.above, b.r, b.len)));
     if let Some((sr, sl)) = spindle {
-        out.push((
-            FixturePart::Spindle,
-            tool.flute_len + tool.shank_len + tool.holder_len,
-            sr,
-            sl,
-        ));
+        out.push((FixturePart::Spindle, holder.top, sr, sl));
     }
     out
 }

@@ -147,6 +147,13 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
                     crate::tool_numbers::RANGE_TEXT
                 )));
             }
+            // #368: a body is a body this build's envelope law accepts,
+            // on a tool it fits - or the file refuses by name.
+            if let Some(b) = &tool.body {
+                let body = b.to_body(&dto.name).map_err(corrupt)?;
+                crate::tool_body::fits(&tool.to_tool(), &body)
+                    .map_err(|e| corrupt(format!("tool '{}': {e}", dto.name)))?;
+            }
         }
         EntityKind::Operation => {
             if dto.name.is_empty() {

@@ -2,7 +2,7 @@
 //! glyph except the operation-section doors and the machine door, so the
 //! whole Create run read as text - "missing icons" on Windows and Fedora.
 //! Every cell of every workspace's ribbon now names a glyph, except the
-//! View door (a layout list, captioned by its own words).
+//! View and Theme doors (lists captioned by their own words).
 //! Provenance: our own tests over our own ribbon.
 
 use super::panes::{Cmd, icon_of, ribbon_plan};
@@ -21,7 +21,7 @@ fn every_ribbon_cell_of_every_workspace_wears_a_glyph() {
         assert_eq!(camcraft_app::machine::kind_of(&state.world), kind, "{machine} mounted");
         for group in ribbon_plan(kind, &[]) {
             for cell in group.cells {
-                if cell == Cmd::View {
+                if matches!(cell, Cmd::View | Cmd::Theme) {
                     continue;
                 }
                 assert!(

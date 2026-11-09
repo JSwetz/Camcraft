@@ -49,6 +49,11 @@
 // world - the singleton glue and the program checker.
 pub use camcraft_post::machine::*;
 
+// #287: the Machines pane's catalogue, property sheet and validator.
+pub mod library;
+mod sheet;
+pub mod validate;
+
 use flecs_ecs::core::WorldGet;
 use flecs_ecs::prelude::World;
 
@@ -155,9 +160,14 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
 
     for (name, e) in &ops {
         let op = model::operation_of(world, e).ok_or_else(|| format!("{name}: lost its operation"))?;
-        let tool = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let tool_entity = model::find_by_name(world, &op.tool)
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        let tool = model::tool_of(world, &tool_entity)
+            .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        // #368: a modelled body is the holder the magazine measures.
+        let tool = crate::tool_body::judged(world, &tool_entity, tool)
+            .map_err(|e| format!("{name}: tool {}: {e}", op.tool))?
+            .0;
         let cache = model::toolpath_of(world, e).ok_or_else(|| format!("{name}: lost its toolpath"))?;
         // Travel numbers in the file are PROGRAM coordinates; the
         // cached moves are world millimeters. This is the post's own

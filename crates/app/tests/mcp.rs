@@ -245,3 +245,62 @@ fn the_stdio_loop_answers_line_for_line() {
     assert_eq!(lines[1]["result"]["isError"], json!(false));
     assert_eq!(lines[1]["result"]["structuredContent"]["operations"], json!([]));
 }
+
+#[test]
+fn a_nested_patch_typo_is_refused_by_its_path() {
+    let mut c = Client::new();
+    c.ok("set_stock", json!({ "box": { "dx": 50.0, "dy": 50.0, "dz": 10.0 } }));
+    c.ok("add_tool", json!({ "catalog": "EM-0400-2FL" }));
+    c.ok("add_operation", json!({ "kind": "face", "tool": "EM-0400-2FL" }));
+    // One level down: `ofset` would have been dropped by serde and the
+    // edit reported done while clearance stayed at +25.
+    let msg = c.refused("edit_operation", json!({ "name": "Face1", "params": { "clearance_z": { "ofset": 50.0 } } }));
+    assert!(msg.contains("unknown field clearance_z.ofset"), "{msg}");
+    let job = c.ok("get_job", json!({}));
+    assert_eq!(job["operations"][0]["params"]["face"]["clearance_z"]["offset"], json!(25.0), "{job}");
+    // The same typo on add_operation, and the right spelling lands.
+    let msg = c.refused("add_operation", json!({ "kind": "face", "tool": "EM-0400-2FL", "params": { "cut_z": { "referense": "fixed" } } }));
+    assert!(msg.contains("unknown field cut_z.referense"), "{msg}");
+    let edit = c.ok("edit_operation", json!({ "name": "Face1", "params": { "clearance_z": { "offset": 50.0 } } }));
+    assert_eq!(edit["params"]["face"]["clearance_z"]["offset"], json!(50.0), "{edit}");
+}
+
+#[test]
+fn a_null_id_is_an_invalid_request() {
+    let mut s = Server::new();
+    let reply = s.handle(&json!({ "jsonrpc": "2.0", "id": null, "method": "ping" })).expect("answered");
+    assert_eq!(reply["error"]["code"], json!(-32600), "{reply}");
+    assert_eq!(reply["id"], Value::Null);
+}
+
+fn serve_bytes(input: &[u8]) -> Vec<Value> {
+    let mut out = Vec::new();
+    mcp::serve(input, &mut out).expect("serve");
+    let text = String::from_utf8(out).expect("utf8");
+    text.lines().map(|l| serde_json::from_str(l).expect("one JSON object per line")).collect()
+}
+
+const PING: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n";
+
+#[test]
+fn a_non_utf8_line_is_a_parse_error_and_the_session_reads_on() {
+    let mut input = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"x\":\"\xff\xfe\"}\n".to_vec();
+    input.extend_from_slice(PING);
+    let lines = serve_bytes(&input);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[0]["error"]["code"], json!(-32700));
+    assert_eq!(lines[1]["id"], json!(7));
+    assert_eq!(lines[1]["result"], json!({}));
+}
+
+#[test]
+fn an_oversized_line_is_a_parse_error_and_is_skipped() {
+    let mut input = vec![b'x'; mcp::MAX_LINE_BYTES + 4096];
+    input.push(b'\n');
+    input.extend_from_slice(PING);
+    let lines = serve_bytes(&input);
+    assert_eq!(lines.len(), 2, "one answer for the long line, one for the ping");
+    assert_eq!(lines[0]["error"]["code"], json!(-32700));
+    assert!(lines[0]["error"]["message"].as_str().is_some_and(|m| m.contains("longer than")), "{}", lines[0]);
+    assert_eq!(lines[1]["id"], json!(7));
+}

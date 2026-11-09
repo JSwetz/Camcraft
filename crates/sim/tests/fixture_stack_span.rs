@@ -15,7 +15,8 @@ use camcraft_sim::fixture::FixtureBox;
 use camcraft_sim::geo2d::Point2;
 use camcraft_sim::geometry::Point3;
 use camcraft_sim::verify::{
-    bands_vs_fixtures, bands_vs_workholding, rapids_vs_fixtures, rapids_vs_fixtures_spindle, rapids_vs_workholding,
+    bands_vs_fixtures, bands_vs_workholding, rapids_vs_fixtures, rapids_vs_fixtures_held, rapids_vs_fixtures_spindle,
+    rapids_vs_workholding,
     FixturePart, RotaryAxis, ToolGeom, Warning, Workholding,
 };
 
@@ -191,3 +192,22 @@ fn level_moves_keep_their_verdicts() {
     // A level rapid at z 0 past the same box: clear above the stack.
     assert_eq!(rapids_vs_fixtures(&rapid(p(0.0, 0.0, 0.0), p(40.0, 0.0, 0.0)), &tool(), &[over]), Vec::new());
 }
+
+/// The #424 x #368 seam: an upright rapid judges a modelled holder
+/// body's own bands (`HolderStack`), not the tool's holder cylinder. A
+/// slim holder cylinder (r5) clears the bolt 15 off the axis; a body
+/// whose collar is r20 over 50..90 does not - and the rapid must say so.
+#[test]
+fn an_upright_rapid_reads_a_modelled_holder_bodys_bands() {
+    use camcraft_tools::holder_profile::{HolderBand, HolderStack};
+    let slim = ToolGeom { holder_radius: 5.0, ..tool() };
+    let path = rapid(p(0.0, 0.0, 0.0), p(0.0, 0.0, 50.0));
+    assert_eq!(rapids_vs_fixtures(&path, &slim, &[bolt()]), Vec::new(), "the r5 cylinder clears the bolt");
+    let body = HolderStack { bands: vec![HolderBand { above: 50.0, len: 40.0, r: 20.0 }], top: 90.0 };
+    assert_eq!(
+        rapids_vs_fixtures_held(&path, &slim, &body, &[bolt()], None),
+        hit(FixturePart::Holder),
+        "the body's r20 collar reaches the bolt"
+    );
+}
+
