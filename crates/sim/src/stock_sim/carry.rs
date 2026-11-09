@@ -253,8 +253,8 @@ impl Body {
     }
 
     /// The verdict against the part, in the body's frame: the top
-    /// against the part's top as the column verdict always read it, and
-    /// - once the floor has faced a tool - the floor against the part's
+    /// against the part's top as the column verdict always read it, and,
+    /// once the floor has faced a tool, the floor against the part's
     /// bottom. Per column the worse of the two stands (a gouge before
     /// rest); the aggregates add up.
     ///
