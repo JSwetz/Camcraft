@@ -19,7 +19,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::model;
 use crate::schema::ToolBody;
 use crate::tool_body;
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolKind};
 
 /// The six model directions the editor offers as the tool axis.
 pub const AXIS_CHOICES: [(&str, [f64; 3]); 6] = [
@@ -171,16 +171,36 @@ fn revolve(prof: &[(f64, f64)]) -> Vec<Triangle> {
     out
 }
 
-/// The display assembly (`assembly`) of the tool operation `op` runs,
-/// tool frame - only when that tool has a body.
+/// The tool with no body, for display, tool frame: its whole
+/// `Tool::profile` revolved - cutter, shank, and the holder cylinder
+/// (Ø holder_d × holder_len on the shank top), the very cylinder
+/// `HolderStack::cylinder` hands the collision laws. `None` for the
+/// lathe insert kinds: their profile is a stand-in envelope (the truth
+/// lives in the work's meridian), so drawing it spun would show a tool
+/// that is not there - they keep the axis marker only.
+#[must_use]
+pub fn bare_assembly(tool: &Tool) -> Option<Vec<Triangle>> {
+    if matches!(tool.kind, ToolKind::Turning | ToolKind::Groove | ToolKind::Thread | ToolKind::Form) {
+        return None;
+    }
+    let prof: Vec<(f64, f64)> = tool.profile().into_iter().filter(|&(z, r)| z.is_finite() && r.is_finite()).collect();
+    let tris = revolve(&prof);
+    (!tris.is_empty()).then_some(tris)
+}
+
+/// The display assembly of the tool operation `op` runs, tool frame:
+/// with a body, [`assembly`]; without one, [`bare_assembly`] (`None`
+/// for the lathe insert kinds, which keep the marker only).
 #[must_use]
 pub fn assembly_for_operation(world: &World, op: &str) -> Option<Vec<Triangle>> {
     let e = model::find_by_name(world, op)?;
     let tool_name = model::operation_of(world, &e)?.tool;
     let te = model::find_by_name(world, &tool_name)?;
     let tool = model::tool_of(world, &te)?;
-    let body = tool_body::body_of(world, &te)?;
-    Some(assembly(&tool, &body))
+    match tool_body::body_of(world, &te) {
+        Some(body) => Some(assembly(&tool, &body)),
+        None => bare_assembly(&tool),
+    }
 }
 
 /// The body on the tool operation `op` runs, if that tool has one.

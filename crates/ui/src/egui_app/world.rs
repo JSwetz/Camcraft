@@ -290,12 +290,13 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
 }
 
 /// #371: the running tool's assembly at the playhead - cutter and shank
-/// revolved from its numbers, then its modelled body - posed by the
-/// frame's tip and axis, world space. Only while the transport is up and
-/// its timeline is this document's (`cached_script` refreshes it before
-/// the next frame), any playhead including 0 and the end, playing or
-/// paused, the op fresh or stale (display reads the cached path). A tool
-/// without a body yields nothing, so every no-body scene is unchanged.
+/// revolved from its numbers, then its modelled body, or without one the
+/// holder cylinder from its own numbers (what the collision laws judge),
+/// posed by the frame's tip and axis, world space. Only while the
+/// transport is up and its timeline is this document's (`cached_script`
+/// refreshes it before the next frame), any playhead including 0 and the
+/// end, playing or paused, the op fresh or stale (display reads the
+/// cached path). Lathe insert kinds yield nothing (marker only).
 pub(crate) fn sim_tool_tris(state: &State) -> Option<Vec<camcraft_app::geometry::Triangle>> {
     let sim = state.sim?;
     let (version, sc) = state.sim_script_cache.as_ref()?;

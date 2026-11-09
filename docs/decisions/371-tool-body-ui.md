@@ -55,23 +55,27 @@
   revolved envelope) and drawn as one more model part - depth-tested
   and shaded by the existing GPU pipeline. It reads the cached timeline
   only when it is this document version's, so it never re-walks the
-  program per frame. Without a body nothing is added. There are no
-  holder/shank cylinders drawn anywhere in the viewport today (the sim
-  draws an axis marker only), so "unchanged cylinders" means unchanged:
-  no body, no new geometry. Dropped: drawing the cylinder assembly for
-  body-less tools (a separate display feature).
-- **Hands-on follow-up: the simulation draws the whole tool when it
-  has a body.** The first cut drew the body alone; on the user's
-  document the collar floated a shank length (55 mm) above the axis
-  marker. Now a tool with a body is drawn whole while simulating:
-  cutter and shank revolved from `Tool::profile` up to the shank top
-  (carried up to the body's foot if it stands clear - the same gap the
-  fixture laws fill with shank), then the body, all posed by the same
-  function into the same part. Tools without a body draw exactly as
-  before (marker only). Briefly Frame also took the posed tool in;
-  that was reverted on the user's word (the view behaviour stays as
-  it was - zoom out to see a tall holder). Not done: auto-framing on
-  Simulate; a static tool marker outside playback (none exists).
+  program per frame. (First cut: without a body nothing was added -
+  superseded by the follow-up below, which draws the tool and its
+  holder cylinder.)
+- **Hands-on follow-up: the simulation always draws the running
+  tool.** The first cut drew the body alone; on the user's document the
+  collar floated a shank length (55 mm) above the axis marker. Now the
+  tool at the playhead is drawn whole, posed by one function into one
+  part: cutter and shank revolved from `Tool::profile`, then
+  - with a body, the body (the shank carried up to its foot if it stands
+    clear - the same gap the fixture laws fill with shank);
+  - without a body (user re-check: "no body shows only the marker"),
+    the holder cylinder from the tool's own numbers, Ø holder_d ×
+    holder_len on the shank top - the `HolderStack::cylinder` reading
+    the collision laws judge, so the picture is the verdict's.
+  The lathe insert kinds (Turning, Groove, Thread, Form) keep the axis
+  marker only: their `profile` is a stand-in envelope (their truth is in
+  the work's meridian), and spinning it would draw a tool that is not
+  there. Briefly Frame also took the posed tool in; that was reverted on
+  the user's word (zoom out to see a tall holder). Not done:
+  auto-framing on Simulate; a static tool marker outside playback (none
+  exists).
 - **Preview zoom (user request):** wheel or pinch (Ctrl+wheel) over the
   3D body preview zooms about the cursor (log2 zoom clamped to
   [-2, 5], i.e. 1/4x to 32x of the fit view; the pan keeps the point

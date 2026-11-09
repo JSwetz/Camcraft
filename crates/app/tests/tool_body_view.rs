@@ -178,3 +178,17 @@ fn the_display_assembly_runs_from_the_tip_through_the_shank_into_the_body() {
     let steel = &all[..all.len() - high.facets.len()];
     assert!((zr(steel).1 - (zs + 10.0)).abs() < 1e-9, "no floating body");
 }
+
+#[test]
+fn without_a_body_the_display_is_the_profile_with_its_holder_cylinder() {
+    let t = catalog_tool(TOOL);
+    let tris = view::bare_assembly(&t).expect("a mill draws");
+    let zh = t.flute_len + t.shank_len + t.holder_len;
+    let (lo, hi) = tris.iter().flat_map(|q| [q.a.z, q.b.z, q.c.z]).fold((f64::INFINITY, f64::NEG_INFINITY), |a, z| (a.0.min(z), a.1.max(z)));
+    assert_eq!((lo, hi), (0.0, zh), "tip to the holder's top");
+    let r_top = tris.iter().flat_map(|q| [q.a, q.b, q.c]).filter(|p| (p.z - zh).abs() < 1e-9).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+    assert!((r_top - t.holder_d * 0.5).abs() < 1e-9, "the holder cylinder's radius");
+    // The lathe insert kinds keep the marker only.
+    let insert = catalog().into_iter().map(|(_, t)| t).find(|t| t.kind == camcraft_app::tools::ToolKind::Turning).expect("a turning insert in the catalog");
+    assert!(view::bare_assembly(&insert).is_none());
+}

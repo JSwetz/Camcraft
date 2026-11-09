@@ -165,35 +165,47 @@ fn a_missing_file_is_refused_by_name() {
 }
 
 #[test]
-fn the_simulation_draws_the_body_at_the_playhead_and_nothing_without_one() {
+fn the_simulation_draws_the_tool_with_its_holder_cylinder_or_its_body() {
     let mut harness = editor();
     let st = &mut harness.state_mut().state;
+    let tool = model::find_by_name(&st.world, TOOL).and_then(|e| model::tool_of(&st.world, &e)).unwrap();
     st.sim = Some(crate::state::Sim { t: 0.0, playing: false, speed: 1.0 });
     let sc = super::super::shell::cached_script(st);
     assert!(!sc.is_empty(), "the seed's Contour1 runs");
-    let bare = world::collect(st).parts.len();
+    let tip = sc.at(0.0).pos.z;
+    let zr = |v: &[[f32; 3]]| {
+        v.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, p| (a.0.min(f64::from(p[2])), a.1.max(f64::from(p[2]))))
+    };
+    let r_at = |v: &[[f32; 3]], z: f64| {
+        v.iter().filter(|p| (f64::from(p[2]) - z).abs() < 1e-3).map(|p| f64::from(p[0]).hypot(f64::from(p[1]))).fold(0.0, f64::max)
+    };
+    // No body: cutter, shank and the holder cylinder from the tool's own
+    // numbers, tip to shank top + holder length.
+    let top = shank_top(st);
+    let (verts, _) = tool_part(st).expect("the tool draws without a body");
+    let (lo, hi) = zr(&verts);
+    assert!((lo - tip).abs() < 1e-3, "starts at the tip: {lo} vs {tip}");
+    assert!((hi - (tip + top + tool.holder_len)).abs() < 1e-3, "ends on the holder's top: {hi}");
+    let f = sc.at(0.0);
+    let local: Vec<[f32; 3]> = verts.iter().map(|p| [p[0] - f.pos.x as f32, p[1] - f.pos.y as f32, p[2]]).collect();
+    assert!((r_at(&local, tip + top + tool.holder_len) - tool.holder_d * 0.5).abs() < 1e-3, "Ø holder_d at its top");
+    let parts_no_body = world::collect(st).parts.len();
+    // With a body: the same one part, now ending at the body's top.
     let path = temp_stl("sim");
     prism_stl(&path, 15.0, 0.0, 30.0, 24);
-    let top = shank_top(st);
     st.import_tool_body_from(&path);
     st.tool_body_ui.offset = top;
     st.queue_apply_tool_body();
     st.drain_actions();
     assert!(body_source(st).is_some(), "status: {}", st.status);
-    let sc = super::super::shell::cached_script(st);
-    let scene = world::collect(st);
-    assert_eq!(scene.parts.len(), bare + 1, "the body is one more part");
-    // Posed at the playhead: the tool runs from its tip up through the
-    // body, whose foot sits the shank top above the tip.
-    let f = sc.at(0.0);
-    let (verts, tip) = tool_part(st).expect("the posed tool part");
-    assert!((tip - f.pos.z).abs() < 1e-9);
-    let zmin = verts.iter().map(|v| f64::from(v[2])).fold(f64::INFINITY, f64::min);
-    let zmax = verts.iter().map(|v| f64::from(v[2])).fold(f64::NEG_INFINITY, f64::max);
-    assert!((zmin - f.pos.z).abs() < 1e-3, "tip at {}: {zmin}", f.pos.z);
-    assert!((zmax - (f.pos.z + top + 30.0)).abs() < 1e-3, "body top at tip + {top} + 30: {zmax}");
+    super::super::shell::cached_script(st);
+    assert_eq!(world::collect(st).parts.len(), parts_no_body, "the body replaces the holder, one part");
+    let (verts, _) = tool_part(st).expect("the posed tool part");
+    let (lo, hi) = zr(&verts);
+    assert!((lo - tip).abs() < 1e-3, "tip at {tip}: {lo}");
+    assert!((hi - (tip + top + 30.0)).abs() < 1e-3, "body top at tip + {top} + 30: {hi}");
     st.sim = None;
-    assert_eq!(world::collect(st).parts.len(), bare, "no transport, no body drawn");
+    assert_eq!(world::collect(st).parts.len(), parts_no_body - 1, "no transport, no tool drawn");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -213,9 +225,9 @@ fn tool_part(state: &State) -> Option<(Vec<[f32; 3]>, f64)> {
 }
 
 /// #371 feedback: on the user's document the collar floated a shank
-/// length (55 mm) above the axis marker with nothing below it. A tool
-/// with a body now draws whole in the simulation - cutter and shank up
-/// into the body - at every playhead, stale or fresh.
+/// length (55 mm) above the axis marker with nothing below it. The tool
+/// draws whole in the simulation - cutter and shank up into the body -
+/// at every playhead, stale or fresh.
 #[test]
 fn the_simulated_tool_reaches_from_its_tip_into_the_body_on_the_users_document() {
     let mut harness = shell_harness();
