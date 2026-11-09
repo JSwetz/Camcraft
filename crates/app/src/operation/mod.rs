@@ -79,6 +79,7 @@ mod stamp;
 pub use stamp::*;
 mod stamp_stock;
 pub use stamp_stock::reads_setup_stock;
+pub(crate) use stamp_stock::write_setup_stock;
 mod material;
 pub use material::*;
 mod material_region;
