@@ -86,6 +86,9 @@ mod layout;
 mod unsaved;
 mod first_setup;
 mod structural;
+mod one_wcs;
+// #343: the per-setup browser tree.
+mod setup_tree;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -1628,7 +1631,7 @@ fn anchor_click_queues_setwcs() {
 #[test]
 fn origin_page_shows_the_anchor_grid_and_arms_pick_mode() {
     let mut harness = shell_harness();
-    harness.state_mut().state.ui_target = UiTarget::WcsSlot(0);
+    harness.state_mut().state.ui_target = UiTarget::Wcs;
     harness.run();
     // The draft default highlight is center (anchor_xy 4), so that cell
     // already reads bracketed - imgui's law, pinned here too.
@@ -4351,7 +4354,7 @@ fn stock_eye_hides_the_viewport_stock_without_removing_it_from_the_document() {
     harness.run_steps(2);
     let stock_name = camcraft_app::setup::stock_entity_name(&harness.state().state.world, None);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
-    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock)).expect("stock row");
+    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock(_))).expect("stock row");
     let eye = egui::pos2(216.0, 179.0 + (row as f32 + 0.5) * theme::current().row_height);
     assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
 
@@ -4502,7 +4505,7 @@ fn setup_navigation_is_always_reachable_and_operations_keep_a_flat_browser() {
     let op = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour1"))
         .expect("stable operation key in browser");
     assert_eq!(rows[op].label, "Finish contour");
-    assert_eq!(rows[op].depth, 1, "operation sits directly beneath Operations");
+    assert_eq!(rows[op].depth, 2, "operation sits beneath its setup's Operations (#343)");
     assert!(!rows.iter().any(|row| row.label == "Global Setup"));
 
     let source = model::find_by_name(&seeded.state.world, "Contour1").expect("seed op");
@@ -4642,7 +4645,7 @@ fn close_property_editors_keep_stock_offsets_models_and_tools() {
     let mut harness = shell_harness();
     let targets = [
         UiTarget::Stock,
-        UiTarget::WcsSlot(0),
+        UiTarget::Wcs,
         UiTarget::Model("Block".into()),
         UiTarget::Tool("EM-0600-4FL".into()),
     ];
@@ -4689,7 +4692,7 @@ fn operations_heading_menu_pastes_the_copied_operation() {
     harness.run_steps(2);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
     let row = leaves.iter().position(|leaf| matches!(leaf,
-        panes::Leaf::Parent(panes::BrowserSection::Operations)))
+        panes::Leaf::SetupOps(_)))
         .expect("Operations heading");
     let row_height = theme::current().row_height;
     let heading = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);

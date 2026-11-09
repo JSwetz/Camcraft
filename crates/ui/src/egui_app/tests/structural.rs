@@ -80,8 +80,16 @@ fn assert_shell_skeleton(h: &Harness<'static, ShellUi>) {
     assert!((b.y - v.y).abs() < 1.0 && (v.y - p.y).abs() < 1.0, "the tab titles share a row");
     // Browser rows of the seed, under its tab.
     let in_browser = |q: egui::Pos2| q.y > b.y && q.x < v.x;
-    for row in ["Setups", "Stock", "G54", "Models", "Block", "Tools", "Operations"] {
+    // #343: each setup owns its WCS, Stock, Machine, Post, Fixtures and
+    // Tool list rows; a row paints its name and value as one text.
+    for row in ["Setups", "Setup", "Stock", "Fixtures", "Operations", "Models", "Block", "Tools"] {
         at_where(&texts, row, in_browser);
+    }
+    for (name, value) in [("WCS", "G54"), ("Machine", ""), ("Post", ""), ("Tool list", "")] {
+        assert!(
+            texts.iter().any(|(t, q)| t.starts_with(name) && t.contains(value) && in_browser(*q)),
+            "the setup's {name} row ({value:?}) must show in the browser"
+        );
     }
     assert!(
         texts.iter().any(|(t, q)| t.starts_with("Contour1") && t.contains("2D Contour") && q.x < v.x),

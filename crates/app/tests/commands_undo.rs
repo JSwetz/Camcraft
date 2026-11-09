@@ -290,30 +290,32 @@ fn wcs_lazy_create_undo_removes() {
         rot: camcraft_app::geometry::IDENTITY_Q,
     };
 
-    history.execute(&world, SetWcsOrigin::new(&world, "G55", at).unwrap());
-    let e = model::find_by_name(&world, "G55").expect("slot entity");
+    history.execute(&world, SetWcsOrigin::new(&world, at).unwrap());
+    let e = model::find_by_name(&world, "G54").expect("the WCS entity");
     assert!(model::is_wcs(&world, &e));
     assert_eq!(model::transform_of(&world, &e), Some(at));
     assert_eq!(model::facets_of(&world, &e), None, "offsets never have geometry");
 
     assert!(history.undo(&world));
-    assert_eq!(model::find_by_name(&world, "G55"), None);
+    assert_eq!(model::find_by_name(&world, "G54"), None);
     assert!(history.redo(&world));
-    assert!(model::is_wcs(&world, &model::find_by_name(&world, "G55").unwrap()));
+    assert!(model::is_wcs(&world, &model::find_by_name(&world, "G54").unwrap()));
 }
 
 #[test]
-fn wcs_validates_slot_and_name() {
+fn wcs_validates_placement_and_name() {
     let world = new_world();
     let mut history = History::default();
+    // #342: no slot to name any more - one WCS per setup; a degenerate
+    // rotation is still refused at construction.
     assert!(matches!(
-        SetWcsOrigin::new(&world, "G53", Location::default()),
+        SetWcsOrigin::new(&world, Location { rot: [0.0; 4], ..Location::default() }),
         Err(CommandError::Invalid(_))
     ));
-    // A model squatting on a slot name is a conflict, not an overwrite.
+    // A model squatting on the WCS name is a conflict, not an overwrite.
     history.execute(&world, ImportModel::from_mesh("G54", cube_mesh()));
     assert!(matches!(
-        SetWcsOrigin::new(&world, "G54", Location::default()),
+        SetWcsOrigin::new(&world, Location::default()),
         Err(CommandError::NameConflict(_))
     ));
 }
@@ -523,7 +525,7 @@ fn reselecting_the_same_geometry_stays_fresh() {
 #[test]
 fn set_geometry_refusals_never_write_the_world() {
     let (world, mut history, top) = selection_fixture();
-    history.execute(&world, SetWcsOrigin::new(&world, "G55", Location::default()).expect("wcs"));
+    history.execute(&world, SetWcsOrigin::new(&world, Location::default()).expect("wcs"));
     let before = op_src(&world, "G1");
 
     // Op that does not exist: NotFound.
@@ -551,7 +553,7 @@ fn set_geometry_refusals_never_write_the_world() {
         SetOperationGeometry::new(
             &world,
             "G1",
-            vec![GeoSel { entity: "G55".into(), feature: top }]
+            vec![GeoSel { entity: "G54".into(), feature: top }]
         ),
         Err(CommandError::Invalid(_))
     ));
@@ -929,7 +931,7 @@ fn move_model_refuses_other_furniture_and_garbage() {
         other => panic!("expected an invalid refusal, got {other:?}"),
     }
     // The offset exists once a command has placed it; it is not a part.
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", Location::default()).expect("wcs"));
+    history.execute(&world, SetWcsOrigin::new(&world, Location::default()).expect("wcs"));
     assert!(matches!(
         MoveModel::new(&world, "G54", Location::default()),
         Err(CommandError::Invalid(m)) if m.contains("work offset")
