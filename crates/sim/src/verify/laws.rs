@@ -6,6 +6,7 @@ use crate::cl::{is_vertical, Move, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 pub use crate::tools::ToolGeom;
+use camcraft_tools::holder_profile::HolderStack;
 pub(super) fn xy(p3: &Point3) -> Point2 {
     Point2::new(p3.x, p3.y)
 }
@@ -129,10 +130,12 @@ pub(super) fn law_points(m: &Move, chord_tol: f64) -> Vec<Point2> {
 /// flute-free: shank, holder, then the spindle housing. Region-free by
 /// construction - the post's live gate runs it against a cached path
 /// without re-deriving any cut geometry (the M2.3 law: workholding is
-/// checked here and now, never baked into a stamp).
-pub fn bands_vs_fixtures(
+/// checked here and now, never baked into a stamp). `holder` is what
+/// stands above the shank (#368): one cylinder, or a body's bands.
+pub fn bands_vs_fixtures_held(
     path: &Toolpath,
     tool: &ToolGeom,
+    holder: &HolderStack,
     fixtures: &[crate::fixture::FixtureBox],
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
@@ -143,29 +146,15 @@ pub fn bands_vs_fixtures(
     }
     // The posed sweep (M13.8): a leaning move's real stack along its
     // real pose - [`super::posed_steel`]; it only ever ADDS a verdict.
-    let posed = super::posed_steel::posed_hits(path, tool, fixtures, spindle, chord_tol, false);
+    let posed = super::posed_steel::posed_hits(path, tool, holder, fixtures, spindle, chord_tol, false);
     // The spindle housing band rides on the holder's top: its bottom
     // offset is the holder's offset plus the holder length, so the stack
     // can never double-count a slice of air or gap over the tool. It is a
     // fixture law only - against stock the housing stands down by the kerf
     // reasoning that already excuses the holder band there.
-    let spindle = spindle.map(|(sr, sl)| {
-        (
-            FixturePart::Spindle,
-            tool.flute_len + tool.shank_len + tool.holder_len,
-            sr,
-            sl,
-        )
-    });
-    let bands = [
-        (FixturePart::Shank, tool.flute_len, tool.shank_radius, tool.shank_len),
-        (
-            FixturePart::Holder,
-            tool.flute_len + tool.shank_len,
-            tool.holder_radius,
-            tool.holder_len,
-        ),
-    ];
+    let spindle = spindle.map(|(sr, sl)| (FixturePart::Spindle, holder.top, sr, sl));
+    let mut bands = vec![(FixturePart::Shank, tool.flute_len, tool.shank_radius, tool.shank_len)];
+    bands.extend(holder.bands.iter().map(|b| (FixturePart::Holder, b.above, b.r, b.len)));
     for (i, m) in path.moves.iter().enumerate() {
         if m.kind == MoveKind::Rapid {
             continue;
@@ -195,7 +184,7 @@ pub fn bands_vs_fixtures(
         // the law's own history: same sums, same comparisons.
         let lean = m.axis.filter(|a| !is_vertical(a));
         let mut struck = None;
-        for (part, above, band_r, band_len) in bands.into_iter().chain(spindle) {
+        for (part, above, band_r, band_len) in bands.iter().copied().chain(spindle) {
             // Unlike law (c), a band THINNER than the flute still
             // collides here: (c) skips it because the flute's kerf in
             // stock covers that radius, and steel has no such kerf.
@@ -299,14 +288,37 @@ pub fn rapids_vs_fixtures(
     rapids_vs_fixtures_spindle(path, tool, fixtures, None)
 }
 
-/// [`rapids_vs_fixtures`] with the machine's spindle housing band
-/// (radius, length - the bands law's own `spindle`) riding on the
-/// holder's top: a posed rapid sweeps the whole stack, the housing
-/// nose included (M13.8 (1)). The upright laws read the flute only,
-/// as before - their verdicts are unchanged.
+/// [`bands_vs_fixtures_held`] with the tool's own holder cylinder.
+pub fn bands_vs_fixtures(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    fixtures: &[crate::fixture::FixtureBox],
+    spindle: Option<(f64, f64)>,
+    chord_tol: f64,
+) -> Vec<Warning> {
+    bands_vs_fixtures_held(path, tool, &HolderStack::cylinder(tool), fixtures, spindle, chord_tol)
+}
+
+/// [`rapids_vs_fixtures_held`] with the tool's own holder cylinder.
 pub fn rapids_vs_fixtures_spindle(
     path: &Toolpath,
     tool: &ToolGeom,
+    fixtures: &[crate::fixture::FixtureBox],
+    spindle: Option<(f64, f64)>,
+) -> Vec<Warning> {
+    rapids_vs_fixtures_held(path, tool, &HolderStack::cylinder(tool), fixtures, spindle)
+}
+
+/// [`rapids_vs_fixtures`] with the machine's spindle housing band
+/// (radius, length - the bands law's own `spindle`) riding on the
+/// holder's top, and what stands above the shank (`holder`, #368): a
+/// posed rapid sweeps the whole stack, the housing nose included
+/// (M13.8 (1)). The upright laws read the flute only,
+/// as before - their verdicts are unchanged.
+pub fn rapids_vs_fixtures_held(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    holder: &HolderStack,
     fixtures: &[crate::fixture::FixtureBox],
     spindle: Option<(f64, f64)>,
 ) -> Vec<Warning> {
@@ -316,7 +328,7 @@ pub fn rapids_vs_fixtures_spindle(
     }
     // The posed sweep (M13.8): a leaning rapid's whole stack - not
     // only its flute - along its real pose ([`super::posed_steel`]).
-    let posed = super::posed_steel::posed_hits(path, tool, fixtures, spindle, 0.01, true);
+    let posed = super::posed_steel::posed_hits(path, tool, holder, fixtures, spindle, 0.01, true);
     for (i, m) in path.moves.iter().enumerate() {
         if m.kind != MoveKind::Rapid {
             continue;

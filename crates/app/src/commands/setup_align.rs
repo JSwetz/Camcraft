@@ -161,7 +161,6 @@ impl AlignPartToSetup {
             .ok_or_else(|| CommandError::Invalid("there is no part to align - import a model first".into()))?;
         Self::new(world, setup, setup_align::about_centre(rot, c))
     }
-
 }
 
 impl Step {
