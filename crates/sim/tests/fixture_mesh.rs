@@ -163,6 +163,29 @@ fn a_rapid_dipping_into_a_jaw_top_still_blocks() {
 }
 
 #[test]
+fn a_rapid_kept_by_the_mesh_names_its_band_like_law_d2() {
+    // Two meshed fixtures: the vise acquits the rapid down its gap, a
+    // bar at shank height (z 60..65, 35 mm over the tip) convicts it.
+    // Law (d2) reads the whole upright stack since #424 and names a
+    // band above the flute by its part - the mesh's verdict must name
+    // it the same way, not as the flute's Rapid.
+    let vise = fixture(vise());
+    let bar_tris = cube(p(70.0, -3.0, 60.0), p(90.0, 3.0, 65.0));
+    let bar = MeshedFixture::new("Bar1", aabb(&bar_tris), Arc::<[Triangle]>::from(bar_tris));
+    let boxes = [vise.aabb, bar.aabb];
+    let wh = Workholding { turning: &boxes, fixed: &[], axis: None };
+    let t = tool();
+    let stack = steel_stack(&t, &camcraft_tools::holder_profile::HolderStack::cylinder(&t), None);
+    let fixtures = [vise, bar];
+    let steel = MeshSteel { fixtures: &fixtures, stack: &stack, chord_tol: 0.01 };
+    let path = Toolpath::new(vec![Move::new(MoveKind::Rapid, p(-60.0, 0.0, 25.0), p(100.0, 0.0, 25.0), None)]);
+    let boxed = rapids_vs_workholding(&path, &t, &wh, None);
+    assert_eq!(hit_at(&boxed, 0), Some(FixturePart::Rapid), "the vise box's flute disc: {boxed:?}");
+    let meshed = mesh_refined(&path, &wh, &steel, true, |w| rapids_vs_workholding(&path, &t, w, None));
+    assert_eq!(hit_at(&meshed, 0), Some(FixturePart::Shank), "the bar strikes the shank: {meshed:?}");
+}
+
+#[test]
 fn a_tool_standing_wholly_inside_steel_is_a_hit() {
     // A tall block: the whole stack (175 mm tall from z 60) sits inside
     // it, far from every facet - only the inside test can see it.

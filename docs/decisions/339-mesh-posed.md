@@ -80,6 +80,16 @@ upright passes: 0.016 s; its grazing worst case 0.73 s unchanged).
 asserted a posed gap pass keeps its box hit; it is now acquitted (renamed
 `unpaired_boxes_keep_the_box_verdict_and_posed_moves_are_read`).
 
+**Rapid naming (merged with the parent's #424 fix):** a rapid the mesh
+keeps names its struck band the way law (d2) names an upright rapid
+since #424 - shank, holder or spindle by its part, the flute as Rapid -
+on the posed and spindle-C readings too, through the one shared
+`mesh_steel::label`. Chosen over keeping Rapid for every posed band so
+one rapid reads the same whichever reading the mesh took. The posed box
+law itself still names a posed rapid's whole-stack hit Rapid, so the
+named band shows only where the mesh acquits another flagging box and
+keeps this one (pinned by `a_posed_rapid_kept_by_the_mesh_names_its_band`).
+
 **Found, not fixed here:** the box laws read a `stamp_c` piece's stated
 axis (the whole move's), which is off the live-tool station by the rest
 of the turn, and read C moves on the CL chord in the part frame for

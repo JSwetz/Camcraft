@@ -147,6 +147,29 @@ fn the_same_index_leaning_into_a_jaw_convicts() {
     assert_eq!(hit_at(&meshed, 2), Some(FixturePart::Rapid), "{meshed:?}");
 }
 
+/// A leaning rapid kept by the mesh is named the way law (d2) names an
+/// upright one since #424: a band above the flute by its part. The vise
+/// acquits the rapid down its gap; a bar at shank height convicts it.
+#[test]
+fn a_posed_rapid_kept_by_the_mesh_names_its_band() {
+    let vise = fixture(vise());
+    let (lo, hi) = (p(70.0, -12.0, 60.0), p(90.0, 12.0, 65.0));
+    let bar = MeshedFixture::new("Bar1", FixtureBox { min: lo, max: hi }, Arc::<[Triangle]>::from(cube(lo, hi)));
+    let boxes = [vise.aabb, bar.aabb];
+    let wh = Workholding { turning: &boxes, fixed: &[], axis: None };
+    let t = tool();
+    let stack = steel_stack(&t, &camcraft_tools::holder_profile::HolderStack::cylinder(&t), None);
+    let fixtures = [vise, bar];
+    let steel = MeshSteel { fixtures: &fixtures, stack: &stack, chord_tol: 0.01 };
+    let path = Toolpath::new(vec![
+        Move::new(MoveKind::Rapid, p(-60.0, 0.0, 25.0), p(100.0, 0.0, 25.0), None).with_axis(pose(10.0, 0.0)),
+    ]);
+    let boxed = rapids_vs_workholding(&path, &t, &wh, None);
+    assert_eq!(hit_at(&boxed, 0), Some(FixturePart::Rapid), "the posed box law: {boxed:?}");
+    let meshed = mesh_refined(&path, &wh, &steel, true, |w| rapids_vs_workholding(&path, &t, w, None));
+    assert_eq!(hit_at(&meshed, 0), Some(FixturePart::Shank), "the bar strikes the shank: {meshed:?}");
+}
+
 /// Two jaws with a gap in y (no base): steel stated at rotary zero.
 fn fork(dy: f64) -> Vec<Triangle> {
     let mut t = cube(p(-50.0, -40.0 + dy, 20.0), p(50.0, -15.0 + dy, 50.0));

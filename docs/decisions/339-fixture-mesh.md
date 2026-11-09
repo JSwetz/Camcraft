@@ -62,3 +62,15 @@ per setup per post-gate pass (no cross-call cache yet).
 **Cost to change later:** the mesh law is one function behind one
 closure seam - #368's `HolderStack` replaces `steel_stack`'s holder band
 and the closures call the `_held` laws; nothing else moves.
+
+**Merged with #464 (stack_span, 2026-11-09):** law (d2) now reads an
+upright rapid's whole stack and names a band above the flute by its part
+(the flute column stays `Rapid`); law (c2) reads each band over the
+move's true z span. `mesh_refined` already wraps both laws through its
+closure, and `steel_stack` is the same band list as
+`stack_span::upper_bands` plus the flute, so the bands judged agree.
+Chosen: the mesh's rapid verdict now names the band the same way (only
+the flute reads as `Rapid`), pinned by
+`a_rapid_kept_by_the_mesh_names_its_band_like_law_d2`. Dropped: keeping
+every mesh rapid hit as `Rapid` - after #464 that renamed a shank or
+holder strike the box law itself names.

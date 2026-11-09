@@ -32,8 +32,10 @@
 //! (the swept band is connected and meets no facet, so one point
 //! decides). See [`crate::fixture_mesh`] for why each answer is
 //! conservative. The stack is the same one for rapids: an upright rapid
-//! the boxes flagged keeps its hit if ANY band meets the steel, not
-//! only the flute the rapid box law reads.
+//! the boxes flagged keeps its hit if ANY band meets the steel - the
+//! same whole stack the rapid box law (d2) sweeps since #424
+//! ([`super::stack_span`]), named the way that law names it: a band
+//! above the flute by its part, the flute itself as the rapid.
 //!
 //! Provenance: our own composition of the box laws with the mesh tests
 //! of [`crate::fixture_mesh`] (GJK, BVH, ray-crossing inclusion -
@@ -267,10 +269,12 @@ fn judge(
     mesh_posed::judge_posed(mesh, m, (pose.from, pose.to), steel, rapids, if fixed { axis } else { None })
 }
 
-/// A struck band's report: its own part, or [`FixturePart::Rapid`] on
-/// a rapid (law d2's single label).
+/// A struck band's report, named the way law (d2) names it since #424:
+/// its own part, except the flute on a rapid, which reads as
+/// [`FixturePart::Rapid`] (a band above the flute keeps its part).
+/// Shared by the upright, posed and spindle-C readings.
 pub(super) fn label(p: FixturePart, rapids: bool) -> Read {
-    Read::Hit(if rapids { FixturePart::Rapid } else { p })
+    Read::Hit(if rapids && p == FixturePart::Flute { FixturePart::Rapid } else { p })
 }
 
 /// The move's tip path as straight chords, each with how far the real
@@ -307,8 +311,9 @@ pub(super) fn chords(m: &Move, chord_tol: f64) -> Option<Vec<(Point3, Point3, f6
 }
 
 /// One upright move against one closed mesh: the first band struck
-/// (shank, holder, spindle, flute; [`FixturePart::Rapid`] on a rapid),
-/// Clear only on proof.
+/// (shank, holder, spindle, flute; on a rapid the flute reads as
+/// [`FixturePart::Rapid`], law (d2)'s own naming since #424), Clear
+/// only on proof.
 fn judge_move(mesh: &FixtureMesh, m: &Move, steel: &MeshSteel<'_>, rapids: bool) -> Read {
     if !(m.from.is_finite() && m.to.is_finite()) {
         return Read::Unjudged;
