@@ -103,7 +103,7 @@ pub fn block_world() -> World {
 }
 
 pub fn op(src: SrcRef, params: OpParams, area: AreaControls) -> Operation {
-    Operation { tool: TOOL.into(), src, params, stamp: None, setup: None, area, coolant: Default::default() }
+    Operation { tool: TOOL.into(), src, params, stamp: None, setup: None, area, coolant: Default::default(), after: Default::default(), suppressed: false }
 }
 
 pub fn run(world: &World, o: &Operation) -> Result<(Toolpath, usize), String> {

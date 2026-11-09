@@ -55,6 +55,15 @@ unstated capability into existence.
     traverse bands and collision sweep read these directly). Linear:
     mm (unit-scaled); rotary: DEGREES, never unit-scaled. Must be
     finite with `max > min` or the field is dropped.
+  - linear only: `direction` `1` | `-1` (#373) - which way the slide
+    moves for a + command; absent or null is `1`, and anything else
+    refuses the file NAMING the axis. The program frame stays standard
+    (ISO 841); the stated `travel` is the machine's own stroke, so an
+    inverted axis is judged as `-v` against it. The post (#374) writes
+    an inverted X / Y mirrored (sign, I/J/K, G2/G3, G41/G42) through a
+    script that declares `axisInversion = true`; an inverted Z or any
+    other letter refuses posting by name. A rotary part's numeric `-1` refuses (a reversed
+    rotary is not supported).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
     finite numbers or the file refuses NAMING the axis (a garbled
     tilt vector must never read as "no tilt": the RTCP judgment rides
@@ -71,6 +80,14 @@ unstated capability into existence.
     second station on a one-spindle machine is a named refusal at the
     program gate). A file stating no spindle keeps `None`: the
     unstated-limit law again, never a guessed `Some(1)`.
+  - `live_tool` (issue #33), on the tool station: `{ "c_axis_on",
+    "c_axis_off", "spindle_on", "spindle_off" }` - the builder's words
+    that engage the spindle as a positioned C axis, release it, start
+    the live tool (the post appends `S<rpm>`) and stop it. No public
+    standard fixes them, so a post never guesses: all four non-empty,
+    or the machine states none and a C-axis live-tool section is
+    refused by name. The mirror carries them as
+    `head.liveTool { cAxisOn, cAxisOff, spindleOn, spindleOff }`.
   - `coolants`: entries are `{ "name": "Flood", "mCode": "M8" }` (the
     M-code is the machine's own word — string `"M8"` or bare number
     `8`, both normalized to `M8`; `mcode` spelling reads too) or a

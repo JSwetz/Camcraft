@@ -80,6 +80,11 @@ fn body(ui: &mut Ui, state: &mut State, name: &str, op: &camcraft_app::schema::O
                 name: tool_name.clone(),
                 tool: camcraft_app::tools::Tool { tool_material: tm, flutes, ..tool.clone() },
             });
+        } else {
+            // #225: the spindle speed, editable as rpm or surface speed.
+            // (Skipped on a frame that already queued a tool change, so
+            // two ChangeTools never race on one tool.)
+            super::spindle_row::row(ui, state, &tool_name, &tool);
         }
     }
 

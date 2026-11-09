@@ -15,6 +15,8 @@ extension = "nc";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
+axisInversion = true; // verified on the engine's mirrored stream for an inverted X/Y (#374): goldens + equivalence test
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -30,6 +32,7 @@ var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
@@ -213,15 +216,72 @@ function centerWords(p) {
 }
 
 // -------------------------------------------------------------- header
+// The program's O-word (#111): O0001 for the whole job, and one file
+// per operation counts up (the engine's programNumber); a host that
+// publishes none posts O0001.
+function oWord() {
+  var n = typeof programNumber !== "undefined" ? Math.round(Number(programNumber) || 1) : 1;
+  var t = String(Math.max(1, Math.min(n, 9999)));
+  while (t.length < 4) t = "0" + t;
+  return "O" + t;
+}
+
+// ------------------------------------------------------------ comments
+// Program commentary (#257): the setup, the operation and the tool, for
+// the operator reading the program - never a word the control moves on.
+// The stream's PARAMs OperationName / OperationKind / SetupName /
+// ToolDiameter / ToolKind / ToolCornerRadius and the TOOL record's name
+// feed it; a stream without them (a legacy .cl) writes none. User text
+// is cleaned for this dialect: a parenthesis would end the comment
+// early, % is the tape's end mark and ; opens a comment on some
+// controls, so all three become spaces; printable ASCII only, capped at
+// 40 characters.
+var setupName = "", setupSaid = "", opName = "", opKind = "";
+var toolName = "", toolKind = "", toolDia = 0, toolCr = 0;
+function clean(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  t = t.replace(/[()%;]/g, " ").replace(/[^\x20-\x7E]/g, "?").replace(/\s+/g, " ").trim();
+  return t.length > 40 ? t.substring(0, 40).trim() : t;
+}
+function joinDash(parts) {  // the non-empty parts, " - " between
+  var a = [];
+  for (var i = 0; i < parts.length; i++) if (parts[i]) a.push(parts[i]);
+  return a.join(" - ");
+}
+function note(s) { block(["(" + s + ")"]); }
+function commentParam(name, value) {
+  if (name === "SetupName") setupName = clean(value);
+  else if (name === "OperationName") opName = clean(value);
+  else if (name === "OperationKind") opKind = clean(value).toUpperCase();
+  else if (name === "ToolKind") toolKind = clean(value).toUpperCase();
+  else if (name === "ToolDiameter" && has(value)) toolDia = Number(value);
+  else if (name === "ToolCornerRadius" && has(value)) toolCr = Number(value);
+}
+function opNotes() {  // at the section's preamble: the setup once, the op each time
+  if (setupName && setupName !== setupSaid) { note("SETUP: " + setupName); setupSaid = setupName; }
+  if (opName) note("OPERATION: " + joinDash([opName, opKind, wcsWord]));
+  opName = ""; opKind = "";
+}
+function toolNote() {  // just before the tool change it describes
+  var desc = [];
+  if (toolKind) desc.push(toolKind);
+  if (toolDia > 0) desc.push("D" + fu(toolDia));
+  if (toolCr > 0) desc.push("R" + fu(toolCr));
+  note(joinDash(["T" + pad2(tNo) + (toolName ? " " + toolName : ""), desc.join(" ")]));
+  toolKind = ""; toolCr = 0;
+}
+
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block(["O0001", "(" + nm + ")"]);
+  block([oWord(), "(" + nm + ")"]);
 }
 
 function onParameter(name, value) {
+  commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -237,6 +297,7 @@ function onSpindleSpeed() {
 }
 
 function onToolChange(number, name) {
+  toolName = clean(name);
   tNo = number;
   toolWait = true;
   tcpmOn = false;              // a new tool re-arms TCPM (stage D)
@@ -251,8 +312,10 @@ function onToolChange(number, name) {
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
+  opNotes();
   block(["G90", wcsWord, "G40", "G49", "G80"]);
   if (toolWait) {
+    toolNote();
     block(["T" + pad2(tNo), "M6"]);
     block(["G43", "H" + pad2(tNo)]);
     toolWait = false;
@@ -263,6 +326,29 @@ function startPreamble() {
   }
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
+}
+
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M1"]); return; }
+  if (ask === "stop") { block(["M0"]); return; }
+  if (ask === "home") {
+    // A reference return under TCPM is one many controls alarm on:
+    // G49 drops it (and the length offset) first; the next preamble
+    // states G49 and its own H again, so nothing carries over.
+    if (tcpmOn) { block(["G49"]); tcpmOn = false; }
+    block(["G91", "G28", "Z0"]);  // straight up to the reference point first
+    block(["G28", "X0", "Y0"]);
+    block(["G90"]);               // absolute again before the next section
+    return;
+  }
+  msg(coolantWho() + "unknown after-operation ask " + ask);
 }
 
 function endPreamble() {
@@ -280,6 +366,7 @@ function endPreamble() {
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
+  afterOp();
   // The next preamble carries G49, which cancels TCPM too - so the
   // arm and the angle memory reset here, and a later tilt re-arms by
   // commanding all three words (stage D).

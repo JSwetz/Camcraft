@@ -165,9 +165,43 @@ pub fn fit_cylinder(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> 
     }, pos))
 }
 
+/// Cylinder stock about the vertical axis through `bounds`' XY centre
+/// whose radius is `r_max` - the models' largest horizontal distance from
+/// that axis (a turned part's revolved max radius) - plus `margin`, the
+/// height spanning z plus margins (#230). Snug: it contains every vertex
+/// yet never exceeds [`fit_cylinder`]'s padded diagonal. `None` for a
+/// non-finite or negative radius or margin, or degenerate bounds.
+#[must_use]
+pub fn fit_cylinder_about(bounds: &Aabb, r_max: f64, margin: f64) -> Option<(StockShape, Point3)> {
+    if !(r_max.is_finite() && r_max >= 0.0) {
+        return None;
+    }
+    let ([_, _, wz], pos) = fit_measures(bounds, margin)?;
+    let diameter = 2.0 * (r_max + margin);
+    if !positive(diameter) {
+        return None;
+    }
+    Some((StockShape::Cylinder { diameter, height: wz }, pos))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snug_cylinder_is_the_revolved_radius_plus_the_allowance() {
+        // A round part of radius 10, z 0..30, centred on the origin.
+        let b = Aabb { min: Point3::new(-10.0, -10.0, 0.0), max: Point3::new(10.0, 10.0, 30.0) };
+        let (shape, pos) = fit_cylinder_about(&b, 10.0, 2.0).expect("fits");
+        assert_eq!(shape, StockShape::Cylinder { diameter: 24.0, height: 34.0 }, "R + allowance, not 1.41 R");
+        assert_eq!(pos, Point3::new(0.0, 0.0, -2.0));
+        let (loose, _) = fit_cylinder(&b, 2.0).expect("the diagonal fit");
+        let (StockShape::Cylinder { diameter: dl, .. }, StockShape::Cylinder { diameter: ds, .. }) = (loose, shape) else {
+            panic!("cylinders");
+        };
+        assert!(ds < dl, "snugger than the diagonal: {ds} vs {dl}");
+        assert!(fit_cylinder_about(&b, f64::NAN, 2.0).is_none() && fit_cylinder_about(&b, -1.0, 2.0).is_none());
+    }
     use crate::geometry::Mesh;
 
     #[test]

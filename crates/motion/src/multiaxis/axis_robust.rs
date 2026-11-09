@@ -43,12 +43,13 @@
 //! surface of revolution (Pottmann & Randrup, 1998). Written from
 //! those sources and our own design notes; no vendor material.
 
-use super::axis::{judge, line, Axis, Datum, REFINE_FLOOR, REL_TOL};
+use super::axis::{judge_at, line, Axis, Datum, REFINE_FLOOR, REL_TOL};
 
 /// Below this share of the answering area kept, the refit is not on
 /// the part's revolved surface but on a remnant, and is declined.
 /// A backstop, with [`MIN_KEPT`]: it rarely fires, because `judge`
-/// already requires 90 % of the answering area to meet the axis, so a
+/// already requires 90 % of the answering area to meet the axis (75 %
+/// on the consensus path of `axis_consensus.rs`), so a
 /// part the plain fit earned seldom loses half its area to the trim;
 /// it guards the refit against a pathological inlier set (few or
 /// tiny facets) the share gate alone would not catch.
@@ -64,7 +65,7 @@ const ROUNDS: usize = 4;
 const BAND_K: f64 = 5.0;
 /// The median absolute deviation's normal-consistency factor: sigma =
 /// 1.4826 * MAD (Huber, Robust Statistics).
-const MAD_SIGMA: f64 = 1.4826;
+pub(super) const MAD_SIGMA: f64 = 1.4826;
 /// The tightened band's floor, as a fraction of the mean radius: below
 /// it the misses are the solve's rounding, not the part's.
 const BAND_FLOOR: f64 = 1e-9;
@@ -87,8 +88,10 @@ pub struct Fit {
     pub trusted: bool,
 }
 
-/// Reweigh the plain fit `plain` of `data` (total area `a_total`).
-pub(super) fn reweigh(data: &[Datum], plain: Axis, a_total: f64) -> Fit {
+/// Reweigh the plain fit `plain` of `data` (total area `a_total`), every
+/// refit judged at the concurrency share `ok_share` (`axis.rs`'s plain
+/// gate, or the consensus gate of `axis_consensus.rs`).
+pub(super) fn reweigh(data: &[Datum], plain: Axis, a_total: f64, ok_share: f64) -> Fit {
     let as_is = |share: f64, trusted: bool| Fit { axis: plain, plain, outlier_share: share, trusted };
     let Some((_, rho)) = line(data, plain.dir, a_total) else {
         return as_is(0.0, true); // cannot happen for a judged fit; keep it
@@ -103,7 +106,7 @@ pub(super) fn reweigh(data: &[Datum], plain: Axis, a_total: f64) -> Fit {
     let tol = (REL_TOL * rho).max(BAND_K * sigma).max(1e-9);
     let keep = inliers(data, plain, tol);
     let ans_all = answering(data, &all, plain).0;
-    let gate = Gate { rho, a_total, ans_all };
+    let gate = Gate { rho, a_total, ans_all, ok_share };
     // The wide pass: trim at the sagitta band until the inliers settle,
     // taken only when it lowers the trimmed residual of every facet
     // (a noisy mesh's tails cut at the band would otherwise drift it).
@@ -171,11 +174,13 @@ fn trimmed(data: &[Datum], keep: Option<&[bool]>, ax: Axis, band: f64) -> f64 {
 }
 
 /// The fixed terms every refit is judged by: the plain fit's mean
-/// radius, the total area, and the answering area of the whole part.
+/// radius, the total area, the answering area of the whole part, and
+/// the concurrency share the judgement asks.
 struct Gate {
     rho: f64,
     a_total: f64,
     ans_all: f64,
+    ok_share: f64,
 }
 
 /// Refit on `keep` and re-trim at `tol` until the inlier set stops
@@ -212,12 +217,12 @@ fn refit_on(data: &[Datum], keep: &[bool], ax: Axis, g: &Gate) -> Option<Axis> {
         .collect();
     let a_kept: f64 = kept.iter().map(|d| d.a).sum();
     let next = refit(&kept, ax, a_kept)?;
-    judge(data, next, g.rho, g.a_total).map(|_| next)
+    judge_at(data, next, g.rho, g.a_total, g.ok_share).map(|_| next)
 }
 
 /// The area-weighted median miss of the kept non-pole facets about
 /// `ax`; `None` when none answer.
-fn median_miss(data: &[Datum], keep: &[bool], ax: Axis) -> Option<f64> {
+pub(super) fn median_miss(data: &[Datum], keep: &[bool], ax: Axis) -> Option<f64> {
     let mut v: Vec<(f64, f64)> = data
         .iter()
         .zip(keep)
@@ -258,7 +263,7 @@ fn refit(kept: &[Datum], ax: Axis, a_kept: f64) -> Option<Axis> {
 
 /// Which facets' normal lines meet `ax` within `tol` (pole facets bear
 /// no row and are kept: they cannot bias the line).
-fn inliers(data: &[Datum], ax: Axis, tol: f64) -> Vec<bool> {
+pub(super) fn inliers(data: &[Datum], ax: Axis, tol: f64) -> Vec<bool> {
     data.iter().map(|d| dist(d, ax).is_none_or(|e| e <= tol)).collect()
 }
 
@@ -274,7 +279,7 @@ pub(super) fn dist(d: &Datum, ax: Axis) -> Option<f64> {
 }
 
 /// The kept non-pole area (about `ax`) and facet count.
-fn answering(data: &[Datum], keep: &[bool], ax: Axis) -> (f64, usize) {
+pub(super) fn answering(data: &[Datum], keep: &[bool], ax: Axis) -> (f64, usize) {
     data.iter()
         .zip(keep)
         .filter(|(d, k)| **k && dist(d, ax).is_some())

@@ -34,6 +34,7 @@ fn rect() -> Region {
 
 fn at(kind: MoveKind, a: (f64, f64, f64), b: (f64, f64, f64)) -> Move {
     Move {
+        rotary: None,
         kind,
         from: Point3::new(a.0, a.1, a.2),
         to: Point3::new(b.0, b.1, b.2),

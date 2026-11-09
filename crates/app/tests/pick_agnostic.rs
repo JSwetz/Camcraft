@@ -106,6 +106,8 @@ fn generate(world: &World, name: &str, picks: &[FeatureSel], params: &OpParams) 
         setup: None,
         area: Default::default(),
         coolant: Default::default(),
+        after: Default::default(),
+        suppressed: false,
     };
     operation::generate(world, &op, "").map(|(t, w)| (t, w.len())).map_err(|e| e.to_string())
 }

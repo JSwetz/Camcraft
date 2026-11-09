@@ -144,14 +144,36 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
             .collect();
         head.insert("toolStation".to_owned(), json!({ "coolants": cs }));
     }
-    json!({
+    if let Some(lt) = &m.live_tool {
+        // Issue #33: the builder's C-axis / live-spindle words.
+        head.insert(
+            "liveTool".to_owned(),
+            json!({
+                "cAxisOn": lt.c_axis_on,
+                "cAxisOff": lt.c_axis_off,
+                "spindleOn": lt.spindle_on,
+                "spindleOff": lt.spindle_off,
+            }),
+        );
+    }
+    let mut out = json!({
         "name": m.model,
         "kinematics": { "static": { "axes": axes, "rotaries": rotaries, "head": Value::Object(head) } },
         "rapidRate": rapid,
         "feedRateMax": feed,
         // #131: the unit the machine is programmed in (numbers stay mm).
         "units": m.units.as_deref().unwrap_or("mm"),
-    })
+    });
+    // #374: the inverted linear axes, which the engine mirrors the stream
+    // in (`post::invert`). Absent for a standard machine, so every
+    // standard mirror is byte-identical to the one before #374.
+    let inverted = m.inverted_axes();
+    if !inverted.is_empty()
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("invertedAxes".to_owned(), json!(inverted));
+    }
+    out
 }
 
 /// Walk a path of object keys; `None` on any missing or mismatched hop.
@@ -283,6 +305,12 @@ pub fn script_props(m: &Value) -> Value {
             .filter(|v| v.is_array())
             .cloned()
             .unwrap_or_else(|| json!([])),
+        // Issue #33: the builder's C-axis live-tool words, or null.
+        "liveTool": get(m, &["kinematics", "static", "head", "liveTool"])
+            .or(get(m, &["liveTool"]))
+            .filter(|v| v.is_object())
+            .cloned()
+            .unwrap_or(Value::Null),
         "rigidTapping": get(m, &["kinematics", "static", "head", "rigidTapping"])
             .or(get(m, &["rigidTapping"]))
             .and_then(Value::as_bool)

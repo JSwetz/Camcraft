@@ -117,12 +117,22 @@ pub fn current_stamp(
         h.write_u8(0xCC);
     }
     params.stamp_with(world, setup, Some(src), &mut h);
+    // #326: the setup's part alignment is a moved input for every op of
+    // the setup (the parts it machines, verifies against or measures
+    // heights from). Written only when one is set, so no stamp of an
+    // as-modelled setup changes.
+    if let Some(a) = crate::setup_align::alignment(world, setup) {
+        h.write(b"part-alignment");
+        for v in [a.pos.x, a.pos.y, a.pos.z, a.rot[0], a.rot[1], a.rot[2], a.rot[3]] {
+            w(&mut h, v);
+        }
+    }
     // Issue #62: a kind that turns about the spindle measures every
     // diameter from its work offset's origin, so moving that origin is
     // a moved input - the op goes Stale. Written only off the world
     // origin, so no digest of an op on an untouched offset changes.
     if super::spindle_law::turns(world, params) {
-        let (_, o) = crate::posting::wcs_context(world, setup, params);
+        let (_, o) = crate::posting::wcs_context(world, setup);
         if o != [0.0; 3] {
             h.write(b"spindle-origin");
             for v in o {
@@ -141,7 +151,9 @@ pub fn current_stamp(
             h.write_u8(b'E');
             h.write(name.as_bytes());
             let entity = model::find_by_name(world, name)?;
-            let loc = model::transform_of(world, &entity).unwrap_or_default();
+            // #326: the pose in the setup's frame (as modelled: the
+            // document `Location`, the bytes every older stamp read).
+            let loc = crate::setup_align::pose_in(world, &entity, setup).unwrap_or_default();
             for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]]
             {
                 w(&mut h, v);

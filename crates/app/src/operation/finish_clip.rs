@@ -137,16 +137,16 @@ fn link(out: &mut Vec<Move>, pos: Option<Point3>, p: Point3, clearance: f64, plu
         && s.z < over.z
     {
         let up = Point3::new(s.x, s.y, over.z);
-        out.push(Move { kind: MoveKind::Rapid, from: s, to: up, feed: None, arc: None, axis: None });
+        out.push(Move { rotary: None, kind: MoveKind::Rapid, from: s, to: up, feed: None, arc: None, axis: None });
         cur = Some(up);
     }
     if let Some(c) = cur
         && c != over
     {
-        out.push(Move { kind: MoveKind::Rapid, from: c, to: over, feed: None, arc: None, axis: None });
+        out.push(Move { rotary: None, kind: MoveKind::Rapid, from: c, to: over, feed: None, arc: None, axis: None });
     }
     if over != p {
-        out.push(Move { kind: MoveKind::Plunge, from: over, to: p, feed: Some(plunge_feed), arc: None, axis: None });
+        out.push(Move { rotary: None, kind: MoveKind::Plunge, from: over, to: p, feed: Some(plunge_feed), arc: None, axis: None });
     }
 }
 
@@ -181,7 +181,7 @@ fn runs(path: &Toolpath, allow: &Region, tol: f64) -> Vec<Vec<Move>> {
         }
         for (a, b) in segs {
             for (p, q) in edges.clip(allow, a, b) {
-                push(&mut runs, &mut pos, Move { kind: m.kind, from: p, to: q, feed: m.feed, arc: None, axis: m.axis });
+                push(&mut runs, &mut pos, Move { rotary: None, kind: m.kind, from: p, to: q, feed: m.feed, arc: None, axis: m.axis });
             }
         }
     }
@@ -207,7 +207,7 @@ pub(super) fn clip_path(path: Toolpath, allow: &Region, fp: &Finish3DParams, ram
             Some(legs) => {
                 link(&mut out, pos, legs[0], clearance, fp.plunge_feed);
                 for w in legs.windows(2) {
-                    out.push(Move { kind: MoveKind::Feed, from: w[0], to: w[1], feed: Some(fp.plunge_feed), arc: None, axis: None });
+                    out.push(Move { rotary: None, kind: MoveKind::Feed, from: w[0], to: w[1], feed: Some(fp.plunge_feed), arc: None, axis: None });
                 }
             }
             None => link(&mut out, pos, first.from, clearance, fp.plunge_feed),
@@ -224,7 +224,7 @@ pub(super) fn clip_path(path: Toolpath, allow: &Region, fp: &Finish3DParams, ram
     if let Some(p) = pos
         && p.z < clearance
     {
-        out.push(Move { kind: MoveKind::Rapid, from: p, to: Point3::new(p.x, p.y, clearance), feed: None, arc: None, axis: None });
+        out.push(Move { rotary: None, kind: MoveKind::Rapid, from: p, to: Point3::new(p.x, p.y, clearance), feed: None, arc: None, axis: None });
     }
     Ok(Toolpath { moves: out, cycles: path.cycles, notes: path.notes, comps: path.comps, threads: Vec::new(), probes: path.probes })
 }
@@ -242,6 +242,7 @@ mod law {
 
     fn feed(a: (f64, f64, f64), b: (f64, f64, f64)) -> Move {
         Move {
+            rotary: None,
             kind: MoveKind::Feed,
             from: Point3::new(a.0, a.1, a.2),
             to: Point3::new(b.0, b.1, b.2),

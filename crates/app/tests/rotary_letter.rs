@@ -4,8 +4,9 @@
 //! laid along world X generates on a mill stating an A trunnion
 //! about X; the same op refuses by name on a mill whose only rotary
 //! is a B about Y; a bar standing on the spindle of a mill-turn
-//! (its C about Z) refuses with the PINNED word - the post's pose
-//! law carries no C - and an unmounted machine checks nothing. The
+//! (its C about Z) is admitted since issue #33 and its path states
+//! the C angle on every move (the C law itself lives in
+//! `c_axis_live.rs`); an unmounted machine checks nothing. The
 //! letter law itself is unit-pinned in `operation::rotary_gate`;
 //! this file is the document.
 //!
@@ -104,6 +105,8 @@ fn op() -> Operation {
         setup: None,
         area: Default::default(),
         coolant: Default::default(),
+        after: Default::default(),
+        suppressed: false,
     }
 }
 
@@ -125,9 +128,13 @@ fn a_machine_without_the_bars_line_refuses_by_name() {
 }
 
 #[test]
-fn the_mill_turn_spindle_as_c_axis_is_pinned_by_name() {
+fn the_mill_turn_spindle_as_c_axis_answers_c_and_stamps_it() {
+    // A standing bar is the contour's stance (the parallel lays it down).
     let w = world(2, Some(machine("mill-turn", vec![rotary("C", [0.0, 0.0, 1.0])])));
-    let e = operation::generate(&w, &op(), "").expect_err("no C word reaches the post yet");
-    let msg = format!("{e}");
-    assert!(msg.contains("pinned") && msg.contains("M13.5 B"), "{msg}");
+    let mut o = op();
+    if let OpParams::RotaryParallel { tolerance, clearance_z, retract_z, top_z, bottom_z, feed, plunge_feed, climb, lead_deg, lag_deg, max_tilt_deg, .. } = o.params.clone() {
+        o.params = OpParams::RotaryContour { tolerance, clearance_z, retract_z, top_z, bottom_z, feed, plunge_feed, climb, lead_deg, lag_deg, max_tilt_deg };
+    }
+    let (path, _) = operation::generate(&w, &o, "").expect("the spindle's C holds the standing bar");
+    assert!(path.moves.iter().all(|m| m.rotary.is_some()), "every move states its C");
 }

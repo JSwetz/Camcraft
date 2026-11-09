@@ -130,7 +130,7 @@ fn sheet_is_deterministic_byte_identical_twice() {
     run(
         &world,
         &mut history,
-        SetWcsOrigin::new(&world, "G54", at(10.0, 0.0, 5.0)),
+        SetWcsOrigin::new(&world, at(10.0, 0.0, 5.0)),
         "place offset",
     ); // lands in Setup2 (active)
     run(
@@ -176,7 +176,7 @@ fn sheet_names_stock_wcs_and_op_depths() {
     run(
         &world,
         &mut history,
-        SetWcsOrigin::new(&world, "G54", at(12.5, -3.0, 4.0)),
+        SetWcsOrigin::new(&world, at(12.5, -3.0, 4.0)),
         "place G54 in Setup2",
     );
     create_face(&world, &mut history, "Face2", 19.5);
@@ -366,7 +366,7 @@ fn every_float_uses_the_format_helper() {
 
     let mut params = face_params();
     if let OpParams::Face { cut_z: c, .. } = &mut params {
-        *c = Height::of(HeightReference::WorkOffset(0), 0.0);
+        *c = Height::of(HeightReference::WorkOffset, 0.0);
     }
     // Unresolvable at render time, sane at creation time - the command
     // gate checks structure, not resolution (depth_sane's rule).

@@ -287,6 +287,20 @@ impl Tool {
             }
     }
 
+    /// The corner radius the tip really has (#263). A ball nose's or a
+    /// probe's tip is a sphere, so its corner is half the diameter
+    /// whatever `corner_r` holds - the radius every reader already cuts
+    /// and judges with (`Cutter::of`, [`Tool::profile`], the stock sim's
+    /// sphere atom). Every other kind answers its own field; only the
+    /// bull nose reads it.
+    #[must_use]
+    pub fn tip_corner_r(&self) -> f64 {
+        match self.kind {
+            ToolKind::BallNose | ToolKind::Probe => self.diameter * 0.5,
+            _ => self.corner_r,
+        }
+    }
+
     /// The same tool as the verifier sees it: coaxial radii upward from
     /// the cutting edge.
     #[must_use]
@@ -619,6 +633,21 @@ mod tests {
         assert!(!Tool { pitch: -1.0, ..drill }.is_sane());
         let tap = catalog().into_iter().find(|(n, _)| *n == "TAP-M6").unwrap().1;
         assert!(!Tool { pitch: 0.0, ..tap }.is_sane());
+    }
+
+    /// #263: a ball's corner is its ball. A ball nose saved with any
+    /// corner field still answers half its diameter - the radius the
+    /// readers cut with - while a bull nose answers its own field.
+    #[test]
+    fn a_ball_noses_corner_is_half_its_diameter_whatever_the_field_holds() {
+        let tool = |name: &str| catalog().into_iter().find(|(n, _)| *n == name).unwrap().1;
+        let ball = tool("BN-0600");
+        for stale in [0.0, 1.0, ball.diameter * 0.5] {
+            let b = Tool { corner_r: stale, ..ball.clone() };
+            assert_eq!(b.tip_corner_r(), ball.diameter * 0.5, "corner field {stale}");
+        }
+        let bull = Tool { kind: ToolKind::BullNose, corner_r: 1.0, ..ball };
+        assert_eq!(bull.tip_corner_r(), 1.0);
     }
 
     /// The preview-drawing law: the profile's band breakpoints are the

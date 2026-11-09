@@ -23,6 +23,9 @@ use super::*;
 /// their generation-time call sites, so a batch surfaces exactly the
 /// error the serial path surfaces, in the same precedence.
 pub struct GenJob {
+    /// The operation's own name, for the generation log (#163) - "" for
+    /// a preview with no entity.
+    pub(super) op_name: String,
     pub(super) tool: crate::tools::Tool,
     /// The op's tool NAME as the component stored it - the error
     /// strings of the tilted kinds quote it verbatim.
@@ -116,6 +119,18 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         return Err(GenError::Invalid(format!("'{}' is not a tool", op.tool)));
     };
     let setup = op.setup.as_deref();
+    // #326: an op this slice has not verified in an aligned setup is
+    // refused by name here, at the one door every generation passes -
+    // never cut in the unaligned frame.
+    if let Some(why) = crate::setup_align::generation_problem(world, op) {
+        return Err(GenError::Invalid(why));
+    }
+    // #343: the mounted machine and post are the active setup's - an op
+    // of a setup mounting other steel is refused by name, never cut
+    // against the wrong machine.
+    if let Some(why) = crate::setup_mount::generation_problem(world, op) {
+        return Err(GenError::Invalid(why));
+    }
     let material = material_of(world, setup, &op.src)?;
     let part_solid = part_solid_of(world, setup, &op.src, &material);
     // Setup stock, when it is not the source itself: the swarf column
@@ -236,7 +251,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // (The post reads it again, against the origin it is handed then.)
     // The mill-turn's cross drill joins it (issue #67): its standoffs
     // are measured about that same line.
-    let (slot, wcs_origin) = crate::posting::wcs_context(world, setup, &op.params);
+    let (slot, wcs_origin) = crate::posting::wcs_context(world, setup);
     let spindle_note = if super::spindle_law::turns(world, &op.params) {
         super::spindle_law::check(&material.facets, wcs_origin, slot)?
     } else {
@@ -257,6 +272,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     });
 
     Ok(GenJob {
+        op_name: op_name.to_owned(),
         tool,
         tool_name: op.tool.clone(),
         params: op.params.clone(),

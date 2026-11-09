@@ -1,0 +1,121 @@
+//! #196 in the surface: the Setups page's work-offset picker queues
+//! `SetSetupWorkOffset` (never a world poke), the drain lands it as one
+//! undo unit, Ctrl+Z / Ctrl+Y walk it, and a refused pick pushes nothing.
+//! Provenance: our own page law; no vendor material consulted.
+
+use egui::accesskit::Role;
+use egui::{Event, Key, Modifiers, Vec2};
+use egui_kittest::kittest::Queryable;
+use egui_kittest::Harness;
+
+use crate::state::{CommandKind, State};
+
+fn run(state: &mut State, k: CommandKind) {
+    state.pending.push_back(k);
+    state.drain_actions();
+}
+
+fn with_setup() -> State {
+    let mut state = State::new();
+    run(&mut state, CommandKind::CreateSetup { name: None, datum_from: None });
+    state
+}
+
+fn pick(state: &State) -> Option<usize> {
+    camcraft_app::setup::work_offset(&state.world, "Setup1")
+}
+
+fn frame(ui: &mut egui::Ui, st: &mut State) {
+    super::panes::shortcuts(ui, st);
+    st.drain_actions();
+    super::setup_wcs_pick::picker(ui, st, "Setup1");
+}
+
+fn key(h: &mut Harness<'static, State>, k: Key) {
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::COMMAND));
+    h.input_mut().events.push(Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    h.run_steps(2);
+}
+
+#[test]
+fn the_picker_sets_the_setups_work_offset_through_the_command() {
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(500.0, 400.0))
+        .build_ui_state(frame, with_setup());
+    h.run();
+    assert_eq!(pick(h.state()), None, "a fresh setup is unset - it reads G54");
+    assert!(h.state().pending.is_empty(), "drawing the picker queues nothing");
+    let auto = super::setup_wcs_pick::pick_text(None);
+    h.get_by(|n| n.role() == Role::ComboBox && n.value().as_deref() == Some(auto)).click();
+    h.run();
+    h.get_by_label("G55").click();
+    h.run();
+    assert_eq!(pick(h.state()), Some(1), "the drain lands G55");
+    assert_eq!(h.state().status, "Setup1 WCS posts as G55");
+    key(&mut h, Key::Z);
+    assert_eq!(pick(h.state()), None, "undo restores G54 (unset)");
+    key(&mut h, Key::Y);
+    assert_eq!(pick(h.state()), Some(1), "redo restores G55");
+}
+
+#[test]
+fn a_refused_pick_changes_nothing_and_says_why() {
+    let mut state = with_setup();
+    run(&mut state, CommandKind::SetSetupWorkOffset { setup: "Setup1".into(), slot: Some(9) });
+    assert_eq!(pick(&state), None);
+    assert!(state.status.contains("work offset not changed"), "{}", state.status);
+    // The refusal pushed nothing: the one undo unit is the CreateSetup.
+    run(&mut state, CommandKind::Undo);
+    assert!(camcraft_app::setup::names(&state.world).is_empty());
+    assert!(!state.history.can_undo());
+}
+
+/// #329: the Heights page's Work offset reference offers no slot of its
+/// own - one combo (From), and the setup's offset shown read-only with
+/// the pointer to the Setups page. Picking G55 on the setup changes what
+/// the row shows; the height itself is untouched.
+#[test]
+fn the_heights_page_shows_the_setups_offset_with_no_wcs_choice() {
+    use camcraft_app::operation::{Height, HeightReference};
+    let frame = |ui: &mut egui::Ui, st: &mut (State, Height)| {
+        let (state, height) = st;
+        super::heights_page::height_editor(ui, "Cut Z", &state.world, Some("Setup1"), height, "t.cut");
+    };
+    let height = Height::of(HeightReference::WorkOffset, 0.0);
+    let combos = |h: &Harness<'static, (State, Height)>| {
+        h.query_all_by(|n| n.role() == Role::ComboBox).count()
+    };
+    let shown = |h: &Harness<'static, (State, Height)>, text: &str| {
+        h.query_all_by(|n| {
+            n.label().is_some_and(|l| l.contains(text)) || n.value().is_some_and(|v| v.contains(text))
+        })
+        .count()
+            > 0
+    };
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(500.0, 300.0))
+        .build_ui_state(frame, (with_setup(), height));
+    h.run();
+    assert_eq!(combos(&h), 1, "only the From combo - no per-height WCS choice");
+    assert!(shown(&h, "WCS (G54)  (from setup Setup1)"), "an unset setup reads G54");
+    run(&mut h.state_mut().0, CommandKind::SetSetupWorkOffset { setup: "Setup1".into(), slot: Some(1) });
+    h.run();
+    assert_eq!(combos(&h), 1);
+    assert!(shown(&h, "WCS (G55)  (from setup Setup1)"), "follows the setup's pick");
+    assert_eq!(h.state().1, Height::of(HeightReference::WorkOffset, 0.0), "the height is untouched");
+}
+
+/// #329: unset and an explicit G54 are one entry, spelled plainly.
+#[test]
+fn an_unset_setup_reads_plain_g54() {
+    use super::setup_wcs_pick::pick_text;
+    assert_eq!(pick_text(None), "G54");
+    assert_eq!(pick_text(Some(0)), "G54");
+    assert_eq!(pick_text(Some(1)), "G55");
+}

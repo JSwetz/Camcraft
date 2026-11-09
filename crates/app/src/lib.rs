@@ -19,7 +19,10 @@ pub use camcraft_motion::machining2d;
 pub use camcraft_motion::machining3d;
 pub use camcraft_motion::multiaxis;
 pub use camcraft_motion::turning;
+pub mod logging;
 pub mod machine;
+// #25: deviation classes on the machined mesh.
+pub mod machined_classes;
 pub mod mcp;
 pub mod model;
 pub mod operation;
@@ -34,6 +37,10 @@ pub mod ribbon;
 pub mod schema;
 pub mod script;
 pub mod setup;
+// #326: the part's alignment per setup.
+pub mod setup_align;
+// #343: each setup's own machine and post, and the one-mount law.
+pub mod setup_mount;
 pub mod setup_sheet;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;

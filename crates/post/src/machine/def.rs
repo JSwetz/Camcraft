@@ -8,6 +8,7 @@
 //! Crate-boundary home (M4.1 R0): pure data - no flecs, no world. The
 //! document glue and the program checker stay in the parent module.
 
+use super::direction::AxisDirection;
 use serde::{Deserialize, Serialize};
 
 /// One axis as the machine file describes it - prismatic or, since
@@ -50,6 +51,10 @@ pub struct AxisLimits {
     /// one for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis: Option<[f64; 3]>,
+    /// Which way a linear axis moves for a positive command (#373), the
+    /// file's `"direction": 1 | -1`; the program frame never changes.
+    #[serde(default, skip_serializing_if = "AxisDirection::is_standard")]
+    pub direction: AxisDirection,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -155,6 +160,26 @@ pub struct Machine {
     /// Unstated reads as "not limited", the unstated-limit law.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rigid_tapping: Option<bool>,
+    /// The builder's codes for C-axis live-tool work (issue #33), or
+    /// None - unstated, and a post refuses a C-axis section by name
+    /// rather than guess a builder-specific M word.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_tool: Option<LiveToolCodes>,
+}
+
+/// The words a control needs around C-axis live-tool work (issue
+/// #33): engage the spindle as a positioned C axis and release it,
+/// start the live tool (the post appends `S<rpm>`) and stop it. They
+/// are BUILDER-specific - no public standard fixes them - so they are
+/// the machine file's statement (`tool_station.live_tool`), never a
+/// post's default. All four or none: a partial set reads as unstated.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LiveToolCodes {
+    pub c_axis_on: String,
+    pub c_axis_off: String,
+    pub spindle_on: String,
+    pub spindle_off: String,
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -

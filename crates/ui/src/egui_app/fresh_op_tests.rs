@@ -54,7 +54,7 @@ fn part_with_g54_on_top() -> World {
     };
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", top).expect("G54 on the part top"),
+        SetWcsOrigin::new(&world, top).expect("G54 on the part top"),
     );
     world
 }
@@ -86,7 +86,7 @@ fn a_bottom_on_the_g54_plane_is_refused_when_g54_sits_on_the_part_top() {
     let world = part_with_g54_on_top();
     let mut params = quick_params(1);
     if let OpParams::Contour { bottom_z, .. } = &mut params {
-        *bottom_z = Height::of(HeightReference::WorkOffset(0), 0.0);
+        *bottom_z = Height::of(HeightReference::WorkOffset, 0.0);
     } else {
         panic!("kind 1 is a 2D Contour");
     }
