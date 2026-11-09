@@ -215,7 +215,7 @@ fn the_pick_round_trips_and_older_or_broken_files_read_by_name() {
     assert!(first.contains("\"stock_source\": \"from_previous\""), "{first}");
     // The stock source arrived at v57 (#320); pin the floor so a later
     // rung does not break this round trip (cf. #344).
-    assert!(project::PROJECT_VERSION >= 57, "stock sources need project v57 or later");
+    const _: () = assert!(project::PROJECT_VERSION >= 57, "stock sources need project v57 or later");
     let world2 = new_world();
     project::load(&world2, &path).expect("load");
     assert_eq!(setup_stock::stored(&world2, "Setup2"), Some(StockSource::FromPrevious));
