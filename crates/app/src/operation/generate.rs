@@ -2795,7 +2795,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. }))
                 && let Some(dex) = verify_prior.get()
             {
-                verify::acquit_by_prior(&path, dex, geom.radius, Z_TOL, &mut warns);
+                let prior = crate::stock_sim::Columns::of_grid(dex);
+                verify::acquit_by_prior(&path, &prior, geom.radius, Z_TOL, &mut warns);
             }
             // A turned path's axial rapids are judged in the meridian
             // plane, not by the column (#96, #103): the revolved stock
