@@ -236,6 +236,8 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::RestUnjudged { .. } => (210, false),
             // The scallop reading (M13.9): a quality note, its own line.
             Warning::Scallop { .. } => (211, false),
+            // A lathe holder's rub (#369) splits part from stock too.
+            Warning::HolderHit { part, .. } => (212 + *part as u8, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -243,6 +245,7 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::Crossing { moves } => moves[1],
             Warning::Gouge { at }
             | Warning::ShankHit { at, .. }
+            | Warning::HolderHit { at, .. }
             | Warning::SweepHit { at, .. }
             | Warning::RapidInStock { at }
             | Warning::FixtureHit { at, .. }

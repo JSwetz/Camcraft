@@ -138,6 +138,8 @@ mod top_stock;
 pub use top_stock::TOP_STOCK_WARNING;
 mod turning_credit;
 mod turning_feeds;
+mod turning_holder;
+mod turning_holder_scene;
 mod turning_outline;
 mod turning_rapids;
 mod turning_stock;

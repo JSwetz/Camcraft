@@ -16,6 +16,11 @@
 //! - **Refusals by name**, at the command and again at use: a body that
 //!   is empty, non-finite, degenerate, flat, off the axis, below the
 //!   tip, too large, or reaching into the flutes.
+//! - **One body, one frame (#369).** A milling body is placed along the
+//!   spindle axis ([`BodyFrame::Spindle`]); a lathe steel's in the
+//!   turning tool frame ([`BodyFrame::Lathe`], `crate::tool_body_lathe`).
+//!   The milling laws read only the first; a lathe body leaves the tool
+//!   record as it is for them and is judged by the revolved-stock law.
 
 use std::sync::Arc;
 
@@ -23,10 +28,28 @@ use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.
 use flecs_ecs::prelude::{Entity, World};
 
 use camcraft_tools::holder_profile::{HolderProfile, HolderStack, MAX_BODY_HEIGHT};
+use camcraft_tools::lathe_holder::{LatheClearance, LathePlacement};
 
 use crate::geometry::{Point3, Triangle};
 use crate::schema::ToolBody;
 use crate::tools::{Tool, ToolGeom, ToolKind};
+
+/// The frame a body is placed in, the placement it landed with, and
+/// what the laws read off it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BodyFrame {
+    /// #368: a milling body - the model direction that became the tool
+    /// axis, the model origin's height above the tip, and its revolved
+    /// envelope.
+    Spindle { axis: [f64; 3], offset: f64, profile: HolderProfile },
+    /// #369: a lathe-held body - its placement in the turning tool
+    /// frame and its clearance bands along the spindle.
+    Lathe { place: LathePlacement, clearance: Arc<LatheClearance> },
+}
+
+/// The tool kinds a lathe holds: they take a lathe-frame body only
+/// (`Bore` serves both machines and takes either).
+pub const LATHE_HELD: [ToolKind; 4] = [ToolKind::Turning, ToolKind::Groove, ToolKind::Thread, ToolKind::Form];
 
 /// The body on a tool entity, if it has one.
 #[must_use]
@@ -82,20 +105,28 @@ pub fn build(source: &str, axis: [f64; 3], offset: f64, placed: Vec<Triangle>) -
         .map(|t| [[t.a.x, t.a.y, t.a.z], [t.b.x, t.b.y, t.b.z], [t.c.x, t.c.y, t.c.z]])
         .collect();
     let profile = HolderProfile::envelope(&tris).map_err(|e| e.to_string())?;
-    Ok(ToolBody { source: source.to_owned(), axis, offset, facets: Arc::from(placed), profile })
+    Ok(ToolBody { source: source.to_owned(), facets: Arc::from(placed), frame: BodyFrame::Spindle { axis, offset, profile } })
 }
 
-/// Can `tool` carry `body`? The insert kinds are lathe-held (their
-/// holders are #369's), and a body reaching into the flutes has no
-/// cylinder stack that could stand it.
+/// Can `tool` carry `body`? A lathe-held insert takes a lathe-frame
+/// body (#369) and a lathe-frame body needs a lathe steel; a spindle
+/// body reaching into the flutes has no cylinder stack that could
+/// stand it.
 pub fn fits(tool: &Tool, body: &ToolBody) -> Result<(), String> {
-    if matches!(tool.kind, ToolKind::Turning | ToolKind::Groove | ToolKind::Thread | ToolKind::Form) {
-        return Err(format!("a {} takes no modelled body yet - lathe holders are a later slice", tool.kind));
+    let profile = match &body.frame {
+        BodyFrame::Lathe { .. } => return crate::tool_body_lathe::fits(tool),
+        BodyFrame::Spindle { profile, .. } => profile,
+    };
+    if LATHE_HELD.contains(&tool.kind) {
+        return Err(format!(
+            "a {} is lathe-held - lathe holders are placed in the turning tool frame (radial and spindle directions, tip point), not along a spindle axis",
+            tool.kind
+        ));
     }
-    if body.profile.enclose(tool).is_none() {
+    if profile.enclose(tool).is_none() {
         return Err(format!(
             "the tool body reaches into the flutes (its foot is {:.3} mm above the tip, the flutes run {:.3} mm)",
-            body.profile.bottom(),
+            profile.bottom(),
             tool.flute_len
         ));
     }
@@ -105,14 +136,21 @@ pub fn fits(tool: &Tool, body: &ToolBody) -> Result<(), String> {
 /// The tool as every judging law should read it, and the body behind
 /// it: unchanged with no body; with one, the holder widened to the
 /// cylinder enclosing the body. Refuses by name when the body no longer
-/// fits the tool (a later edit shortened the shank under it).
+/// fits the tool (a later edit shortened the shank under it). A lathe
+/// body (#369) leaves the record as it is: the revolved-stock law
+/// reads it (`tool_body_lathe::clearance_of`), no cylinder law does.
 pub fn judged(world: &World, entity: &Entity, tool: Tool) -> Result<(Tool, Option<HolderProfile>), String> {
     let Some(body) = body_of(world, entity) else {
         return Ok((tool, None));
     };
     fits(&tool, &body)?;
-    let enclosed = body.profile.enclose(&tool).ok_or("the tool body reaches into the flutes")?;
-    Ok((enclosed, Some(body.profile)))
+    match body.frame {
+        BodyFrame::Lathe { .. } => Ok((tool, None)),
+        BodyFrame::Spindle { profile, .. } => {
+            let enclosed = profile.enclose(&tool).ok_or("the tool body reaches into the flutes")?;
+            Ok((enclosed, Some(profile)))
+        }
+    }
 }
 
 /// What the fixture laws sweep above the shank of `geom`: the body's
@@ -126,10 +164,20 @@ pub fn stack(geom: &ToolGeom, body: Option<&HolderProfile>) -> HolderStack {
 /// digest moves), the envelope's bands with one - the only numbers a
 /// law reads off it.
 pub fn digest(world: &World, entity: &Entity, h: &mut impl std::hash::Hasher) {
-    if let Some(b) = body_of(world, entity) {
-        h.write(b"tool-body");
-        for band in b.profile.bands() {
-            for v in [band.above, band.len, band.r] {
+    match body_of(world, entity).map(|b| b.frame) {
+        None => {}
+        Some(BodyFrame::Spindle { profile, .. }) => {
+            h.write(b"tool-body");
+            for band in profile.bands() {
+                for v in [band.above, band.len, band.r] {
+                    h.write(&v.to_bits().to_le_bytes());
+                }
+            }
+        }
+        // #369: the clearance bands, the only numbers its law reads.
+        Some(BodyFrame::Lathe { clearance, .. }) => {
+            h.write(b"lathe-body");
+            for v in clearance.words() {
                 h.write(&v.to_bits().to_le_bytes());
             }
         }

@@ -1,5 +1,6 @@
 //! SetToolBody (#368): attach, replace or clear a tool's modelled body
-//! as one undoable command. The mesh is read, placed and judged at
+//! as one undoable command - a milling body along the spindle axis, or
+//! (#369) a lathe body in the turning tool frame. The mesh is read, placed and judged at
 //! construction (AGENTS.md: malformed input never enters the history);
 //! `apply`/`invert` only land the snapshot. Our own command model, the
 //! snapshot-and-restore inverse every sibling uses.
@@ -13,6 +14,7 @@ use crate::geometry::Triangle;
 use crate::model;
 use crate::schema::ToolBody;
 use crate::tool_body;
+use camcraft_tools::lathe_holder::LathePlacement;
 
 /// A body as the caller states it: model-frame facets, where they came
 /// from, and the numeric placement (`tool_body::place`).
@@ -24,6 +26,16 @@ pub struct ToolBodySpec {
     pub axis: [f64; 3],
     /// The model origin's height above the tool tip, along that axis.
     pub offset: f64,
+}
+
+/// A lathe-held body as the caller states it (#369): model-frame
+/// facets, where they came from, and the turning-frame placement (the
+/// model directions that are radial and along the spindle, the model
+/// point that is the tip - `camcraft_tools::lathe_holder`).
+pub struct LatheBodySpec {
+    pub source: String,
+    pub facets: Vec<Triangle>,
+    pub place: LathePlacement,
 }
 
 /// Set (`Some`) or clear (`None`) a tool's body.
@@ -59,6 +71,37 @@ impl SetToolBody {
         let mesh = crate::geometry::import::load_model(path)?;
         let source = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
         Self::new(world, name, Some(ToolBodySpec { source, facets: mesh.facets.to_vec(), axis, offset }))
+    }
+
+    /// Place and judge a lathe body (#369) against tool `name` now;
+    /// `None` clears. Refused by name: no such tool, no lathe steel, a
+    /// placement that is no frame, a mesh that is no body.
+    pub fn lathe(world: &World, name: &str, spec: Option<LatheBodySpec>) -> Result<Self, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let tool = model::tool_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a tool")))?;
+        let invalid = |e: String| CommandError::Invalid(format!("tool '{name}': {e}"));
+        let next = match spec {
+            None => None,
+            Some(s) => {
+                crate::tool_body_lathe::fits(&tool).map_err(invalid)?;
+                let placed = crate::tool_body_lathe::place(&s.facets, &s.place).map_err(invalid)?;
+                let body = crate::tool_body_lathe::build(&s.source, s.place, placed).map_err(invalid)?;
+                tool_body::fits(&tool, &body).map_err(invalid)?;
+                Some(body)
+            }
+        };
+        Ok(SetToolBody { name: name.to_string(), prev: tool_body::body_of(world, &entity), next })
+    }
+
+    /// Read a STEP / STL / OBJ through the model importer and place it
+    /// as a lathe body.
+    pub fn lathe_from_file(world: &World, name: &str, path: &Path, place: LathePlacement) -> Result<Self, CommandError> {
+        let mesh = crate::geometry::import::load_model(path)?;
+        let source = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
+        Self::lathe(world, name, Some(LatheBodySpec { source, facets: mesh.facets.to_vec(), place }))
     }
 }
 
