@@ -720,6 +720,7 @@ dependencies = [
  "camcraft-tools",
  "clipper2-rust",
  "flecs_ecs",
+ "png",
  "rayon",
  "ruststep",
  "serde",
