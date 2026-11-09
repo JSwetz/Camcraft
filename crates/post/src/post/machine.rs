@@ -315,6 +315,10 @@ pub fn script_props(m: &Value) -> Value {
             .or(get(m, &["rigidTapping"]))
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        // #375: the inverted linear axes, for the header comment a post
+        // that translates them writes ([] for every standard machine). A
+        // statement the reader refuses was refused before the script ran.
+        "invertedAxes": super::invert::stated(m).map(|(_, l)| l).unwrap_or_default(),
     })
 }
 
