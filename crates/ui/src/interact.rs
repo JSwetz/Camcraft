@@ -20,7 +20,6 @@
 //! Provenance: our own code, from our own imgui app (M1-era, specced from
 //! public CAM conventions; see app.rs's history and ROADMAP).
 
-use camcraft_app::cl::MoveKind;
 use camcraft_app::geometry::feature;
 use camcraft_app::geometry::{Aabb, Point3, transform_point};
 use camcraft_app::geo2d::Region;
@@ -970,7 +969,7 @@ pub(crate) const MAX_OVERLAY_VERTICES: usize = 1 << 20;
 const DISPLAY_CHORD_TOL: f64 = 0.02;
 
 /// One overlay line: two `[x, y, z, r, g, b]` vertices.
-fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
+pub(crate) fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
     out.push([ftoz(a.x), ftoz(a.y), ftoz(a.z), c[0], c[1], c[2]]);
     out.push([ftoz(b.x), ftoz(b.y), ftoz(b.z), c[0], c[1], c[2]]);
 }
@@ -1007,44 +1006,9 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
             continue;
         }
         let dim = if selected { 1.0 } else { OTHERS_DIM };
-        for m in &cache.path.moves {
-            let base = match m.kind {
-                MoveKind::Rapid => pal.rapid,
-                MoveKind::Feed => pal.feed,
-                MoveKind::Plunge => pal.plunge,
-            };
-            let c = [base[0] * dim, base[1] * dim, base[2] * dim];
-            if m.arc.is_some() {
-                // Arcs draw as chords (one law, one tolerance story) and
-                // take no chevrons: the curve itself reads as direction.
-                let cs = arc_segments(m);
-                if out.len() + 2 * cs.len() + 2 > MAX_OVERLAY_VERTICES {
-                    eprintln!(
-                        "overlay: the cached paths outgrew the {MAX_OVERLAY_VERTICES}-vertex \
-                         display budget; the rest is truncated (the full path still posts)"
-                    );
-                    out.truncate(out.len() & !1);
-                    return out;
-                }
-                for (a, b) in cs {
-                    push_line(&mut out, a, b, c);
-                }
-                continue;
-            }
-            if out.len() + 10 > MAX_OVERLAY_VERTICES {
-                // A pathological cache (millions of file-loaded moves)
-                // must not allocate millions of segments either.
-                eprintln!(
-                    "overlay: the cached paths outgrew the {MAX_OVERLAY_VERTICES}-vertex \
-                     display budget; the rest is truncated (the full path still posts)"
-                );
-                out.truncate(out.len() & !1);
-                return out;
-            }
-            push_line(&mut out, m.from, m.to, c);
-            if m.kind == MoveKind::Feed {
-                chevrons(&mut out, m.from, m.to, c, arm);
-            }
+        // #261: warned moves wear the gouge colour (crate::path_lines).
+        if !crate::path_lines::cache_lines(&mut out, &cache, pal, dim, arm) {
+            return out;
         }
     }
     out

@@ -13,6 +13,8 @@
 
 mod form;
 pub(crate) use form::*;
+#[cfg(test)]
+mod banner_tests;
 
 use egui::{Rect, Sense, Ui, Vec2};
 use egui_dock::{DockState, Node, NodePath, Split, SurfaceIndex};
@@ -61,6 +63,7 @@ pub(crate) fn tab_of(p: Panel) -> Tab {
     match p {
         Panel::Browser => Tab::Browser,
         Panel::Properties => Tab::Properties,
+        Panel::Machines => Tab::Machines,
     }
 }
 
@@ -74,6 +77,7 @@ pub(crate) fn panels_open(dock: &DockState<Tab>) -> PanelsOpen {
     PanelsOpen {
         browser: is_open(dock, &Tab::Browser),
         properties: is_open(dock, &Tab::Properties),
+        machines: is_open(dock, &Tab::Machines),
     }
 }
 
@@ -93,9 +97,19 @@ fn reopen(dock: &mut DockState<Tab>, p: Panel) {
         dock.push_to_first_leaf(tab);
         return;
     }
+    // #287: the Machines pane opens as a tab beside the properties pane
+    // when that is open (same side, same width - one more context pane),
+    // else alone at the right like the properties pane would.
+    if p == Panel::Machines
+        && let Some(props) = dock.find_tab(&Tab::Properties)
+        && let Ok(leaf) = dock.leaf_mut(props.node_path())
+    {
+        leaf.append_tab(tab);
+        return;
+    }
     let (side, frac) = match p {
         Panel::Browser => (Split::Left, BROWSER_FRAC),
-        Panel::Properties => (Split::Right, REOPEN_PROPS_FRAC),
+        Panel::Properties | Panel::Machines => (Split::Right, REOPEN_PROPS_FRAC),
     };
     dock.split(NodePath::MAIN_ROOT, side, frac, Node::leaf(tab));
 }
@@ -137,10 +151,11 @@ pub(crate) enum ViewRow {
     Reset,
 }
 
-const ROWS: [ViewRow; 4] = [
+const ROWS: [ViewRow; 5] = [
     ViewRow::Viewport,
     ViewRow::Panel(Panel::Browser),
     ViewRow::Panel(Panel::Properties),
+    ViewRow::Panel(Panel::Machines),
     ViewRow::Reset,
 ];
 
@@ -149,6 +164,7 @@ fn row_label(r: ViewRow) -> &'static str {
         ViewRow::Viewport => "Viewport",
         ViewRow::Panel(Panel::Browser) => "Browser",
         ViewRow::Panel(Panel::Properties) => "Properties",
+        ViewRow::Panel(Panel::Machines) => "Machines",
         ViewRow::Reset => "Reset layout",
     }
 }
