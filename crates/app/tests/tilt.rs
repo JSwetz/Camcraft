@@ -71,7 +71,7 @@ fn asset(name: &str) -> PathBuf {
 }
 
 /// The 40 x 30 x 10 block, sunk so a 90-degree-indexed pocket of it
-/// stays inside a Z stroke that runs negative (the tilthead's own).
+/// stays below the table plane (the tilthead's old -500..0 band; #457).
 fn block() -> Mesh {
     cube(Point3::new(0.0, 0.0, -20.0), Point3::new(40.0, 30.0, -10.0))
 }
@@ -159,8 +159,8 @@ fn tilt90() -> Tilt {
 }
 
 /// The same 90-degree index parked inside a negative Z column: the
-/// tilthead's stroke runs -500..0, so the cutting plane it names must
-/// sit strictly below the table plane. The L1 law reads fixed heights
+/// cutting plane it names sits strictly below the table plane (the
+/// tilthead's old -500..0 band asked it; #457 states -500..500). The L1 law reads fixed heights
 /// as distance along the axis from the anchor, so dropping the anchor
 /// to z = -15 and shifting x = -25 puts the 25..35 pocket levels at
 /// world x = 15..25 over the block - the cut moves, the shape does not.
