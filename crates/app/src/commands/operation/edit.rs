@@ -191,7 +191,7 @@ impl ChangeOperationKind {
                 prev.params.kind()
             )));
         }
-        family_gate(world, &params)?;
+        family_gate(world, prev.setup.as_deref(), &params)?;
         if !params.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "operation parameters are not usable for a {} operation",

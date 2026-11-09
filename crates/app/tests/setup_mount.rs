@@ -3,22 +3,24 @@
 //! `SetSetupPost`, undoable); the mounted machine and post are the
 //! active setup's. A v54 file opens with every setup following the
 //! document and posts byte-identically; a v55 file round-trips the own
-//! mounts. Work that crosses mounts is refused by name: generating an
-//! op of a setup mounting other steel than the active one, and posting
-//! a program whose setups disagree on machine or post.
+//! mounts. Work that crosses mounts is no longer refused (#388): an
+//! inactive setup's op generates on its own machine, and a program whose
+//! setups disagree on machine or post posts one file per mount (the
+//! mill/lathe cases live in `setup_mounts_post.rs`).
 //! Provenance: our own fixtures over our own commands; no vendor material.
 //!
 //! Gate map (#343): covers app::setup_mount, app::commands
 //! (SetSetupMachine, SetSetupPost, CreateSetup datum transfer),
-//! app::machine (of, document_of, kind_of), app::posting (post_of,
-//! post_setup, verification_report), app::project (SetupDto v55).
+//! app::machine (of, document_of, kind_of, kind_of_setup), app::posting
+//! (post_of, post_setup, post_mounts, verification_report),
+//! app::project (SetupDto v55).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
 use serde_json::{Value, json};
 
 use camcraft_app::commands::{
-    ActivateSetup, AddTool, CreateOperation, CreateSetup, GenerateOperation, History,
+    ActivateSetup, AddTool, CreateOperation, CreateSetup, EditOperationParams, GenerateOperation, History,
     SetSetupMachine, SetSetupPost, SetStock,
 };
 use camcraft_app::operation::{Height, OpParams, SrcRef};
@@ -149,36 +151,79 @@ fn a_setups_own_machine_and_post_round_trip_and_undo() {
     assert!(bad.is_err_and(|e| e.to_string().contains("not in the registry")));
 }
 
+/// Post one file per mount; the texts, files removed.
+fn post_mounts(world: &World, tag: &str) -> Vec<String> {
+    let files = posting::post_mounts(world, &tmp(tag, "nc")).expect("posts per mount");
+    files
+        .into_iter()
+        .map(|f| {
+            let _ = std::fs::remove_file(&f.path);
+            f.posted.program
+        })
+        .collect()
+}
+
+fn suppressed(world: &World, h: &mut History, op: &str, on: bool) {
+    h.execute(world, EditOperationParams::with_suppressed(world, op, on).expect("suppress"));
+}
+
+/// Replaces #343's "two setups on different posts are refused by name":
+/// the program posts one file per post, each the setup posted alone, and
+/// the inactive setup's op generates without activation.
 #[test]
-fn two_setups_on_different_posts_are_refused_by_name() {
+fn two_setups_on_different_posts_post_one_file_each() {
     let (world, mut h) = doc(2);
     let both = post(&world, "two-same").expect("one mount posts");
     h.execute(&world, SetSetupPost::new(&world, "Setup2", Some(PostRef::Named("Haas".into()))).expect("Setup2 posts Haas"));
     // Setup2 is active (the last created): Setup1 follows the Fanuc default.
-    let why = post(&world, "two-diff").expect_err("refused");
-    assert!(why.contains("setup 'Setup1' posts with") && why.contains("activate 'Setup1'"), "{why}");
-    assert!(why.contains("one program is written by one post for one machine"), "{why}");
-    // Generating Setup1's op while Setup2 is mounted is refused too.
-    let refused = GenerateOperation::new(&world, "Face1");
-    assert!(refused.is_err_and(|e| e.to_string().contains("activate 'Setup1' first")));
-    h.execute(&world, ActivateSetup::new(&world, Some("Setup1")).expect("activate"));
-    let why = post(&world, "two-diff-1").expect_err("refused from the other side too");
-    assert!(why.contains("setup 'Setup2' posts with Haas (built-in)"), "{why}");
+    // Its op generates where it stands - once "activate 'Setup1' first".
+    h.execute(&world, GenerateOperation::new(&world, "Face1").expect("an inactive setup's op generates"));
+    assert!(
+        !posting::verification_gate(&world).iter().any(|p| p.contains("one program is written by one post")),
+        "the one-mount clause is retired"
+    );
+    let files = post_mounts(&world, "two-diff");
+    assert_eq!(files.len(), 2, "one file per post");
+    // The single-file post names the mounts instead of picking one.
+    let why = post(&world, "two-diff-one").expect_err("one file holds one post");
+    assert!(why.contains("Setup1 (") && why.contains("Setup2 (") && why.contains("Haas (built-in)"), "{why}");
+    // Each file is that setup posted alone, from either side.
+    for active in ["Setup1", "Setup2"] {
+        h.execute(&world, ActivateSetup::new(&world, Some(active)).expect("activate"));
+        assert_eq!(post_mounts(&world, &format!("two-diff-{active}")), files, "activation moves no file");
+    }
+    suppressed(&world, &mut h, "Face2", true);
+    assert_eq!(post(&world, "alone-1").expect("Setup1 alone"), files[0]);
+    suppressed(&world, &mut h, "Face2", false);
+    suppressed(&world, &mut h, "Face1", true);
+    assert_eq!(post(&world, "alone-2").expect("Setup2 alone"), files[1]);
+    assert_ne!(files[0], files[1], "Fanuc and Haas write different programs");
+    suppressed(&world, &mut h, "Face1", false);
     // Giving it back to the document posts the same program as before.
     h.execute(&world, SetSetupPost::new(&world, "Setup2", None).expect("follow the document"));
     assert_eq!(post(&world, "two-back").expect("posts"), both);
+    assert_eq!(post_mounts(&world, "two-back-mounts"), vec![both], "one mount, one file");
 }
 
+/// Replaces #343's "two setups on different machines are refused by
+/// name": the ribbon reads the active setup's kind, every op law its own.
 #[test]
-fn two_setups_on_different_machines_are_refused_by_name_and_kinds_follow_the_active() {
+fn two_setups_on_different_machines_are_judged_on_their_own_and_the_ribbon_follows_the_active() {
     let (world, mut h) = doc(2);
     h.execute(&world, SetSetupMachine::builtin(&world, "Setup2", "Lathe").expect("Setup2 on a lathe"));
     assert_eq!(machine::kind_of(&world), machine::Kind::Lathe, "Setup2 is active: the ribbon reads a lathe");
-    let why = post(&world, "mach-diff").expect_err("refused");
-    assert!(why.contains("setup 'Setup1' is machined on") && why.contains("activate 'Setup1'"), "{why}");
+    assert_eq!(machine::kind_of_setup(&world, Some("Setup1")), machine::Kind::Mill, "Setup1's op is a mill's");
+    assert!(
+        !posting::verification_gate(&world).iter().any(|p| p.contains("is machined on")),
+        "no setup is refused for its machine"
+    );
+    // A new op joins the active setup: the family gate reads ITS machine.
+    let refused = CreateOperation::new(&world, "Face3", TOOL, SrcRef::Stock, face());
+    assert!(refused.is_err_and(|e| e.to_string().contains("milling work")), "a face on the lathe setup");
     h.execute(&world, ActivateSetup::new(&world, Some("Setup1")).expect("activate"));
     assert_eq!(machine::kind_of(&world), machine::Kind::Mill);
-    assert!(posting::verification_gate(&world).iter().any(|p| p.contains("setup 'Setup2' is machined on")));
+    h.execute(&world, CreateOperation::new(&world, "Face3", TOOL, SrcRef::Stock, face()).expect("a face on the mill"));
+    assert_eq!(machine::kind_of_setup(&world, Some("Setup2")), machine::Kind::Lathe);
 }
 
 #[test]
