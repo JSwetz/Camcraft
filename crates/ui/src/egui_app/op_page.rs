@@ -23,7 +23,7 @@ use crate::state::{CommandKind, ErrorScope, State};
 
 use super::colorvision::text_inks;
 use super::fields::combo_owned;
-use super::layout::{Action, ActionKind, BarInks, action_bar, group, prop_grid, status_banner};
+use super::layout::{Action, ActionKind, BarInks, action_bar, group, prop_grid, status_banner_located};
 use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_MACHINE, SEC_PASSES};
 use super::theme::Tokens;
 
@@ -294,9 +294,16 @@ pub(super) fn status_text(state: &State, target: &str) -> (String, super::layout
     (line, tone, details)
 }
 
-fn status(ui: &mut Ui, state: &State, target: &str, pal: &Tokens) {
+fn status(ui: &mut Ui, state: &mut State, target: &str, pal: &Tokens) {
     use super::layout::Tone;
     let (line, tone, details) = status_text(state, target);
+    // #261: a warning line that names a move frames it on click (the
+    // fold lines lead `details`, aligned with `warning_focus`).
+    let focus: Vec<Option<[f64; 3]>> = model::find_by_name(&state.world, target)
+        .and_then(|e| model::toolpath_of(&state.world, &e))
+        .map(|tp| crate::path_lines::warning_focus(&tp))
+        .unwrap_or_default();
+    let links: Vec<bool> = focus.iter().map(Option::is_some).collect();
     let inks = text_inks(ui, &state.world);
     let ink = match tone {
         Tone::Ok => pal.accent,
@@ -304,7 +311,12 @@ fn status(ui: &mut Ui, state: &State, target: &str, pal: &Tokens) {
         Tone::Error => inks.error,
         Tone::Quiet => pal.text_dim,
     };
-    status_banner(ui, "op_status", &line, ink, &details);
+    if let Some(p) = status_banner_located(ui, "op_status", &line, ink, &details, &links)
+        .and_then(|i| focus.get(i).copied().flatten())
+    {
+        // View state, like every camera move: no command (AGENTS.md).
+        crate::actions::frame_at(state, p);
+    }
 }
 
 /// The fixed bottom bar, with the one refusal line above it.

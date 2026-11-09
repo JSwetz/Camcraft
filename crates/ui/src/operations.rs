@@ -215,6 +215,13 @@ pub(crate) fn quick_params(kind: usize) -> OpParams {
 /// vs part/island) group apart because they read differently and mean
 /// different fixes.
 pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
+    fold_warnings_located(warnings).into_iter().map(|(line, _)| line).collect()
+}
+
+/// [`fold_warnings`] with each line's first located move (#261): the
+/// move a click on the line frames and the viewport marks. `None` for a
+/// group whose first warning locates nothing (`RestUnjudged`).
+pub fn fold_warnings_located(warnings: &[Warning]) -> Vec<(String, Option<usize>)> {
     fn key(w: &Warning) -> (u8, bool) {
         match w {
             Warning::Crossing { .. } => (0, false),
@@ -236,6 +243,8 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::RestUnjudged { .. } => (210, false),
             // The scallop reading (M13.9): a quality note, its own line.
             Warning::Scallop { .. } => (211, false),
+            // A lathe holder's rub (#369) splits part from stock too.
+            Warning::HolderHit { part, .. } => (212 + *part as u8, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -243,6 +252,7 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::Crossing { moves } => moves[1],
             Warning::Gouge { at }
             | Warning::ShankHit { at, .. }
+            | Warning::HolderHit { at, .. }
             | Warning::SweepHit { at, .. }
             | Warning::RapidInStock { at }
             | Warning::FixtureHit { at, .. }
@@ -252,7 +262,7 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             | Warning::Scallop { at, .. } => *at,
         }
     }
-    let mut lines: Vec<String> = Vec::new();
+    let mut lines: Vec<(String, Option<usize>)> = Vec::new();
     let mut groups: Vec<((u8, bool), usize, usize)> = Vec::new();
     for w in warnings {
         match groups.iter_mut().find(|g| g.0 == key(w)) {
@@ -262,11 +272,11 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             }
             None => {
                 groups.push((key(w), 1, last_move(w)));
-                lines.push(format!("warning: {w}"));
+                lines.push((format!("warning: {w}"), camcraft_app::warned_moves::first_move(w)));
             }
         }
     }
-    for (line, (_, count, last)) in lines.iter_mut().zip(&groups) {
+    for ((line, _), (_, count, last)) in lines.iter_mut().zip(&groups) {
         let extra = count - 1;
         if extra > 0 {
             let noun = if extra == 1 { "move" } else { "moves" };
@@ -521,6 +531,17 @@ mod warning_fold_tests {
             "warning: shank/holder at move 1131 collides with the uncut stock \
              - repeated on 15 more moves (to 1146)"
         );
+    }
+
+    #[test]
+    fn each_folded_line_carries_its_groups_first_move() {
+        // #261: the line a click frames is the group's first hit, and
+        // the unjudged note locates nothing.
+        let mut w = shank_run(84, 90, false);
+        w.push(Warning::Crossing { moves: [12, 40] });
+        w.push(Warning::RestUnjudged { at: 0, cells: 1, claims: 1 });
+        let at: Vec<Option<usize>> = super::fold_warnings_located(&w).into_iter().map(|(_, a)| a).collect();
+        assert_eq!(at, [Some(84), Some(12), None]);
     }
 
     #[test]

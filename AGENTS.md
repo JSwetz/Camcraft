@@ -605,7 +605,9 @@ PR*s made by owner should be reviewd and tagged"); a fix PR merges once
 that review is clean, a `feat` or breaking PR at the cut (step 1 above).
 **Review labels**, one colour per state: green `merge-ready` (clean review
 and mergeable), red `needs-rework` (blockers), orange `conflicts` (no
-longer merges with `main`). On red or orange the reviewer turns one of our
+longer merges with `main`), yellow `needs-maintainer` (no blockers, but
+read, not built: a new dependency or a `build.rs` / scripts / `.github`
+change waits for the owner's decision). On red or orange the reviewer turns one of our
 own PRs back into a draft; a fork PR is left as its contributor set it,
 and the review comment says what to fix.
 

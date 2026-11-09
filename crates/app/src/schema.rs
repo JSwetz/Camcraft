@@ -115,22 +115,34 @@ pub struct ToolDef {
 }
 
 /// A tool's modelled body (#368): a holder or assembly mesh (a vendor
-/// STEP, an STL) placed in the TOOL frame - tip at the origin, axis +Z
-/// toward the spindle - and its revolved envelope, derived from those
-/// facets at landing and never stored apart from them. A tool without
-/// one judges its `holder_d`/`holder_len` cylinder, as always. Written
-/// only through `SetToolBody` (`crate::tool_body`).
+/// STEP, an STL) placed in the tool's frame, and what the judging laws
+/// read off it, derived from those facets at landing and never stored
+/// apart from them. A milling tool's frame is the spindle's (tip at the
+/// origin, axis +Z toward the spindle; its revolved envelope); a lathe
+/// steel's is the turning tool frame (#369: tip at the origin, +x away
+/// from the spindle axis, +z along it; its clearance bands) - see
+/// [`crate::tool_body::BodyFrame`]. A tool without one judges its
+/// `holder_d`/`holder_len` cylinder, as always. Written only through
+/// `SetToolBody` (`crate::tool_body`).
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct ToolBody {
     /// Where the mesh came from (a file name), for display only.
     pub source: String,
-    /// The placement it landed with: the model direction that became
-    /// the tool axis, and the model origin's height above the tip.
-    pub axis: [f64; 3],
-    pub offset: f64,
-    /// The placed facets, tool frame.
+    /// The placed facets, in the frame `frame` names.
     pub facets: std::sync::Arc<[Triangle]>,
-    pub profile: camcraft_tools::holder_profile::HolderProfile,
+    /// The frame, the placement it landed with, and the derived read.
+    pub frame: crate::tool_body::BodyFrame,
+}
+
+impl ToolBody {
+    /// The revolved envelope of a milling (spindle-frame) body.
+    #[must_use]
+    pub fn profile(&self) -> Option<&camcraft_tools::holder_profile::HolderProfile> {
+        match &self.frame {
+            crate::tool_body::BodyFrame::Spindle { profile, .. } => Some(profile),
+            crate::tool_body::BodyFrame::Lathe { .. } => None,
+        }
+    }
 }
 
 /// One machine setup (M3.2 stage A): the named context that says WHICH
