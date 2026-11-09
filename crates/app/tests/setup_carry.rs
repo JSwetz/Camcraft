@@ -169,9 +169,11 @@ fn a_turn_the_lattice_cannot_carry_is_refused_by_name() {
     h.execute(&world, skew);
     let op = CreateOperation::new(&world, "Face2", TOOL, SrcRef::Entity("part".into()), face(16.0)).expect("create");
     h.execute(&world, op);
-    h.execute(&world, GenerateOperation::new(&world, "Face2").expect("generate"));
-    let err = simulate_document(&world).map(|_| ()).expect_err("refused");
+    // #318: Face2 reads the program ahead, whose stock cannot be carried
+    // in - its generation is refused by name, never cut on a guess.
+    let err = GenerateOperation::new(&world, "Face2").err().expect("generation refused").to_string();
     assert!(err.contains("from setup 'Setup1' into setup 'Setup2'") && err.contains(CARRY_TURN_REFUSAL), "{err}");
-    let err = incoming_body(&world, "Setup2").map(|_| ()).expect_err("the same refusal");
-    assert!(err.contains(CARRY_TURN_REFUSAL), "{err}");
+    // The program cannot be judged either: Face2 never generated, so the
+    // walk refuses before it reaches the carry.
+    assert!(incoming_body(&world, "Setup2").is_err());
 }

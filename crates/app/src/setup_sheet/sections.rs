@@ -122,6 +122,29 @@ pub(super) fn render_datum(world: &World, ctx: Option<&str>, out: &mut String) {
     }
 }
 
+/// #375: one line per inverted linear axis of the machine this setup
+/// mounts - the operator must know the slide runs the other way and the
+/// program is mirrored for it. A standard machine prints nothing (sheets
+/// unchanged).
+pub(super) fn render_machine_axes(world: &World, ctx: Option<&str>, out: &mut String) {
+    let (_, machine) = crate::machine::of_setup(world, ctx);
+    let Some(m) = machine else {
+        return;
+    };
+    let letters = m.inverted_axes();
+    if letters.is_empty() {
+        return;
+    }
+    out.push_str("MACHINE AXES\n");
+    for l in letters {
+        out.push_str(&format!(
+            "  {} - the program is mirrored in {l} for this machine\n",
+            crate::machine::inverted_axis_line(l)
+        ));
+    }
+    out.push('\n');
+}
+
 pub(super) fn render_fixtures(world: &World, ctx: Option<&str>, out: &mut String) {
     out.push_str("FIXTURES\n");
     let lines = fixture_lines(world, ctx);
