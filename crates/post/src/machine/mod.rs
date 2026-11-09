@@ -8,5 +8,5 @@ mod direction;
 mod parse;
 
 pub use def::*;
-pub use direction::AxisDirection;
+pub use direction::{inverted_axis_line, inverted_motion, inverted_phrase, untranslated_inversion, AxisDirection};
 pub use parse::parse_mch;

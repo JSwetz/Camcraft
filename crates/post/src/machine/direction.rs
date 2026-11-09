@@ -11,10 +11,10 @@
 //! frame stays standard. A stated travel is the machine's own stroke - in
 //! the coordinates its controller reads - so an inverted axis maps it
 //! into the program frame by negation ([`AxisLimits::program_travel`]).
-//! Until the post translates coordinates for an inverted axis (#374),
-//! posting for such a machine is refused by name
-//! ([`Machine::inverted_post_refusal`]); a standard-sign program on it
-//! would move the slide the wrong way.
+//! The post translates an inverted X / Y into the controller's frame
+//! (#374, `post::invert`); what it cannot translate - an inverted Z, any
+//! other letter - is refused by name ([`Machine::inverted_post_refusal`]):
+//! a standard-sign program on it would move the slide the wrong way.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -105,22 +105,70 @@ impl Machine {
             .collect()
     }
 
-    /// The post's refusal for an inverted machine, until #374 teaches the
-    /// post to translate signs, arc words and comp sides. `None` when no
-    /// axis is inverted. Never post standard-sign code for such a machine.
+    /// The post's refusal for an inverted axis it cannot translate
+    /// (#374): an inverted Z, or any letter but X / Y. `None` for every
+    /// standard machine and for an inverted X and/or Y, which the post
+    /// translates ([`crate::post::invert`]).
     #[must_use]
     pub fn inverted_post_refusal(&self) -> Option<String> {
-        let inv = self.inverted_axes();
-        let (last, rest) = inv.split_last()?;
-        let (letters, noun) = if rest.is_empty() {
-            ((*last).to_owned(), "axis")
-        } else {
-            (format!("{} and {last}", rest.join(", ")), "axes")
-        };
-        let article = if rest.is_empty() { "an " } else { "" };
-        Some(format!(
-            "machine {} has {article}inverted {letters} {noun}; posting for inverted axes is not supported yet (#374)",
-            self.model
-        ))
+        untranslated_inversion(&self.model, &self.inverted_axes())
     }
+}
+
+/// Where an inverted axis's + moves, in the operator's words (#375):
+/// the program frame's + (ISO 841, standing at the front of a vertical
+/// mill) is X right, Y toward the back, Z up, so the inverted + is the
+/// opposite. Every display (viewport triad, setup sheet, NC header)
+/// reads this one table.
+#[must_use]
+pub fn inverted_motion(letter: &str) -> &'static str {
+    match letter {
+        "X" => "left",
+        "Y" => "toward the front",
+        "Z" => "down",
+        _ => "the other way",
+    }
+}
+
+/// "Machine X+ moves left (inverted axis)" - the one line every display
+/// of an inverted axis states (#375).
+#[must_use]
+pub fn inverted_axis_line(letter: &str) -> String {
+    format!("Machine {letter}+ moves {} (inverted axis)", inverted_motion(letter))
+}
+
+/// "machine M has an inverted X axis" / "... inverted X and Y axes".
+#[must_use]
+pub fn inverted_phrase(model: &str, letters: &[&str]) -> String {
+    let Some((last, rest)) = letters.split_last() else {
+        return format!("machine {model} has no inverted axis");
+    };
+    if rest.is_empty() {
+        format!("machine {model} has an inverted {last} axis")
+    } else {
+        format!("machine {model} has inverted {} and {last} axes", rest.join(", "))
+    }
+}
+
+/// The machine-level refusal (#374) for inverted letters the post does
+/// not translate. An inverted X and/or Y is translated; an inverted Z is
+/// not - tool-length compensation (G43), the canned cycles' R-plane
+/// retract and every "up is away from the work" convention assume the
+/// controller's +Z leaves the part - and neither is any other letter.
+#[must_use]
+pub fn untranslated_inversion(model: &str, letters: &[&str]) -> Option<String> {
+    let bad: Vec<&str> = letters.iter().copied().filter(|l| *l != "X" && *l != "Y").collect();
+    if bad.is_empty() {
+        return None;
+    }
+    let why = if bad == ["Z"] {
+        "tool-length compensation (G43) and the canned cycles' retract assume the controller's +Z leaves the work"
+    } else {
+        "the post translates an inverted X or Y only"
+    };
+    Some(format!(
+        "{}; posting for an inverted {} is not supported yet - {why}",
+        inverted_phrase(model, letters),
+        bad.join(" / ")
+    ))
 }

@@ -59,9 +59,10 @@ unstated capability into existence.
     moves for a + command; absent or null is `1`, and anything else
     refuses the file NAMING the axis. The program frame stays standard
     (ISO 841); the stated `travel` is the machine's own stroke, so an
-    inverted axis is judged as `-v` against it. Until the post
-    translates inverted axes (#374), posting for such a machine is
-    refused by name. A rotary part's numeric `-1` refuses (a reversed
+    inverted axis is judged as `-v` against it. The post (#374) writes
+    an inverted X / Y mirrored (sign, I/J/K, G2/G3, G41/G42) through a
+    script that declares `axisInversion = true`; an inverted Z or any
+    other letter refuses posting by name. A rotary part's numeric `-1` refuses (a reversed
     rotary is not supported).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
     finite numbers or the file refuses NAMING the axis (a garbled
@@ -153,7 +154,9 @@ record is refused instead.
    mirror) and asserts declared kind == inferred kind, so a
    half-registered or self-contradictory definition fails the suite,
    not the shop.
-4. Gate: `cargo test -p camcraft-app --test machine --test posting`,
+4. Gate: `cargo test -p camcraft-app --test machine --test posting
+   --test machine_library` (the last runs the Machines pane's validator,
+   `app::machine::validate`, over every library entry - #287),
    plus a CLI smoke — `post.exe --machine <name>.mch <post>.cps
    <file>.cnc out.nc` over a committed golden stream (a 5-axis
    definition should drive the refusal path in fanuc.cps's `tilt()`

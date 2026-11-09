@@ -157,6 +157,8 @@ pub enum Kind {
     Wcs,
     Tool,
     Op,
+    /// A setup node (#343): its radio, filled when it is the active setup.
+    Setup(bool),
 }
 
 /// Tree icon edge (browser.rs: 32 px sources render at 16). The row's
@@ -182,6 +184,8 @@ pub struct TreeHit {
     /// retype menu's channel, a hit like the others - never state.
     pub menu: Option<usize>,
     pub drag_started: Option<usize>,
+    /// A setup row's radio was clicked (#343).
+    pub radio: Option<usize>,
 }
 
 /// Paint the rows and collect this frame's clicks. Input first (real
@@ -199,7 +203,7 @@ pub fn tree(
     pal: &Tokens,
     icons: Option<&IconSet>,
 ) -> TreeHit {
-    let mut hit = TreeHit { row: None, eye: None, menu: None, drag_started: None };
+    let mut hit = TreeHit { row: None, eye: None, menu: None, drag_started: None, radio: None };
     let mut eye_resps: Vec<(usize, Response)> = Vec::new();
     let row_h = pal.row_height;
     for (ix, row) in rows.iter().enumerate() {
@@ -234,6 +238,12 @@ pub fn tree(
             painter.add(Shape::rect_filled(rr.shrink(1.0), pal.radius_widget, pal.field_hover));
         }
         let gx = rr.left() + 10.0 + row.depth as f32 * 14.0;
+        if matches!(row.kind, Kind::Setup(_)) {
+            let rr = Rect::from_center_size(Pos2::new(gx, rr.center().y), Vec2::splat(TREE_INK));
+            if ui.interact(rr, ui.id().with(("tree-radio", ix)), Sense::click()).clicked() {
+                hit.radio = Some(ix);
+            }
+        }
         // PNG first (browser.rs: the tree icon rides the row, dimmed to
         // 0.55 when hidden), the painted glyph as the no-GPU twin.
         let tex = icons.and_then(|s| row.icon.map(|i| s.texture(i))).flatten();
@@ -248,7 +258,7 @@ pub fn tree(
         }
         let mut shapes = Vec::new();
         if tex.is_none() {
-            glyph(&mut shapes, Pos2::new(gx, rr.center().y), row.kind, pal);
+            super::tree_glyphs::glyph(&mut shapes, Pos2::new(gx, rr.center().y), row.kind, pal);
         }
         if let Some(er) = eye_rect {
             let eye_tex = icons
@@ -269,7 +279,7 @@ pub fn tree(
                         Color32::from_white_alpha(if row.hidden { 140 } else { 217 }),
                     );
                 }
-                None => eye_glyph(&mut shapes, er, row.hidden, pal),
+                None => super::tree_glyphs::eye_glyph(&mut shapes, er, row.hidden, pal),
             }
         }
         painter.add(Shape::Vec(shapes));
@@ -302,7 +312,7 @@ pub fn tree(
             galley,
             ink,
         );
-        if row_resp.clicked() && hit.eye != Some(ix) {
+        if row_resp.clicked() && hit.eye != Some(ix) && hit.radio != Some(ix) {
             hit.row = Some(ix);
         }
         if row_resp.secondary_clicked() && hit.eye != Some(ix) {
@@ -319,91 +329,6 @@ pub fn tree(
         r.on_hover_text(format!("{tip} in the viewport (view state; geometry still cuts)"));
     }
     hit
-}
-
-/// The ~9-px marks, per kind: original geometry, one stroke family.
-fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Tokens) {
-    let s = Stroke::new(1.0, pal.text_dim);
-    match kind {
-        Kind::Parent(expanded) => {
-            let points = if expanded {
-                vec![c + Vec2::new(-4.0, -2.0), c + Vec2::new(4.0, -2.0), c + Vec2::new(0.0, 3.0)]
-            } else {
-                vec![c + Vec2::new(-2.0, -4.0), c + Vec2::new(3.0, 0.0), c + Vec2::new(-2.0, 4.0)]
-            };
-            shapes.push(Shape::convex_polygon(points, pal.text_dim, Stroke::NONE));
-        }
-        Kind::Section => {
-            // Open folder: a body with a back-tab.
-            let body = Rect::from_min_size(c + Vec2::new(-5.0, -3.0), Vec2::new(10.0, 7.0));
-            shapes.push(Shape::rect_stroke(body, 1.0, s, egui::StrokeKind::Middle));
-            shapes.push(Shape::rect_filled(
-                Rect::from_min_size(body.left_top() + Vec2::new(1.0, -2.5), Vec2::new(4.0, 2.5)),
-                0.0,
-                pal.text_dim,
-            ));
-        }
-        Kind::Model => {
-            let r = Rect::from_center_size(c, Vec2::new(9.0, 7.0));
-            shapes.push(Shape::rect_stroke(r, 0.0, s, egui::StrokeKind::Middle));
-        }
-        Kind::Fixture => {
-            // The vise: two parallel jaws, the screw shaft running from
-            // the movable one, a solid knob. The PNG twin's geometry at
-            // tree scale, drawn from what it names - original.
-            let jaw = Vec2::Y * 3.5;
-            for dx in [-4.0, -0.5] {
-                let p = c + Vec2::X * dx;
-                shapes.push(Shape::line_segment([p - jaw, p + jaw], s));
-            }
-            shapes.push(Shape::line_segment(
-                [c + Vec2::X * -0.5, c + Vec2::X * 2.8],
-                s,
-            ));
-            shapes.push(Shape::circle_filled(c + Vec2::X * 4.0, 1.3, pal.text_dim));
-        }
-        Kind::Stock => {
-            let r = Rect::from_center_size(c, Vec2::new(9.0, 8.0));
-            shapes.push(Shape::rect_stroke(r, 0.0, s, egui::StrokeKind::Middle));
-            shapes.push(Shape::line_segment([r.left_top(), r.right_bottom()], s));
-        }
-        Kind::Wcs => {
-            shapes.push(Shape::line_segment([c - Vec2::X * 4.5, c + Vec2::X * 4.5], s));
-            shapes.push(Shape::line_segment([c - Vec2::Y * 4.5, c + Vec2::Y * 4.5], s));
-        }
-        Kind::Tool => {
-            shapes.push(Shape::circle_stroke(c, 4.0, s));
-        }
-        Kind::Op => {
-            // A play-triangle in a square frame: "this op owns a path",
-            // drawn from what it names, original.
-            let r = Rect::from_center_size(c, Vec2::new(9.0, 9.0));
-            shapes.push(Shape::rect_stroke(r, 1.0, s, egui::StrokeKind::Middle));
-            shapes.push(Shape::convex_polygon(
-                vec![
-                    Pos2::new(c.x - 1.8, c.y - 3.0),
-                    Pos2::new(c.x + 3.0, c.y),
-                    Pos2::new(c.x - 1.8, c.y + 3.0),
-                ],
-                Color32::TRANSPARENT,
-                Stroke::new(1.0, pal.text_dim),
-            ));
-        }
-    }
-}
-
-/// The browser eye: an outlined lid-rect with a pupil, or crossed when
-/// hidden (display state - the row click still selects, the eye never
-/// destroys).
-fn eye_glyph(shapes: &mut Vec<Shape>, r: Rect, hidden: bool, pal: &Tokens) {
-    let s = Stroke::new(1.0, if hidden { pal.text_faint } else { pal.text_dim });
-    shapes.push(Shape::rect_stroke(r, 4.0, s, egui::StrokeKind::Middle));
-    if hidden {
-        shapes.push(Shape::line_segment([r.left_top(), r.right_bottom()], s));
-        shapes.push(Shape::line_segment([r.left_bottom(), r.right_top()], s));
-    } else {
-        shapes.push(Shape::circle_filled(r.center(), 2.2, pal.text_dim));
-    }
 }
 
 /// Ground and hairline under a painted strip (ribbon rows, the status

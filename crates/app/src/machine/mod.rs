@@ -49,6 +49,11 @@
 // world - the singleton glue and the program checker.
 pub use camcraft_post::machine::*;
 
+// #287: the Machines pane's catalogue, property sheet and validator.
+pub mod library;
+mod sheet;
+pub mod validate;
+
 use flecs_ecs::core::WorldGet;
 use flecs_ecs::prelude::World;
 
@@ -57,16 +62,29 @@ use crate::model;
 use crate::posting;
 use crate::schema::MachineDef;
 
-/// The document's machine, read from the flecs singleton: (the path it
-/// was loaded from, the definition). `("", None)` until a `LoadMachine`
-/// command or a v19 project file says otherwise - and a document with
-/// no machine checks nothing, which is the unstated-limit law wearing
-/// a document-sized hat.
+/// The MOUNTED machine: the active setup's (#343 - its own, else the
+/// document's), as (the path it was loaded from, the definition).
+/// `("", None)` until a `LoadMachine` command or a project file says
+/// otherwise - and a document with no machine checks nothing, which is
+/// the unstated-limit law wearing a document-sized hat. The document's
+/// stored machine alone is [`document_of`].
 #[must_use]
 pub fn of(world: &World) -> (String, Option<Machine>) {
-    world
-        .try_get::<&MachineDef>(|d| (d.path.clone(), d.machine.clone()))
-        .unwrap_or_default()
+    crate::setup_mount::machine_of(world, crate::setup::active(world).as_deref())
+}
+
+/// The document's machine as stored - what every setup that owns no
+/// machine follows (#343). For `LoadMachine`, the save, and the
+/// document's machine section.
+#[must_use]
+pub fn document_of(world: &World) -> (String, Option<Machine>) {
+    crate::setup_mount::document_machine(world)
+}
+
+/// The machine a declared setup context mounts (#343).
+#[must_use]
+pub fn of_setup(world: &World, declared: Option<&str>) -> (String, Option<Machine>) {
+    crate::setup_mount::machine_of(world, declared)
 }
 
 /// Write the singleton. For the `LoadMachine` command and the project
@@ -79,10 +97,14 @@ pub fn set(world: &World, path: &str, machine: Option<&Machine>) {
     });
 }
 
-/// The document's machine kind, read off the singleton without the
-/// clone `of` does - the per-frame accessor for ribbon gating.
+/// The mounted machine's kind (the active setup's, #343) - the
+/// per-frame accessor for ribbon gating. Reads the singleton without a
+/// clone unless the active setup owns its machine.
 #[must_use]
 pub fn kind_of(world: &World) -> Kind {
+    if let Some(own) = crate::setup_mount::own_machine(world, crate::setup::active(world).as_deref()) {
+        return kind(own.machine.as_ref());
+    }
     world
         .try_get::<&MachineDef>(|d| kind(d.machine.as_ref()))
         .unwrap_or(Kind::Mill)
@@ -138,9 +160,14 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
 
     for (name, e) in &ops {
         let op = model::operation_of(world, e).ok_or_else(|| format!("{name}: lost its operation"))?;
-        let tool = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let tool_entity = model::find_by_name(world, &op.tool)
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        let tool = model::tool_of(world, &tool_entity)
+            .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        // #368: a modelled body is the holder the magazine measures.
+        let tool = crate::tool_body::judged(world, &tool_entity, tool)
+            .map_err(|e| format!("{name}: tool {}: {e}", op.tool))?
+            .0;
         let cache = model::toolpath_of(world, e).ok_or_else(|| format!("{name}: lost its toolpath"))?;
         // Travel numbers in the file are PROGRAM coordinates; the
         // cached moves are world millimeters. This is the post's own

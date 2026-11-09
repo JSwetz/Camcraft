@@ -31,6 +31,8 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // path whichever arm cut it: a note, never a warning - the post
     // is not held for features the op honestly leaves standing.
     let note = job.spindle_note.take();
+    let carried = job.carried_overhang.take();
+    let tool_r = job.tool.diameter * 0.5;
     let kind = job.params.kind();
     let _span = tracing::info_span!("generate", op = %job.op_name).entered();
     let started = std::time::Instant::now();
@@ -45,10 +47,11 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         ms = crate::logging::elapsed_ms(started),
         "generated"
     );
-    if let Some(n) = note
-        && !path.notes.contains(&n)
-    {
-        path.notes.push(n);
+    let carried = carried.map(|o| o.note(&path, tool_r));
+    for n in note.into_iter().chain(carried) {
+        if !path.notes.contains(&n) {
+            path.notes.push(n);
+        }
     }
     Ok((path, warns))
 }
@@ -57,6 +60,7 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let GenJob {
         tool,
+        body,
         tool_name,
         params,
         src,
@@ -85,6 +89,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         area,
         wcs_origin,
         spindle_note: _,
+        carried_overhang: _,
         op_name: _,
     } = job;
     // The probe (#108) cuts nothing: its own protected-move law judges
@@ -2320,7 +2325,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::chamfer(
+            let path = crate::turning::chamfer_in(
                 &material.facets,
                 &crate::turning::ChamferParams {
                     clearance_z: hl.clearance,
@@ -2332,6 +2337,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2357,7 +2363,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::taper(
+            let path = crate::turning::taper_in(
                 &material.facets,
                 &crate::turning::TaperParams {
                     clearance_z: hl.clearance,
@@ -2370,6 +2376,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2399,7 +2406,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::multi_pass(
+            let path = crate::turning::multi_pass_in(
                 &material.facets,
                 &crate::turning::MultiPassParams {
                     clearance_z: hl.clearance,
@@ -2413,6 +2420,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2514,6 +2522,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // unstated-limit law means a file that names no spindle body adds
     // no band, exactly as it adds no feed or travel check.
     let geom = tool.geom();
+    // #368: what the fixture laws sweep above the shank.
+    let holder = crate::tool_body::stack(&geom, body.as_ref());
     let fixture_boxes = fixtures;
     let stl = match &params {
         OpParams::Face { .. }
@@ -2823,7 +2833,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // ...and a boring bar's head and shank on its FEEDS (#146),
             // against the same revolved material at each instant.
             super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
-            warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
+            warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
             // - a grooved part is undercut BY DESIGN, material
@@ -3015,7 +3025,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             }
             warns.extend(workholding_warnings(
                 &path_world,
-                &geom,
+                (&geom, &holder),
                 &fixture_boxes,
                 &workholding,
                 rotary_axis,
@@ -3054,7 +3064,7 @@ fn rotary_letter_gate(
 /// the path-frame verdict untouched.
 fn workholding_warnings(
     path: &Toolpath,
-    geom: &crate::tools::ToolGeom,
+    (geom, holder): (&crate::tools::ToolGeom, &camcraft_tools::holder_profile::HolderStack),
     all: &[crate::fixture::FixtureBox],
     (turning, fixed): &(Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
     axis: Option<verify::RotaryAxis>,
@@ -3064,8 +3074,8 @@ fn workholding_warnings(
         return Vec::new();
     }
     let wh = verify::Workholding { turning, fixed, axis };
-    let mut warns = verify::bands_vs_workholding(path, geom, &wh, spindle, GOUGE_TOL);
-    warns.extend(verify::rapids_vs_workholding(path, geom, &wh, spindle));
+    let mut warns = verify::bands_vs_workholding_held(path, geom, holder, &wh, spindle, GOUGE_TOL);
+    warns.extend(verify::rapids_vs_workholding_held(path, geom, holder, &wh, spindle));
     warns
 }
 

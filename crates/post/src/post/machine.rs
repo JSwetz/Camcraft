@@ -156,14 +156,24 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
             }),
         );
     }
-    json!({
+    let mut out = json!({
         "name": m.model,
         "kinematics": { "static": { "axes": axes, "rotaries": rotaries, "head": Value::Object(head) } },
         "rapidRate": rapid,
         "feedRateMax": feed,
         // #131: the unit the machine is programmed in (numbers stay mm).
         "units": m.units.as_deref().unwrap_or("mm"),
-    })
+    });
+    // #374: the inverted linear axes, which the engine mirrors the stream
+    // in (`post::invert`). Absent for a standard machine, so every
+    // standard mirror is byte-identical to the one before #374.
+    let inverted = m.inverted_axes();
+    if !inverted.is_empty()
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("invertedAxes".to_owned(), json!(inverted));
+    }
+    out
 }
 
 /// Walk a path of object keys; `None` on any missing or mismatched hop.
@@ -305,6 +315,10 @@ pub fn script_props(m: &Value) -> Value {
             .or(get(m, &["rigidTapping"]))
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        // #375: the inverted linear axes, for the header comment a post
+        // that translates them writes ([] for every standard machine). A
+        // statement the reader refuses was refused before the script ran.
+        "invertedAxes": super::invert::stated(m).map(|(_, l)| l).unwrap_or_default(),
     })
 }
 
