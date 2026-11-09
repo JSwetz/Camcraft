@@ -49,6 +49,10 @@
 // world - the singleton glue and the program checker.
 pub use camcraft_post::machine::*;
 
+// #287: the Machines pane's catalogue, property sheet and validator.
+pub mod library;
+mod sheet;
+pub mod validate;
 use flecs_ecs::prelude::World;
 
 use crate::geometry::Point3;
