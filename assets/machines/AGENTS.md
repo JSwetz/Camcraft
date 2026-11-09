@@ -54,7 +54,11 @@ unstated capability into existence.
     coordinates, absolute world, not joint-local (the checker's
     traverse bands and collision sweep read these directly). Linear:
     mm (unit-scaled); rotary: DEGREES, never unit-scaled. Must be
-    finite with `max > min` or the field is dropped.
+    finite with `max > min` or the field is dropped. The file cannot
+    know the work offset, so a linear slide of stroke L is written
+    `-L..L` - the FULL stroke each way, never the machine-frame band
+    (`-500..0` for a 500 mm column refuses every retract above the
+    work origin, #457; the Tormach files follow the same rule).
   - linear only: `direction` `1` | `-1` (#373) - which way the slide
     moves for a + command; absent or null is `1`, and anything else
     refuses the file NAMING the axis. The program frame stays standard
