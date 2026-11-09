@@ -27,6 +27,8 @@ pub use lathe::{LathePlan, LATHE_HELIX_REFUSAL, LATHE_THREAD_REFUSAL, LATHE_VERD
 // next setup's frame through the transform between the two.
 #[path = "stock_sim_carry.rs"]
 pub mod carry;
+#[path = "stock_sim_breaks.rs"]
+pub mod breaks;
 pub use carry::{CARRY_MACHINE_CHANGE_REFUSAL, CARRY_MACHINE_REFUSAL, incoming_body};
 
 use crate::geometry::Triangle;
@@ -308,7 +310,8 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         planned.push(Planned {
             name: name.clone(),
             moves: cache.path.moves,
-            breaks: cache.path.breaks,
+            // #529: only what the op itself declared, never wider.
+            breaks: breaks::bounded(name, &op.params, cache.path.breaks),
             // A turning insert's cutting feature is its nose (a
             // blade's, half its band - `LathePlan::feature`): the
             // display cell law (`auto_cell`) reads it, not the IC.
