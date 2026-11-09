@@ -125,7 +125,8 @@ go to `CHANGELOG.md`.
     the conflicting upstream change into the branch (`git merge
     upstream/main`) on that branch only, never into the fork's `main`, which
     advances only at the next cut tag.
-  - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0"). Open PRs wait unmerged (a `feat` until its
+  - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0").
+- **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
   (not main) and its PR says "stacked on #M". Before the parent merges (any
