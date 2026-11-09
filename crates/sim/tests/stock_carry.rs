@@ -5,7 +5,11 @@
 //! Provenance: our own fixtures (blocks with one cut column) over the
 //! rigid-body algebra; no vendor material consulted.
 //!
-//! Gate map (#317): covers camcraft_sim::stock_sim (carry: Body,
+//! #404: an odd cell count carried through a translation off the grid
+//! pitch keeps every image cell centre on a transformed source centre -
+//! the carried origin moves with the part, whole cells, never snapped.
+//!
+//! Gate map (#317, #404): covers camcraft_sim::stock_sim (carry: Body,
 //! LatticeTurn, CARRY_TURN_REFUSAL).
 //! Lane shape (M4.4): all tests here run in milliseconds.
 
@@ -151,4 +155,60 @@ fn a_column_cut_through_is_air_to_the_eye_and_a_gouge_to_the_verdict() {
     assert_eq!(c.display().top_at(j), f64::NEG_INFINITY, "the eye shows air");
     let v = c.deviate(&part, DEV_TOL).expect("two-sided");
     assert!(v.max_gouge >= 16.0 - 1e-9, "the hole is a gouge on the floor side: {v:?}");
+}
+
+/// #404: a 7 x 5 lattice at a 0.5 mm pitch, every column a distinct
+/// height, carried through a flip over X and through a quarter turn,
+/// each with a translation off the grid pitch (0.37, -1.13). Every
+/// source column lands on exactly one image column whose centre IS the
+/// transformed source centre (whole cells, the origin moved with the
+/// part, not snapped back onto the old grid), the heights ride with
+/// it, and the bounds are the transformed bounds - no material shifted.
+#[test]
+fn an_odd_lattice_carried_off_the_grid_keeps_whole_cells() {
+    use camcraft_sim::geo2d::Point2;
+    let mut d = Dexel::block(-1.75, -1.25, 1.75, 1.25, 18.0, 0.5).expect("block");
+    assert_eq!((d.nx, d.ny), (7, 5), "an odd cell count on both axes");
+    for k in 0..d.nx * d.ny {
+        d.lower(k, 10.0 + 0.01 * k as f64);
+    }
+    let b = Body::on_floor(d, -2.0);
+    let (blo, bhi) = b.bounds().expect("material");
+    let t = [0.37, -1.13, 16.0];
+    // (turn, expected image origin, expected image cell counts)
+    let cases = [
+        (FLIP_X, (-1.75 + 0.37, -1.25 - 1.13), (7, 5)),
+        (TURN_Z90, (-1.25 + 0.37, -1.75 - 1.13), (5, 7)),
+    ];
+    for (r, (ox, oy), (nx, ny)) in cases {
+        let turn = LatticeTurn::from_matrix(r, t).expect("a lattice turn");
+        let c = b.carry(&turn).expect("carried");
+        assert_eq!((c.dex.nx, c.dex.ny), (nx, ny));
+        assert!((c.dex.x0 - ox).abs() < 1e-12 && (c.dex.y0 - oy).abs() < 1e-12, "origin moved with the part: ({}, {})", c.dex.x0, c.dex.y0);
+        let mut hit = vec![false; nx * ny];
+        for iy in 0..b.dex.ny {
+            for ix in 0..b.dex.nx {
+                let k = ix + iy * b.dex.nx;
+                let src = b.dex.center(ix, iy);
+                let p = turn.apply(Point3::new(src.x, src.y, 0.0));
+                let j = c.dex.col(Point2::new(p.x, p.y)).expect("the image column exists");
+                let (jx, jy) = (j % nx, j / nx);
+                let q = c.dex.center(jx, jy);
+                assert!((q.x - p.x).abs() < 1e-9 && (q.y - p.y).abs() < 1e-9, "column ({ix}, {iy}): image centre {q:?} vs transformed {p:?}");
+                assert!(!hit[j], "two source columns on image column {j}");
+                hit[j] = true;
+                let (top, floor) = (b.dex.top_at(k), b.floor_at(k));
+                let want = if turn.flips() { (t[2] - floor, t[2] - top) } else { (top + t[2], floor + t[2]) };
+                assert_eq!((c.dex.top_at(j), c.floor_at(j)), want, "column ({ix}, {iy}) heights");
+            }
+        }
+        assert!(hit.iter().all(|h| *h), "every image column is carried from one source column");
+        assert!((b.volume() - c.volume()).abs() < 1e-9, "{} vs {}", b.volume(), c.volume());
+        let (lo, hi) = c.bounds().expect("material");
+        let corners = [turn.apply(blo), turn.apply(bhi)];
+        let (ex0, ex1) = (corners[0].x.min(corners[1].x), corners[0].x.max(corners[1].x));
+        let (ey0, ey1) = (corners[0].y.min(corners[1].y), corners[0].y.max(corners[1].y));
+        assert!((lo.x - ex0).abs() < 1e-9 && (hi.x - ex1).abs() < 1e-9, "x {lo:?} {hi:?} vs {ex0} {ex1}");
+        assert!((lo.y - ey0).abs() < 1e-9 && (hi.y - ey1).abs() < 1e-9, "y {lo:?} {hi:?} vs {ey0} {ey1}");
+    }
 }

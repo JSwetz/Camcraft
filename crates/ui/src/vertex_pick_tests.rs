@@ -21,6 +21,7 @@ fn diagonal_cam() -> Camera {
         yaw: std::f64::consts::FRAC_PI_4,
         pitch: (1.0f64 / 2.0f64.sqrt()).atan(),
         dist: 100.0,
+        ..Camera::default()
     }
 }
 
