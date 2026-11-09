@@ -135,6 +135,7 @@ pub const HOOKS: &[&str] = &[
     "onProbe",
     "onProbeMove",
     "onProbeRetreat",
+    "onProbeGuard",
     "onProbeResult",
     "onComment",
     "onClose",

@@ -417,9 +417,11 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
         .iter()
         .filter_map(|r| match r {
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
-            // Probing (#108): each touch and retreat stands for one move.
+            // Probing (#108): each touch, retreat and protected move (#174)
+            // stands for one move.
             cnc::Record::Touch(t) => Some(t.expect),
             cnc::Record::Retreat(t) => Some(t.expect),
+            cnc::Record::Guard(g) => Some(g.to),
             _ => None,
         })
         .collect();
@@ -432,6 +434,7 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
             cnc::Record::Touch(t) => Some(t.expect),
             cnc::Record::Retreat(t) => Some(t.expect),
+            cnc::Record::Guard(g) => Some(g.to),
             cnc::Record::Cycle(c) => moves.get(c.first_move).copied(),
             _ => None,
         };
@@ -708,7 +711,7 @@ pub(crate) fn join_streams(streams: Vec<(String, Vec<cnc::Record>)>) -> Vec<cnc:
         // contour in place of its centre moves.
         moved += recs
             .iter()
-            .filter(|r| matches!(r, cnc::Record::Move(_) | cnc::Record::Touch(_) | cnc::Record::Retreat(_)))
+            .filter(|r| matches!(r, cnc::Record::Move(_) | cnc::Record::Touch(_) | cnc::Record::Retreat(_) | cnc::Record::Guard(_)))
             .count();
         records.extend(recs);
     }

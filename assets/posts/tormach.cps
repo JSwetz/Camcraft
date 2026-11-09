@@ -387,6 +387,33 @@ function onCircular() {
   ].concat(centerWords(p)).concat([fw(p.FeedRate)]));
 }
 
+// ------------------------------------------- protected probe moves
+// #174. The positioning feeds of a probe cycle (the descent to a touch's
+// start, the travel between touches, the rise) are protected moves:
+// G38.3 - the LinuxCNC G-code reference's "G38.n Straight Probe": probe
+// toward the point, stop on contact, NO error when no contact comes -
+// then #5070 (G38 probe result: 1 when the probe tripped, set by
+// G38.3/G38.5) is tested in an `o<n> if [...]` / `o<n> endif` block
+// (O-codes, same reference), and a trip shows a (MSG,...) and ends the
+// program with M2: an obstacle where the model has none stops the run
+// instead of the stylus being driven into it, and is never resumed past
+// as M0 could be. G38.3 is itself an error when the probe is already
+// tripped at the start - the control's own guard. Tormach's PathPilot
+// machine-code reference lists G38.2-G38.5 and M2 as supported. The
+// O-word numbers run from 5001, a range of their own.
+var guardO = 5000;
+function onProbeGuard() {
+  startPreamble();
+  var p = properties;
+  startXY(p);
+  block(["G38.3", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  guardO += 1;
+  block(["o" + guardO, "if", "[#5070 EQ 1]"]);
+  block(["(MSG, PROBE HIT ON POSITIONING)"]);
+  block(["M2"]);
+  block(["o" + guardO, "endif"]);
+}
+
 // ------------------------------------------------------- canned cycles
 // One block per hole, holes of an unchanged cycle continuing modally
 // with bare X Y lines. LinuxCNC's dwell P is in SECONDS (not the
