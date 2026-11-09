@@ -33,6 +33,10 @@ fn mv(kind: MoveKind, from: Point3, to: Point3) -> crate::cl::Move {
 /// The axial rapids of `moves` the meridian law convicts, a 12 mm
 /// part in a 20 mm bar from Z -16 to 16, a 0.8 nose.
 fn convicted(moves: Vec<crate::cl::Move>) -> Vec<Warning> {
+    convicted_in(moves, 16.0)
+}
+
+fn convicted_in(moves: Vec<crate::cl::Move>, bar_top: f64) -> Vec<Warning> {
     let params = OpParams::ProfileRough {
         tolerance: 0.05,
         clearance_z: crate::operation::Height::fixed(25.0),
@@ -44,7 +48,7 @@ fn convicted(moves: Vec<crate::cl::Move>) -> Vec<Warning> {
         plunge_feed: 80.0,
     };
     let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() };
-    let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, 16.0));
+    let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, bar_top));
     let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None, ahead: &[], outward: None };
     let mut warns = Vec::new();
     judge_axial_rapids(&params, &path, &cx, &mut PriorCell::new(None), &mut warns);
@@ -298,4 +302,17 @@ fn a_pilot_removes_its_cylinder_and_its_point_cone_only() {
     assert!(!p.removed(0.0, 2.1));
     assert!(!p.removed(-9.0, 1.9), "the point's cone is not a flat floor");
     assert!(!p.removed(-10.5, 0.0));
+}
+
+/// #323: preceding axial feeds clear their nose sweep, not the uncut bar beyond the pass end.
+#[test]
+fn a_radial_exit_inside_a_longer_bar_is_refused_unless_it_is_a_feed() {
+    let p = Point3::new;
+    let path = |exit| vec![
+        mv(MoveKind::Feed, p(11.8, 0.0, -16.0), p(8.0, 0.0, -16.0)),
+        mv(MoveKind::Feed, p(8.0, 0.0, -16.0), p(8.0, 0.0, 16.0)),
+        mv(exit, p(8.0, 0.0, 16.0), p(11.8, 0.0, 16.0)),
+    ];
+    assert_eq!(convicted_in(path(MoveKind::Rapid), 24.0), vec![Warning::RapidInStock { at: 2 }]);
+    assert!(convicted_in(path(MoveKind::Feed), 24.0).is_empty());
 }

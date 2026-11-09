@@ -36,7 +36,8 @@ text, assets or post processors were used.
   holes).
 - **Set up** stock, work offsets (G54–G59), fixtures and machines (mill,
   5-axis, lathe, mill-turn, and the Tormach 770MX, 770MX (ML), 770M,
-  1100MX, 1500MX and PCNC 440 mills).
+  1100M, 1100MX, 1500MX, PCNC 440, PCNC 770 (earlier and Series 3) and
+  PCNC 1100 (Series I, II and 3) mills).
 - **2D milling:** face, contour (with G41/G42 compensation), pocket,
   adaptive clearing, slot, trace, engrave, chamfer, circular, bore and
   thread milling.
@@ -159,6 +160,8 @@ Actions runs only on a pushed release tag; the CI and nightly workflows in
   (`git show v0.14.0:ROADMAP.md`).
 - `RECOMMENDED.md`: the decision ledger, with what was chosen, why, and
   what was dropped.
+- [Machine onboarding](docs/MACHINE-ONBOARDING.md): source facts, registration,
+  software-test seams, and current limitations for machine definitions/posts.
 - `AGENTS.md`: engineering rules (clean-room protocol, the never-crash /
   never-gouge directive, layering, testing).
 - `RELEASE_NOTES.md`, `TESTING.md`: the current release.
@@ -291,6 +294,7 @@ re-tested, and only then is flagged ready again.
 | `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
 | `needs-rework` (red) | review found blockers | a maintainer PR goes back to draft; fix, push, flag ready again (a fork PR stays as its contributor set it; the review comment says what to fix) |
 | `conflicts` (orange) | no longer merges with `main` | a maintainer PR goes back to draft; merge `main`, re-test, flag ready again (a fork PR: the contributor merges `main`) |
+| `needs-maintainer` (yellow) | reviewed with no blockers, but it adds a dependency or changes `build.rs`, scripts or `.github`, so it was read, not built | waits for the maintainer's decision |
 
 When a PR comes back from draft with a new head, that head gets a fresh
 review; the marker `<!-- pr-reviewer: <head sha> -->` in the review comment
@@ -333,5 +337,12 @@ be resolved; only merge commits are allowed.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). Third-party notices are in
-`assets/ui/LICENSES.md`.
+Apache License 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+The copyright belongs to the CamCraft contributors, each holding the
+rights to their own contributions, and not to any one person. By opening a
+pull request you license your contribution under Apache-2.0 (section 5 of
+the license). Code contributed while CamCraft was MIT-licensed is
+redistributed under Apache-2.0, which MIT permits.
+
+Third-party notices are in `assets/ui/LICENSES.md`.

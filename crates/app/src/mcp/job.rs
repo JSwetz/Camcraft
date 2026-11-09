@@ -33,7 +33,7 @@ fn src_view(src: &SrcRef) -> Value {
 
 /// The setup slice of the job: the implicit first setup (`null`) when
 /// none is declared, else every declared one, each with its stock and
-/// the work offsets that have been placed.
+/// its one WCS (#342) with the word the post writes for it.
 fn setups_view(env: &Env) -> Vec<Value> {
     let w = &env.world;
     let mut declared: Vec<Option<String>> = setup::names(w).into_iter().map(Some).collect();
@@ -45,18 +45,16 @@ fn setups_view(env: &Env) -> Vec<Value> {
         .map(|s| {
             let d = s.as_deref();
             let stock = setup::stock_entity(w, d).and_then(|e| model::stock_def_of(w, &e));
-            let wcs: Vec<Value> = (0..WCS_SLOTS.len())
-                .filter_map(|i| {
-                    let e = setup::wcs_entity(w, d, i)?;
-                    let loc = model::transform_of(w, &e)?;
-                    Some(json!({
-                        "slot": WCS_SLOTS.get(i).copied().unwrap_or("?"),
-                        "entity": model::name_of(w, &e),
-                        "origin": [fnum(loc.pos.x), fnum(loc.pos.y), fnum(loc.pos.z)],
-                        "rotation": loc.rot.iter().map(|v| fnum(*v)).collect::<Vec<_>>(),
-                    }))
-                })
-                .collect();
+            // #342: one WCS per setup; the word is only its post label.
+            let wcs = setup::wcs_entity(w, d).and_then(|e| model::transform_of(w, &e).map(|loc| (e, loc)));
+            let wcs = json!({
+                "label": setup::wcs_label(w, d),
+                "word": WCS_SLOTS.get(setup::wcs_slot(w, d)).copied().unwrap_or("G54"),
+                "placed": wcs.is_some(),
+                "entity": setup::wcs_entity_name(w, d),
+                "origin": wcs.as_ref().map(|(_, loc)| vec![fnum(loc.pos.x), fnum(loc.pos.y), fnum(loc.pos.z)]),
+                "rotation": wcs.as_ref().map(|(_, loc)| loc.rot.iter().map(|v| fnum(*v)).collect::<Vec<_>>()),
+            });
             json!({
                 "name": s,
                 "stock": stock.as_ref().map(project::stock_to_json),
@@ -178,6 +176,7 @@ fn finding(op: &str, w: &Warning) -> Value {
         Warning::Crossing { moves } => ("crossing", moves[0]),
         Warning::Gouge { at } => ("gouge", *at),
         Warning::ShankHit { at, .. } => ("shank_hit", *at),
+        Warning::HolderHit { at, .. } => ("holder_hit", *at),
         Warning::SweepHit { at, .. } => ("sweep_hit", *at),
         Warning::RapidInStock { at } => ("rapid_in_stock", *at),
         Warning::FixtureHit { at, .. } => ("fixture_hit", *at),

@@ -1,6 +1,6 @@
-//! The Setups page's work-offset picker (#196): which `G54`..`G59` word
-//! a setup's program runs in and every work-offset height of its
-//! operations measures from (#329 - the Heights page only shows it).
+//! The Setups page's work-offset picker (#196, #342): which `G54`..`G59`
+//! word the post writes for the setup's one WCS. It is only the label -
+//! the WCS origin, and every height measured from it, stay put.
 //! An unset setup IS `G54` - one `G54` entry, stored unset, so the file
 //! format is unchanged (#329). A pick queues the undoable
 //! `SetSetupWorkOffset`; nothing here writes the world.
@@ -43,9 +43,8 @@ pub(super) fn picker(ui: &mut Ui, state: &mut State, setup: &str) {
             })
             .response
             .on_hover_text(
-                "The G-word this setup's program runs in; every operation of the setup \
-                 posts at it and measures its work-offset heights from that offset's \
-                 placement here.",
+                "The G-word the post writes for this setup's WCS. It only names the \
+                 controller register - the WCS origin stays where it is placed.",
             );
     });
     if chosen != current {

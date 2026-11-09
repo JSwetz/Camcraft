@@ -31,6 +31,7 @@ pub mod cnc;
 pub mod cnc_thread;
 mod coolant;
 pub mod engine;
+pub mod invert;
 pub mod js;
 pub mod machine;
 pub mod probe_rec;
@@ -55,6 +56,10 @@ pub enum PostError {
     Json(#[from] serde_json::Error),
     #[error("post script: {0}")]
     Script(String),
+    /// A refusal by name before any script runs (#374: an inverted axis
+    /// the post cannot translate). Nothing is posted.
+    #[error("{0}")]
+    Refused(String),
 }
 
 /// Post a stream text with one script (the CLI's whole job, and the
@@ -74,6 +79,13 @@ pub struct Dump<'a> {
     pub tool_number: u32,
     pub tool_name: &'a str,
     pub tool_diameter: f64,
+    /// Commentary only (#257): the op's kind, its setup's name, the
+    /// tool's kind and corner radius - read by the scripts' program
+    /// comments, never by motion. Empty / 0 writes no PARAM.
+    pub op_kind: &'a str,
+    pub setup_name: &'a str,
+    pub tool_kind: &'a str,
+    pub tool_corner_r: f64,
     pub rpm: f64,
     pub clearance_z: f64,
     pub retract_z: f64,
@@ -130,6 +142,10 @@ impl<'a> Default for Dump<'a> {
             tool_number: 0,
             tool_name: "",
             tool_diameter: 0.0,
+            op_kind: "",
+            setup_name: "",
+            tool_kind: "",
+            tool_corner_r: 0.0,
             rpm: 0.0,
             clearance_z: 0.0,
             retract_z: 0.0,
@@ -165,6 +181,7 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     out.push(Record::Param { name: "OperationName".into(), value: json!(d.op_name) });
     out.push(Record::Param { name: "ToolDiameter".into(), value: json!(d.tool_diameter) });
+    comment_params(d, &mut out);
     out.push(Record::Param { name: "SpindleSpeed".into(), value: json!(d.rpm) });
     out.push(Record::Param { name: "WorkOffset".into(), value: json!(d.wcs) });
     out.push(Record::Param { name: "OriginX".into(), value: json!(d.origin[0]) });
@@ -392,6 +409,21 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     out.push(Record::Section { begin: false });
     out
+}
+
+/// The commentary PARAMs (#257): optional, each written only when
+/// stated, so a stream without them reads exactly as before and a
+/// script that does not know them ignores them.
+fn comment_params(d: &Dump, out: &mut Vec<Record>) {
+    let texts = [("OperationKind", d.op_kind), ("SetupName", d.setup_name), ("ToolKind", d.tool_kind)];
+    for (name, v) in texts {
+        if !v.is_empty() {
+            out.push(Record::Param { name: name.into(), value: json!(v) });
+        }
+    }
+    if d.tool_corner_r.is_finite() && d.tool_corner_r > 0.0 {
+        out.push(Record::Param { name: "ToolCornerRadius".into(), value: json!(d.tool_corner_r) });
+    }
 }
 
 /// The exclusive move index at which cycle `ci`'s chain group ends:

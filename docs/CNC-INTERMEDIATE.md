@@ -91,6 +91,7 @@ behavior only):
 | `LiveTool` | `radial` (PARAM, issue #33): the section is C-axis live-tool work - every move carries `A 0 B 0 C <c>` with C the stated spindle angle (unwrapped) that turns the part-frame tip onto the live tool's +X station; a script without `liveTooling = true` is refused the section by name |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
+| `OperationKind` `SetupName` `ToolKind` `ToolCornerRadius` | commentary (PARAMs, #257), each written only when stated: the op's kind label (`2D Contour`), its setup's name, the tool's kind label (`flat end mill`) and corner radius in mm (only above 0). Scripts voice them as program comments and nothing else; a script that does not know them ignores them |
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |
 | `Advance` | the `PART LOAD` ADVANCE in mm (present only on loads; an unload's properties carry no `Advance` key at all) |
 | `From` `To` | the `PART TRANSFER` stations, 1-based (present only on transfer events) |

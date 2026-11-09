@@ -6,6 +6,7 @@
 //! machine file and RS-274/ISO 6983 axis-lettering convention.
 
 use super::def::{AxisLimits, Coolant, Kind, LiveToolCodes, Machine};
+use super::direction::AxisDirection;
 
 /// The number a machine field reads as, with the unstated-limit law:
 /// absent, null, non-numeric, or exactly zero reads `None`; a
@@ -287,6 +288,7 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
                     }
                 }
             }
+            let direction = axis_direction(name, part, *rotary)?;
             axes.push(AxisLimits {
                 name: name.clone(),
                 rotary: *rotary,
@@ -295,12 +297,35 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
                 travel,
                 resolution,
                 axis,
+                direction,
             });
         }
         axes.sort_by_key(|a| ctrl_coord(ctrl, &a.name));
         m.axes = axes;
     }
     Ok(m)
+}
+
+/// A part's `"direction"` (#373). Linear: absent or null is standard,
+/// exactly `1` / `-1` states it, anything else refuses naming the axis -
+/// a garbled sign must never read as "standard". Rotary: a numeric `-1`
+/// refuses (a reversed rotary is not supported); any other value is the
+/// rotary's own business (`axis` states its geometry) and is not read.
+fn axis_direction(name: &str, part: &serde_json::Value, rotary: bool) -> Result<AxisDirection, String> {
+    let v = match part.get("direction") {
+        None | Some(serde_json::Value::Null) => return Ok(AxisDirection::Standard),
+        Some(v) => v,
+    };
+    let sign = v.as_f64().and_then(AxisDirection::from_sign);
+    if rotary {
+        return match sign {
+            Some(AxisDirection::Inverted) => Err(format!(
+                "machine file: rotary axis {name} states direction -1; a reversed rotary is not supported"
+            )),
+            _ => Ok(AxisDirection::Standard),
+        };
+    }
+    sign.ok_or_else(|| format!("machine file: axis {name} direction must be +1 or -1, not {v}"))
 }
 
 fn text_of(v: Option<&serde_json::Value>) -> String {

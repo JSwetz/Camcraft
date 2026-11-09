@@ -10,6 +10,7 @@ pub mod commands;
 pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
+pub mod fixture_carried;
 pub use camcraft_motion::finishing3d;
 pub use camcraft_geometry::geo2d;
 pub mod geometry;
@@ -41,7 +42,13 @@ pub mod script;
 pub mod setup;
 // #326: the part's alignment per setup.
 pub mod setup_align;
+// #343: each setup's own machine and post, and the one-mount law.
+pub mod setup_mount;
+// #316: transforms between setups and the setup-relative link.
+pub mod setup_relative;
 pub mod setup_sheet;
+// #320: a setup's stock source - its own, or what the setup before leaves.
+pub mod setup_stock;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;
@@ -54,6 +61,12 @@ pub mod tool_list;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
 pub use camcraft_tools::tools;
+// #368: a tool's modelled body and the reads the judging laws take from it.
+pub mod tool_body;
+// #369: lathe-held tool bodies (the turning tool frame).
+pub mod tool_body_lathe;
 pub mod units;
 pub use camcraft_sim::verify;
+// #261: the moves a cached path's warnings name.
+pub mod warned_moves;
 pub mod world;

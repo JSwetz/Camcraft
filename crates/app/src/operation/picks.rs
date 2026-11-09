@@ -67,6 +67,10 @@ pub fn selection_account(
     items: &[GeoSel],
     params: &OpParams,
 ) -> (Vec<String>, Option<String>) {
+    // A probe's pick seeds a touch, it bounds no region (#171).
+    if let Some(account) = super::probe_account(world, items, params) {
+        return account;
+    }
     let mut notes = Vec::new();
     match selection_geometry_impl(world, setup, items, params, Some(&mut notes)) {
         Ok(_) => (notes, None),

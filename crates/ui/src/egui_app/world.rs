@@ -27,7 +27,6 @@ use camcraft_app::geometry::{Point3, cube, feature, transform_point};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
-use camcraft_app::schema::WCS_SLOTS;
 use camcraft_app::tools::{Tool, catalog};
 
 use crate::interact::ftoz;
@@ -97,12 +96,11 @@ pub fn seed(state: &mut State) {
     };
     state.pending.push_back(CommandKind::StockFit { margin: 2.0, shape: 0 });
     state.pending.push_back(CommandKind::AddTool { name: "EM-0600-4FL".into(), tool });
-    // The seed's Contour bottoms out at work offset G54 (hand-test 4's
-    // fixture law), so G54 must exist before generate or the command is
+    // The seed's Contour bottoms out at the WCS (hand-test 4's
+    // fixture law), so the WCS must exist before generate or the command is
     // refused by name. The block sits z 0..30; the offset at the world
     // origin puts Cut Z at the model bottom.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: WCS_SLOTS[0].to_string(),
         pos: [0.0, 0.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,

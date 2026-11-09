@@ -50,8 +50,8 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
-    Shape, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Layout, Pos2, RichText, ScrollArea,
+    Sense, Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
@@ -59,8 +59,7 @@ use camcraft_app::machine;
 use camcraft_app::model;
 use camcraft_app::operation::SrcRef;
 use camcraft_app::posting;
-use camcraft_app::commands::theme_of;
-use camcraft_app::schema::{PostRef, ThemeRef, WCS_SLOTS};
+use camcraft_app::schema::PostRef;
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools;
 use camcraft_app::units::{self, Unit};
@@ -114,7 +113,7 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         super::op_page::operation_page(ui, state, n.as_str(), pal);
         return;
     }
-    let has_close = matches!(&t, UiTarget::Tool(_) | UiTarget::Stock | UiTarget::WcsSlot(_) | UiTarget::Model(_));
+    let has_close = matches!(&t, UiTarget::Tool(_) | UiTarget::Stock | UiTarget::Wcs | UiTarget::Model(_) | UiTarget::SetupNode(..));
     let content_height = (ui.available_height() - if has_close { 40.0 } else { 0.0 }).max(80.0);
     ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -130,17 +129,29 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 stock_page(ui, state);
                 setup_error(ui, state);
             }
-            UiTarget::WcsSlot(i) => {
+            UiTarget::Wcs => {
                 state.sync_setup_ui();
-                let name = WCS_SLOTS.get(i).copied().unwrap_or("?");
-                ui.heading(format!("Work offset {name}"));
+                // #342: one WCS per setup; the word is its post label.
+                let active = camcraft_app::setup::active(&state.world);
+                ui.heading(camcraft_app::setup::wcs_label(&state.world, active.as_deref()));
                 ui.separator();
-                wcs_page(ui, state, i);
+                wcs_page(ui, state);
+                // #343: the WCS node's dialog names its post word too.
+                if let Some(name) = active.as_deref() {
+                    ui.separator();
+                    super::setup_wcs_pick::picker(ui, state, name);
+                }
                 setup_error(ui, state);
             }
             UiTarget::Model(n) => {
                 state.sync_setup_ui();
                 model_page(ui, state, n);
+                setup_error(ui, state);
+            }
+            // #343: a setup's own node pages.
+            UiTarget::SetupNode(name, page) => {
+                state.sync_setup_ui();
+                super::setup_pages::page(ui, state, &name, page);
                 setup_error(ui, state);
             }
             UiTarget::Setups => {
@@ -309,65 +320,6 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
                 .push_back(CommandKind::DeleteByName(stock_name.clone()));
         }
     });
-    ui.add_space(10.0);
-    ui.separator();
-    machine_section(ui, state);
-    ui.add_space(10.0);
-    ui.separator();
-    post_section(ui, state);
-    ui.add_space(10.0);
-    ui.separator();
-    theme_section(ui, state);
-}
-
-/// The document's theme (M6.1 C): setup furniture, read live off the
-/// world singleton like the machine and post sections beside it - no
-/// mirror to go stale, the label is exactly the reference the command
-/// wrote. The combo offers the two built-ins and the discovered
-/// `assets/themes/*.json` files BY NAME (the `post_registry` law: an
-/// index into a file list would silently re-point the document when a
-/// file arrives), and "Load theme" reaches any `.json` through the
-/// file-pick law. The look itself lands on the next frame edge, in
-/// `State::sync_theme` - the click writes the reference, never a
-/// table - so undo puts the previous theme back exactly.
-fn theme_section(ui: &mut Ui, state: &mut State) {
-    let current = theme_of(&state.world);
-    ui.label("Theme");
-    ui.label(crate::state::theme_label(&state.world));
-    ui.horizontal(|ui| {
-        let mut pick: Option<CommandKind> = None;
-        egui::ComboBox::from_id_salt("theme_switcher")
-            .selected_text(state.theme_selection_text())
-            .show_ui(ui, |ui| {
-                for (label, cmd) in state.theme_options() {
-                    let on = match (&cmd, &current) {
-                        (CommandKind::SelectTheme(ThemeRef::Dark), ThemeRef::Dark) => true,
-                        (
-                            CommandKind::SelectTheme(ThemeRef::Named(n)),
-                            ThemeRef::Named(m),
-                        ) => n == m,
-                        (
-                            CommandKind::SelectTheme(ThemeRef::File(p)),
-                            ThemeRef::File(q),
-                        ) => p == q,
-                        _ => false,
-                    };
-                    if ui.selectable_label(on, &label).clicked() {
-                        pick = Some(cmd);
-                    }
-                }
-            });
-        if let Some(cmd) = pick {
-            state.pending.push_back(cmd);
-        }
-        if matches!(current, ThemeRef::File(_)) && ui.button("Built-in").clicked() {
-            state
-                .pending
-                .push_back(CommandKind::SelectTheme(ThemeRef::Dark));
-        }
-    });
-    // M13.4: the viewer's colour-vision remap rides beside the theme.
-    super::colorvision::picker(ui, state);
 }
 
 /// The document's post script (M3.3 A/B): setup furniture, read live
@@ -378,7 +330,7 @@ fn theme_section(ui: &mut Ui, state: &mut State) {
 /// document when the registry grows or reorders); loading a `.cps` of
 /// your own and returning to the default are commands too - undo puts
 /// the previous post back.
-fn post_section(ui: &mut Ui, state: &mut State) {
+pub(super) fn post_section(ui: &mut Ui, state: &mut State) {
     let current = posting::post_of(&state.world);
     ui.label("Post");
     ui.label(posting::post_label(&state.world));
@@ -496,7 +448,7 @@ fn post_offer_banner(ui: &mut Ui, state: &mut State) {
 /// same `LoadMachine` command, so every change here is undoable
 /// furniture, not a field poke. The kind line follows the DECLARED
 /// kind where the machine states one, the axis inventory otherwise.
-fn machine_section(ui: &mut Ui, state: &mut State) {
+pub(super) fn machine_section(ui: &mut Ui, state: &mut State) {
     let (path, m) = machine::of(&state.world);
     ui.label("Machine");
     ui.horizontal(|ui| {
@@ -553,11 +505,8 @@ fn machine_section(ui: &mut Ui, state: &mut State) {
 
 // ------------------------------------------------------------------ wcs page
 
-fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
+fn wcs_page(ui: &mut Ui, state: &mut State) {
     let u = state.units();
-    if state.wcs_ui.slot != slot {
-        load_wcs_slot(state, slot);
-    }
     field(ui, "X origin");
     num(ui, u, &mut state.wcs_ui.x);
     field(ui, "Y origin");
@@ -668,44 +617,28 @@ fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
     }
 
     ui.add_space(6.0);
-    // The slot WORDS are always the RS-274 literals (law f: a posted G55
-    // is a G55); only the entity behind each follows the setup.
+    // #342: the setup's one WCS, and the word its post writes - which
+    // word is chosen on the Setups page, never here.
     let wcs_ctx = camcraft_app::setup::active(&state.world);
-    ui.label(match wcs_ctx.as_deref() {
-        Some(s) => format!("Placed offsets in setup {s}:"),
-        None => "Placed offsets:".to_owned(),
-    });
-    for (i, name) in WCS_SLOTS.iter().enumerate() {
-        let line = match camcraft_app::setup::wcs_entity(&state.world, wcs_ctx.as_deref(), i)
-            .and_then(|e| model::transform_of(&state.world, &e))
-        {
-            Some(loc) => format!(
-                "{name}: {}, {}, {}  yaw {:.1}",
-                units::len(loc.pos.x, u, 2),
-                units::len(loc.pos.y, u, 2),
-                units::len(loc.pos.z, u, 2),
-                quat_yaw_deg(loc.rot)
-            ),
-            None => format!("{name}: -"),
-        };
-        ui.label(line);
-    }
-}
-
-fn load_wcs_slot(state: &mut State, slot: usize) {
-    state.wcs_ui.slot = slot.min(WCS_SLOTS.len() - 1);
-    // The lib's own sync (state.rs sync_setup_ui) mirrors the world into
-    // every wcs_ui field, `placed` included - that flag is pub(crate) and
-    // not writable from a pane anyway. Same behavior, one source.
-    state.sync_setup_ui();
+    let label = camcraft_app::setup::wcs_label(&state.world, wcs_ctx.as_deref());
+    let line = match camcraft_app::setup::wcs_entity(&state.world, wcs_ctx.as_deref())
+        .and_then(|e| model::transform_of(&state.world, &e))
+    {
+        Some(loc) => format!(
+            "{label}: {}, {}, {}  yaw {:.1}",
+            units::len(loc.pos.x, u, 2),
+            units::len(loc.pos.y, u, 2),
+            units::len(loc.pos.z, u, 2),
+            quat_yaw_deg(loc.rot)
+        ),
+        None => format!("{label}: not placed (at the origin)"),
+    };
+    ui.label(line);
+    ui.label("The work offset word is set per setup on the Setups page.");
 }
 
 fn apply_wcs_drafts(state: &mut State) {
-    let slot = *WCS_SLOTS
-        .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
-        .unwrap_or(&WCS_SLOTS[0]);
     state.pending.push_back(CommandKind::SetWcs {
-        slot: slot.to_string(),
         pos: [state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z],
         roll_deg: state.wcs_ui.roll_deg,
         pitch_deg: state.wcs_ui.pitch_deg,
@@ -770,7 +703,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
     if names.is_empty() {
         ui.label(
             "No setups in this document: the one global stock and the \
-             G54-G59 offsets act as the first setup.",
+             G54 WCS act as the first setup.",
         );
         ui.add_space(6.0);
         if ui.button("Create first setup").clicked() {
@@ -809,23 +742,24 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             });
         });
         if let Some(def) = camcraft_app::setup::def_of(&state.world, name) {
-            let placed = (0..WCS_SLOTS.len())
-                .filter(|i| {
-                    camcraft_app::setup::wcs_entity(&state.world, Some(name.as_str()), *i).is_some()
-                })
-                .count();
-            let mut line = format!("    stock {}, offsets placed {placed}", def.stock);
+            let placed = if camcraft_app::setup::wcs_entity(&state.world, Some(name.as_str())).is_some() {
+                "placed"
+            } else {
+                "not placed"
+            };
+            let mut line = format!("    stock {}, WCS {placed}", def.stock);
             if !def.datum_from.is_empty() {
                 line.push_str(&format!(", datum from {}", def.datum_from));
             }
             ui.label(line);
             super::setup_align_pick::picker(ui, state, name);
+            super::setup_plane_pick::row(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
     }
     ui.separator();
     ui.horizontal(|ui| {
-        ui.checkbox(&mut state.setups_ui.datum, "Carry stock and offsets over");
+        ui.checkbox(&mut state.setups_ui.datum, "Carry stock and WCS over");
         if ui.button("New setup").clicked() {
             let datum_from = if state.setups_ui.datum {
                 active.clone()
@@ -852,7 +786,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
 /// the estimate. Read-only by law - tools live in the Tool Library and
 /// operations pick them; this page only reports what that wiring
 /// implies, so there is no draft and no command here.
-fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
+pub(super) fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
     let rows = camcraft_app::tool_list::for_setup(&state.world, ctx);
     if rows.is_empty() {
@@ -885,7 +819,7 @@ fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
 /// The setup-sheet export row (M3.2 stage D). Writing a sheet is a
 /// read of the document plus a file write - like posting - so the
 /// button queues the dialog arm and nothing touches the history.
-fn sheet_footer(ui: &mut Ui, state: &mut State) {
+pub(super) fn sheet_footer(ui: &mut Ui, state: &mut State) {
     ui.horizontal(|ui| {
         if ui.button("Export setup sheets…").clicked() {
             state.pending.push_back(CommandKind::SetupSheetDialog);
@@ -1298,10 +1232,23 @@ fn gcode_listing(
                 {
                     rt = rt.weak();
                 }
-                // add_sized pins every row to exactly row_h, so the
-                // cursor arithmetic above stays exact over a long
-                // program instead of drifting a row.
-                let resp = ui.add_sized([width, row_h], Label::new(rt).selectable(false));
+                // Every row is a left-to-right box exactly `width` by
+                // `row_h`, so the text starts at the left edge (#256:
+                // `add_sized` centred it) and the cursor arithmetic
+                // above stays exact over a long program instead of
+                // drifting a row. `truncate` keeps a line wider than
+                // the window on its one row (egui shows the whole line
+                // on hover) rather than wrapping it onto a second.
+                let resp = ui
+                    .allocate_ui_with_layout(
+                        Vec2::new(width, row_h),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_size(Vec2::new(width, row_h));
+                            ui.add(Label::new(rt).selectable(false).truncate())
+                        },
+                    )
+                    .inner;
                 if jump.get() == Some(i) {
                     resp.scroll_to_me(Some(Align::Center));
                     jump.set(None);
@@ -1817,7 +1764,6 @@ mod turn_tests {
 
     fn place(state: &mut State, pos: [f64; 3], yaw_deg: f64) {
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".to_string(),
             pos,
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1871,13 +1817,12 @@ mod turn_tests {
     }
 
     #[test]
-    fn turning_an_unplaced_slot_applies_the_typed_position() {
+    fn turning_an_unplaced_wcs_applies_the_typed_position() {
         let mut state = State::new();
-        state.wcs_ui.slot = 1; // G55
         state.wcs_ui.x = 5.0;
         turn_wcs(&mut state, 1, -1.0); // Y- quarter
         state.drain_actions();
-        let loc = location(&state, "G55");
+        let loc = location(&state, "G54");
         assert_eq!([loc.pos.x, loc.pos.y, loc.pos.z], [5.0, 0.0, 0.0]);
         // Right-hand -90 about Y takes +X to +Z: the drafts, not just a
         // rotation, rode along.

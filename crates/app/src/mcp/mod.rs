@@ -15,15 +15,18 @@
 //! and every failure is an MCP tool error (`isError: true`) naming the
 //! reason - never a panic, never a silent success.
 
+mod area;
 mod edit;
+mod features;
 mod job;
+mod pick;
 mod render;
 mod tools;
 
 use crate::script::Env;
 
 use serde_json::{json, Value};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 
 /// The protocol revisions this server speaks, newest first. A client
 /// asking for one of them gets it echoed; anything else gets the newest
@@ -78,6 +81,10 @@ impl Server {
             return Some(rpc_error(Value::Null, INVALID_REQUEST, "a single JSON-RPC object was expected"));
         };
         let id = obj.get("id").cloned();
+        if id == Some(Value::Null) {
+            // MCP: a request id is a string or a number, never null.
+            return Some(rpc_error(Value::Null, INVALID_REQUEST, "\"id\" must be a string or a number, not null"));
+        }
         if obj.get("jsonrpc") != Some(&json!("2.0")) {
             return id.map(|id| rpc_error(id, INVALID_REQUEST, "\"jsonrpc\" must be \"2.0\""));
         }
@@ -179,17 +186,61 @@ fn rpc_error(id: Value, code: i64, msg: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": msg } })
 }
 
+/// The longest wire line the server reads, in bytes (16 MiB). A longer
+/// line is answered with a parse error and skipped to its newline
+/// without being held in memory - one runaway message must not take
+/// the session (or the machine) down with it.
+pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+
 /// The stdio loop: one message per line in, one per line out, flushed
 /// at once (the client waits on it). Ends cleanly at end of input.
+/// A line that is not UTF-8, or longer than [`MAX_LINE_BYTES`], is a
+/// JSON-RPC parse error for that line; the loop reads on. Only an I/O
+/// failure of the streams themselves ends it early.
 /// Diagnostics never go to stdout - that stream is the protocol's.
-pub fn serve(input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+pub fn serve(mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
     let mut server = Server::new();
-    for line in input.lines() {
-        let line = line?;
-        if let Some(reply) = server.handle_line(&line) {
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        let cap = u64::try_from(MAX_LINE_BYTES).unwrap_or(u64::MAX).saturating_add(1);
+        let n = (&mut input).take(cap).read_until(b'\n', &mut buf)?;
+        if n == 0 {
+            return Ok(());
+        }
+        let reply = if !buf.ends_with(b"\n") && buf.len() > MAX_LINE_BYTES {
+            skip_line(&mut input)?;
+            Some(parse_error(&format!("line longer than {MAX_LINE_BYTES} bytes")))
+        } else {
+            match std::str::from_utf8(&buf) {
+                Ok(line) => server.handle_line(line),
+                Err(e) => Some(parse_error(&format!("the line is not UTF-8: {e}"))),
+            }
+        };
+        if let Some(reply) = reply {
             writeln!(output, "{reply}")?;
             output.flush()?;
         }
     }
-    Ok(())
+}
+
+fn parse_error(msg: &str) -> String {
+    rpc_error(Value::Null, PARSE_ERROR, &format!("parse error: {msg}")).to_string()
+}
+
+/// Drop input up to and including the next newline (or to the end),
+/// one buffer at a time - nothing of the skipped line is kept.
+fn skip_line(input: &mut impl BufRead) -> std::io::Result<()> {
+    loop {
+        let chunk = input.fill_buf()?;
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        if let Some(i) = chunk.iter().position(|&b| b == b'\n') {
+            input.consume(i.saturating_add(1));
+            return Ok(());
+        }
+        let len = chunk.len();
+        input.consume(len);
+    }
 }

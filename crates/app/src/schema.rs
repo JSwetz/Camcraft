@@ -92,9 +92,11 @@ pub struct StockDef {
     pub shape: StockShape,
 }
 
-/// Unit tag marking an entity as a work coordinate system origin. The entity
-/// NAME is the slot identity (`G54`..`G59`), its `Location` the transform;
-/// there is no payload to drift. Never has facets.
+/// Unit tag marking an entity as a work coordinate system origin: a
+/// setup's one WCS (#342), named by `SetupDef::wcs` (`G54` for a document
+/// without setups), its `Location` the transform; there is no payload to
+/// drift. The NAME is not the G-word - that is the setup's label
+/// (`SetupDef::work_offset`). Never has facets.
 #[derive(Component, Debug)]
 pub struct Wcs;
 
@@ -112,39 +114,91 @@ pub struct ToolDef {
     pub number: Option<u32>,
 }
 
+/// A tool's modelled body (#368): a holder or assembly mesh (a vendor
+/// STEP, an STL) placed in the tool's frame, and what the judging laws
+/// read off it, derived from those facets at landing and never stored
+/// apart from them. A milling tool's frame is the spindle's (tip at the
+/// origin, axis +Z toward the spindle; its revolved envelope); a lathe
+/// steel's is the turning tool frame (#369: tip at the origin, +x away
+/// from the spindle axis, +z along it; its clearance bands) - see
+/// [`crate::tool_body::BodyFrame`]. A tool without one judges its
+/// `holder_d`/`holder_len` cylinder, as always. Written only through
+/// `SetToolBody` (`crate::tool_body`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ToolBody {
+    /// Where the mesh came from (a file name), for display only.
+    pub source: String,
+    /// The placed facets, in the frame `frame` names.
+    pub facets: std::sync::Arc<[Triangle]>,
+    /// The frame, the placement it landed with, and the derived read.
+    pub frame: crate::tool_body::BodyFrame,
+}
+
+impl ToolBody {
+    /// The revolved envelope of a milling (spindle-frame) body.
+    #[must_use]
+    pub fn profile(&self) -> Option<&camcraft_tools::holder_profile::HolderProfile> {
+        match &self.frame {
+            crate::tool_body::BodyFrame::Spindle { profile, .. } => Some(profile),
+            crate::tool_body::BodyFrame::Lathe { .. } => None,
+        }
+    }
+}
+
 /// One machine setup (M3.2 stage A): the named context that says WHICH
-/// raw material and WHICH work offsets an operation is machined against.
-/// The strings are entity NAMES, resolved through [`crate::setup`] - the
-/// first setup of a pre-M3.2 document points at the legacy global names
-/// (`STOCK_NAME`, `WCS_SLOTS`) so nothing is renamed when setups arrive.
-/// `wcs` is indexed by [`WCS_SLOTS`]; an entry naming an entity that does
-/// not exist yet means "this slot is not placed in this setup", exactly
-/// as a missing `G55` entity means today. `datum_from` records the setup
-/// whose stock and G54 a new setup was cloned from - provenance for the
-/// sheet, inert for every stamp (the clones themselves carry the data).
-/// `work_offset` is the setup's PICKED program offset (#196), an index
-/// into [`WCS_SLOTS`]: every operation of the setup posts at that word,
-/// measured from that slot's placement, and every work-offset height of
-/// its operations reads that slot (#329). `None` - the default - is
-/// "not picked" and reads `G54` ([`crate::setup::wcs_slot`]). The loader
-/// lifts an older file's per-height slots onto this field when the whole
-/// setup agreed (`project::wcs_migrate`). Written only by
-/// `SetSetupWorkOffset` and that migration.
+/// raw material and WHICH work coordinate system an operation is
+/// machined against. The strings are entity NAMES, resolved through
+/// [`crate::setup`] - the first setup of a pre-M3.2 document points at
+/// the legacy global names (`STOCK_NAME`, `G54`) so nothing is renamed
+/// when setups arrive.
+/// `wcs` names the setup's ONE work coordinate system (#342): one origin
+/// per setup, never a list of slots. An empty name, or one naming an
+/// entity that does not exist yet, means "this setup's WCS is not placed"
+/// (it sits at the origin). `datum_from` records the setup whose stock
+/// and WCS a new setup was cloned from - provenance for the sheet, inert
+/// for every stamp (the clones themselves carry the data).
+/// `work_offset` is only the setup's post LABEL (#196, #342), an index
+/// into [`WCS_SLOTS`]: the `G54`..`G59` word the post writes for this
+/// setup's WCS. It selects no stored origin - changing it moves nothing.
+/// `None` - the default - writes `G54` ([`crate::setup::wcs_slot`]).
+/// Written only by `SetSetupWorkOffset` and the loader's migrations.
 /// `part_alignment` (#326) is how the PART sits in this setup: the rigid
 /// transform from the document frame into the setup frame (which face
-/// is on the table, which edge runs along X). The stock, the offsets and
+/// is on the table, which edge runs along X). The stock, the WCS and
 /// the fixtures of the setup are placed in that frame already; only the
 /// parts read through it (`setup_align`). `None` - the default - is "as
 /// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
 /// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
 /// carries it) and the project loader.
+/// `machine` and `post` (#343) are the setup's OWN machine and post:
+/// `None` - the default, and every file before v55 - follows the
+/// document's (`MachineDef` / `PostRef` singletons), so an untouched
+/// document mounts and posts exactly as before. Read through
+/// [`crate::setup_mount`]; written only by `SetSetupMachine` /
+/// `SetSetupPost` and the project loader.
+/// `relative_to` (#316) names the setup this one is placed RELATIVE to
+/// (a re-clamp of it: flipped, turned). The relation itself is not
+/// stored - it is `part_alignment` read against the other setup's
+/// ([`crate::setup_relative::transform_between`]); the link only makes
+/// a later change of that setup's alignment carry into this one. `None`,
+/// the default and every file before v56, links nothing. Written only by
+/// `SetSetupRelative` and the project loader.
+/// `stock_source` (#320) is where the setup's stock comes from: its own,
+/// or what the setup before it leaves. `None`, the default and every
+/// file before v57, reads as #317's implicit rule
+/// ([`crate::setup_stock::implicit`]). Written only by
+/// `SetSetupStockSource` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
-    pub wcs: Vec<String>,
+    pub wcs: String,
     pub datum_from: String,
     pub work_offset: Option<usize>,
     pub part_alignment: Option<Location>,
+    pub machine: Option<MachineDef>,
+    pub post: Option<PostRef>,
+    pub relative_to: Option<String>,
+    pub stock_source: Option<crate::setup_stock::StockSource>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
@@ -411,6 +465,7 @@ pub fn register_schema(world: &World) {
     world.component::<StockDef>();
     world.component::<Wcs>();
     world.component::<ToolDef>();
+    world.component::<ToolBody>();
     world.component::<Operation>();
     world.component::<OperationMeta>();
     world.component::<Toolpath>();

@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc='Computer-aided manufacturing application'
 arch=('x86_64')
 url='https://github.com/NeoTech/Camcraft'
-license=('MIT')
+license=('Apache-2.0')
 depends=('glibc' 'libgcc' 'libxkbcommon' 'libxkbcommon-x11' 'libx11'
          'wayland' 'vulkan-icd-loader' 'libglvnd')
 makedepends=('cargo' 'pkgconf')
@@ -54,5 +54,6 @@ package() {
     install -Dm644 "$srcdir/camcraft.desktop" "$pkgdir/usr/share/applications/camcraft.desktop"
     install -Dm644 assets/ui/cube.png "$pkgdir/usr/share/pixmaps/camcraft.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/camcraft/LICENSE"
+    install -Dm644 NOTICE "$pkgdir/usr/share/licenses/camcraft/NOTICE"
     install -Dm644 TESTING.md "$pkgdir/usr/share/doc/camcraft/TESTING.md"
 }
