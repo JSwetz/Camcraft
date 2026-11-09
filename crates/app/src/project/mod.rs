@@ -141,3 +141,6 @@ mod mount_dto;
 pub use mount_dto::{SetupMachineDto, SetupPostDto};
 // #316: setup links (v56), checked before any world write.
 mod setup_links;
+// #368: a tool's modelled body on file (v57).
+mod tool_body_wire;
+pub use tool_body_wire::ToolBodyDto;

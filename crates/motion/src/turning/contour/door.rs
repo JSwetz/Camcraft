@@ -6,7 +6,7 @@
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::machining2d::GenError;
 
-use crate::turning::{offset, prof, profile};
+use crate::turning::{offset, prof, profile, StockEnv};
 
 /// The station equality hair: the door skips samples AT the window
 /// ends (they are the corners and the end faces the authored line
@@ -114,11 +114,14 @@ pub(super) fn face_ride(
     clearance_z: f64,
     feed: f64,
     plunge_feed: f64,
+    stock: Option<StockEnv>,
 ) -> Result<Toolpath, GenError> {
     let cl = offset::profile_offset(pts, nose, tol * 0.25, win.0, win.1)?;
     let rho_clear = cl.iter().map(|q| q.1).fold(0.0f64, f64::max) + tol;
+    let part_r = pts.iter().map(|q| q.1).fold(0.0f64, f64::max);
+    let rho_clear = StockEnv::rapid_radius(stock, part_r, rho_clear, nose);
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(clearance_z)));
-    prof::ride(&mut b, f, &cl, rho_clear, feed, plunge_feed, prof::Exit::Rapid);
+    prof::ride(&mut b, f, &cl, rho_clear, feed, plunge_feed, prof::Exit::inside(stock, win.1));
     b.push(
         MoveKind::Rapid,
         f.point(rho_clear, f.station_of(clearance_z)),

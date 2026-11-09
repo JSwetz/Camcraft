@@ -1152,6 +1152,11 @@ pub struct State {
     /// M1.7d G-code viewer: None after any document switch or refused
     /// post, `Some` while a posted program is being reviewed.
     pub post_view: Option<PostView>,
+    /// #265: the last post's refusal, `Some` from a refused post until
+    /// the user closes its window, a later post succeeds, or the
+    /// document is switched. The status line says it too, but the next
+    /// click or command writes over that line; this keeps the reason.
+    pub post_refusal: Option<crate::egui_app::post_refusal::PostRefusal>,
     /// #157: the Debug info window is open. View state - never a
     /// command, never saved.
     pub debug_info_open: bool,
@@ -1462,6 +1467,7 @@ impl State {
             display: DisplayMode::default(),
             sim: None,
             post_view: None,
+            post_refusal: None,
             program_sim: None,
             field_view: None,
             field_play: None,
@@ -2382,6 +2388,7 @@ impl State {
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
+                self.post_refusal = None;
                 self.program_sim = None;
                 self.field_view = None;
                 self.field_play = None;
@@ -3615,6 +3622,7 @@ impl State {
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
+        self.post_refusal = None; // nor its refused post
         self.program_sim = None; // and neither is its stock verdict
         self.field_view = None; // nor its traced stock
         self.field_play = None; // nor its playback
@@ -3670,10 +3678,18 @@ impl State {
     fn post_program_path(&mut self, path: PathBuf) {
         // #388: setups on different machines or posts write one file each.
         match posting::post_mounts(&self.world, &path) {
-            Ok(files) if files.len() > 1 => self.show_posted_mounts(files),
+            Ok(files) if files.len() > 1 => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
+                self.show_posted_mounts(files);
+            }
             Ok(files) => {
                 let Some(first) = files.into_iter().next() else { return };
                 let (path, posted) = (first.path, first.posted);
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
                 self.status = format!(
                     "posted {} op(s), {} lines to {}",
                     posted.ops,
@@ -3701,8 +3717,18 @@ impl State {
                 });
             }
             // A refused post leaves any previous program (file and viewer)
-            // exactly as it was - the gate writes nothing on refusal.
-            Err(err) => self.status = format!("post refused: {err}"),
+            // exactly as it was - the gate writes nothing on refusal. The
+            // reason also goes to its own window (#265), because the
+            // status line is overwritten by the next click or command.
+            Err(err) => {
+                let reason = err.to_string();
+                self.status = format!("post refused: {reason}");
+                self.post_refusal = Some(crate::egui_app::post_refusal::PostRefusal {
+                    path,
+                    reason,
+                    doc_version: self.doc_version,
+                });
+            }
         }
     }
 
@@ -3851,13 +3877,16 @@ pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     dialog.set_file_name(filename).save_file()
 }
 
-fn post_program_dialog() -> Option<PathBuf> {
+/// The Post dialog, opened where `crate::post_file::post_target` says
+/// (#258: the last post's folder and name, else the project's).
+fn post_program_dialog(target: &crate::post_file::PostTarget) -> Option<PathBuf> {
     // The extension law lives with the script (fanuc.cps's `extension`
     // is "nc"); the dialog just offers it.
-    rfd::FileDialog::new()
-        .add_filter("NC Program", &["nc"])
-        .set_file_name("program.nc")
-        .save_file()
+    let mut dialog = rfd::FileDialog::new().add_filter("NC Program", &["nc"]);
+    if let Some(dir) = &target.dir {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.set_file_name(&target.file_name).save_file()
 }
 
 fn save_stl_dialog() -> Option<PathBuf> {

@@ -11,4 +11,6 @@
 //! this crate only says what a tool record IS.
 
 pub mod cutting;
+// #368: a modelled tool body as the stack laws read it.
+pub mod holder_profile;
 pub mod tools;
