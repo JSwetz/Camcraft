@@ -27,7 +27,8 @@
 use super::ahead::{all_ahead, Ahead};
 use crate::stock_sim::carry::{self, Entry};
 use crate::geometry::Point3;
-use crate::stock_sim::{Dexel, LatticeTurn, SimOp};
+use crate::stock_sim::{Body, Dexel, LatticeTurn, SimOp};
+use std::sync::Arc;
 use flecs_ecs::prelude::World;
 
 /// An axis-aligned box, `(min, max)`.
@@ -123,14 +124,25 @@ pub(super) fn chain_of(world: &World, name: &str, setup: Option<&str>, with_move
     Ok(Chain { segments })
 }
 
-/// The column grid the crossing chain leaves standing, in the consumer's
-/// frame: the origin setup's block, each segment's cut moves swept, the
-/// body carried at every boundary. The tops are read as the rest grid -
-/// a column cut through on its far side still reads its standing top
-/// (more material, never less).
+/// The body the crossing chain leaves standing, in the consumer's frame:
+/// the origin setup's block, each segment's cut moves swept, the body
+/// carried at every boundary. Its tops are read as the rest grid - a
+/// column cut through on its far side still reads its standing top (more
+/// material, never less). Served from the carried-body cache (#321) when
+/// nothing it reads has moved.
 /// `through_consumer: false` stops at the body the consumer's setup is
 /// ENTERED with (#319): its own setup's earlier cuts are not swept.
+pub(super) fn carried_body(world: &World, chain: &Chain, min_r: f64, through_consumer: bool) -> Result<Arc<Body>, String> {
+    super::carried_cache::body(world, chain, min_r, through_consumer, || sweep(world, chain, min_r, through_consumer))
+}
+
+/// [`carried_body`]'s tops: the rest grid.
 pub(super) fn carried_grid(world: &World, chain: &Chain, min_r: f64, through_consumer: bool) -> Result<Dexel, String> {
+    carried_body(world, chain, min_r, through_consumer).map(|b| b.dex.clone())
+}
+
+/// The sweep itself, uncached.
+fn sweep(world: &World, chain: &Chain, min_r: f64, through_consumer: bool) -> Result<Body, String> {
     let origin = crate::setup::effective(world, chain.origin());
     let dex = crate::stock_sim::stock_grid(world, origin.as_deref(), min_r)?;
     let mut body = carry::first_body(world, origin.as_deref(), dex)?;
@@ -150,7 +162,7 @@ pub(super) fn carried_grid(world: &World, chain: &Chain, min_r: f64, through_con
             .collect();
         crate::stock_sim::simulate(&mut body.dex, &ops).map_err(|e| e.to_string())?;
     }
-    Ok(body.dex)
+    Ok(body)
 }
 
 /// The block a later carried setup is entered with, bounded (#319): the
@@ -194,7 +206,8 @@ pub(super) fn carried_body_bounds(
     min_r: f64,
     block: (Point3, Point3),
 ) -> Result<Option<(Bounds, Dexel)>, String> {
-    let dex = carried_grid(world, chain, min_r, false)?;
+    let body = carried_body(world, chain, min_r, false)?;
+    let dex = &body.dex;
     let h = dex.cell * 0.5;
     let mut pts = Vec::new();
     for iy in 0..dex.ny {
@@ -212,7 +225,7 @@ pub(super) fn carried_body_bounds(
     let (b0, b1) = block;
     let lo = Point3::new(lo.x.max(b0.x), lo.y.max(b0.y), b0.z);
     let hi = Point3::new(hi.x.min(b1.x), hi.y.min(b1.y), hi.z.min(b1.z));
-    Ok((lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some(((lo, hi), dex)))
+    Ok((lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some(((lo, hi), dex.clone())))
 }
 
 /// The axis-aligned bounds of finite points; `None` for none.
@@ -258,6 +271,29 @@ pub fn carried_stock_body(
     }
     let min_r = chain.ops().filter(|a| a.cut && a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
     carried_body_bounds(world, &chain, min_r, block)
+}
+
+/// The body setup `setup` is entered with when the program ahead of
+/// `name` carries it there (#321: the workholding clause reads it), with
+/// the origin setup's name - the carried-body cache's own entry for the
+/// same chain and lattice the op's generation read. `Ok(None)`: no
+/// carried boundary.
+///
+/// # Errors
+/// A refused carry, or a body the grid cannot cut.
+pub fn entered_body(
+    world: &World,
+    name: &str,
+    setup: Option<&str>,
+    tool_r: f64,
+) -> Result<Option<(String, Arc<Body>)>, String> {
+    let chain = chain_of(world, name, setup, true)?;
+    if !chain.crosses() {
+        return Ok(None);
+    }
+    let min_r = chain.ops().filter(|a| a.cut && a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
+    let origin = chain.origin().unwrap_or_default().to_owned();
+    carried_body(world, &chain, min_r, false).map(|b| Some((origin, b)))
 }
 
 /// The rest digest of an operation whose verdict does not otherwise read
