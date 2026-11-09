@@ -56,6 +56,7 @@ pub mod validate;
 // #383: the machine editor - property grid, draft, user folder and save.
 pub mod draft;
 pub mod fields;
+pub mod order;
 pub mod store;
 
 use flecs_ecs::core::WorldGet;

@@ -56,13 +56,17 @@ New blank, New from template and Edit machine.
   doesn't know (and some of what it does, such as a backwards travel), so
   writing back from it would lose unknown keys. Pointer edits on the raw
   `serde_json::Value` carry every unknown key through by construction.
-- *Key order is not kept.* The workspace `serde_json` does not enable
-  `preserve_order`, so a saved file's keys come out sorted. The content,
-  unknown keys included, round-trips exactly (pinned by test). Turning on
-  `preserve_order` would change every JSON writer in the workspace,
-  project files included, which is a wider change than this issue owns.
-  Considered and dropped for now. It can follow as its own issue if
-  hand-diffing saved files matters.
+- *Key order is kept (#480, stacked on this PR).* The workspace
+  `serde_json` has no `preserve_order`, so `Value` keeps keys sorted.
+  The draft records the file's order beside its value
+  (`machine::order::KeyOrder`, built by a visitor in one pass over the
+  source text) and writes through its own pretty writer in that order;
+  keys the file did not have go last in their object. A blank machine has
+  no recorded order and writes exactly what `to_string_pretty` would.
+  Considered and dropped: `preserve_order` workspace-wide (changes every
+  JSON writer, project files included); depending on `indexmap` directly
+  (already in Cargo.lock transitively, but still a dependency change for
+  the maintainer). The visitor is ~60 lines and needs neither.
 - *A number field keeps a non-number as text,* so the validator names it
   (for example "min and max must both be numbers"), rather than the editor
   silently eating the keystroke. The pane keeps a per-field buffer so a
