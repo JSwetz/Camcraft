@@ -25,7 +25,8 @@
 //!   refuses while any operation belongs to it ([`crate::setup::belongs`],
 //!   by declaration or by the first/implicit position), naming the
 //!   operation. Furniture the setup alone owns goes with it; names the
-//!   legacy world or another setup also points at stay.
+//!   legacy world or another setup also points at stay. A setup another
+//!   is placed relative to (#316) is refused the same way, naming it.
 //! - **Activation is inert data** (AGENTS.md, M1.6): which setup is
 //!   ACTIVE changes no path, no stamp, no staleness - it only decides
 //!   where NEW things join. Commands write the singleton; readers
@@ -120,6 +121,10 @@ impl CreateSetup {
                 datum_from: String::new(),
                 work_offset: None,
                 part_alignment: None,
+                machine: None,
+                post: None,
+                relative_to: None,
+                stock_source: None,
             }
         } else {
             SetupDef {
@@ -133,6 +138,16 @@ impl CreateSetup {
                 // #326: the cloned stock and offsets sit in the source's
                 // part frame, so the part alignment rides the transfer.
                 part_alignment: datum_from.and_then(|f| crate::setup_align::stored(world, f)),
+                // #343: a datum transfer is the same clamping system moved
+                // to a new setup - it keeps the source's machine and post.
+                machine: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.machine),
+                post: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.post),
+                // #316: a datum transfer starts in the source's frame (the
+                // transform between them is the identity) but links nothing:
+                // the clone does not follow the source's later edits.
+                relative_to: None,
+                // #320: a new setup takes the default stock source.
+                stock_source: None,
             }
         };
         let mut stock = None;
@@ -250,6 +265,13 @@ impl DeleteSetup {
                     "'{op_name}' machines in '{name}' - move or delete it first"
                 )));
             }
+        }
+        // #316: a setup placed relative to this one would lose the setup
+        // its edits follow - refused by name, like an operation.
+        if let Some(child) = crate::setup_relative::dependents(world, name).first() {
+            return Err(CommandError::Invalid(format!(
+                "'{child}' is placed relative to '{name}' - unlink it first"
+            )));
         }
         let owned = |n: &str| {
             n != STOCK_NAME && !WCS_SLOTS.contains(&n) && !setup::is_furniture_of_other(world, n, name)

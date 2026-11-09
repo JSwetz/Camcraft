@@ -15,10 +15,10 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
-    ActivateSetup, AlignPartToSetup, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
+    ActivateSetup, AlignPartToSetup, SetSetupRelative, SetSetupStockSource, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
-    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SelectPost, SetOperationGeometry,
+    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel,
+    MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetToolNumber, SetUnits, SetWcsOrigin,
     SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
@@ -37,6 +37,8 @@ use camcraft_app::{machine, model, posting, project, world::new_world};
 
 #[path = "state_per_op.rs"]
 mod per_op;
+#[path = "state_setup_mount.rs"]
+mod setup_mount;
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -128,6 +130,17 @@ pub enum CommandKind {
     /// is the name, so a registry re-growth never re-points a saved
     /// file's post.
     SelectPostNamed(String),
+    /// #343: a setup takes its own machine / post (a copy of what it
+    /// mounts now) or follows the document's again. Undoable
+    /// (`SetSetupMachine` / `SetSetupPost`).
+    SetupOwnMachine {
+        setup: String,
+        own: bool,
+    },
+    SetupOwnPost {
+        setup: String,
+        own: bool,
+    },
     /// The post's user options (issue #34): the undoable
     /// `SetPostOptions` with the picked value.
     SetPostOptions(camcraft_app::schema::PostOptions),
@@ -270,6 +283,21 @@ pub enum CommandKind {
     AlignPart {
         setup: String,
         angles: [f64; 3],
+    },
+    /// Place a setup relative to another (#316): `to` the setup it is a
+    /// re-clamp of, turned by `angles` (about X, then Y, then Z, degrees)
+    /// from how that setup holds the part; `to: None` unlinks (the part
+    /// stays). Undoable (`SetSetupRelative`). Never touches the work offset.
+    SetSetupRelative {
+        setup: String,
+        to: Option<String>,
+        angles: [f64; 3],
+    },
+    /// Pick where a setup's stock comes from (#320): its own, or what the
+    /// setup before it leaves behind. Undoable (`SetSetupStockSource`).
+    SetSetupStockSource {
+        setup: String,
+        source: camcraft_app::setup_stock::StockSource,
     },
     /// Lay the part on a G17 / G18 / G19 plane in a setup (#330): one
     /// flat face or two straight edges, read by the app. Undoable
@@ -1103,7 +1131,7 @@ pub struct State {
     pub hidden_paths: Vec<String>,
     pub operation_clipboard: Option<OperationClipboard>,
     /// Expanded state of Setup, Models, Tools, and Operations in the browser.
-    pub browser_expanded: [bool; 4],
+    pub browser_expanded: [bool; 3],
 
     /// Show the dimmed world origin axes in the viewport. View state like
     /// the camera - not undoable, not saved - toggled from the Models panel;
@@ -1341,6 +1369,20 @@ pub enum UiTarget {
     /// The Setups page (M3.2 A): always resolves - it doubles as the
     /// creation form, like Stock and the empty-name Tool page.
     Setups,
+    /// One setup's own page from its browser node (#343): the setup's
+    /// settings, machine, post, fixtures or tool list. The empty name is
+    /// the implicit context of a document without setups.
+    SetupNode(String, SetupPage),
+}
+
+/// Which of a setup's browser nodes a [`UiTarget::SetupNode`] opens (#343).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetupPage {
+    Settings,
+    Machine,
+    Post,
+    Fixtures,
+    Tools,
 }
 
 impl UiTarget {
@@ -1366,6 +1408,13 @@ impl UiTarget {
                 model::find_by_name(world, name).is_some_and(|e| model::is_operation(world, &e))
             }
             UiTarget::Setups => true,
+            UiTarget::SetupNode(name, _) => {
+                if name.is_empty() {
+                    camcraft_app::setup::names(world).is_empty()
+                } else {
+                    camcraft_app::setup::exists(world, name)
+                }
+            }
         }
     }
 }
@@ -1407,7 +1456,7 @@ impl State {
             hidden_offsets: Vec::new(),
             hidden_paths: Vec::new(),
             operation_clipboard: None,
-            browser_expanded: [true; 4],
+            browser_expanded: [true; 3],
             cam: Camera::default(),
             show_world_axes: true,
             show_all_paths: false,
@@ -2446,27 +2495,12 @@ impl State {
                 }
             }
             CommandKind::LoadMachineFile(path) => self.load_machine_path(path),
-            CommandKind::ClearMachine => match LoadMachine::new(&self.world, String::new(), None) {
-                Ok(command) => {
-                    self.history.execute(&self.world, command);
-                    self.doc_version += 1;
-                    self.status = String::from("machine cleared");
-                }
-                Err(err) => self.refuse(ErrorScope::Setup, format!("machine not cleared: {err}")),
-            },
-            CommandKind::LoadBuiltinMachine(name) => {
-                match LoadMachine::builtin(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.machine_editor = None;
-                        self.status = format!("machine: {name} (built-in)");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("machine not loaded: {err}"))
-                    }
-                }
-            }
+            // #343: the machine verbs land on the active setup's own
+            // machine when it has one (`setup_mount`).
+            CommandKind::ClearMachine => self.mount_clear(),
+            CommandKind::LoadBuiltinMachine(name) => self.mount_builtin(&name),
+            CommandKind::SetupOwnMachine { setup, own } => self.own_machine(&setup, own),
+            CommandKind::SetupOwnPost { setup, own } => self.own_post(&setup, own),
             CommandKind::EditMachineDialog => {
                 let (path, m) = machine::of(&self.world);
                 match m {
@@ -2483,24 +2517,9 @@ impl State {
                     ),
                 }
             }
-            CommandKind::EditMachineApply { path, machine } => {
-                match LoadMachine::new(&self.world, path, Some(*machine)) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.machine_editor = None;
-                        self.status = String::from("machine edited");
-                    }
-                    // Refused edits keep the window open: the draft is
-                    // someone's work, and a silent close would be the
-                    // silent wrong answer with the work thrown away.
-                    Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("machine edit refused: {err}"))
-                    }
-                }
-            }
+            CommandKind::EditMachineApply { path, machine } => self.mount_edited(path, *machine),
             CommandKind::UseCatalogueMachine(source) => {
-                match LoadMachine::from_catalogue(&self.world, &source) {
+                match camcraft_app::commands::LoadMachine::from_catalogue(&self.world, &source) {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
@@ -2996,6 +3015,38 @@ impl State {
                     }
                 }
             }
+            CommandKind::SetSetupRelative { setup, to, angles } => {
+                let built = match &to {
+                    Some(parent) => SetSetupRelative::link(&self.world, &setup, parent, angles),
+                    None => SetSetupRelative::unlink(&self.world, &setup),
+                };
+                match built {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = match camcraft_app::setup_relative::describe(&self.world, &setup) {
+                            Some(words) => format!("{setup}: {words}"),
+                            None => format!("{setup} is no longer placed relative to another setup"),
+                        };
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("setup not re-placed: {err}"));
+                    }
+                }
+            }
+            CommandKind::SetSetupStockSource { setup, source } => {
+                match SetSetupStockSource::new(&self.world, &setup, source) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        let words = camcraft_app::setup_stock::describe(&self.world, &setup).unwrap_or_default();
+                        self.status = format!("{setup} stock: {words}");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("stock source not changed: {err}"));
+                    }
+                }
+            }
             CommandKind::LayPartOnPlane { setup, picks, lay } => {
                 match AlignPartToSetup::lay_on_plane(&self.world, &setup, &picks, lay) {
                     Ok(command) => {
@@ -3430,33 +3481,13 @@ impl State {
     /// validation, so a bad file is a visible refusal, never a
     /// half-written setup.
     fn load_machine_path(&mut self, path: PathBuf) {
-        match LoadMachine::from_file(&self.world, &path) {
-            Ok(command) => {
-                self.history.execute(&self.world, command);
-                self.doc_version += 1;
-                let summary = machine::of(&self.world)
-                    .1
-                    .map(|m| m.summary())
-                    .unwrap_or_default();
-                self.status = format!("machine: {summary}");
-            }
-            Err(err) => self.refuse(ErrorScope::Setup, format!("machine not loaded: {err}")),
-        }
+        self.mount_file(&path);
     }
 
-    /// Choose the post script (M3.3 A). The validation - read and
-    /// compile - lives in `SelectPost::new`, command-construction time,
-    /// so a script that cannot run is a visible refusal at the pick,
-    /// never a surprise at the post.
+    /// Choose the post script (M3.3 A) - routed to the active setup's
+    /// own post when it has one (#343, `setup_mount`).
     fn select_post(&mut self, next: PostRef) {
-        match SelectPost::new(&self.world, next) {
-            Ok(command) => {
-                self.history.execute(&self.world, command);
-                self.doc_version += 1;
-                self.status = format!("post: {}", posting::post_label(&self.world));
-            }
-            Err(err) => self.refuse(ErrorScope::Setup, format!("post not selected: {err}")),
-        }
+        self.choose_post(next);
     }
 
     /// Choose the theme (M6.1 C). `SelectPost`'s twin with the

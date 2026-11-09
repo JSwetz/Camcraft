@@ -161,12 +161,20 @@ pub fn machine_value(world: &World) -> Value {
     }
 }
 
-/// The post this document runs, from the `PostRef` singleton. Setup
-/// furniture moved through commands or a document load, never ad hoc
-/// - the `machine::set` law wearing the post's own clothes.
+/// The post the program runs: the active setup's (#343 - its own, else
+/// the document's `PostRef` singleton). Setup furniture moved through
+/// commands or a document load, never ad hoc - the `machine::set` law
+/// wearing the post's own clothes.
 #[must_use]
 pub fn post_of(world: &World) -> PostRef {
-    world.try_get::<&PostRef>(|p| p.clone()).unwrap_or_default()
+    crate::setup_mount::post_of(world, crate::setup::active(world).as_deref())
+}
+
+/// The document's post as stored - what every setup that owns no post
+/// follows (#343). For `SelectPost`, the save and the document section.
+#[must_use]
+pub fn document_post_of(world: &World) -> PostRef {
+    crate::setup_mount::document_post(world)
 }
 
 /// Write the singleton. For the `SelectPost` command and the project
@@ -205,7 +213,13 @@ pub fn options_value(o: PostOptions) -> Value {
 /// read two ways.
 #[must_use]
 pub fn post_label(world: &World) -> String {
-    match post_of(world) {
+    post_ref_label(&post_of(world))
+}
+
+/// [`post_label`] for any post reference (#343: a setup's own post).
+#[must_use]
+pub fn post_ref_label(post: &PostRef) -> String {
+    match post.clone() {
         PostRef::Builtin => match BUILTINS.first() {
             Some((name, _)) => format!("{name} (built-in)"),
             None => "built-in".to_owned(),
@@ -511,8 +525,16 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(suppressed::suppressed_problems(world));
     // The rotated-offset clause (#315): the post carries translation only.
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
+    // The one-mount clause (#343): one program, one post, one machine.
+    problems.extend(crate::setup_mount::program_problems(world));
+    // The carried-stock clause (#319): a feed move into carried material
+    // outside a setup's declared stock is engagement nothing verified.
+    problems.extend(crate::operation::carried_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
+        // #374: an inverted axis the post cannot translate (Z, any letter
+        // but X/Y) would take standard-sign code; X/Y the engine mirrors.
+        problems.extend(m.inverted_post_refusal());
         match crate::machine::check_document(world, &m) {
             Ok(c) if !c.is_ok() => {
                 let more = if c.more > 0 { format!(" (+{} more)", c.more) } else { String::new() };

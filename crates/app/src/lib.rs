@@ -39,7 +39,13 @@ pub mod script;
 pub mod setup;
 // #326: the part's alignment per setup.
 pub mod setup_align;
+// #343: each setup's own machine and post, and the one-mount law.
+pub mod setup_mount;
+// #316: transforms between setups and the setup-relative link.
+pub mod setup_relative;
 pub mod setup_sheet;
+// #320: a setup's stock source - its own, or what the setup before leaves.
+pub mod setup_stock;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;

@@ -139,6 +139,24 @@ pub struct ToolDef {
 /// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
 /// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
 /// carries it) and the project loader.
+/// `machine` and `post` (#343) are the setup's OWN machine and post:
+/// `None` - the default, and every file before v55 - follows the
+/// document's (`MachineDef` / `PostRef` singletons), so an untouched
+/// document mounts and posts exactly as before. Read through
+/// [`crate::setup_mount`]; written only by `SetSetupMachine` /
+/// `SetSetupPost` and the project loader.
+/// `relative_to` (#316) names the setup this one is placed RELATIVE to
+/// (a re-clamp of it: flipped, turned). The relation itself is not
+/// stored - it is `part_alignment` read against the other setup's
+/// ([`crate::setup_relative::transform_between`]); the link only makes
+/// a later change of that setup's alignment carry into this one. `None`,
+/// the default and every file before v56, links nothing. Written only by
+/// `SetSetupRelative` and the project loader.
+/// `stock_source` (#320) is where the setup's stock comes from: its own,
+/// or what the setup before it leaves. `None`, the default and every
+/// file before v57, reads as #317's implicit rule
+/// ([`crate::setup_stock::implicit`]). Written only by
+/// `SetSetupStockSource` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
@@ -146,6 +164,10 @@ pub struct SetupDef {
     pub datum_from: String,
     pub work_offset: Option<usize>,
     pub part_alignment: Option<Location>,
+    pub machine: Option<MachineDef>,
+    pub post: Option<PostRef>,
+    pub relative_to: Option<String>,
+    pub stock_source: Option<crate::setup_stock::StockSource>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the

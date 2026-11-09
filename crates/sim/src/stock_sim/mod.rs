@@ -55,6 +55,7 @@
 
 mod backend;
 mod backend_build;
+mod carry;
 mod columns;
 mod cut;
 mod dexel;
@@ -88,6 +89,7 @@ mod scan_near;
 mod tiles;
 
 pub use backend::{Backend, Stock, FIELD_BAND, FIELD_VERDICT_EPS, LATHE_COLUMN_REFUSAL};
+pub use carry::{Body, LatticeTurn, CARRY_TURN_REFUSAL};
 pub use columns::Columns;
 pub use cut::{auto_cell, first_posed, simulate, SimOp, POSED_REFUSAL};
 pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};
