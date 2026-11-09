@@ -321,6 +321,26 @@ fn click_toggles_view_state() {
     assert!(harness.state().state.pending.is_empty(), "a view toggle queues nothing");
 }
 
+/// #434: the Projection radios flip the viewport's projection mode -
+/// view state on the same law as the Solids radios (never a command,
+/// never the undo stack), reached through a real pointer event.
+#[test]
+fn projection_radios_flip_the_viewport_mode() {
+    let mut harness = shell_harness();
+    assert_eq!(
+        harness.state().state.cam.projection,
+        crate::viewport::ProjectionMode::Perspective,
+        "the house default stays perspective"
+    );
+    harness.get_by_label("Ortho").click();
+    harness.run();
+    assert_eq!(harness.state().state.cam.projection, crate::viewport::ProjectionMode::Orthographic);
+    harness.get_by_label("Perspective").click();
+    harness.run();
+    assert_eq!(harness.state().state.cam.projection, crate::viewport::ProjectionMode::Perspective);
+    assert!(harness.state().state.pending.is_empty(), "a mode switch queues nothing");
+}
+
 #[test]
 fn browser_show_and_hide_all_toolpaths_update_operation_eyes() {
     let mut harness = shell_harness();
@@ -1931,6 +1951,44 @@ fn file_keys_queue_their_commands() {
         typing.state().pending.is_empty(),
         "Ctrl+O armed a dialog over a focused text field: {:?}",
         typing.state().pending
+    );
+}
+
+/// #434: bare P flips perspective/ortho in place - a viewport-layer
+/// key like F, view state through `actions`, so it arms no command,
+/// and Ctrl+P keeps its post dialog exactly as `file_keys_queue_their_commands`
+/// proves. The typing gate applies to it the same way.
+#[test]
+fn bare_p_flips_projection_without_a_command() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(400.0, 200.0))
+        .build_ui_state(shortcuts_only, State::new());
+    harness.run();
+    let press_p = |h: &mut Harness<'static, State>, mods: Modifiers| {
+        h.input_mut().events.push(Event::ModifiersChanged(mods));
+        h.input_mut().events.push(Event::Key {
+            key: Key::P,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: mods,
+        });
+        h.run();
+    };
+    let mode = |h: &Harness<'static, State>| h.state().cam.projection;
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective);
+    press_p(&mut harness, Modifiers::NONE);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Orthographic, "P to ortho");
+    press_p(&mut harness, Modifiers::NONE);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective, "P back to perspective");
+    assert!(harness.state().pending.is_empty(), "the flip armed a command");
+    // Ctrl+P stays on the post lane: the key splits, the flip stays out.
+    press_p(&mut harness, Modifiers::COMMAND);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective, "Ctrl+P must not flip");
+    assert!(
+        harness.state().pending.iter().any(|c| matches!(c, CommandKind::PostProgramDialog)),
+        "Ctrl+P lost its post: {:?}",
+        harness.state().pending
     );
 }
 
@@ -4353,7 +4411,7 @@ fn stock_eye_hides_the_viewport_stock_without_removing_it_from_the_document() {
     let stock_name = camcraft_app::setup::stock_entity_name(&harness.state().state.world, None);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
     let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock(_))).expect("stock row");
-    let eye = egui::pos2(216.0, 179.0 + (row as f32 + 0.5) * theme::current().row_height);
+    let eye = egui::pos2(216.0, 200.0 + (row as f32 + 0.5) * theme::current().row_height);
     assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
 
     set_pos(&mut harness, eye);
@@ -4546,12 +4604,13 @@ fn dragging_an_operation_row_reorders_within_global_setup() {
     let second = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour2"))
         .expect("second row");
     assert_eq!(second, first + 1);
-    // The browser tree begins at y=179 below its view controls in the
+    // The browser tree begins at y=200 below its view controls (the
+    // projection radios joined them for #434) in the
     // 1280x720 shell. The row indices come from the current flat browser,
     // so the drag follows the rows after setup nesting was removed.
     let row_h = theme::current().row_height;
-    let from = egui::pos2(120.0, 179.0 + (second as f32 + 0.5) * row_h);
-    let to = egui::pos2(120.0, 179.0 + (first as f32 + 0.25) * row_h);
+    let from = egui::pos2(120.0, 200.0 + (second as f32 + 0.5) * row_h);
+    let to = egui::pos2(120.0, 200.0 + (first as f32 + 0.25) * row_h);
     set_pos(&mut harness, from);
     button_at(&mut harness, egui::PointerButton::Primary, from, true);
     set_pos(&mut harness, to);
@@ -4693,14 +4752,14 @@ fn operations_heading_menu_pastes_the_copied_operation() {
         panes::Leaf::SetupOps(_)))
         .expect("Operations heading");
     let row_height = theme::current().row_height;
-    let heading = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let heading = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     set_pos(&mut harness, heading);
     button_at(&mut harness, egui::PointerButton::Secondary, heading, true);
     button_at(&mut harness, egui::PointerButton::Secondary, heading, false);
     assert_eq!(harness.state().state.tree_menu, Some(TreeMenuTarget::Operations));
 
     let paste = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
     set_pos(&mut harness, paste);
     button_at(&mut harness, egui::PointerButton::Primary, paste, true);
     button_at(&mut harness, egui::PointerButton::Primary, paste, false);
@@ -4717,7 +4776,7 @@ fn operation_type_menu_requires_confirmation() {
         panes::Leaf::Op(name) if name == "Contour1"))
         .expect("operation row");
     let row_height = theme::current().row_height;
-    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let operation = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     set_pos(&mut harness, operation);
     button_at(&mut harness, egui::PointerButton::Secondary, operation, true);
     button_at(&mut harness, egui::PointerButton::Secondary, operation, false);
@@ -4727,7 +4786,7 @@ fn operation_type_menu_requires_confirmation() {
     // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
     // (#110), section header, Face.
     let face = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);
@@ -4756,14 +4815,14 @@ fn operation_menu_suppresses_and_sets_the_after_action() {
         panes::Leaf::Op(name) if name == "Contour1"))
         .expect("operation row");
     let row_height = theme::current().row_height;
-    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let operation = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     let open_menu = |harness: &mut Harness<'static, ShellUi>| {
         set_pos(harness, operation);
         button_at(harness, egui::PointerButton::Secondary, operation, true);
         button_at(harness, egui::PointerButton::Secondary, operation, false);
     };
     let click_row = |harness: &mut Harness<'static, ShellUi>, k: f32| {
-        let at = egui::pos2(90.0, 179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
+        let at = egui::pos2(90.0, 200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
         set_pos(harness, at);
         button_at(harness, egui::PointerButton::Primary, at, true);
         button_at(harness, egui::PointerButton::Primary, at, false);

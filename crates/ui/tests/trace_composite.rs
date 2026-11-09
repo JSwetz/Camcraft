@@ -73,7 +73,7 @@ fn centre(dev: &wgpu::Device, q: &wgpu::Queue, parts: &[GpuPart], traced: bool) 
 fn centre_with(dev: &wgpu::Device, q: &wgpu::Queue, parts: &[GpuPart], traced: bool, cpu: bool) -> [u8; 4] {
     let mut view = View3D::new(dev, FORMAT, W, H);
     view.set_document(dev, q, parts);
-    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0 };
+    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0, ..Camera::default() };
     let mvp = cam.mvp(f64::from(W) / f64::from(H));
     let mut eye = StockEye::new(dev, FORMAT).unwrap();
     if cpu {
@@ -147,7 +147,7 @@ fn the_cpu_fallback_marches_off_the_ui_thread_and_the_picture_arrives() {
         eprintln!("trace_composite: no adapter - skipped");
         return;
     };
-    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0 };
+    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0, ..Camera::default() };
     let mvp = cam.mvp(f64::from(W) / f64::from(H));
     let mut eye = StockEye::new(&dev, FORMAT).unwrap().cpu_only();
     let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -164,7 +164,7 @@ fn the_cpu_fallback_marches_off_the_ui_thread_and_the_picture_arrives() {
     let second = eye.prepare(&dev, &q, &mut enc, Some(&fv), &cam, &mvp, big).unwrap();
     assert!(second, "the finished picture is bound on the next frame");
     // A moved camera keeps the last picture up while the next marches.
-    let moved = Camera { target: [5.0, 5.0, 2.5], yaw: 1.2, pitch: 0.7, dist: 28.0 };
+    let moved = Camera { target: [5.0, 5.0, 2.5], yaw: 1.2, pitch: 0.7, dist: 28.0, ..Camera::default() };
     let mvp2 = moved.mvp(f64::from(W) / f64::from(H));
     let t1 = std::time::Instant::now();
     let kept = eye.prepare(&dev, &q, &mut enc, Some(&fv), &moved, &mvp2, big).unwrap();

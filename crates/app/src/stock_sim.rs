@@ -27,7 +27,7 @@ pub use lathe::{LathePlan, LATHE_HELIX_REFUSAL, LATHE_THREAD_REFUSAL, LATHE_VERD
 // next setup's frame through the transform between the two.
 #[path = "stock_sim_carry.rs"]
 pub mod carry;
-pub use carry::{CARRY_MACHINE_REFUSAL, incoming_body};
+pub use carry::{CARRY_MACHINE_CHANGE_REFUSAL, CARRY_MACHINE_REFUSAL, incoming_body};
 
 use crate::geometry::Triangle;
 
