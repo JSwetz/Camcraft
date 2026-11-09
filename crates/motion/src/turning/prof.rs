@@ -140,7 +140,7 @@ pub(crate) enum Exit {
 
 impl Exit {
     /// The exit for a ride ending at station `s_end` inside `stock`.
-    fn inside(stock: Option<StockEnv>, s_end: f64) -> Exit {
+    pub(crate) fn inside(stock: Option<StockEnv>, s_end: f64) -> Exit {
         if StockEnv::runs_past(stock, s_end) {
             Exit::Feed
         } else {

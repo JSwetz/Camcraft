@@ -128,6 +128,48 @@ pub fn cross_holes_of(
     Ok(crate::drilling::recognize_cross(&m.facets))
 }
 
+/// Detect holes (M2.4 C; shared with the MCP server by #312): `params`
+/// with its source's holes, read NOW, written into whichever hole list
+/// the kind has - the drill, the boring ride and the thread mill store
+/// the same `holes` shape - plus the drill's radial list when the
+/// document's machine holds a turret (M5.2 F2; a plain mill asks nothing
+/// of the mesh's sides). `name` only words the refusals. The caller
+/// commits the result as one undoable `EditOperationParams`, so the
+/// app's Detect holes button and the MCP `detect_holes` tool store the
+/// same list.
+pub fn detect_holes(
+    world: &World,
+    name: &str,
+    params: &OpParams,
+    setup: Option<&str>,
+    src: &SrcRef,
+) -> Result<OpParams, String> {
+    let mut params = params.clone();
+    let is_drill = matches!(params, OpParams::Drill { .. });
+    let holes: &mut Vec<_> = match &mut params {
+        OpParams::Drill { holes, .. } | OpParams::Bore { holes, .. } | OpParams::Thread { holes, .. } => holes,
+        _ => return Err(format!("'{name}' is not a drilling operation")),
+    };
+    let axial = holes_of(world, setup, src).map_err(|e| e.to_string())?;
+    let radial = if !is_drill || crate::machine::kind_of(world) == crate::machine::Kind::Mill {
+        Vec::new()
+    } else {
+        cross_holes_of(world, setup, src).map_err(|e| e.to_string())?
+    };
+    if axial.is_empty() && radial.is_empty() {
+        return Err(if is_drill {
+            "no drilled holes found in the source model - Z or radial".to_string()
+        } else {
+            "no Z-axis holes found in the source model - this ride reads only those".to_string()
+        });
+    }
+    *holes = axial;
+    if let OpParams::Drill { cross, .. } = &mut params {
+        *cross = radial;
+    }
+    Ok(params)
+}
+
 /// A named entity's facets in its setup's frame (#326: a part of an
 /// aligned setup reads turned; the stock and an unaligned setup read
 /// exactly the world facets they always did).

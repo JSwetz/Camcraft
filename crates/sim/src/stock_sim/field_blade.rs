@@ -93,6 +93,15 @@ impl LatheProfile {
         self.footprint().map(|_| ())
     }
 
+    /// The footprint swept along the meridian chord `(r0, z0) -> (r1,
+    /// z1)` as (convex hull in (radius, station), the disc it is
+    /// dilated by) - the very solid the field cuts, for a caller that
+    /// credits a move's cut outside the field (#369's holder law).
+    pub fn swept_outline(&self, r0: f64, z0: f64, r1: f64, z1: f64) -> Result<(Vec<[f64; 2]>, f64), StockError> {
+        let f = self.footprint()?;
+        Ok((f.swept(r0, z0, r1, z1), f.round))
+    }
+
     /// The validated footprint, refused by name when nonsense.
     pub(crate) fn footprint(&self) -> Result<Footprint, StockError> {
         match *self {

@@ -50,7 +50,7 @@ done
 for asset in posts machines ui scripts themes; do
     cp -a "assets/$asset" "$stage/assets/$asset"
 done
-install -m 644 RELEASE_NOTES.md TESTING.md LICENSE README.md "$stage/"
+install -m 644 RELEASE_NOTES.md TESTING.md LICENSE NOTICE README.md "$stage/"
 tar -C "$work" -czf "$dist/$name.tar.gz" "$name"
 
 cp -a "$stage/." "$pkg_root/usr/lib/camcraft/"
@@ -93,7 +93,7 @@ Name: camcraft
 Version: $version
 Release: 1%{?dist}
 Summary: Computer-aided manufacturing application
-License: MIT
+License: Apache-2.0
 BuildArch: x86_64
 Requires: vulkan-loader
 Requires: libxkbcommon-x11

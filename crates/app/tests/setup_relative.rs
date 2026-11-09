@@ -176,6 +176,61 @@ fn a_change_of_the_parent_carries_into_linked_setups_in_one_undo_unit() {
 }
 
 #[test]
+fn a_parent_alignment_makes_a_linked_childs_toolpath_stale_and_undo_restores_it() {
+    use camcraft_app::commands::{ActivateSetup, AddTool, CreateOperation, GenerateOperation};
+    use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
+    use camcraft_app::tools::catalog;
+
+    let (world, mut h) = document();
+    link(&world, &mut h, "Setup2", "Setup1", [180.0, 0.0, 0.0]);
+    h.execute(&world, ActivateSetup::new(&world, Some("Setup2")).expect("activate child"));
+    let tool_name = "EM-0400-2FL";
+    let tool = catalog().into_iter().find(|(n, _)| *n == tool_name).map(|(_, t)| t).expect("tool");
+    h.execute(&world, AddTool::new(&world, tool_name, tool).expect("add tool"));
+    // The flipped stock extends to Z22 above the part's Z20 top. Face
+    // only that cap, with fixed heights and a square stock: a Z quarter
+    // turn changes the child's alignment, not its stock or cut heights.
+    let params = OpParams::Face {
+        holes: Default::default(), tilt: None, blend_turns: false,
+        stepover: 3.0, clearance_z: Height::fixed(25.0), cut_z: Height::fixed(21.5),
+        top_z: None, stepdown: None, feed: 1200.0, plunge_feed: 300.0, climb: true,
+    };
+    h.execute(&world, CreateOperation::new(&world, "Face1", tool_name, SrcRef::Stock, params).expect("create"));
+    h.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate in linked child"));
+    let op = model::find_by_name(&world, "Face1").expect("op");
+    assert_eq!(model::operation_of(&world, &op).expect("operation").setup.as_deref(), Some("Setup2"));
+    assert_eq!(link_of(&world, "Setup2").as_deref(), Some("Setup1"));
+    assert!(!model::toolpath_of(&world, &op).expect("generated path").path.moves.is_empty());
+    assert_eq!(operation::status_of(&world, &op), OpStatus::Ok);
+    let before = setup_align::stored(&world, "Setup2");
+    let stock = model::find_by_name(&world, "Setup2/Stock").expect("child stock");
+    let stock_before = (model::stock_def_of(&world, &stock), model::transform_of(&world, &stock));
+    let child_point = || {
+        let a = setup_align::stored(&world, "Setup2").expect("child alignment");
+        camcraft_app::geometry::transform_point(CORNER, a.pos, a.rot)
+    };
+    let point_before = child_point();
+
+    let turn = AlignPartToSetup::preset(&world, "Setup1", AlignPreset::TurnZ90).expect("parent turns");
+    assert_eq!(turn.carried_count(), 1);
+    h.execute(&world, turn);
+    let moved = setup_align::stored(&world, "Setup2");
+    assert!(!setup_relative::same(moved, before), "the child followed its parent");
+    assert!(!close(child_point(), point_before));
+    assert_eq!((model::stock_def_of(&world, &stock), model::transform_of(&world, &stock)), stock_before);
+    assert_eq!(operation::status_of(&world, &op), OpStatus::Stale);
+
+    assert!(h.undo(&world), "undo only the parent's alignment command");
+    assert_eq!(setup_align::stored(&world, "Setup1"), None);
+    assert!(setup_relative::same(setup_align::stored(&world, "Setup2"), before));
+    assert!(close(child_point(), point_before));
+    assert_eq!(operation::status_of(&world, &op), OpStatus::Ok, "fresh without regenerating");
+    assert!(h.redo(&world));
+    assert!(setup_relative::same(setup_align::stored(&world, "Setup2"), moved));
+    assert_eq!(operation::status_of(&world, &op), OpStatus::Stale);
+}
+
+#[test]
 fn a_linked_setup_that_cannot_follow_refuses_the_parent_change_by_name() {
     let (world, mut h) = document();
     // Setup3 is active (the last created): give it a cylinder stock.
@@ -225,7 +280,9 @@ fn links_round_trip_and_older_or_broken_files_are_read_by_name() {
     let first = std::fs::read_to_string(&path).expect("read");
     assert!(first.contains("\"relative_to\": \"Setup1\""), "{first}");
     assert!(first.contains(&format!("\"version\": {}", project::PROJECT_VERSION)));
-    assert_eq!(project::PROJECT_VERSION, 57);
+    // Links arrived at v56 (#316); a later rung must not break them, so
+    // pin the floor, not the exact number (cf. #344).
+    const _: () = assert!(project::PROJECT_VERSION >= 56, "setup links need project v56 or later");
     let world2 = new_world();
     project::load(&world2, &path).expect("load");
     assert_eq!(link_of(&world2, "Setup2").as_deref(), Some("Setup1"));
