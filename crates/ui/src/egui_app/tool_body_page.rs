@@ -31,7 +31,7 @@ const PITCH0: f32 = 0.45;
 /// preview: `(above, len, r)` per band, or `None` with no usable draft.
 pub(super) fn envelope(state: &mut State) -> Option<Vec<(f64, f64, f64)>> {
     match state.tool_body_preview()? {
-        Ok(b) => Some(b.profile.bands().iter().map(|q| (q.above, q.len, q.r)).collect()),
+        Ok(b) => Some(b.profile()?.bands().iter().map(|q| (q.above, q.len, q.r)).collect()),
         Err(_) => None,
     }
 }
@@ -101,12 +101,15 @@ pub(super) fn body_section(ui: &mut Ui, state: &mut State, exists: bool, u: Unit
     });
     preview_3d(ui, state);
     let note = match state.tool_body_preview() {
-        Some(Ok(b)) => format!(
-            "placed: foot {} to top {} {} above the tip",
-            units::len(b.profile.bottom(), u, 1),
-            units::len(b.profile.top(), u, 1),
-            u.suffix()
-        ),
+        Some(Ok(b)) => match b.profile() {
+            Some(p) => format!(
+                "placed: foot {} to top {} {} above the tip",
+                units::len(p.bottom(), u, 1),
+                units::len(p.top(), u, 1),
+                u.suffix()
+            ),
+            None => String::new(),
+        },
         Some(Err(e)) => format!("placement: {e}"),
         None => String::new(),
     };

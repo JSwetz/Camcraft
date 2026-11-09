@@ -61,6 +61,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let GenJob {
         tool,
         body,
+        lathe_body,
         tool_name,
         params,
         src,
@@ -2325,7 +2326,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::chamfer(
+            let path = crate::turning::chamfer_in(
                 &material.facets,
                 &crate::turning::ChamferParams {
                     clearance_z: hl.clearance,
@@ -2337,6 +2338,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2362,7 +2364,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::taper(
+            let path = crate::turning::taper_in(
                 &material.facets,
                 &crate::turning::TaperParams {
                     clearance_z: hl.clearance,
@@ -2375,6 +2377,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2404,7 +2407,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::multi_pass(
+            let path = crate::turning::multi_pass_in(
                 &material.facets,
                 &crate::turning::MultiPassParams {
                     clearance_z: hl.clearance,
@@ -2418,6 +2421,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2510,6 +2514,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         }
     };
     let path = super::turning_stock::noted(path, turn_note);
+    // #369: a turning steel with no lathe body says its holder went unjudged.
+    let path = super::turning_holder::noted(path, &params, &tool, lathe_body.is_some());
 
     // M3.2 stage B: what the program clamps to. The op's setup context
     // decides - user fixtures bound to it (tagged models, implicit-
@@ -2830,6 +2836,10 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // ...and a boring bar's head and shank on its FEEDS (#146),
             // against the same revolved material at each instant.
             super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
+            // ...and a modelled lathe holder on every move (#369), against
+            // the revolved stock standing at each instant.
+            super::turning_holder::judge(&params, &path, &meridian, lathe_body.as_deref(), &tool, &mut verify_prior, &mut warns)
+                .map_err(GenError::Invalid)?;
             warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it

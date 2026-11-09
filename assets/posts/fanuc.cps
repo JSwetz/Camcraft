@@ -55,6 +55,16 @@ function fu(v) {  // mm at three decimals, trailing zeros trimmed
   if (s.indexOf(".") >= 0) s = s.replace(/0+$/, "").replace(/\.$/, "");
   return s === "-0" ? "0" : s;
 }
+// #377: `expr - v` as a macro-B expression with v's sign folded into the
+// operator, so a negative v never writes a doubled sign (`#100--15`).
+// Macro B's arithmetic form is `#i=#j-#k` / `#i=#j+#k` (Fanuc custom
+// macro B, published operator documentation); a value that formats to 0
+// (including -0 and anything under half a micron) adds no term.
+function minusU(expr, v) {
+  var s = fu(v);
+  if (s === "0") return expr;
+  return s.charAt(0) === "-" ? expr + "+" + s.substring(1) : expr + "-" + s;
+}
 function ff(v) { return has(v) && v > 0 ? String(Math.round(v)) : "0"; }
 function w(letter, v) { return has(v) ? letter + fu(v) : ""; }
 function fw(v) { return has(v) ? "F" + ff(v) : ""; }
@@ -494,7 +504,7 @@ function onProbeMove() {
   var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
   var ai = d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
   var tgt = [p.X - orgX, p.Y - orgY, p.Z - orgZ][ai];
-  block(["IF[ABS[#" + (5061 + ai) + "-" + fu(tgt) + "]LT0.001]THEN#3000=2(PROBE NO CONTACT)"]);
+  block(["IF[ABS[" + minusU("#" + (5061 + ai), tgt) + "]LT0.001]THEN#3000=2(PROBE NO CONTACT)"]);
   if (has(p.Measure) && p.Measure >= 0) {
     var b = probeBase + 3 * p.Measure;
     block(["#" + b + "=#5061"]);
@@ -522,7 +532,7 @@ function onProbeResult() {
     var sum = [];
     for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
     var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
-    block(["#" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    block(["#" + (dev + i) + "=" + minusU(mean, a.Expected - org[ai])]);
     block(["IF[ABS[#" + (dev + i) + "]GT" + fu(p.Tolerance) + "]THEN#3000=1(PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
   }
   if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {

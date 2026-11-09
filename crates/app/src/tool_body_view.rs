@@ -69,10 +69,8 @@ pub fn spun_preview(tool: &Tool, points: &[SpunPoint]) -> Result<SpunProfile, St
     let spun = SpunProfile::new(points.to_vec()).map_err(|e| format!("holder profile: {e}"))?;
     let probe = ToolBody {
         source: tool_body::SPUN_SOURCE.to_owned(),
-        axis: [0.0, 0.0, 1.0],
-        offset: 0.0,
         facets: std::sync::Arc::from(Vec::new()),
-        profile: spun.holder_profile(),
+        frame: tool_body::BodyFrame::Spindle { axis: [0.0, 0.0, 1.0], offset: 0.0, profile: spun.holder_profile() },
         spun: None,
     };
     tool_body::fits(tool, &probe)?;
@@ -156,7 +154,8 @@ const RING: usize = 32;
 #[must_use]
 pub fn assembly(tool: &Tool, body: &ToolBody) -> Vec<Triangle> {
     let zs = tool.flute_len.max(0.0) + tool.shank_len.max(0.0);
-    let top = zs.max(body.profile.bottom());
+    // A lathe-frame body (#369) has no spindle envelope: the shank stops at its own top.
+    let top = body.profile().map_or(zs, |p| zs.max(p.bottom()));
     let rs = tool.shank_d.max(0.0) * 0.5;
     let mut prof: Vec<(f64, f64)> =
         tool.profile().into_iter().filter(|&(z, r)| z.is_finite() && r.is_finite() && z < zs - 1e-9).collect();
@@ -219,8 +218,10 @@ pub fn assembly_for_operation(world: &World, op: &str) -> Option<Vec<Triangle>> 
     let te = model::find_by_name(world, &tool_name)?;
     let tool = model::tool_of(world, &te)?;
     match tool_body::body_of(world, &te) {
-        Some(body) => Some(assembly(&tool, &body)),
-        None => bare_assembly(&tool),
+        // A lathe-frame body (#369) sits in the turning tool frame, not
+        // the spindle frame this assembly draws in: the bare tool stands.
+        Some(body) if body.profile().is_some() => Some(assembly(&tool, &body)),
+        _ => bare_assembly(&tool),
     }
 }
 

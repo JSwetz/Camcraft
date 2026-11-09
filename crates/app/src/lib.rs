@@ -66,6 +66,10 @@ pub use camcraft_tools::spun;
 pub mod tool_body;
 // #371: the editor's placement preview and picks, the sim's posed body.
 pub mod tool_body_view;
+// #369: lathe-held tool bodies (the turning tool frame).
+pub mod tool_body_lathe;
 pub mod units;
 pub use camcraft_sim::verify;
+// #261: the moves a cached path's warnings name.
+pub mod warned_moves;
 pub mod world;

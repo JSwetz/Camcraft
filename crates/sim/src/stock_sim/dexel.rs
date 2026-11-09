@@ -1,5 +1,6 @@
 //! Split from `stock_sim.rs` by M5.0.1; structure only.
 
+use super::dexel_arc::Atom;
 use super::kernel::{MAX_CELLS_PER_AXIS, StockError};
 use super::tiles::{Tile, TILE};
 
@@ -285,8 +286,8 @@ impl Dexel {
     /// positions, the codebase's tip-first convention read on the cone
     /// the chamfer mill actually is, so the axis path IS the move path
     /// and no center lift applies (a ball's center is above its tip;
-    /// a cone's apex is its tip). Arcs reduce to chords under the same
-    /// uniform-Z law as `subtract`.
+    /// a cone's apex is its tip). XY arcs sweep the true arc under the
+    /// same helix law as `subtract` (`dexel_arc`).
     pub fn subtract_cone(&mut self, m: &Move, r: f64, cot: f64, chord_tol: f64) {
         if m.kind == MoveKind::Rapid || !m.is_finite() {
             return;
@@ -299,31 +300,16 @@ impl Dexel {
                     self.cut_cone(a, b, r, cot);
                 }
             }
-            Some(arc) => {
-                let a2 = Point2::new(m.from.x, m.from.y);
-                let b2 = Point2::new(m.to.x, m.to.y);
-                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
-                let n = cs.len().max(1) as f64;
-                let dz = m.to.z - m.from.z;
-                for (j, (ca, cb)) in cs.into_iter().enumerate() {
-                    let za = m.from.z + dz * (j as f64 / n);
-                    let zb = m.from.z + dz * ((j + 1) as f64 / n);
-                    self.cut_cone(
-                        Point3::new(ca.x, ca.y, za),
-                        Point3::new(cb.x, cb.y, zb),
-                        r,
-                        cot,
-                    );
-                }
-            }
+            // XY arcs sweep the true arc (#402), not chords.
+            Some(arc) => self.cut_xy_arc(m, arc, r, Atom::Cone(cot)),
         }
     }
 
     /// Ball-nose version of `subtract`: moves carry TIP positions (the
     /// whole codebase stores toolpaths tip-first), so the CENTER path
     /// is the tip path lifted by `r` in Z and the swept solid is a
-    /// sphere at every instant. Arcs reduce to chords under the same
-    /// uniform-Z helix law as `subtract`.
+    /// sphere at every instant. XY arcs sweep the true arc under the
+    /// same helix law as `subtract` (`dexel_arc`).
     pub fn subtract_ball(&mut self, m: &Move, r: f64, chord_tol: f64) {
         if m.kind == MoveKind::Rapid || !m.is_finite() {
             return;
@@ -344,29 +330,18 @@ impl Dexel {
                     );
                 }
             }
-            Some(arc) => {
-                let a2 = Point2::new(m.from.x, m.from.y);
-                let b2 = Point2::new(m.to.x, m.to.y);
-                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
-                let n = cs.len().max(1) as f64;
-                let dz = m.to.z - m.from.z;
-                for (j, (ca, cb)) in cs.into_iter().enumerate() {
-                    let za = m.from.z + dz * (j as f64 / n) + r;
-                    let zb = m.from.z + dz * ((j + 1) as f64 / n) + r;
-                    self.cut_ball(
-                        Point3::new(ca.x, ca.y, za),
-                        Point3::new(cb.x, cb.y, zb),
-                        r,
-                    );
-                }
-            }
+            // XY arcs sweep the true arc (#402), not chords.
+            Some(arc) => self.cut_xy_arc(m, arc, r, Atom::Ball),
         }
     }
 
     /// Subtract one move: rapids touch nothing, straight moves are one
-    /// chord, arcs reduce to their sagitta chords with Z interpolated
-    /// at each chord endpoint (a helix descends uniformly with its
-    /// sweep - the same reading `sim::path_len` takes).
+    /// chord, XY arcs sweep the true arc with Z linear in the swept
+    /// angle (a helix descends uniformly with its sweep - the same
+    /// reading `sim::path_len` takes; `dexel_arc`, #402: inscribed
+    /// chords stood a sagitta inside the arc, a false gouge on a convex
+    /// corner and a hidden one on a concave corner). XZ / YZ arcs keep
+    /// their in-plane chords.
     pub fn subtract(&mut self, m: &Move, r: f64, chord_tol: f64) {
         if m.kind == MoveKind::Rapid || !m.is_finite() {
             return;
@@ -379,24 +354,8 @@ impl Dexel {
                     self.cut_chord(a, b, r);
                 }
             }
-            Some(arc) => {
-                let a2 = Point2::new(m.from.x, m.from.y);
-                let b2 = Point2::new(m.to.x, m.to.y);
-                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
-                let n = cs.len().max(1) as f64;
-                let dz = m.to.z - m.from.z;
-                for (k, (ca, cb)) in cs.into_iter().enumerate() {
-                    let f0 = k as f64 / n;
-                    let f1 = (k + 1) as f64 / n;
-                    let za = m.from.z + dz * f0;
-                    let zb = m.from.z + dz * f1;
-                    self.cut_chord(
-                        Point3::new(ca.x, ca.y, za),
-                        Point3::new(cb.x, cb.y, zb),
-                        r,
-                    );
-                }
-            }
+            // XY arcs sweep the true arc (#402), not chords.
+            Some(arc) => self.cut_xy_arc(m, arc, r, Atom::Flat),
         }
     }
 

@@ -121,12 +121,13 @@ fn a_drawn_holder_lands_with_its_bands_exact() {
     assert_eq!(body.source, tool_body::SPUN_SOURCE);
     assert_eq!(body.spun.as_ref().map(|s| s.points().to_vec()), Some(drawn_collar()));
     let z0 = shank_top();
+    let profile = body.profile().expect("a spindle-frame body");
     assert_eq!(
-        body.profile.bands(),
+        profile.bands(),
         &[HolderBand { above: z0, len: 20.0, r: 15.0 }, HolderBand { above: z0 + 20.0, len: 15.0, r: 40.0 }]
     );
     let g = catalog_tool(TOOL).geom();
-    assert_eq!(tool_body::stack(&g, Some(&body.profile)), HolderStack { bands: body.profile.bands().to_vec(), top: z0 + 35.0 });
+    assert_eq!(tool_body::stack(&g, Some(profile)), HolderStack { bands: profile.bands().to_vec(), top: z0 + 35.0 });
     // The display assembly carries the revolve of the drawn outline.
     let asm = tool_body_view::assembly(&catalog_tool(TOOL), &body);
     let top = asm.iter().flat_map(|t| [t.a.z, t.b.z, t.c.z]).fold(0.0f64, f64::max);
@@ -242,7 +243,8 @@ fn the_drawn_profile_round_trips_and_an_old_reader_over_reports() {
     let old = tool_body::body_of(&world3, &tool_entity(&world3)).expect("a body");
     assert!(old.spun.is_none());
     let outline = landed.spun.as_ref().expect("drawn").outline();
+    let old_profile = old.profile().expect("a spindle-frame body");
     for &(z, r) in &outline {
-        assert!(old.profile.reach_over(z, z) >= r - 1e-6, "at {z}: {} < {r}", old.profile.reach_over(z, z));
+        assert!(old_profile.reach_over(z, z) >= r - 1e-6, "at {z}: {} < {r}", old_profile.reach_over(z, z));
     }
 }
