@@ -85,6 +85,7 @@ mod first_setup;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
+mod mcp_live;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.

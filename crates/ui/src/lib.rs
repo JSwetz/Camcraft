@@ -16,6 +16,7 @@ pub mod egui_app;
 pub mod feedback;
 pub mod interact;
 pub mod machined;
+pub mod mcp_host;
 pub mod operations;
 pub mod plane_pick;
 pub mod state;

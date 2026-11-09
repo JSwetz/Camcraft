@@ -170,6 +170,15 @@ pub fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
+    // #183: the live MCP server is opt-in - off unless asked for.
+    let mcp_env = std::env::var("CAMCRAFT_MCP_PORT").ok();
+    let mcp_port = match camcraft_app::mcp::port_from(args, mcp_env.as_deref()) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("mcp: {err}");
+            return 2;
+        }
+    };
     if args.iter().any(|a| a == "--headless") {
         if pick != gpu::GpuPick::Auto || want.is_some() {
             println!("gpu: --headless pins the fallback adapter for determinism; backend and adapter picks ignored");
@@ -185,6 +194,6 @@ pub fn run(args: &[String]) -> i32 {
             }
         }
     } else {
-        shell::run_windowed(pick, want)
+        shell::run_windowed(pick, want, mcp_port)
     }
 }

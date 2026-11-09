@@ -15,9 +15,18 @@
 //! and every failure is an MCP tool error (`isError: true`) naming the
 //! reason - never a panic, never a silent success.
 
+mod bridge;
 mod edit;
 mod job;
+mod listen;
+mod live;
 mod tools;
+
+// #183: the same tool table served live from inside the GUI, over a
+// loopback socket, against the app's own document and History.
+pub use bridge::bridge;
+pub use listen::{port_from, Inbox, Request, Wake};
+pub use live::{answer_live, LiveAnswer};
 
 use crate::script::Env;
 

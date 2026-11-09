@@ -1208,6 +1208,9 @@ pub struct State {
     /// Operation key being dragged in the browser; discarded on release.
     pub dragging_op: Option<String>,
     pub pending: VecDeque<CommandKind>,
+    /// #183: the live MCP session's inbox when the app was started with
+    /// `--mcp-port` / `CAMCRAFT_MCP_PORT`; drained with `pending`.
+    pub mcp: Option<camcraft_app::mcp::Inbox>,
     pub request_quit: bool,
     /// #107: a New / Open / Quit held back because the document has
     /// unsaved changes; while Some, the shell shows the Save / Don't Save
@@ -1466,6 +1469,7 @@ impl State {
             rename_draft: None,
             dragging_op: None,
             pending: VecDeque::new(),
+            mcp: None,
             request_quit: false,
             unsaved_prompt: None,
             discard_confirmed: false,
@@ -2293,6 +2297,8 @@ impl State {
         while let Some(action) = self.pending.pop_front() {
             self.run(action);
         }
+        // #183: an agent's live calls, after the user's own clicks.
+        crate::mcp_host::pump(self);
         self.poll_import();
         // A refusal that no longer describes the page retires, with its
         // status-strip mirror (crate::feedback).
