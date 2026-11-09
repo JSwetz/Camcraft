@@ -558,6 +558,9 @@ pub fn verification_report(world: &World) -> GateReport {
     // precedent: what the room is made of is verified now, never baked
     // into a digest).
     problems.extend(fixture_problems(world));
+    // #321: a carried setup's fixtures against the body it is entered
+    // with - workholding modelled into material the program carries in.
+    problems.extend(crate::fixture_carried::carried_fixture_problems(world));
 
     // The in-process measurement ask (M5.3 D): a Part op's probe
     // budget is a claim about the FINISHED part, and the finished
