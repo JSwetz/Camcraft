@@ -1033,6 +1033,9 @@ pub struct PostView {
 pub enum Panel {
     Browser,
     Properties,
+    /// The Machines pane (#287): closed by default, opened from the View
+    /// door beside the properties pane.
+    Machines,
 }
 
 /// A dock-layout ask from the View door, applied by the shell on the
@@ -1054,6 +1057,7 @@ pub enum LayoutRequest {
 pub struct PanelsOpen {
     pub browser: bool,
     pub properties: bool,
+    pub machines: bool,
 }
 
 impl PanelsOpen {
@@ -1062,6 +1066,7 @@ impl PanelsOpen {
         match p {
             Panel::Browser => self.browser,
             Panel::Properties => self.properties,
+            Panel::Machines => self.machines,
         }
     }
 }
@@ -1297,6 +1302,10 @@ pub struct State {
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
     /// which is the command, which is the undo.
     pub machine_editor: Option<crate::egui_app::machine_editor::MachineEditor>,
+    /// The Machines pane's view state (#287): the cached catalogue and
+    /// the selected row. Ephemeral like the dock itself - browsing a
+    /// machine is not a command; assigning one will be.
+    pub machines_pane: crate::egui_app::machines_pane::MachinesPane,
     /// M6.1 C's resolution furniture (never a command, never saved -
     /// the camera's law): the parse cache for `File` themes, the
     /// discovered theme files behind the switcher's rows, and the last
@@ -1471,7 +1480,7 @@ impl State {
             ribbon_mode_open: false,
             ribbon_view_open: false,
             ribbon_theme_open: false,
-            panels_open: PanelsOpen { browser: true, properties: true },
+            panels_open: PanelsOpen { browser: true, properties: true, machines: false },
             layout_request: None,
             tree_menu: None,
             retype_confirm: None,
@@ -1510,6 +1519,7 @@ impl State {
             },
             tool_editor: None,
             machine_editor: None,
+            machines_pane: Default::default(),
             theme_cache: theme_files::Cache::new(),
             // One walk per window, at construction: the switcher's file
             // rows are furniture, not live filesystem polling (the

@@ -80,6 +80,7 @@ mod spindle_row;
 mod stock_size;
 mod stock_fit_sides;
 mod layout;
+mod machines_pane;
 mod unsaved;
 mod first_setup;
 mod one_wcs;
@@ -2576,7 +2577,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Deviate, "Judge the program's stock against the model (deviation map)"),
         (
             Cmd::View,
-            "Show or hide the browser and properties panes, or reset the layout",
+            "Show or hide the browser, properties and machines panes, or reset the layout",
         ),
         (Cmd::Theme, "Pick the document's theme and colour-vision mode (undoable)"),
     ];

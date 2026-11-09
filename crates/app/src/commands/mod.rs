@@ -22,6 +22,7 @@ pub mod ribbon_pins;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
+pub mod setup_delete;
 // #196: a setup's picked program offset.
 pub mod setup_align;
 pub mod setup_wcs;
