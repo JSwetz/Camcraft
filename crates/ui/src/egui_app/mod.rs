@@ -86,6 +86,8 @@ mod turning_page;
 // #107: Save / Don't Save / Cancel over unsaved changes.
 mod unsaved_prompt;
 mod panes;
+// #441: the ribbon's Theme door and its dropdown.
+mod theme_drop;
 // #343: the browser tree, split from panes (rows / pane / operation menu).
 mod browser_tree;
 mod browser_pane;
@@ -137,6 +139,9 @@ mod setup_wcs_tests;
 mod setup_align_tests;
 #[cfg(test)]
 mod setup_relative_tests;
+mod setup_stock_pick;
+#[cfg(test)]
+mod setup_stock_tests;
 #[cfg(test)]
 mod setup_plane_tests;
 #[cfg(test)]

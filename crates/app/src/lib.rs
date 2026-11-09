@@ -10,6 +10,7 @@ pub mod commands;
 pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
+pub mod fixture_carried;
 pub use camcraft_motion::finishing3d;
 pub use camcraft_geometry::geo2d;
 pub mod geometry;
@@ -44,6 +45,8 @@ pub mod setup_mount;
 // #316: transforms between setups and the setup-relative link.
 pub mod setup_relative;
 pub mod setup_sheet;
+// #320: a setup's stock source - its own, or what the setup before leaves.
+pub mod setup_stock;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;
