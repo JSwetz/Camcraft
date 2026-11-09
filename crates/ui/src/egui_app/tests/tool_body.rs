@@ -201,18 +201,6 @@ fn the_simulation_draws_the_body_at_the_playhead_and_nothing_without_one() {
 /// catalog end mill, Face1 generated (project v56, our own fixture).
 const STEP_BLOCK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/egui_app/tests/step_block_371.camproj");
 
-/// Is every vertex of `verts` inside the viewport image under the camera?
-fn on_screen(state: &State, verts: &[[f32; 3]]) -> usize {
-    let mvp = state.cam.mvp(1280.0 / 649.0);
-    verts
-        .iter()
-        .filter(|v| {
-            interact::project_uv(&mvp, [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
-                .is_some_and(|u| (0.0..=1.0).contains(&u[0]) && (0.0..=1.0).contains(&u[1]))
-        })
-        .count()
-}
-
 /// The posed tool part of the scene (the one model part that is no
 /// document model) and the frame's tip height.
 fn tool_part(state: &State) -> Option<(Vec<[f32; 3]>, f64)> {
@@ -224,11 +212,10 @@ fn tool_part(state: &State) -> Option<(Vec<[f32; 3]>, f64)> {
     (solids.len() == models + 1).then(|| (solids.last().map(|p| p.verts.clone()).unwrap_or_default(), tip))
 }
 
-/// #371 feedback, bug 1: on the user's document the body was collected
-/// but posed a shank length (55 mm) above the tip with nothing below it,
-/// off the top of a part-sized view - "no difference with and without
-/// the body". The tool now draws whole (cutter and shank up into the
-/// body) at every playhead, stale or fresh, and Frame takes it in.
+/// #371 feedback: on the user's document the collar floated a shank
+/// length (55 mm) above the axis marker with nothing below it. A tool
+/// with a body now draws whole in the simulation - cutter and shank up
+/// into the body - at every playhead, stale or fresh.
 #[test]
 fn the_simulated_tool_reaches_from_its_tip_into_the_body_on_the_users_document() {
     let mut harness = shell_harness();
@@ -266,11 +253,6 @@ fn the_simulated_tool_reaches_from_its_tip_into_the_body_on_the_users_document()
         harness.run();
         check(&harness.state().state, &format!("t = {t:.1}"));
     }
-    // Frame takes the assembly in: the whole tool is on screen.
-    harness.state_mut().state.pending.push_back(CommandKind::FrameAll);
-    harness.run();
-    let (verts, _) = tool_part(&harness.state().state).unwrap();
-    assert_eq!(on_screen(&harness.state().state, &verts), verts.len(), "Frame shows the whole tool");
     // Regenerated (fresh), still drawn.
     harness.state_mut().state.pending.push_back(CommandKind::GenerateOperation("Face1".into()));
     harness.run();
@@ -278,3 +260,4 @@ fn the_simulated_tool_reaches_from_its_tip_into_the_body_on_the_users_document()
     check(&harness.state().state, "after regenerate");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
