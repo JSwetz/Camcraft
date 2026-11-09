@@ -4,10 +4,10 @@
     "units": { "length": "mm", "angle": "degrees" },
     "parts": [
       { "id": "base", "name": "table", "type": "table", "parts": [
-        { "id": "crl", "name": "X", "type": "linear", "travel": { "min": -300.0, "max": 300.0 }, "parts": [
-          { "id": "sld", "name": "Y", "type": "linear", "travel": { "min": -250.0, "max": 250.0 } }
+        { "id": "crl", "name": "X", "type": "linear", "travel": { "min": -600.0, "max": 600.0 }, "parts": [
+          { "id": "sld", "name": "Y", "type": "linear", "travel": { "min": -500.0, "max": 500.0 } }
         ] },
-        { "id": "col", "name": "Z", "type": "linear", "travel": { "min": -500.0, "max": 0.0 }, "parts": [
+        { "id": "col", "name": "Z", "type": "linear", "travel": { "min": -500.0, "max": 500.0 }, "parts": [
           { "id": "tla", "name": "A", "type": "rotary", "axis": [1.0, 0.0, 0.0],
             "travel": { "min": -120.0, "max": 120.0 }, "resolution": 0.001, "parts": [
             { "id": "tlb", "name": "B", "type": "rotary", "axis": [0.0, 1.0, 0.0],

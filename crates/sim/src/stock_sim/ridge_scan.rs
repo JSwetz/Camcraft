@@ -16,7 +16,7 @@
 //! differential geometry). Our own law; no vendor material consulted.
 
 use super::ridge::Access;
-use super::scan::dist_pt_seg3;
+use super::scan_arc::{seg_dist, ScanArc};
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 
@@ -49,11 +49,11 @@ type Box2 = (f64, f64, f64, f64);
 /// true one).
 fn walk(q3: Point3, path: &Path, band: f64) -> (f64, u8) {
     let (mut dmin, mut near) = (f64::INFINITY, 0u8);
-    for ((a, b), (x0, x1, y0, y1)) in path.segs.iter().zip(&path.boxes) {
+    for (i, ((a, b), (x0, x1, y0, y1))) in path.segs.iter().zip(&path.boxes).enumerate() {
         if q3.x < x0 - band || q3.x > x1 + band || q3.y < y0 - band || q3.y > y1 + band {
             continue;
         }
-        let d = dist_pt_seg3(q3.x, q3.y, q3.z, *a, *b);
+        let d = seg_dist(q3, &(*a, *b), path.arc(i));
         if d <= band {
             near = near.saturating_add(1);
         }
@@ -66,17 +66,29 @@ fn walk(q3: Point3, path: &Path, band: f64) -> (f64, u8) {
 /// order, their XY boxes and closed-ring ids.
 struct Path<'a> {
     segs: &'a [Seg],
+    arcs: &'a [Option<ScanArc>],
     rings: &'a [u32],
     boxes: Vec<Box2>,
 }
 
 impl<'a> Path<'a> {
-    fn new(segs: &'a [Seg], rings: &'a [u32]) -> Self {
+    /// Each box holds its piece: a chord's, grown by its arc's bulge
+    /// (#413, `scan_arc`).
+    fn new(segs: &'a [Seg], arcs: &'a [Option<ScanArc>], rings: &'a [u32]) -> Self {
         let boxes = segs
             .iter()
-            .map(|(a, b)| (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y)))
+            .enumerate()
+            .map(|(i, (a, b))| {
+                let g = arcs.get(i).copied().flatten().map_or(0.0, |p| p.bulge());
+                (a.x.min(b.x) - g, a.x.max(b.x) + g, a.y.min(b.y) - g, a.y.max(b.y) + g)
+            })
             .collect();
-        Path { segs, rings, boxes }
+        Path { segs, arcs, rings, boxes }
+    }
+
+    /// Segment `i`'s XY arc piece, when it stands for one.
+    fn arc(&self, i: usize) -> Option<&ScanArc> {
+        self.arcs.get(i).and_then(Option::as_ref)
     }
 
     /// Whether segment `i` starts where segment `i - 1` ended (a rapid
@@ -142,7 +154,7 @@ fn flank(q3: Point3, n: [f64; 3], path: &Path, access: &Access, (band, reach, sl
         if q3.x < x0 - reach || q3.x > x1 + reach || q3.y < y0 - reach || q3.y > y1 + reach {
             continue;
         }
-        let d = dist_pt_seg3(q3.x, q3.y, q3.z, *a, *b);
+        let d = seg_dist(q3, &(*a, *b), path.arc(i));
         if d <= reach {
             segs_in.push((i, d));
         }
@@ -218,6 +230,7 @@ const MAX_PASSES: usize = 64;
 pub(super) fn ridge_rest(
     facets: &[Triangle],
     segs: &[Seg],
+    arcs: &[Option<ScanArc>],
     rings: &[u32],
     lat: &Lattice,
     (r, tol, floor): (f64, f64, f64),
@@ -229,7 +242,7 @@ pub(super) fn ridge_rest(
     // other - never narrower than the M13.8 window's `3·tol` past the
     // band, so no flank the old window read is lost.
     let slack = lat.cell.max(3.0 * tol);
-    let path = Path::new(segs, rings);
+    let path = Path::new(segs, arcs, rings);
     let access = Access::new(facets, r);
     let mut out = RidgeRead::default();
     let mut flanked: Vec<(f64, Point3, [f64; 3])> = Vec::new();

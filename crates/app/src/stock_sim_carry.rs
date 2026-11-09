@@ -25,8 +25,23 @@
 //!   carry exactly (side-on, or off the quarter turns) and a lathe or
 //!   mill-turn machine refuse by name, naming both setups. Lathe,
 //!   rotary and posed programs are refused before the walk, as before.
+//! - **One machine (#404).** A carry into a setup whose machine (its own
+//!   or the document's, #343) differs from the setup before it refuses
+//!   by name ([`CARRY_MACHINE_CHANGE_REFUSAL`]) in [`entry`], so the rest
+//!   reading (#318) refuses it too. The program walk refuses every setup
+//!   change onto another machine, the clip included: the clip keeps
+//!   what the earlier setup left standing. (A rest chain that meets a
+//!   clip starts from the setup's own block and reads nothing across, so
+//!   it does not refuse.) The machine kind gate reads the two setups'
+//!   machine, never the active setup's.
 
 use crate::stock_sim::{Body, Deviation, Dexel, LatticeTurn, Planned, SimOp, simulate, stock_grid};
+
+/// The refusal for a program that moves the stock between setups on
+/// different machines (#404). The program sim judges one machine's
+/// program, the post writes one (#343's one-mount law), so the material
+/// is never handed across a machine change on a guess.
+pub const CARRY_MACHINE_CHANGE_REFUSAL: &str = "the setups are on different machines - the program sim carries the stock only between setups on one machine; simulate each machine's setups on their own";
 
 /// The refusal for a carry on a lathe or mill-turn machine (#321 decided:
 /// the part flip / sub-spindle hand-off is not implemented - the column
@@ -54,16 +69,47 @@ fn matrix_of(rot: [f64; 4]) -> [[f64; 3]; 3] {
     [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]]
 }
 
+fn carry_head(from: &str, to: &str) -> String {
+    format!("carrying the machined stock from setup '{from}' into setup '{to}'")
+}
+
+/// The machine both setups mount (#343: each its own, else the
+/// document's), or [`CARRY_MACHINE_CHANGE_REFUSAL`] naming both setups and both
+/// machines when they differ (#404).
+///
+/// # Errors
+/// The two setups mount different machines.
+pub(crate) fn one_machine(
+    world: &flecs_ecs::prelude::World,
+    from: &str,
+    to: &str,
+) -> Result<(String, Option<crate::machine::Machine>), String> {
+    use crate::setup_mount::{machine_label, machine_of};
+    let (m_from, m_to) = (machine_of(world, Some(from)), machine_of(world, Some(to)));
+    if m_from != m_to {
+        return Err(format!(
+            "{}: {CARRY_MACHINE_CHANGE_REFUSAL} ('{from}' on {}, '{to}' on {})",
+            carry_head(from, to),
+            machine_label(&m_from),
+            machine_label(&m_to),
+        ));
+    }
+    Ok(m_to)
+}
+
 /// The lattice turn that carries the body from setup `from` into setup
 /// `to`.
 ///
 /// # Errors
-/// A transform that cannot be carried exactly, a machine kind the carry
-/// is not verified on, or a setup `transform_between` refuses - each
-/// named with both setups.
+/// Setups on different machines (#404), a transform that cannot be
+/// carried exactly, a machine kind the carry is not verified on, or a
+/// setup `transform_between` refuses - each named with both setups.
 pub(crate) fn carry_turn(world: &flecs_ecs::prelude::World, from: &str, to: &str) -> Result<LatticeTurn, String> {
-    let head = format!("carrying the machined stock from setup '{from}' into setup '{to}'");
-    if crate::machine::kind_of(world) != crate::machine::Kind::Mill {
+    let head = carry_head(from, to);
+    // #404: the machine is the two setups' own (#343), never the active
+    // setup's - the body never crosses a machine change.
+    let m_to = one_machine(world, from, to)?;
+    if crate::machine::kind(m_to.1.as_ref()) != crate::machine::Kind::Mill {
         return Err(format!("{head}: {CARRY_MACHINE_REFUSAL}"));
     }
     let t = crate::setup_relative::transform_between(world, from, to).map_err(|e| format!("{head}: {e}"))?;
@@ -170,7 +216,17 @@ pub(crate) fn walk(
         if eff != frame {
             spanned = true;
             match entry(world, frame.as_deref(), eff.as_deref())? {
-                Entry::Clip => clip_to_setup_stock(held.dex_mut(), world, eff.as_deref(), min_r)?,
+                Entry::Clip => {
+                    // #404: material never crosses a machine change. The
+                    // carry refuses in `carry_turn`; the clip keeps what the
+                    // earlier setup left standing, so it hands material
+                    // across too and refuses here. A new block hands nothing
+                    // across, so it may start on another machine.
+                    if let (Some(from), Some(to)) = (frame.as_deref(), eff.as_deref()) {
+                        one_machine(world, from, to)?;
+                    }
+                    clip_to_setup_stock(held.dex_mut(), world, eff.as_deref(), min_r)?;
+                }
                 Entry::Carry(turn) => {
                     let body = match held {
                         Held::Plain(d) => first_body(world, origin.as_deref(), d)?,

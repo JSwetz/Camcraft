@@ -6,7 +6,7 @@
       { "id": "base", "name": "table", "type": "table", "parts": [
         { "id": "car", "name": "X", "type": "linear", "travel": { "min": 0.0, "max": 650.0 }, "parts": [
           { "id": "sld", "name": "Y", "type": "linear", "travel": { "min": -100.0, "max": 100.0 }, "parts": [
-            { "id": "quill", "name": "Z", "type": "linear", "travel": { "min": -620.0, "max": 0.0 } }
+            { "id": "quill", "name": "Z", "type": "linear", "travel": { "min": -620.0, "max": 620.0 } }
           ] }
         ] },
         { "id": "tn", "name": "C", "type": "rotary", "axis": [0.0, 0.0, 1.0],
