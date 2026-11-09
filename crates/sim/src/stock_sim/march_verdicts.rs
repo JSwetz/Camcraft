@@ -13,6 +13,7 @@ use super::deviate::{Deviation, SimSurface};
 use super::field::{center_of, SdfField};
 use super::kernel::{part_surface, StockError, StockReport};
 use super::march::{lattice_of, march, world, Read};
+use super::wall_slack::{settle, Candidate};
 
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
@@ -45,6 +46,7 @@ pub(crate) fn deviate_field(f: &SdfField, facets: &[Triangle], tol: f64) -> Resu
         max_rest_at: None,
         max_gouge_at: None,
     };
+    let mut cands: Vec<Candidate> = Vec::new();
     for iy in 0..lat.ny {
         for ix in 0..lat.nx {
             let k = ix + iy * lat.nx;
@@ -70,15 +72,13 @@ pub(crate) fn deviate_field(f: &SdfField, facets: &[Triangle], tol: f64) -> Resu
                     d.max_rest_at = Some(Point3::new(x, y, sim));
                 }
             } else if v < -tol {
-                d.gouge_cells += 1;
-                d.gouge_volume += -v * a2;
-                if -v > d.max_gouge {
-                    d.max_gouge = -v;
-                    d.max_gouge_at = Some(Point3::new(x, y, sim));
-                }
+                // #299: judged once the whole lattice is read - a
+                // column within `tol` of a wall is not the wall's gouge.
+                cands.push(Candidate { k, sim, v, at: Point3::new(x, y, sim) });
             }
         }
     }
+    settle(&mut d, facets, lat.x0, lat.y0, &part, &cands);
     Ok(d)
 }
 

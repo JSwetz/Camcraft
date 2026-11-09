@@ -19,6 +19,12 @@
 //! An enclosing window over-reports a graze on a long ramp, never hides
 //! a crash - the bands law's own precedent.
 //!
+//! An arc's chords are padded by what its circle adds to them (#491,
+//! [`super::arc_bulge`]): each band's radius grows by the horizontal
+//! part of the chord's deviation (the sagitta, plus the lattice pad),
+//! and a vertical arc's window is its true z range between the joints.
+//! A straight move pads nothing.
+//!
 //! The z test stays [`crate::fixture::band_hits_box`]'s: overlap must
 //! be strict beyond tolerance. So the strict-dip silences hold for the
 //! whole stack - a retract off a mounting face (the tip leaving
@@ -35,12 +41,14 @@ use crate::fixture::{band_hits_box, FixtureBox};
 use crate::tools::ToolGeom;
 use camcraft_tools::holder_profile::HolderStack;
 
+use super::arc_bulge::Bulge;
 use super::types::FixturePart;
 
 /// One straight piece of a move's tip path: its XY ends and the z the
-/// tip spans over it, already floored by the law's historical bottom.
-/// A non-finite z fails closed (the window is NaN, which the band
-/// predicate reads as a hit).
+/// tip spans over it, already floored by the law's historical bottom,
+/// and how far the true path strays sideways off it (`pad`, zero on a
+/// straight move). A non-finite z or pad fails closed (the window or
+/// radius is NaN, which the band predicate reads as a hit).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Piece {
     ax: f64,
@@ -49,23 +57,30 @@ pub(super) struct Piece {
     by: f64,
     z_lo: f64,
     z_hi: f64,
+    pad: f64,
 }
 
 /// The move's tip path as pieces: itself for a straight move, its 3-D
 /// chords for an arc (the same XY as [`Move::chords`]), each spanning
-/// `[min(floor, its low end), its high end]` in z.
+/// `[min(floor, its low end), its high end]` in z - for a vertical arc,
+/// its true z range between the joints ([`Bulge::z_span`]) - and
+/// padded sideways by the arc's bulge ([`Bulge::horizontal`]).
 pub(super) fn pieces(m: &Move, chord_tol: f64, floor: f64) -> Vec<Piece> {
-    m.segments3(chord_tol)
-        .into_iter()
-        .map(|(p, q)| {
-            let finite = p.z.is_finite() && q.z.is_finite() && floor.is_finite();
+    let segs = m.segments3(chord_tol);
+    let bulge = Bulge::of(m, segs.len());
+    segs.into_iter()
+        .enumerate()
+        .map(|(j, (p, q))| {
+            let (lo, hi) = bulge.z_span(j, p, q);
+            let finite = p.z.is_finite() && q.z.is_finite() && floor.is_finite() && lo.is_finite() && hi.is_finite();
             Piece {
                 ax: p.x,
                 ay: p.y,
                 bx: q.x,
                 by: q.y,
-                z_lo: if finite { floor.min(p.z).min(q.z) } else { f64::NAN },
-                z_hi: if finite { p.z.max(q.z) } else { f64::NAN },
+                z_lo: if finite { floor.min(lo) } else { f64::NAN },
+                z_hi: if finite { hi } else { f64::NAN },
+                pad: bulge.horizontal(p, q),
             }
         })
         .collect()
@@ -76,8 +91,9 @@ pub(super) fn pieces(m: &Move, chord_tol: f64, floor: f64) -> Vec<Piece> {
 /// band's column into the leaning enclosure of law (c2): shifted to the
 /// band's mid-height point on the axis, widened by the half-length's
 /// spread, its z planes the axis reach at both window ends plus the
-/// disc's radius. Upright, the window is the bare z span. A level
-/// piece reproduces the law's historical sums exactly.
+/// disc's radius. Upright, the window is the bare z span. Either way
+/// the radius takes the piece's arc pad. A level straight piece
+/// reproduces the law's historical sums exactly.
 pub(super) fn band_struck(
     pieces: &[Piece],
     lean: Option<[f64; 3]>,
@@ -89,7 +105,7 @@ pub(super) fn band_struck(
     fixtures.iter().any(|b| {
         pieces.iter().any(|pc| {
             let (offx, offy, r_use, bz0, bz1) = match lean {
-                None => (0.0, 0.0, r, pc.z_lo + above, pc.z_hi + above + len),
+                None => (0.0, 0.0, r + pc.pad, pc.z_lo + above, pc.z_hi + above + len),
                 Some(a) => {
                     let mid = above + len * 0.5;
                     let spread = (len * 0.5) * (a[0] * a[0] + a[1] * a[1]).sqrt();
@@ -98,7 +114,7 @@ pub(super) fn band_struck(
                     (
                         mid * a[0],
                         mid * a[1],
-                        r + spread,
+                        r + spread + pc.pad,
                         za0.min(za1).min(zb0.min(zb1)) - r,
                         za0.max(za1).max(zb0.max(zb1)) + r,
                     )

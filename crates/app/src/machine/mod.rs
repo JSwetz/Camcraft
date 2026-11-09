@@ -22,7 +22,9 @@
 //! own files add a `"travel": {"min": .., "max": ..}` object to a
 //! linear part. Those numbers are read in PROGRAM coordinates through
 //! the active WCS - the file cannot know a work offset, and guessing a
-//! machine origin would invent the very number the check needs.
+//! machine origin would invent the very number the check needs. So a
+//! stroke L is stated `-L..L` (the origin may sit anywhere along it);
+//! a machine-frame `-500..0` refused every retract (#457).
 //!
 //! M3.3 stage C widened the readable grammar, all of it optional -
 //! files written before stage C parse exactly as they always did:
