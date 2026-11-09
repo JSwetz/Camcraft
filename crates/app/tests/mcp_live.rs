@@ -253,3 +253,112 @@ fn a_browser_post_never_reaches_the_app() {
     r.read_line(&mut line).expect("answer");
     assert!(line.contains("\"id\":1"), "{line}");
 }
+
+/// The listener's log lines, captured: a global subscriber writing into
+/// a shared buffer (only the idle test installs it).
+#[derive(Clone, Default)]
+struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Write for LogBuf {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("log lock").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Wait for one request and answer it against `world`.
+fn answer_one(inbox: &Inbox, world: &World, history: &mut History) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(req) = inbox.next() {
+            let line = req.line().to_owned();
+            let a = answer_live(world, history, None, req.line());
+            req.answer(a.reply);
+            return line;
+        }
+        assert!(Instant::now() < deadline, "the client was not served");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// #567: a client that connects and says nothing holds the single
+/// session only for the idle window; then it is told why, closed,
+/// logged by its address, and the next client is served.
+#[test]
+fn an_idle_client_is_dropped_by_name_and_the_next_one_is_served() {
+    let log = LogBuf::default();
+    let sink = log.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(move || sink.clone())
+        .finish();
+    let captured = tracing::subscriber::set_global_default(subscriber).is_ok();
+
+    let inbox = Inbox::listen_with_idle(0, Box::new(|| {}), Duration::from_millis(300)).expect("listen");
+    let addr = inbox.addr().expect("bound address");
+    let silent = TcpStream::connect(addr).expect("connect");
+    let silent_addr = silent.local_addr().expect("client address");
+    // A regression must fail, never hang.
+    silent.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
+    let t = Instant::now();
+    let mut r = BufReader::new(silent);
+    let mut line = String::new();
+    r.read_line(&mut line).expect("an idle note, not silence - the idle client was never dropped");
+    assert!(line.contains("notifications/message") && line.contains("idle"), "{line}");
+    let mut rest = String::new();
+    assert_eq!(r.read_line(&mut rest).unwrap_or(0), 0, "the connection is closed after the note: {rest:?}");
+    assert!(t.elapsed() >= Duration::from_millis(250), "dropped before the window: {:?}", t.elapsed());
+
+    // The next client is served.
+    let s = TcpStream::connect(addr).expect("reconnect");
+    let mut w = s.try_clone().expect("clone");
+    let mut r = BufReader::new(s);
+    writeln!(w, r#"{{"jsonrpc":"2.0","id":1,"method":"ping"}}"#).expect("send");
+    let world = new_world();
+    let mut history = History::default();
+    answer_one(&inbox, &world, &mut history);
+    let mut answer = String::new();
+    r.read_line(&mut answer).expect("answer");
+    assert!(answer.contains("\"id\":1") && answer.contains("\"result\""), "{answer}");
+
+    if captured {
+        let text = String::from_utf8_lossy(&log.0.lock().expect("log lock")).into_owned();
+        assert!(text.contains(&format!("client {silent_addr} dropped: idle")), "the log names the idle client: {text}");
+    }
+}
+
+/// #567: a client that keeps sending complete lines inside the window
+/// keeps its session however long it runs.
+#[test]
+fn a_client_that_keeps_talking_is_never_dropped_as_idle() {
+    let window = Duration::from_millis(400);
+    let inbox = Inbox::listen_with_idle(0, Box::new(|| {}), window).expect("listen");
+    let addr = inbox.addr().expect("bound address");
+    let client = std::thread::spawn(move || -> Vec<String> {
+        let s = TcpStream::connect(addr).expect("connect");
+        s.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
+        let mut w = s.try_clone().expect("clone");
+        let mut r = BufReader::new(s);
+        let mut answers = Vec::new();
+        // Eight calls 150 ms apart: three windows long in all.
+        for id in 0..8 {
+            std::thread::sleep(Duration::from_millis(150));
+            writeln!(w, r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#).expect("send");
+            let mut line = String::new();
+            r.read_line(&mut line).expect("answer");
+            answers.push(line);
+        }
+        answers
+    });
+    let world = new_world();
+    let mut history = History::default();
+    pump_until(&inbox, &world, &mut history, &|| client.is_finished());
+    let answers = client.join().expect("client thread");
+    assert_eq!(answers.len(), 8);
+    for (id, a) in answers.iter().enumerate() {
+        assert!(a.contains(&format!("\"id\":{id}")) && !a.contains("idle"), "call {id}: {a}");
+    }
+}

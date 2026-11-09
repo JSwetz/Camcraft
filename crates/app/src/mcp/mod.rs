@@ -31,7 +31,7 @@ mod tools;
 // #183: the same tool table served live from inside the GUI, over a
 // loopback socket, against the app's own document and History.
 pub use bridge::bridge;
-pub use listen::{port_from, Inbox, Request, Wake};
+pub use listen::{port_from, Inbox, Request, Wake, IDLE_TIMEOUT};
 pub use live::{answer_live, LiveAnswer};
 
 use crate::script::Env;
