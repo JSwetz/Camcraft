@@ -1,9 +1,0 @@
-## #298 - Machine onboarding guide
-
-**What was decided:** Add `docs/MACHINE-ONBOARDING.md` as the focused onboarding reference and link it from the README. It documents the current `.mch` data and registration/test seams, source citation and license practices, existing milling/turning fixtures, operation coverage, and headless/physical-validation boundaries. This change remains documentation-only; it adds no machine, post, sample job, parser behavior, or operation capability.
-
-**Why:** A machine definition is only as reliable as its cited inputs, unit/coordinate conventions, and validation coverage. The existing software checks cover specific parser, machine-limit, post, and operation cases, but they do not certify an OEM configuration or physical machine. Naming current gaps (knurl, end-to-end lathe tapping, and headless machine selection) prevents the onboarding guide from implying more than the source proves.
-
-**Considered and dropped:** Expanding the README into the full guide would bury a multi-part workflow in the project overview; a dedicated document with one short navigation link is easier to maintain. Adding a new `.mch` schema field, comment parser, turning model, knurl operation, or MCP machine-load tool would cross into machine architecture/feature scope and require separate implementation and validation. The source's provenance-comment mismatch is reported in the guide rather than “fixed” by adding an unvalidated parser or editing machine instructions outside this documentation issue.
-
-**Cost to change later:** Update this guide and its README link when the `.mch` format, post registry, or headless interfaces change. A future format change should also reconcile the stated JSON-comment behavior with the actual parser and provide a durable, parseable place for machine-source provenance; new machining capabilities need their own scoped implementation and tests.
