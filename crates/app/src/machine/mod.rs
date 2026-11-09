@@ -57,16 +57,29 @@ use crate::model;
 use crate::posting;
 use crate::schema::MachineDef;
 
-/// The document's machine, read from the flecs singleton: (the path it
-/// was loaded from, the definition). `("", None)` until a `LoadMachine`
-/// command or a v19 project file says otherwise - and a document with
-/// no machine checks nothing, which is the unstated-limit law wearing
-/// a document-sized hat.
+/// The MOUNTED machine: the active setup's (#343 - its own, else the
+/// document's), as (the path it was loaded from, the definition).
+/// `("", None)` until a `LoadMachine` command or a project file says
+/// otherwise - and a document with no machine checks nothing, which is
+/// the unstated-limit law wearing a document-sized hat. The document's
+/// stored machine alone is [`document_of`].
 #[must_use]
 pub fn of(world: &World) -> (String, Option<Machine>) {
-    world
-        .try_get::<&MachineDef>(|d| (d.path.clone(), d.machine.clone()))
-        .unwrap_or_default()
+    crate::setup_mount::machine_of(world, crate::setup::active(world).as_deref())
+}
+
+/// The document's machine as stored - what every setup that owns no
+/// machine follows (#343). For `LoadMachine`, the save, and the
+/// document's machine section.
+#[must_use]
+pub fn document_of(world: &World) -> (String, Option<Machine>) {
+    crate::setup_mount::document_machine(world)
+}
+
+/// The machine a declared setup context mounts (#343).
+#[must_use]
+pub fn of_setup(world: &World, declared: Option<&str>) -> (String, Option<Machine>) {
+    crate::setup_mount::machine_of(world, declared)
 }
 
 /// Write the singleton. For the `LoadMachine` command and the project
@@ -79,10 +92,14 @@ pub fn set(world: &World, path: &str, machine: Option<&Machine>) {
     });
 }
 
-/// The document's machine kind, read off the singleton without the
-/// clone `of` does - the per-frame accessor for ribbon gating.
+/// The mounted machine's kind (the active setup's, #343) - the
+/// per-frame accessor for ribbon gating. Reads the singleton without a
+/// clone unless the active setup owns its machine.
 #[must_use]
 pub fn kind_of(world: &World) -> Kind {
+    if let Some(own) = crate::setup_mount::own_machine(world, crate::setup::active(world).as_deref()) {
+        return kind(own.machine.as_ref());
+    }
     world
         .try_get::<&MachineDef>(|d| kind(d.machine.as_ref()))
         .unwrap_or(Kind::Mill)
@@ -300,16 +317,19 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
             }
             // Travel: endpoints and - for arcs - the quarter points
             // the sweep can bulge past. A straight move's extremes
-            // ARE its endpoints.
+            // ARE its endpoints. The stroke is the machine's own; an
+            // inverted axis (#373) reads program `v` as `-v`, so the
+            // band is judged in the machine's coordinates.
             for p in move_extremes(mv) {
                 for (k, w) in [p.x, p.y, p.z].iter().enumerate() {
-                    let v = w - origin[k];
-                    if let Some((lo, hi)) = machine.axis(k).and_then(|a| a.travel)
-                        && (v < lo || v > hi)
-                    {
+                    let Some(ax) = machine.axis(k) else { continue };
+                    let Some((lo, hi)) = ax.travel else { continue };
+                    let v = (w - origin[k]) * ax.direction.sign();
+                    if v < lo || v > hi {
+                        let inv = if ax.direction.is_standard() { "" } else { " (inverted axis)" };
                         say(&mut out, format!(
-                            "{name}: move {i} reaches {v:.3} in {}, the stroke is {lo:.3}..{hi:.3}",
-                            machine.axis(k).map_or("?", |a| a.name.as_str())
+                            "{name}: move {i} reaches {v:.3} in {}{inv}, the stroke is {lo:.3}..{hi:.3}",
+                            ax.name
                         ));
                     }
                 }

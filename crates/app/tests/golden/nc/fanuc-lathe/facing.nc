@@ -2,7 +2,9 @@
 O0001 (TestBench lathe)
 G21 G18 G40 G80 G99
 (F1: finish envelope near move 2: 0.8000 mm gouge, 0.0092 mm rest)
+(OPERATION: F1 - FACING - G54)
 G54
+(T0101 TN-1600-0R8 - TURNING INSERT)
 T0101
 G50 S12000
 G97 S3000 M03

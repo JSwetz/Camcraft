@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectError> {
+pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Vec<String>, ProjectError> {
     // Migration hook: step UP one version at a time, each migration exact,
     // before any entity touches the world. Anything newer than this build
     // remains refused. The chain must run its steps sequentially - a v1
@@ -485,7 +485,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the inferred per-operation law they posted with (#196).
         file.version = 51;
     }
-    if (51..=53).contains(&file.version) {
+    if (51..=PROJECT_VERSION).contains(&file.version) {
         // v51 -> v52 (#329): a work-offset height stops naming its own
         // slot - the setup's is program zero. Agreeing setups take the
         // slot, disagreeing ones refuse by name; a v52+ file is checked
@@ -497,6 +497,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // v52 -> v53 (#326): a setup may hold the part turned. Absent
         // is "as modelled" - what every v52 file machined.
         file.version = 53;
+    }
+    let mut notes = Vec::new();
+    if (53..=PROJECT_VERSION).contains(&file.version) {
+        // v53 -> v54 (#342): one WCS per setup - each setup keeps the
+        // origin of the slot it posts, slots no setup posts are dropped
+        // with a note; a v54 file is checked one-WCS (`wcs_one`).
+        notes = super::wcs_one::settle(&mut file, from)?;
+        file.version = PROJECT_VERSION;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
@@ -650,6 +658,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         .ok_or_else(|| corrupt("stock mesh regeneration failed"))?,
                 };
                 model::set_facets(world, &entity, facets.into());
+                // The same UNCONDITIONAL pin as the Model arm (#340): every
+                // SetStock lands facets and moves the counter, the save
+                // writes it, so the load must end where the file left it.
+                // An absent key (0) puts back what that file remembered.
+                model::set_rev(world, &entity, dto.rev);
                 entity.entity_view(world).set(StockDef {
                     shape: shape.clone(),
                 });
@@ -731,12 +744,26 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         corrupt(format!("setup '{}' holds the part at a placement that is not a rigid transform", dto.name))
                     })?),
                 };
+                // #343: the setup's own machine, sanity-checked like the
+                // document's - a corrupt file, never a guessed limit.
+                let machine = match &sdto.machine {
+                    None => None,
+                    Some(m) => Some(m.to_def(&dto.name).map_err(corrupt)?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
-                    wcs: sdto.wcs,
+                    // `wcs_one` left exactly one name on every setup.
+                    wcs: match sdto.wcs {
+                        WcsDto::One(w) => w,
+                        WcsDto::Slots(_) => {
+                            return Err(corrupt(format!("setup '{}' still lists work offset slots", dto.name)));
+                        }
+                    },
                     datum_from: sdto.datum_from,
                     work_offset,
                     part_alignment,
+                    machine,
+                    post: sdto.post.as_ref().map(SetupPostDto::to_ref),
                 });
             }
         }
@@ -751,5 +778,5 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             });
         }
     }
-    Ok(())
+    Ok(notes)
 }

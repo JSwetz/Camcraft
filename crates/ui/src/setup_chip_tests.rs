@@ -35,8 +35,9 @@ fn face() -> OpParams {
     }
 }
 
-fn place(state: &mut State, slot: &str, z: f64) {
-    let k = CommandKind::SetWcs { slot: slot.into(), pos: [0.0, 0.0, z], roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 };
+/// Place the active setup's one WCS (#342).
+fn place(state: &mut State, z: f64) {
+    let k = CommandKind::SetWcs { pos: [0.0, 0.0, z], roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 };
     run(state, k);
 }
 
@@ -64,10 +65,10 @@ fn two_setups() -> State {
     assert_eq!(names, ["Setup1", "Setup2"], "two setups");
     run(&mut state, CommandKind::ActivateSetup(Some("Setup1".into())));
     stock(&mut state);
-    place(&mut state, "G54", 0.0);
+    place(&mut state, 0.0);
     run(&mut state, CommandKind::ActivateSetup(Some("Setup2".into())));
     stock(&mut state);
-    place(&mut state, "G55", -2.0);
+    place(&mut state, -2.0);
     run(&mut state, CommandKind::SetSetupWorkOffset { setup: "Setup2".into(), slot: Some(1) });
     create_in(&mut state, "Setup1", "F1");
     create_in(&mut state, "Setup2", "F2");
@@ -97,19 +98,19 @@ fn the_chip_and_planes_read_the_shown_operations_setup() {
     let mut state = two_setups();
     show(&mut state, "F2");
     let texts = chips(&state);
-    assert!(texts.iter().any(|t| t == "F2 · Clearance 23.00 (G55 +25.00)"), "Setup2's word: {texts:?}");
+    assert!(texts.iter().any(|t| t == "F2 · Clearance 23.00 (WCS G55 +25.00)"), "Setup2's word: {texts:?}");
     assert!(!texts.iter().any(|t| t.contains("G54")), "never Setup1's word on Setup2's op: {texts:?}");
     assert_eq!(clearance_z(&state), Some(23.0), "the plane stands on Setup2's G55");
 
     show(&mut state, "F1");
     let texts = chips(&state);
-    assert!(texts.iter().any(|t| t == "F1 · Clearance 25.00 (G54 +25.00)"), "Setup1's word: {texts:?}");
+    assert!(texts.iter().any(|t| t == "F1 · Clearance 25.00 (WCS G54 +25.00)"), "Setup1's word: {texts:?}");
     assert_eq!(clearance_z(&state), Some(25.0), "the plane stands on Setup1's G54");
 
     // Activating Setup2 changes nothing for Setup1's op: the op's own
     // setup wins over the active one.
     run(&mut state, CommandKind::ActivateSetup(Some("Setup2".into())));
-    assert!(chips(&state).iter().any(|t| t.contains("(G54 ")), "F1 stays at G54");
+    assert!(chips(&state).iter().any(|t| t.contains("(WCS G54 ")), "F1 stays at G54");
 }
 
 #[test]

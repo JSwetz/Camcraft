@@ -95,12 +95,8 @@ pub(crate) fn pick_at(state: &mut State, p: [f32; 2], mods: Mods) {
     if state.wcs_ui.pick_anchor
         && let Some((k, pos)) = anchor_hit(state, p, 12.0)
     {
-        let slot = *WCS_SLOTS
-            .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
-            .unwrap_or(&WCS_SLOTS[0]);
         state.wcs_ui.anchor_xy = k;
         state.pending.push_back(CommandKind::SetWcs {
-            slot: slot.to_string(),
             pos,
             roll_deg: state.wcs_ui.roll_deg,
             pitch_deg: state.wcs_ui.pitch_deg,
@@ -162,6 +158,10 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity, feature: sel };
+    if state.plane_pick.is_some() {
+        crate::plane_pick::take(state, pick); // #330: the Setups page's draft
+        return;
+    }
     if state.boundary_pick.is_some() {
         queue_boundary_pick(state, pick, mods);
         return;
@@ -205,8 +205,8 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     };
     let sel = if mods.alt {
         feature::singleton_chain_id(&features, edge).map(FeatureSel::Chain)
-    } else if state.boundary_pick.is_some() {
-        // A boundary takes ONE edge per click (M11.5 UX): the run - one
+    } else if state.boundary_pick.is_some() || state.plane_pick.is_some() {
+        // A boundary (and a #330 lay-on-a-plane pick) takes ONE edge per click (M11.5 UX): the run - one
         // straight stretch or one arc - never the whole tangent loop a
         // filleted rim chains into.
         feature::run_containing(&features, edge).map(|r| FeatureSel::Chain(r.id))
@@ -234,6 +234,10 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         facet,
         feature: Some(sel),
     });
+    if state.plane_pick.is_some() {
+        crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #330
+        return;
+    }
     if state.boundary_pick.is_some() {
         queue_boundary_pick(state, GeoSel { entity, feature: sel }, mods);
         return;
@@ -803,14 +807,17 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 let chip = if p.src.is_fixed() {
                     format!("{} · {} {}", state.op_ui.name, p.name, units::len(p.z, u, 2))
                 } else {
-                    // A work-offset plane names the setup's word (#329) -
-                    // the setup context `height_planes` resolved it in.
+                    // A work-offset plane names the setup's WCS and its
+                    // word (#329, #342) - the setup context
+                    // `height_planes` resolved it in.
                     let source = match p.src.reference {
-                        camcraft_app::operation::HeightReference::WorkOffset => camcraft_app::schema::WCS_SLOTS
-                            .get(camcraft_app::setup::wcs_slot(&state.world, shown_setup(state).as_deref()))
-                            .copied()
-                            .unwrap_or("G54")
-                            .to_owned(),
+                        camcraft_app::operation::HeightReference::WorkOffset => format!(
+                            "WCS {}",
+                            WCS_SLOTS
+                                .get(camcraft_app::setup::wcs_slot(&state.world, shown_setup(state).as_deref()))
+                                .copied()
+                                .unwrap_or("G54")
+                        ),
                         r => r.to_string(),
                     };
                     format!(
@@ -1665,7 +1672,11 @@ pub(crate) fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
 /// place while orbiting. A vanished pick - hidden model, deleted entity,
 /// stale id - draws nothing rather than a ghost, the hover rule again.
 pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
-    const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
+    // #330: while the Setups page collects a lay-on-a-plane pick, its
+    // draft picks are the ones drawn.
+    if let Some(draft) = &state.plane_pick {
+        return feature_lines(state, &draft.picks);
+    }
     if state.op_ui.name.is_empty() || state.hidden_paths.contains(&state.op_ui.name) {
         return Vec::new(); // nothing open: nothing picked to pin down
     }
@@ -1677,6 +1688,12 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     let operation::SrcRef::Selection(items) = &op.src else {
         return Vec::new();
     };
+    feature_lines(state, items)
+}
+
+/// The picks' outlines in 3D, violet (see [`selection_feature_lines`]).
+fn feature_lines(state: &State, items: &[GeoSel]) -> Vec<[f32; 6]> {
+    const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
     let mut out = Vec::new();
     for item in items {
         if state.hidden_in_view(&item.entity) {

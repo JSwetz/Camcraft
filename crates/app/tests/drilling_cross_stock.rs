@@ -367,7 +367,7 @@ fn a_box_stock_and_an_off_origin_spindle_stand_off_the_raw_stock_plus_the_rim() 
         for (stock, (ox, oy), raw, face) in [(boxed.clone(), (0.0, 0.0), 800.0_f64.sqrt(), 20.0), (wide.clone(), at, 30.0, 30.0)] {
             let (world, mut history) = world_on(word, stock, (ox, oy), |_| {});
             let g54 = Location { pos: Point3::new(ox, oy, 0.0), rot: IDENTITY_Q };
-            history.execute(&world, SetWcsOrigin::new(&world, "G54", g54).expect("set G54"));
+            history.execute(&world, SetWcsOrigin::new(&world, g54).expect("set G54"));
             let mut o = op();
             if let OpParams::Drill { cross, .. } = &mut o.params {
                 for h in cross.iter_mut() {

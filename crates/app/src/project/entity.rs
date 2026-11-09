@@ -248,16 +248,17 @@ impl CycleDto {
 }
 
 /// A setup as files hold it (M3.2 A): the furniture it owns, by name.
-/// `wcs` is indexed by [`WCS_SLOTS`]; an entry may name an entity the
-/// file does not contain - that slot is simply not placed in this setup,
-/// exactly what a missing `G55` entity has always meant. `datum_from` is
+/// `wcs` names the setup's one WCS entity (v54, #342); it may name an
+/// entity the file does not contain - the WCS is simply not placed yet.
+/// Older files held a list indexed by [`WCS_SLOTS`] (see [`WcsDto`]).
+/// `datum_from` is
 /// clone provenance for the setup sheet (stage D); every stamp ignores
 /// it, so it defaults and rides along for the reader, not the machinery.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct SetupDto {
     pub stock: String,
     #[serde(default)]
-    pub wcs: Vec<String>,
+    pub wcs: WcsDto,
     #[serde(default)]
     pub datum_from: String,
     /// v51 (#196): the setup's picked program offset as its G-word
@@ -270,6 +271,29 @@ pub struct SetupDto {
     /// modelled - is the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_alignment: Option<AlignmentDto>,
+    /// v55 (#343): the setup's own machine. Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<SetupMachineDto>,
+    /// v55 (#343): the setup's own post. Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<SetupPostDto>,
+}
+
+/// A setup's WCS as files hold it. v54 (#342) writes one entity name
+/// (`"wcs": "Setup2/WCS"`); v21-v53 wrote one name per `G54`..`G59` slot
+/// (`"wcs": ["Setup2/G54", ...]`), which only the v53 -> v54 rung reads
+/// (`project::wcs_one`). Absent is an empty name: the default entity.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum WcsDto {
+    One(String),
+    Slots(Vec<String>),
+}
+
+impl Default for WcsDto {
+    fn default() -> Self {
+        WcsDto::One(String::new())
+    }
 }
 
 /// A setup's part alignment as files hold it (#326): the same
