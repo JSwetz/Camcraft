@@ -57,6 +57,8 @@ pub mod tool_numbers;
 pub use camcraft_tools::tools;
 // #368: a tool's modelled body and the reads the judging laws take from it.
 pub mod tool_body;
+// #371: the editor's placement preview and picks, the sim's posed body.
+pub mod tool_body_view;
 pub mod units;
 pub use camcraft_sim::verify;
 pub mod world;

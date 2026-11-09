@@ -41,6 +41,9 @@ mod per_op;
 mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_tool_body.rs"]
+mod tool_body_ui;
+pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi};
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -181,6 +184,12 @@ pub enum CommandKind {
         number: Option<u32>,
     },
     DeleteTool(String),
+    /// #371: set (`Some`) or clear (`None`) a tool's modelled body - the
+    /// tool editor's Apply body / Clear body, one `SetToolBody`.
+    SetToolBody {
+        name: String,
+        body: Option<BodyDraft>,
+    },
     /// The document's workpiece material (M13.2); `None` states none.
     SetWorkMaterial(Option<camcraft_app::tools::WorkMaterial>),
     /// The op page's "Apply suggestion" (M13.2): feed + spindle speed
@@ -1268,6 +1277,9 @@ pub struct State {
     /// when the named tool vanishes (the ghost law, mirrored from
     /// [`State::pane_target`]).
     pub tool_editor: Option<String>,
+    /// #371: the tool editor's body draft (imported mesh, placement,
+    /// pick mode). Ephemeral like `tool_ui`; Apply body is the command.
+    pub tool_body_ui: ToolBodyUi,
     /// The machine editor window (M3.3 stage C): `None` closed. An
     /// ephemeral draft like [`State::tool_editor`] - the numbers under
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
@@ -1484,6 +1496,7 @@ impl State {
                 ..ToolUi::default()
             },
             tool_editor: None,
+            tool_body_ui: ToolBodyUi::default(),
             machine_editor: None,
             theme_cache: theme_files::Cache::new(),
             // One walk per window, at construction: the switcher's file
@@ -2174,6 +2187,7 @@ impl State {
     pub(crate) fn close_tool_editor_window(&mut self) {
         self.tool_editor = None;
         self.tool_synced = (String::new(), self.doc_version);
+        self.tool_body_ui = ToolBodyUi::default();
     }
 
     pub(crate) fn copy_operation(&mut self, name: &str) {
@@ -2629,6 +2643,7 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Tool, format!("tool number not set: {err}")),
                 }
             }
+            CommandKind::SetToolBody { name, body } => self.run_set_tool_body(&name, body),
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {

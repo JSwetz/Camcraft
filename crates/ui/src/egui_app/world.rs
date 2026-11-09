@@ -210,6 +210,7 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             classes: Vec::new(),
         })
         .collect();
+    parts.extend(sim_body_part(state));
     if !state.active_stock_hidden() {
         match (&state.program_sim, crate::machined::mesh(state)) {
             // The machined stock's extracted mesh (M13.1 owed) takes the
@@ -286,6 +287,25 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
         parts.push(GpuPart { verts, selected: false, stock: false, fill: true, classes: Vec::new() });
     }
     parts
+}
+
+/// #371: the running tool's modelled body at the playhead, posed by the
+/// frame's tip and axis, drawn as a model part (depth-tested, shaded).
+/// Only while the transport is up and its timeline is this document's
+/// (`cached_script` refreshes it before the next frame); a tool without
+/// a body adds nothing, so every no-body scene is unchanged.
+fn sim_body_part(state: &State) -> Option<GpuPart> {
+    let sim = state.sim?;
+    let (version, sc) = state.sim_script_cache.as_ref()?;
+    if *version != state.doc_version || sc.is_empty() {
+        return None;
+    }
+    let f = sc.at(sim.t);
+    let op = sc.ops.get(f.op?)?;
+    let body = camcraft_app::tool_body_view::body_for_operation(&state.world, op)?;
+    let tris = camcraft_app::tool_body_view::posed(&body.facets, [f.pos.x, f.pos.y, f.pos.z], f.axis);
+    let verts = tris.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect();
+    Some(GpuPart { verts, selected: false, stock: false, fill: false, classes: Vec::new() })
 }
 
 // -------------------------------------------------------------- overlay

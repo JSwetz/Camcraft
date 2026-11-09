@@ -1344,8 +1344,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
+        // #371 widened the window by the Body column (~270 px); its
+        // default anchor moved left by as much, so it stays centred.
         .default_pos([
-            ctx.viewport_rect().center().x - 270.0,
+            ctx.viewport_rect().center().x - 520.0,
             ctx.viewport_rect().center().y - 210.0,
         ])
         .show(ctx, |ui| {
@@ -1536,7 +1538,13 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     ui.add(egui::DragValue::new(&mut state.tool_ui.number).range(0..=camcraft_app::tool_numbers::MAX));
                 });
                 ui.vertical(|ui| {
-                    draw_tool_preview(ui, &preview_tool, u);
+                    // #371: the placed body's envelope rides the profile.
+                    let body = if exists { super::tool_body_page::envelope(state) } else { None };
+                    draw_tool_preview(ui, &preview_tool, u, body.as_deref());
+                });
+                ui.vertical(|ui| {
+                    ui.set_width(260.0);
+                    super::tool_body_page::body_section(ui, state, exists, u);
                 });
             });
             ui.separator();
@@ -1598,7 +1606,7 @@ fn push_number_if_changed(state: &mut State, name: &str) {
 /// the fields beside it are editing. Tip at the bottom (z = 0 upward),
 /// equal aspect both axes - "to scale" means to scale. A half-typed draft
 /// renders a stub and a word, never a NaN.
-fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
+fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit, body: Option<&[(f64, f64, f64)]>) {
     const SIDE: f32 = 260.0;
     const PAD: f32 = 18.0;
     let (resp, painter) = ui.allocate_painter(Vec2::splat(SIDE), Sense::hover());
@@ -1606,8 +1614,10 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
     let axis_x = rect.center().x;
     painter.rect_filled(rect, 4.0, Color32::from_rgb(24, 26, 31));
     let outline = t.profile();
-    let r_max = outline.iter().map(|q| q.1).fold(0.0f64, f64::max);
-    let z_max = outline.iter().map(|q| q.0).fold(0.0f64, f64::max);
+    // #371: a body's bands (above, len, r) widen the frame to hold them.
+    let bands = body.unwrap_or_default();
+    let r_max = outline.iter().map(|q| q.1).chain(bands.iter().map(|b| b.2)).fold(0.0f64, f64::max);
+    let z_max = outline.iter().map(|q| q.0).chain(bands.iter().map(|b| b.0 + b.1)).fold(0.0f64, f64::max);
     if r_max <= 0.0 || z_max <= 0.0 || !r_max.is_finite() || !z_max.is_finite() {
         painter.line_segment(
             [
@@ -1664,6 +1674,20 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
             steel[band],
             Stroke::NONE,
         ));
+    }
+    // #371: the modelled body's revolved envelope, translucent amber over
+    // the cylinders it replaces in the judging laws.
+    for &(above, len, r) in bands {
+        if !(above.is_finite() && len.is_finite() && r.is_finite()) || len <= 0.0 || r <= 0.0 {
+            continue;
+        }
+        painter.rect(
+            egui::Rect::from_two_pos(at(above, -r), at(above + len, r)),
+            0.0,
+            Color32::from_rgba_unmultiplied(230, 160, 60, 70),
+            Stroke::new(1.0, Color32::from_rgb(230, 160, 60)),
+            egui::StrokeKind::Inside,
+        );
     }
     // The outline as one closed polyline (a stroke has no convexity rule):
     // right side up, then the mirrored left side back down. Axis points

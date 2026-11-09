@@ -55,6 +55,8 @@ mod op_tabs;
 mod painted;
 mod tree_glyphs;
 mod pages;
+// #371: the tool editor's Body section and its picking preview.
+mod tool_body_page;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).
 mod setup_pages;
