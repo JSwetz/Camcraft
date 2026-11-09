@@ -159,6 +159,7 @@ mod engine;
 mod finish;
 mod hidden;
 mod laws;
+mod mesh_steel;
 mod midpose;
 mod posed_steel;
 mod prior;
@@ -189,5 +190,6 @@ pub use workholding::{bands_vs_workholding, rapids_vs_workholding, Workholding};
 pub use probe::Cutter;
 pub use rotary::{rotary_hits, RotaryAxis, RotaryLaw};
 pub use solid::{SolidLaw, solid_hits};
+pub use mesh_steel::{mesh_refined, steel_stack, MeshSteel, SteelBand};
 #[doc(hidden)]
 pub use contact::posed_contact;
