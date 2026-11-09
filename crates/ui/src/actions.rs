@@ -243,19 +243,26 @@ fn follow_playhead(state: &mut State, judged: bool) -> Result<(), String> {
 /// makes it gate. Pure, so the ui tests keep its shape without a window.
 #[must_use]
 pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
-    let m = camcraft_app::machine::of(world).1?;
-    Some(match camcraft_app::machine::check_document(world, &m) {
-        Ok(c) if c.is_ok() => String::from("; machine: within limits"),
-        Ok(c) => format!(
-            "; machine: {} limit problem(s){}",
-            c.problems.len(),
-            if c.more > 0 {
-                format!(" (+{})", c.more)
-            } else {
-                String::new()
+    // #388: each machine judges the ops its own setups run; the vote
+    // sums them (one machine - the common case - reads as it always did).
+    let checks = camcraft_app::posting::machine_checks(world);
+    if checks.is_empty() {
+        return None;
+    }
+    let (mut problems, mut more) = (0usize, 0usize);
+    for (_, check) in checks {
+        match check {
+            Ok(c) => {
+                problems += c.problems.len();
+                more += c.more;
             }
-        ),
-        Err(err) => format!("; machine: {err}"),
+            Err(err) => return Some(format!("; machine: {err}")),
+        }
+    }
+    Some(if problems == 0 {
+        String::from("; machine: within limits")
+    } else {
+        format!("; machine: {problems} limit problem(s){}", if more > 0 { format!(" (+{more})") } else { String::new() })
     })
 }
 
@@ -352,6 +359,8 @@ pub(crate) fn open_tool_editor(state: &mut State, name: &str) {
         state.sync_tool_ui();
     }
     state.tool_editor = Some(name.to_owned());
+    // #371: a fresh body draft per opening; it mirrors the tool's body.
+    state.tool_body_ui = crate::state::ToolBodyUi::default();
 }
 
 /// Quick-add an operation of `kind` (index into the registry the ribbon's

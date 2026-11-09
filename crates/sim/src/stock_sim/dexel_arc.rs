@@ -51,7 +51,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 /// Interior samples per search piece before the golden section: enough
 /// that the piece's minimum is bracketed beside the best sample for
 /// any piece that is convex or concave, as the split law makes them.
-const SAMPLES: usize = 8;
+pub(super) const SAMPLES: usize = 8;
 
 /// Which steel sweeps the arc. Moves carry TIP positions for all four
 /// (the codebase's convention); `lift` is the profile above the tip.
@@ -113,15 +113,15 @@ impl Atom {
 
 /// One XY arc read as a circle: centre, radius, start bearing, travel
 /// direction and swept angle, with its tip end points.
-struct ArcSweep {
-    ox: f64,
-    oy: f64,
-    rad: f64,
-    a0: f64,
-    dir: f64,
-    span: f64,
-    from: Point3,
-    to: Point3,
+pub(super) struct ArcSweep {
+    pub(super) ox: f64,
+    pub(super) oy: f64,
+    pub(super) rad: f64,
+    pub(super) a0: f64,
+    pub(super) dir: f64,
+    pub(super) span: f64,
+    pub(super) from: Point3,
+    pub(super) to: Point3,
 }
 
 impl ArcSweep {
@@ -129,7 +129,7 @@ impl ArcSweep {
     /// larger end radius, the sweep in `(0, 2 pi]` in `arc.ccw`'s
     /// direction); `None` for the degenerate arcs `arc_chords` hands
     /// back as one straight chord.
-    fn of(m: &Move, arc: ArcMove) -> Option<Self> {
+    pub(super) fn of(m: &Move, arc: ArcMove) -> Option<Self> {
         let o = arc.center;
         if !(o.x.is_finite() && o.y.is_finite()) {
             return None;
@@ -282,7 +282,7 @@ fn column_cut(sw: &ArcSweep, qx: f64, qy: f64, r: f64, atom: Atom) -> f64 {
 /// The minimum of `f` on `[lo, hi]` for a piece that is convex or
 /// concave: its ends, then a golden section bracketed around the best
 /// of `SAMPLES` interior samples. Only real evaluations are returned.
-fn piece_min(f: &impl Fn(f64) -> f64, lo: f64, hi: f64) -> f64 {
+pub(super) fn piece_min(f: &impl Fn(f64) -> f64, lo: f64, hi: f64) -> f64 {
     let mut best = f(lo).min(f(hi));
     if hi <= lo || hi.is_nan() || lo.is_nan() {
         return best;

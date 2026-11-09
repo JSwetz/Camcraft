@@ -41,6 +41,8 @@ pub mod set_wcs;
 pub mod tool;
 // #368: a tool's modelled body.
 pub mod tool_body;
+// #300: a tool library file imported as one undo unit.
+pub mod tool_import;
 // #221: a tool's controller number.
 pub mod tool_number;
 pub mod update_model;
@@ -79,6 +81,7 @@ pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
 pub use tool_body::{LatheBodySpec, SetToolBody, ToolBodySpec};
+pub use tool_import::{ImportReport, ImportTools};
 pub use tool_number::SetToolNumber;
 pub use update_model::UpdateModel;
 

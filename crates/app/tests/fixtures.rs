@@ -394,10 +394,10 @@ fn a_rapid_dipping_through_a_jaw_is_a_hit_and_through_air_is_not() {
 fn the_machine_table_is_derived_from_stated_travel() {
     let world = new_world();
     // No machine: no table, by the unstated-limit law.
-    assert!(fixture::table_box(&world).is_none());
+    assert!(fixture::table_box(&world, None).is_none());
 
     machine::set(&world, "vmc.mch", Some(&vmc()));
-    let t = fixture::table_box(&world).expect("the file states its travel");
+    let t = fixture::table_box(&world, None).expect("the file states its travel");
     assert_eq!(t.max, p(100.0, 100.0, -100.0));
     assert_eq!(t.min.x, -100.0);
     assert_eq!(t.min.y, -100.0);
@@ -411,11 +411,11 @@ fn the_machine_table_is_derived_from_stated_travel() {
     let mut quiet = vmc();
     quiet.axes[2].travel = None;
     machine::set(&world, "quiet.mch", Some(&quiet));
-    assert!(fixture::table_box(&world).is_none());
+    assert!(fixture::table_box(&world, None).is_none());
     assert!(fixture::list(&world, None).is_empty());
 
     machine::set(&world, "", None);
-    assert!(fixture::table_box(&world).is_none());
+    assert!(fixture::table_box(&world, None).is_none());
 }
 
 #[test]

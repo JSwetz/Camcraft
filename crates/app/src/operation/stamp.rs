@@ -141,7 +141,7 @@ pub fn current_stamp(
     // diameter from its work offset's origin, so moving that origin is
     // a moved input - the op goes Stale. Written only off the world
     // origin, so no digest of an op on an untouched offset changes.
-    if super::spindle_law::turns(world, params) {
+    if super::spindle_law::turns(world, setup, params) {
         let (_, o) = crate::posting::wcs_context(world, setup);
         if o != [0.0; 3] {
             h.write(b"spindle-origin");

@@ -48,6 +48,10 @@ boa_engine = "0.21.1"
 winit = "0.30"
 rfd = "0.15"
 pollster = "0.4"
+# macOS only (#144): the Objective-C runtime binding winit itself uses
+# (same 0.5 line, already in the lock - no new crate), to give winit's
+# app delegate an applicationShouldTerminate: so Cmd+Q asks first. MIT.
+objc2 = "0.5"
 
 # The shell (M1.4.2 graduation; was the M1.4.1 spike, decision in
 # docs/spike-egui-go-no-go.md): egui stack, MIT OR Apache-2.0 (egui_dock: MIT) - notices in
@@ -65,6 +69,9 @@ egui_kittest = { version = "=0.36.2", features = ["wgpu", "snapshot"] }
 # PNG decode for the UI icon set (assets/ui/*.png -> egui_app/icons.rs).
 # Png only: everything else (formats, headers of other codecs) stays off.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# PNG encode for the headless stock render (#182, app/src/raster.rs): the
+# same png crate `image` already builds on, so no new crate in the tree.
+png = "0.18"
 
 # STEP reading - truck geometry stack (ricosjp), pure Rust, Apache-2.0. The
 # Sept-2024 mutual version set; hard-pinned because the crates are alpha.

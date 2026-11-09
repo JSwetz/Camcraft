@@ -35,6 +35,8 @@ pub mod posting;
 pub mod program_entry;
 pub use camcraft_motion::probing;
 pub mod project;
+// #182: the CPU rasteriser behind the MCP stock render.
+pub mod raster;
 pub mod rest;
 pub mod ribbon;
 pub mod schema;
@@ -57,12 +59,15 @@ pub mod stock_export;
 pub mod stock_play;
 pub mod stock_play_worker;
 pub mod stock_view;
+pub mod tool_library;
 pub mod tool_list;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
 pub use camcraft_tools::tools;
 // #368: a tool's modelled body and the reads the judging laws take from it.
 pub mod tool_body;
+// #371: the editor's placement preview and picks, the sim's posed body.
+pub mod tool_body_view;
 // #369: lathe-held tool bodies (the turning tool frame).
 pub mod tool_body_lathe;
 pub mod units;

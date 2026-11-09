@@ -4,9 +4,9 @@
     "units": { "length": "mm", "angle": "degrees" },
     "parts": [
       { "id": "base", "name": "table", "type": "table", "parts": [
-        { "id": "col", "name": "Z", "type": "linear", "travel": { "min": -500.0, "max": 0.0 }, "parts": [
-          { "id": "ram", "name": "Y", "type": "linear", "travel": { "min": -250.0, "max": 250.0 }, "parts": [
-            { "id": "sld", "name": "X", "type": "linear", "travel": { "min": -300.0, "max": 300.0 } }
+        { "id": "col", "name": "Z", "type": "linear", "travel": { "min": -500.0, "max": 500.0 }, "parts": [
+          { "id": "ram", "name": "Y", "type": "linear", "travel": { "min": -500.0, "max": 500.0 }, "parts": [
+            { "id": "sld", "name": "X", "type": "linear", "travel": { "min": -600.0, "max": 600.0 } }
           ] }
         ] },
         { "id": "head", "name": "head", "type": "head",

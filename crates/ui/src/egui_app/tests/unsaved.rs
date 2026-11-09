@@ -1,7 +1,8 @@
 //! #107's frame tests: a Quit (the window X and Ctrl+Q both queue one)
 //! or a New over unsaved changes raises the Save / Don't Save / Cancel
 //! prompt instead of discarding the document, and each answer does what
-//! it says - Cancel and a failed save keep the app open.
+//! it says - Cancel and a failed save keep the app open. #144 adds the
+//! OS quit (macOS Cmd+Q / app-menu Quit) routed through the same guard.
 //! Provenance: our own tests, specced from the egui_kittest vendored
 //! sources; no HSMWorks material involved.
 
@@ -112,4 +113,28 @@ fn undo_back_to_the_saved_point_clears_the_mark() {
     harness.state_mut().state.pending.push_back(CommandKind::Redo);
     harness.run();
     assert_eq!(harness.state().state.window_title(), saved_title);
+}
+
+/// #144: an OS quit (macOS Cmd+Q, the app menu's or the Dock's Quit, a
+/// logout) is held by the terminate hook and routed as the same guarded
+/// Quit, so unsaved work raises the prompt instead of ending the process.
+/// The only test that touches the hook's process-wide flag.
+#[test]
+fn os_quit_request_over_unsaved_changes_prompts_once() {
+    use crate::egui_app::os_quit;
+    let mut harness = shell_harness();
+    assert!(!os_quit::route_pending(&mut harness.state_mut().state), "nothing asked, nothing queued");
+
+    os_quit::request();
+    assert!(os_quit::route_pending(&mut harness.state_mut().state), "the request is routed");
+    assert!(!os_quit::route_pending(&mut harness.state_mut().state), "a request is taken once");
+    harness.run();
+    let st = &harness.state().state;
+    assert!(!st.request_quit, "a dirty OS quit must not exit");
+    assert!(st.unsaved_prompt.is_some(), "the quit is held for the answer");
+    harness.get_by_label("Unsaved changes");
+
+    harness.get_by_label("Don't Save").click();
+    harness.run();
+    assert!(harness.state().state.request_quit, "Don't Save quits");
 }
