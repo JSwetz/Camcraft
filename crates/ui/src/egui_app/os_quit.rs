@@ -18,7 +18,10 @@ use crate::state::State;
 /// Set by the OS hook, taken by the shell once per loop turn.
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Record an OS quit request (the hook's only side effect).
+/// Record an OS quit request (the hook's only side effect). Only the
+/// macOS hook (and the tests) call it, so other targets don't build it -
+/// it would be dead code under `clippy -D warnings` there.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn request() {
     QUIT_REQUESTED.store(true, Ordering::SeqCst);
 }
