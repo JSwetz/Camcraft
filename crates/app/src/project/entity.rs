@@ -281,6 +281,11 @@ pub struct SetupDto {
     /// every older file - links nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relative_to: Option<String>,
+    /// v57 (#320): where the setup's stock comes from (`"own"` |
+    /// `"from_previous"`). Absent - every older file, and a setup never
+    /// picked - is #317's implicit rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_source: Option<String>,
 }
 
 /// A setup's WCS as files hold it. v54 (#342) writes one entity name

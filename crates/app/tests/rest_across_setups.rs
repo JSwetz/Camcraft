@@ -10,7 +10,8 @@
 //! Gate map (#318): covers app::rest (prior_state, prior_digest,
 //! prior_stale, suppressed_cuts_ahead, carry_refusal, rest::across),
 //! app::operation (job, stamp), app::posting_suppressed,
-//! app::commands (SetSetupRelative, AlignPartToSetup, EditOperationParams).
+//! app::commands (SetSetupRelative, AlignPartToSetup, EditOperationParams,
+//! SetSetupStockSource - #320's pick decides the chain).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
@@ -237,4 +238,92 @@ fn a_carry_the_lattice_refuses_refuses_the_rest_reading_by_name() {
     let err = GenerateOperation::new(&world, "Face2").err().expect("generation refused").to_string();
     assert!(err.contains("Face2") && err.contains("from setup 'Setup1' into setup 'Setup2'"), "{err}");
     assert!(err.contains(REST_CARRY_REFUSAL), "{err}");
+}
+
+/// #320: pick Setup2's stock source and regenerate its rest pass.
+fn pick(world: &World, h: &mut History, source: camcraft_app::setup_stock::StockSource) {
+    let cmd = camcraft_app::commands::SetSetupStockSource::new(world, "Setup2", source).expect("pick");
+    h.execute(world, cmd);
+    h.execute(world, GenerateOperation::new(world, "Rest2").expect("regenerate"));
+}
+
+/// Face1 in Setup1, then Setup2 from its datum holding the plate turned
+/// about Z by `deg`, with Face2 created there (not generated).
+fn faced_then_turned(deg: f64) -> (World, History) {
+    let world = new_world();
+    let mut h = History::default();
+    let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0400-2FL").map(|(_, t)| t).expect("tool");
+    h.execute(&world, AddTool::new(&world, "EM-0400-2FL", tool).expect("add tool"));
+    h.execute(&world, ImportModel::from_mesh("plate", cube(Point3::new(-30.0, -30.0, 0.0), Point3::new(30.0, 30.0, 16.0))));
+    let at = Location { pos: Point3::new(0.0, 0.0, -2.0), ..Default::default() };
+    h.execute(&world, SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, at).expect("stock"));
+    h.execute(&world, CreateSetup::new(&world, None, None).expect("Setup1"));
+    let face = |name: &str| {
+        let p = OpParams::Face {
+            holes: Default::default(),
+            tilt: None,
+            blend_turns: false,
+            stepover: 3.0,
+            clearance_z: Height::fixed(30.0),
+            cut_z: Height::fixed(16.0),
+            top_z: None,
+            stepdown: None,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb: true,
+        };
+        CreateOperation::new(&world, name, "EM-0400-2FL", SrcRef::Entity("plate".into()), p).expect("create")
+    };
+    h.execute(&world, face("Face1"));
+    h.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    h.execute(&world, CreateSetup::new(&world, None, Some("Setup1")).expect("Setup2"));
+    h.execute(&world, AlignPartToSetup::angles(&world, "Setup2", [0.0, 0.0, deg]).expect("turn"));
+    h.execute(&world, face("Face2"));
+    (world, h)
+}
+
+#[test]
+fn a_turned_setup_picked_its_own_stock_does_not_read_the_first_setups_cuts() {
+    use camcraft_app::commands::SetSetupStockSource;
+    use camcraft_app::setup_stock::StockSource;
+    // Turned 30 degrees: unpicked, the chain must carry and refuses.
+    // "Its own stock" is a new block: the chain stops at Setup2, so there
+    // is nothing to carry and nothing to refuse.
+    let (world, mut h) = faced_then_turned(30.0);
+    assert!(camcraft_app::rest::carry_refusal(&world, "Face2", Some("Setup2")).is_some());
+    h.execute(&world, SetSetupStockSource::new(&world, "Setup2", StockSource::Own).expect("own"));
+    assert_eq!(camcraft_app::rest::carry_refusal(&world, "Face2", Some("Setup2")), None, "a new block reads no carry");
+    h.execute(&world, GenerateOperation::new(&world, "Face2").expect("generated on its own block"));
+
+    // Turned 180 degrees (a carry the lattice holds): unpicked, Face2
+    // reads Face1's cut, so suppressing Face1 refuses the post by name;
+    // picked "Its own stock", it does not read Setup1 at all.
+    let suppressed_reader = |world: &World| {
+        posting::verification_report(world).problems.iter().any(|p| p.contains("generated against the cut of suppressed Face1"))
+    };
+    let (world, mut h) = faced_then_turned(180.0);
+    h.execute(&world, GenerateOperation::new(&world, "Face2").expect("generate"));
+    h.execute(&world, EditOperationParams::with_suppressed(&world, "Face1", true).expect("suppress"));
+    assert!(suppressed_reader(&world), "carried: Face2 read Face1's cut");
+    assert!(h.undo(&world));
+    h.execute(&world, SetSetupStockSource::new(&world, "Setup2", StockSource::Own).expect("own"));
+    h.execute(&world, GenerateOperation::new(&world, "Face2").expect("regenerate"));
+    h.execute(&world, EditOperationParams::with_suppressed(&world, "Face1", true).expect("suppress"));
+    assert!(!suppressed_reader(&world), "a new block never read Face1's cut");
+}
+
+#[test]
+fn a_same_held_setup_picked_what_setup1_leaves_reads_its_cuts() {
+    use camcraft_app::setup_stock::StockSource;
+    // Not linked, same hold: unpicked it is the clip (own block); the
+    // explicit pick carries the body, in rest as in the sim.
+    let (world, mut h) = program(Second::Clip);
+    let (one, _h1) = program(Second::None);
+    pick(&world, &mut h, StockSource::FromPrevious);
+    assert_eq!(path(&world, "Rest2"), path(&one, "Rest2"), "the picked carry equals the same-setup rest");
+    assert_eq!(status(&world, "Rest2"), OpStatus::Ok);
+    h.execute(&world, EditOperationParams::with_suppressed(&world, "Rough1", true).expect("suppress"));
+    let want = "operation Rest2 was generated against the cut of suppressed Rough1; unsuppress Rough1 or suppress Rest2 too";
+    let problems = posting::verification_report(&world).problems;
+    assert!(problems.iter().any(|p| p == want), "{problems:?}");
 }

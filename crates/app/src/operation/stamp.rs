@@ -127,6 +127,13 @@ pub fn current_stamp(
             w(&mut h, v);
         }
     }
+    // #320: a picked stock source is a moved input for every op of the
+    // setup (the material it machines). Written only once picked, so no
+    // stamp of an untouched setup changes.
+    if let Some(src) = crate::setup::effective(world, setup).and_then(|s| crate::setup_stock::stored(world, &s)) {
+        h.write(b"stock-source");
+        h.write(src.word().as_bytes());
+    }
     // Issue #62: a kind that turns about the spindle measures every
     // diameter from its work offset's origin, so moving that origin is
     // a moved input - the op goes Stale. Written only off the world
