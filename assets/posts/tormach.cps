@@ -178,6 +178,50 @@ function onOpen() {
   block(["(" + nm + ")"]);
   block([inch ? "G20" : "G21", "G17", "G90", "G91.1", "G94", "G40", "G49", "G80"]);
   block(["G64", inch ? "P0.001" : "P0.025"]);
+  var z = safeZ();
+  if (z !== null && z !== 0) block(["(SAFE RETRACT G53 Z" + fu(z) + " - STATED BY THE MACHINE)"]);
+}
+
+// #495: where "straight up" is, in machine coordinates. G53 G0 Z0 is the
+// top of Z travel only where Z homes at the top with machine Z0 there -
+// the PathPilot convention this post was written for (a Tormach homes Z
+// at the top of its travel). A LinuxCNC machine homed with Z0 at the bottom
+// would rapid DOWN into the part on that line. So the machine file
+// states the height (its Z part's `safe_retract`, `machine.safeRetractZ`,
+// mm); a document with no machine, or a Tormach model that states none,
+// keeps the PathPilot convention (0); any other machine stating none is
+// refused by name - never a guess about which way is up. Judged once.
+var safeZDone = false;
+var safeZValue = null;     // null = refused, nothing is written
+function safeZ() {
+  if (safeZDone) return safeZValue;
+  safeZDone = true;
+  var m = typeof machine !== "undefined" ? machine : null;
+  var stated = m ? m.safeRetractZ : null;
+  if (has(stated)) {
+    safeZValue = Number(stated);
+    return safeZValue;
+  }
+  var nm = (m && (m.name || m.model)) || "";
+  if (nm === "" || /^\s*tormach\b/i.test(nm)) {
+    safeZValue = 0;
+  } else {
+    msg("machine " + nm + " does not state its safe Z retract - this post lifts Z with G53 G0 before each tool change and at the end, and machine Z0 is the top of travel only on a Tormach; state the Z axis's safe_retract (machine coordinates) in the machine file");
+  }
+  return safeZValue;
+}
+
+// Z straight up in machine coordinates, then G30 to the operator's preset
+// tool-change spot. The G30 rides PathPilot's convention with the Z0
+// retract: a machine that states a different safe Z is not on it, and an
+// unset G30 position (LinuxCNC's default is the machine origin) could
+// drive Z back down - so there the retract stands alone and M6 / the
+// control's own tool-change position does the rest.
+function retract() {
+  var z = safeZ();
+  if (z === null) return;
+  block(["G53", "G0", "Z" + fu(z)]);
+  if (z === 0) block(["G30"]);
 }
 
 // Cutter compensation in the control: not stated by this post yet -
@@ -244,7 +288,8 @@ function beltNote(rpm) {
 // recommends a G30 before every tool change (no Tormach document says
 // M6 moves to a safe position on its own), run in G90 as the guidelines
 // require. A bare G30 may move X, Y and Z together, so Z goes straight
-// up first (G53 G0 Z0, the top of travel in machine coordinates) - the
+// up first (G53 G0 Z0, the top of travel in machine coordinates, or the
+// machine's stated safe Z - #495, safeZ) - the
 // same Z-first order PathPilot's own programs use between tools - and
 // only then G30. M6 then runs the changer, or pauses for a manual change
 // when the tool is not in the tray, and G43 H applies the length the
@@ -257,9 +302,8 @@ function startPreamble() {
   planeG = 17;              // the preamble states the plane
   if (toolWait) {
     toolNote();
-    block(["G53", "G0", "Z0"]);
-    block(["G30"]);
-    xyUnknown = true;        // G30 may have moved X and Y anywhere
+    retract();
+    xyUnknown = true;        // G30 (or the changer) may have moved X and Y
     block(["T" + ni(tNo), "M6"]);
     block(["G43", "H" + ni(tNo)]);
     toolWait = false;
@@ -397,13 +441,13 @@ function onCycle() {
 
 // ------------------------------------------------------------ footer
 // G53 G0 Z0 lifts the spindle straight up to the top of Z travel in
-// machine coordinates (Tormach's Z home is at the top), whatever the
+// machine coordinates (Tormach's Z home is at the top; another machine
+// states its own height, #495 - see safeZ), whatever the
 // stored G30 position holds; then G30 takes the machine to the
 // operator's preset G30 location (the unload spot), the way PathPilot's
 // own programs end. M30 ends the program (no % fence).
 function onClose() {
   endPreamble();
-  block(["G53", "G0", "Z0"]);
-  block(["G30"]);
+  retract();
   block(["M30"]);
 }

@@ -123,6 +123,12 @@ behavior only):
   states none; `rigidTapping` is `false` only when the `.mch` says the
   spindle cannot rigid-tap (`spindle.rigid_tapping: false`), so a post
   can refuse a rigid tap cycle by name.
+  `safeRetractZ` (#495) is the Z a post retracts to in MACHINE
+  coordinates (`G53 G0 Z..`), mm, from the `.mch` Z part's
+  `safe_retract`, or `null` when the file states none - a post that
+  needs it refuses by name rather than assume machine Z0 is the top;
+  `model` is the machine's model name through either door (the
+  mirror's `name`, or a raw file's `general.model`).
 - writes: `writeln(s)`, `write(s)` (appends to the open line),
   `writeBlock(...parts)`, `writeWord(w)`, `writeAddress(letter, value, dp)`,
   `writeComment(s)`, `writeBlankLine()`, `writeOutput(...)`
