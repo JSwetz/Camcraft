@@ -7,6 +7,7 @@
 
 pub mod obj;
 pub mod step;
+pub mod step_csys;
 mod step_units;
 pub mod stl;
 
