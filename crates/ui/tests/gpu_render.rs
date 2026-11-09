@@ -165,6 +165,7 @@ fn test_cam() -> Camera {
         yaw: 0.9,
         pitch: 0.5,
         dist: 160.0,
+        ..Camera::default()
     }
 }
 
@@ -266,7 +267,7 @@ fn machined_mesh_paints_as_stock() {
     let tris = camcraft_app::stock_export::machined_mesh(&fv).expect("a closed shell");
     let verts = tris.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [p.x as f32, p.y as f32, p.z as f32])).collect();
     let part = GpuPart { verts, selected: false, stock: true, fill: false, classes: Vec::new() };
-    let cam = Camera { target: [0.0, 0.0, 10.0], yaw: 0.9, pitch: 0.5, dist: 50.0 };
+    let cam = Camera { target: [0.0, 0.0, 10.0], yaw: 0.9, pitch: 0.5, dist: 50.0, ..Camera::default() };
     let Some((img, w, h)) = render(&[part], &cam) else {
         eprintln!("gpu test skipped: no usable adapter");
         return;

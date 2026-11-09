@@ -589,10 +589,30 @@ pub fn verification_report(world: &World) -> GateReport {
 /// `stream_records` refuses those by name before this ever releases
 /// metal; the gate's job is the steel, not the bookkeeping.
 fn fixture_problems(world: &World) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(ops) = program_ops(world) else {
-        return out;
+    let Ok(f) = fixture_findings(world) else {
+        return Vec::new();
     };
+    let hits = f.hits.into_iter().map(|(name, hit)| format!("{name}: {hit}"));
+    f.unjudged.into_iter().chain(hits).collect()
+}
+
+/// The fixture walk's verdict as data (#181), read by both the gate's
+/// strings and the MCP `get_fixture_findings` tool.
+#[derive(Debug, Default)]
+pub struct FixtureFindings {
+    /// `(operation key, warning)` per live collision, in program order.
+    pub hits: Vec<(String, crate::verify::Warning)>,
+    /// Operations the walk could not judge, by name and reason (#368: a
+    /// modelled tool body that no longer fits its tool) - each a problem
+    /// in its own right, never read as clear.
+    pub unjudged: Vec<String>,
+}
+
+/// The fixture walk (#181). `Err` is the program-order refusal (a stale
+/// op): no verdict, never "clear".
+pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
+    let mut out = FixtureFindings::default();
+    let ops = program_ops(world)?;
     let mut mesh_cache: std::collections::HashMap<Option<String>, Vec<crate::fixture::MeshedFixture>> =
         std::collections::HashMap::new();
     for (name, e) in ops {
@@ -612,16 +632,18 @@ fn fixture_problems(world: &World) -> Vec<String> {
             .entry(crate::setup::effective(world, op.setup.as_deref()))
             .or_insert_with(|| crate::fixture::meshes_for(world, op.setup.as_deref()));
         // The one per-op law, shared with the viewport's struck-fixture
-        // view (#339 slice 4) so the two can never disagree.
+        // view (#339 slice 4) so the two can never disagree. Its `Err`
+        // is #368's tool body that no longer fits its tool: unjudged,
+        // by name, never read as clear.
         match crate::fixture_struck::op_hits(world, &op, &cache.path, &turning, &fixed, meshes) {
-            Ok(hits) => out.extend(hits.into_iter().map(|hit| format!("{name}: {hit}"))),
-            Err(why) => out.push(format!("{name}: {why}")),
+            Ok(hits) => out.hits.extend(hits.into_iter().map(|hit| (name.clone(), hit))),
+            Err(why) => out.unjudged.push(format!("{name}: {why}")),
         }
     }
     for meshes in mesh_cache.values() {
         crate::fixture::log_mesh_refusals(meshes);
     }
-    out
+    Ok(out)
 }
 
 /// The stream we would feed the engine: every operation's records,

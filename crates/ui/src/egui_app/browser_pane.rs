@@ -15,6 +15,7 @@ use camcraft_app::{model, setup};
 
 use crate::actions;
 use crate::state::{CommandKind, DisplayMode, SetupPage, State, TreeMenuTarget, UiTarget};
+use crate::viewport::ProjectionMode;
 
 use super::browser_tree::{Leaf, browser_rows};
 use super::icons::IconSet;
@@ -37,6 +38,14 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&Icon
         ui.label("Solids");
         ui.radio_value(&mut state.display, DisplayMode::ShadedEdges, "Shaded");
         ui.radio_value(&mut state.display, DisplayMode::Wireframe, "Wireframe");
+    });
+    // Projection is view state the same way (#434): orthographic keeps
+    // a side view straight - parallel edges, no converging - which is
+    // what CAM eyeballing wants most of the time.
+    ui.horizontal(|ui| {
+        ui.label("Projection");
+        ui.radio_value(&mut state.cam.projection, ProjectionMode::Perspective, "Perspective");
+        ui.radio_value(&mut state.cam.projection, ProjectionMode::Orthographic, "Ortho");
     });
     ui.separator();
     let (rows, leaves) = browser_rows(state);
