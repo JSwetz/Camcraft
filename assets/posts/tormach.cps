@@ -426,6 +426,13 @@ function onCycle() {
 //   the control stores #5221.. in (the reference does not say) - G10 L2
 //   from #5221 + 20 x slot would mix units on a G21 program run on an
 //   inch-configured control.
+// - #575: each axis's deviation (#190.., found - expected: the value the
+//   G10 L20 write subtracts) is reported, after its tolerance test and
+//   before the offset write (or the measure-only stop), as a
+//   (DEBUG, PROBE <axis> ERROR #19n) comment. The LinuxCNC G-code
+//   reference ("Messages" / "Comments" section): DEBUG shows its text like
+//   MSG - in the operator's status display, without stopping the program -
+//   with each #n / #<name> in it replaced by the parameter's value.
 // - arming: PathPilot's probe input is always live (the probe type is a
 //   Settings-tab choice); no M-code arms it, and none is written.
 var probeBase = 100;
@@ -471,6 +478,8 @@ function onProbeResult() {
     block(["(MSG, PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
     block(["M2"]);
     block([o, "endif"]);
+    // #575: the deviation that passed is reported before it is written.
+    block(["(DEBUG, PROBE " + a.Axis + " ERROR #" + (dev + i) + ")"]);
   }
   if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
     var words = ["G10", "L20", "P" + (Number(p.SetWorkOffset) + 1)];
