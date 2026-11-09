@@ -238,9 +238,14 @@ pub fn current_stamp(
     // what the program ahead removed. Issue #109: so does every
     // unposed op's rapid law (prior acquittal, pilot and facing
     // credits) - each carries the digest (one-time Stale, by design).
-    if super::drill_prior::reads_prior(params)
-        && let Some(digest) = crate::rest::prior_digest(world, op_name, setup)
-    {
+    // #319: a posed op in a setup entered with a carried body judges the
+    // stock that body spans, so it digests the same chain - only then.
+    let digest = if super::drill_prior::reads_prior(params) {
+        crate::rest::prior_digest(world, op_name, setup)
+    } else {
+        crate::rest::carried_digest(world, op_name, setup)
+    };
+    if let Some(digest) = digest {
         h.write_u8(b'R');
         h.write_u64(digest);
     }
