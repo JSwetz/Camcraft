@@ -29,7 +29,7 @@ merge.
   review and do not build it - report "not built: needs maintainer look at
   <files> first".
 - Never launch the GUI app; never glob or run `target/*/*.exe`. Test binaries
-  only via `cargo test`. UI snapshot suites run with CWD `crates/ui`.
+  only via `cargo test`. UI suites run with CWD `crates/ui`.
 - **One review at a time.** If `.claude/pr-review.lock` (repo root)
   names a different PR than yours, or another `../cc-pr*-review` worktree
   exists, stop and report "another PR review is running" - never build in
@@ -80,8 +80,15 @@ merge.
    - Process: body ends `Fixes #N`, has a `Changelog:` line, conventional
      commit subjects; `CHANGELOG.md` edits in the PR conflict with the
      release-time changelog and should be dropped.
-   - Golden/snapshot changes: intended and explained? Snapshot pixel diffs on
-     another OS are a platform artifact, not a defect - say so.
+   - Golden changes (`tests/golden/`): intended and explained?
+   - Snapshot PNGs: a PR must not change `crates/ui/tests/snapshots/*.png`
+     (AGENTS.md "Pixel snapshots are release-lane", #255) - request the
+     change be dropped (`git checkout origin/main -- crates/ui/tests/snapshots`);
+     the goldens are regenerated once at the cut. A UI change updates the
+     structural assertions (`crates/ui/src/egui_app/tests/structural.rs`)
+     instead. The snapshot tests are `#[ignore]`d: do not run them for a PR
+     review, and a pixel diff on another OS is a platform artifact, not a
+     defect.
 6. **Post the review** (comment only) with this shape, plain and specific,
    first line `<!-- pr-reviewer: <headRefOid> -->`:
    - one-line verdict: "Ready for the maintainer to merge" / "Needs changes

@@ -108,6 +108,12 @@ After posting the review, read `gh pr view <N> --json mergeable`
 - blocking review -> add `needs-rework`, remove `merge-ready` and `needs-maintainer`; also add `conflicts` if it conflicts;
 - "Not built - needs a maintainer look" with no blockers -> add `needs-maintainer`, remove `merge-ready` and `needs-rework`; also add `conflicts` if it conflicts. With blockers it is `needs-rework` as above, and the comment still names the owner's decision.
 
+A PR that changes `crates/ui/tests/snapshots/*.png` is a blocking review
+(`needs-rework`): the pixel goldens are release-lane and are regenerated
+only at the cut (AGENTS.md "Pixel snapshots are release-lane", #255). The
+fix is to drop the PNG changes and update the structural assertions
+instead.
+
 A red or orange verdict also turns the PR back into a draft
 (`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it
 ready again for a fresh review (AGENTS.md "Every PR opens as a draft").
