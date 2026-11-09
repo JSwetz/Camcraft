@@ -1,11 +1,17 @@
 //! Split from `stock_sim.rs` by M5.0.1; structure only.
 
 use super::kernel::{MAX_CELLS_PER_AXIS, StockError, part_surface};
+use super::scan_arc::ScanArc;
 use super::scan_hidden::{hidden_rest, HiddenRest, ScanBudget};
 
 use crate::cl::{Move, MoveKind};
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
+
+/// The centre path: segments, the XY arc piece each one stands for
+/// (`scan_arc`; `None` for a straight one), and their ring ids.
+pub(super) type CenterPath = (Vec<(Point3, Point3)>, Vec<Option<ScanArc>>, Vec<u32>);
+
 /// The envelope verdict for a finishing path (M2.2a), on a stated
 /// lattice, measured not assumed. Two truths, each read by the law
 /// that is exact for it. Gouge is facet truth (M5.2 E): the exact
@@ -174,9 +180,12 @@ fn envelope_scan_lift(
     // of cell/4, which exceeds the tol + floor gate itself, and a
     // tangential ring's chords then dig a phantom trench the emitted
     // G2 arc never cut. This budget only ever tightens the yardstick:
-    // the machine follows the true arc, chord or not.
+    // the machine follows the true arc, chord or not. Since #413 the
+    // chords only index: every distance is read off the arc piece each
+    // one stands for (`scan_arc`), so this budget sizes pieces, not
+    // error.
     let chord_tol = (tol * 0.25).max(1e-9);
-    let (segs, rings) = center_segments_tagged(moves, center_lift, chord_tol);
+    let (segs, arcs, rings) = center_segments_tagged(moves, center_lift, chord_tol);
     let part = part_surface(facets, x0, y0, cell, nx, ny);
     let floor = cell * cell / (2.0 * r); // the sagitta one cell can hide
     let mut rep = EnvelopeReport {
@@ -196,7 +205,7 @@ fn envelope_scan_lift(
     // it inflated tilts by 1/cos, saw nothing on walls, and convicted
     // legitimate under-passes, and no column reading can be fixed
     // into honesty from those.
-    let (gouge, gouge_at) = super::gouge::facet_gouge(facets, &segs, r, x0, y0, cell, nx, ny)?;
+    let (gouge, gouge_at) = super::gouge::facet_gouge(facets, &segs, &arcs, r, x0, y0, cell, nx, ny)?;
     rep.gouge_mm = gouge;
     if gouge > worst {
         worst = gouge;
@@ -215,7 +224,7 @@ fn envelope_scan_lift(
     // the spacing's own scallop - unless no ball could touch the point
     // at all (a crease narrower than the ball), which is excused.
     let lat = super::ridge_scan::Lattice { part: &part, x0, y0, cell, nx, ny };
-    let ridge = super::ridge_scan::ridge_rest(facets, &segs, &rings, &lat, (r, tol, floor));
+    let ridge = super::ridge_scan::ridge_rest(facets, &segs, &arcs, &rings, &lat, (r, tol, floor));
     rep.rest_mm = ridge.rest_mm;
     if let Some(at) = ridge.rest_at
         && ridge.rest_mm > worst
@@ -231,7 +240,7 @@ fn envelope_scan_lift(
     // visible surface OCCLUDES - a ceiling's shadow over a floor -
     // judged by this same distance law. The union lives in the FIELD:
     // the ridge numbers above stand as computed, predicate untouched.
-    match hidden_rest(facets, &segs, &part, (x0, y0, cell), nx, ny, r, floor, budget) {
+    match hidden_rest(facets, &segs, &arcs, &part, (x0, y0, cell), nx, ny, r, floor, budget) {
         Ok((hidden, hidden_at)) => {
             if hidden > rep.rest_mm {
                 rep.rest_mm = hidden;
@@ -244,7 +253,9 @@ fn envelope_scan_lift(
 }
 
 /// The ball-center polyline the path sweeps: rapids excluded, arcs
-/// reduced to their sagitta chords with Z interpolated, everything
+/// reduced to their sagitta chords with Z interpolated - an XY arc's
+/// chords each carrying the true arc piece every distance is read
+/// off (#413, `scan_arc`) - everything
 /// lifted by `center_lift` - `r` for a tip-stored ball-mill path (the
 /// exact discretization `subtract_ball` cuts with), 0.0 for a turning
 /// path whose positions are already nose centers (M5.2 E).
@@ -263,7 +274,7 @@ pub(super) fn center_segments_tagged(
     moves: &[Move],
     center_lift: f64,
     chord_tol: f64,
-) -> (Vec<(Point3, Point3)>, Vec<u32>) {
+) -> CenterPath {
     let ring_of = super::ridge::closed_ring_ids(moves);
     let mut rings: Vec<u32> = Vec::new();
     let lift = |p: Point3, axis: Option<[f64; 3]>| -> Point3 {
@@ -277,6 +288,7 @@ pub(super) fn center_segments_tagged(
         }
     };
     let mut segs = Vec::new();
+    let mut arcs: Vec<Option<ScanArc>> = Vec::new();
     let mut held: Option<[f64; 3]> = None;
     let mut last_ring = 0u32;
     for (i, m) in moves.iter().enumerate() {
@@ -317,27 +329,20 @@ pub(super) fn center_segments_tagged(
                     ));
                 }
             }
+            // XY arcs measure on the true circle (#413, `scan_arc`);
+            // each piece keeps `arc_chords`' chord for indexing.
             Some(arc) => {
-                let a2 = Point2::new(m.from.x, m.from.y);
-                let b2 = Point2::new(m.to.x, m.to.y);
-                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
-                let n = cs.len().max(1) as f64;
-                let dz = m.to.z - m.from.z;
-                for (j, (ca, cb)) in cs.into_iter().enumerate() {
-                    segs.push((
-                        Point3::new(ca.x, ca.y, m.from.z + dz * (j as f64 / n) + center_lift),
-                        Point3::new(
-                            cb.x,
-                            cb.y,
-                            m.from.z + dz * ((j + 1) as f64 / n) + center_lift,
-                        ),
-                    ));
+                for (seg, piece) in super::scan_arc::xy_arc_pieces(m, arc, center_lift, chord_tol) {
+                    arcs.resize(segs.len(), None);
+                    segs.push(seg);
+                    arcs.push(piece);
                 }
             }
         }
     }
     rings.resize(segs.len(), last_ring);
-    (segs, rings)
+    arcs.resize(segs.len(), None);
+    (segs, arcs, rings)
 }
 
 /// 3D point-to-segment distance - the honest "did any ball of the

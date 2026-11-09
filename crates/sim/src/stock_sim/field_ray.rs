@@ -134,14 +134,23 @@ pub(crate) fn vertical_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> 
 fn flat_floor_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> Option<f64> {
     // The bull nose (M13.1) has the same plane floor inside its
     // flat disc, `r - corner`; its arc ring is the search's business.
-    let (a, b, r) = match sw {
-        Sweep::Revolve { a, b, kind: RevKind::Flat { r, .. } } => (a, b, *r),
-        Sweep::Revolve { a, b, kind: RevKind::Bull { r, corner, .. } } => (a, b, r - corner),
-        _ => return None,
-    };
     if ax != [0.0, 0.0, 1.0] {
         return None;
     }
+    let (rho, r, tip) = match sw {
+        // A level arc piece (#413): the same plane, its nearest anchor
+        // in closed form.
+        Sweep::Arc(p) => p.level_floor(q)?,
+        Sweep::Revolve { a, b, kind: RevKind::Flat { r, .. } } => (seg_rho(a, b, q)?, *r, a.z.min(b.z)),
+        Sweep::Revolve { a, b, kind: RevKind::Bull { r, corner, .. } } => (seg_rho(a, b, q)?, r - corner, a.z.min(b.z)),
+        _ => return None,
+    };
+    floor_entry(rho, r, tip, q, cell)
+}
+
+/// The XY distance from `q` to a level segment or a plunge's disc;
+/// `None` for an oblique move (the search's business).
+fn seg_rho(a: &Point3, b: &Point3, q: Point3) -> Option<f64> {
     let rho = if a.z == b.z {
         // XY distance to the level segment.
         let (dx, dy) = (b.x - a.x, b.y - a.y);
@@ -153,7 +162,12 @@ fn flat_floor_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> Option<f6
     } else {
         return None; // an oblique move: the search's business
     };
-    let tip = a.z.min(b.z);
+    Some(rho)
+}
+
+/// The closed-form entry onto a floor plane `tip` for a ray at `rho`
+/// from the floor disc's axis (radius `r`).
+fn floor_entry(rho: f64, r: f64, tip: f64, q: Point3, cell: f64) -> Option<f64> {
     // Inside the footprint - the flank inclusive, `field_solid::
     // flat_tie`'s law - floor strictly above the center and inside
     // this cell's ray (the search's own domain).
