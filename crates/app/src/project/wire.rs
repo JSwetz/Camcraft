@@ -75,6 +75,7 @@ pub fn collect(world: &World) -> ProjectFile {
                         part_alignment: d.part_alignment.as_ref().map(AlignmentDto::from_location),
                         machine: d.machine.as_ref().map(SetupMachineDto::from_def),
                         post: d.post.as_ref().map(SetupPostDto::from_ref),
+                        relative_to: d.relative_to.clone(),
                     })
             } else {
                 None

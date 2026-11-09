@@ -535,6 +535,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
     }
+    super::setup_links::check(&file)?;
     let keys: std::collections::HashSet<&str> = file.entities.iter()
         .filter(|e| e.kind == Some(EntityKind::Operation))
         .map(|e| e.name.as_str()).collect();
@@ -764,6 +765,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     part_alignment,
                     machine,
                     post: sdto.post.as_ref().map(SetupPostDto::to_ref),
+                    relative_to: sdto.relative_to.clone(),
                 });
             }
         }
