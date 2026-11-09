@@ -12,7 +12,7 @@ fn wcs_rows(state: &State) -> Vec<(String, String)> {
     leaves
         .iter()
         .enumerate()
-        .filter(|(_, l)| matches!(l, panes::Leaf::Wcs))
+        .filter(|(_, l)| matches!(l, panes::Leaf::Wcs(_)))
         .map(|(i, _)| (rows[i].label.clone(), rows[i].suffix.clone()))
         .collect()
 }
@@ -29,14 +29,16 @@ fn the_browser_shows_one_wcs_per_setup_and_no_slot_rows() {
     run(&mut state, CommandKind::CreateSetup { name: None, datum_from: None });
     run(&mut state, CommandKind::CreateSetup { name: None, datum_from: None });
     run(&mut state, CommandKind::SetSetupWorkOffset { setup: "Setup2".into(), slot: Some(1) });
-    assert_eq!(wcs_rows(&state), [("WCS".to_owned(), "G55".to_owned())], "the active Setup2's one WCS");
+    // #343: every setup node shows its own one WCS.
+    let both = [("WCS".to_owned(), "G54".to_owned()), ("WCS".to_owned(), "G55".to_owned())];
+    assert_eq!(wcs_rows(&state), both, "Setup1's and Setup2's one WCS each");
     let (rows, _) = panes::browser_rows(&state);
     for slot in ["G54", "G55", "G56", "G57", "G58", "G59"] {
         assert!(!rows.iter().any(|r| r.label == slot), "no {slot} slot row");
     }
     assert!(!rows.iter().any(|r| r.suffix == "not placed"), "no unplaced slot rows");
     run(&mut state, CommandKind::ActivateSetup(Some("Setup1".into())));
-    assert_eq!(wcs_rows(&state), [("WCS".to_owned(), "G54".to_owned())], "Setup1's one WCS");
+    assert_eq!(wcs_rows(&state), both, "activation moves no row");
 }
 
 #[test]
