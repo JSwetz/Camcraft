@@ -2,10 +2,12 @@
 //! and over a byte pipe: the handshake, the tool list, a whole job
 //! (import, stock, tool, operation, generate, verify, post, undo), and
 //! the refusals - every bad input is a tool error or a JSON-RPC error,
-//! never a panic.
+//! never a panic. #355: the tool library tools - export -> import into a
+//! fresh document, the duplicate skip, a malformed file refused, undo/redo.
 //!
 //! Gate map (M4.4): covers app::mcp, app::script, app::project::json,
-//! app::cli, app::operation (detect_holes, #312).
+//! app::cli, app::tool_library, app::commands (tool_import),
+//! app::operation (detect_holes, #312).
 
 mod common;
 
@@ -106,9 +108,15 @@ fn handshake_and_tool_list() {
     for want in [
         "open_project", "import_model", "save_project", "get_job", "list_operation_types", "add_operation",
         "edit_operation", "delete_operation", "set_tool", "undo", "redo", "generate", "verify", "post",
-        "detect_holes",
+        "export_tool_library", "import_tool_library", "detect_holes",
     ] {
         assert!(names.contains(&want), "missing tool {want}: {names:?}");
+    }
+    // #355: both library tools take one required path.
+    for lib in ["export_tool_library", "import_tool_library"] {
+        let t = tools.iter().find(|t| t["name"] == json!(lib)).expect("library tool listed");
+        assert_eq!(t["inputSchema"]["required"], json!(["path"]), "{t}");
+        assert_eq!(t["inputSchema"]["properties"]["path"]["type"], json!("string"), "{t}");
     }
     for t in tools {
         assert_eq!(t["inputSchema"]["type"], json!("object"), "{t}");
@@ -247,6 +255,129 @@ fn the_stdio_loop_answers_line_for_line() {
     assert_eq!(lines[0]["result"]["protocolVersion"], json!("2025-03-26"));
     assert_eq!(lines[1]["result"]["isError"], json!(false));
     assert_eq!(lines[1]["result"]["structuredContent"]["operations"], json!([]));
+}
+
+/// The first two catalog names, read through the server itself.
+fn two_catalog_tools(c: &mut Client) -> (String, String) {
+    let cat = c.ok("list_tool_catalog", json!({}));
+    let names: Vec<String> =
+        cat["tools"].as_array().map(|t| t.iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect()).unwrap_or_default();
+    assert!(names.len() >= 2, "the catalog has at least two tools: {cat}");
+    (names[0].clone(), names[1].clone())
+}
+
+fn job_tool_names(c: &mut Client) -> Vec<String> {
+    let job = c.ok("get_job", json!({}));
+    job["tools"].as_array().map(|t| t.iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect()).unwrap_or_default()
+}
+
+#[test]
+fn tool_library_export_import_roundtrip_into_a_fresh_document() {
+    let dir = tmp_dir("toollib-roundtrip");
+    let lib = dir.join("shop.camtools");
+    let mut src = Client::new();
+    let (a, b) = two_catalog_tools(&mut src);
+    src.ok("add_tool", json!({ "catalog": a }));
+    src.ok("add_tool", json!({ "catalog": b }));
+    let out = src.ok("export_tool_library", json!({ "path": lib.display().to_string() }));
+    assert_eq!(out["tools"], json!(2), "{out}");
+    let text = std::fs::read_to_string(&lib).expect("library written");
+    assert!(text.contains("\"camcraft-tools\""), "the GUI's own envelope: {text}");
+
+    let mut dst = Client::new();
+    let imp = dst.ok("import_tool_library", json!({ "path": lib.display().to_string() }));
+    assert_eq!(imp["added"].as_array().map(Vec::len), Some(2), "{imp}");
+    assert_eq!(imp["skipped"], json!([]));
+    let src_job = src.ok("get_job", json!({}));
+    let dst_job = dst.ok("get_job", json!({}));
+    assert_eq!(src_job["tools"], dst_job["tools"], "the definitions arrive exactly");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tool_library_import_skips_duplicates_and_renames_clashes() {
+    let dir = tmp_dir("toollib-dup");
+    let lib = dir.join("shop.camtools");
+    let mut src = Client::new();
+    let (a, b) = two_catalog_tools(&mut src);
+    src.ok("add_tool", json!({ "catalog": a }));
+    src.ok("add_tool", json!({ "catalog": b }));
+    src.ok("export_tool_library", json!({ "path": lib.display().to_string() }));
+
+    // The destination already holds `a` exactly, and a different tool
+    // under `b`'s name: `a` is skipped, `b` arrives as "b (2)".
+    let mut dst = Client::new();
+    dst.ok("add_tool", json!({ "catalog": a }));
+    dst.ok("add_tool", json!({ "catalog": a, "name": b }));
+    let imp = dst.ok("import_tool_library", json!({ "path": lib.display().to_string() }));
+    assert_eq!(imp["skipped"], json!([a]), "{imp}");
+    assert_eq!(imp["renamed"], json!([{ "from": b, "to": format!("{b} (2)") }]), "{imp}");
+    assert_eq!(imp["added"], json!([]));
+    // Into the document that exported it, every tool is a duplicate:
+    // nothing to import is refused, and no History entry is made.
+    let msg = src.refused("import_tool_library", json!({ "path": lib.display().to_string() }));
+    assert!(msg.starts_with("import_tool_library:") && msg.contains("nothing to import"), "{msg}");
+    src.ok("undo", json!({}));
+    src.ok("undo", json!({}));
+    src.refused("undo", json!({}));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tool_library_malformed_files_are_refused_by_name() {
+    let dir = tmp_dir("toollib-bad");
+    let mut c = Client::new();
+    let bad = dir.join("bad.camtools");
+    std::fs::write(&bad, "{ not json").expect("write");
+    let msg = c.refused("import_tool_library", json!({ "path": bad.display().to_string() }));
+    assert!(msg.contains("not a tool library"), "{msg}");
+    let insane = dir.join("insane.camtools");
+    let mut src = Client::new();
+    let (a, _) = two_catalog_tools(&mut src);
+    src.ok("add_tool", json!({ "catalog": a }));
+    let def = src.ok("get_job", json!({}))["tools"][0]["definition"].clone();
+    let mut def = def;
+    def["diameter"] = json!(-1.0);
+    let text = json!({ "format": "camcraft-tools", "version": 1, "tools": [{ "name": "Broken", "definition": def }] });
+    std::fs::write(&insane, text.to_string()).expect("write");
+    let msg = c.refused("import_tool_library", json!({ "path": insane.display().to_string() }));
+    assert!(msg.contains("Broken"), "the refusal names the tool: {msg}");
+    let msg = c.refused("import_tool_library", json!({ "path": dir.join("missing.camtools").display().to_string() }));
+    assert!(msg.contains("cannot read"), "{msg}");
+    // Nothing landed; nothing to undo. An empty document has nothing to export,
+    // and an unwritable path is refused.
+    assert!(job_tool_names(&mut c).is_empty());
+    c.refused("undo", json!({}));
+    let msg = c.refused("export_tool_library", json!({ "path": dir.join("e.camtools").display().to_string() }));
+    assert!(msg.contains("no tools"), "{msg}");
+    let msg = src.refused("export_tool_library", json!({ "path": dir.join("no/such/dir/e.camtools").display().to_string() }));
+    assert!(msg.contains("not written"), "{msg}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tool_library_import_is_one_undo_step() {
+    let dir = tmp_dir("toollib-undo");
+    let lib = dir.join("shop.camtools");
+    let mut src = Client::new();
+    let (a, b) = two_catalog_tools(&mut src);
+    src.ok("add_tool", json!({ "catalog": a }));
+    src.ok("add_tool", json!({ "catalog": b }));
+    src.ok("export_tool_library", json!({ "path": lib.display().to_string() }));
+
+    let mut c = Client::new();
+    c.ok("import_tool_library", json!({ "path": lib.display().to_string() }));
+    assert_eq!(job_tool_names(&mut c).len(), 2);
+    c.ok("undo", json!({}));
+    assert!(job_tool_names(&mut c).is_empty(), "one undo removes the whole import");
+    c.refused("undo", json!({}));
+    c.ok("redo", json!({}));
+    let mut names = job_tool_names(&mut c);
+    names.sort();
+    let mut want = vec![a, b];
+    want.sort();
+    assert_eq!(names, want, "redo brings both back");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A 20 mm disc, 10 tall, with a 6 mm blind bore 6 deep from its top,
