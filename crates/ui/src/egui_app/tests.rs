@@ -96,6 +96,8 @@ mod setup_tree;
 mod program_entry;
 // #371: the tool editor's Body section.
 mod tool_body;
+// #93: the tool editor's spun-profile (Profile) section.
+mod tool_profile;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
 

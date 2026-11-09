@@ -1497,7 +1497,8 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                 });
                 ui.vertical(|ui| {
                     ui.set_width(260.0);
-                    super::tool_body_page::body_section(ui, state, exists, u);
+                    // #93: Body / Profile tabs for a milling tool.
+                    super::tool_profile_page::third_column(ui, state, exists, u);
                 });
             });
             ui.separator();

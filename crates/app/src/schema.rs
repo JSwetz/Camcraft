@@ -130,6 +130,10 @@ pub struct ToolBody {
     pub source: String,
     /// The placed facets, in the frame `frame` names.
     pub facets: std::sync::Arc<[Triangle]>,
+    /// The drawn outline when the body is a spun profile (#93): the
+    /// facets are its revolve and the spindle frame's `profile` its exact
+    /// bands. `None` for an imported mesh (and every lathe-frame body).
+    pub spun: Option<camcraft_tools::spun::SpunProfile>,
     /// The frame, the placement it landed with, and the derived read.
     pub frame: crate::tool_body::BodyFrame,
 }
