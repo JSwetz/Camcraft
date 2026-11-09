@@ -34,8 +34,9 @@
 //!   silent crash: every tolerance here errs toward HIT.
 //! - **The mesh acquits, the box convicts (#339).** The box laws stay
 //!   the broad phase; a tagged model's closed world mesh
-//!   ([`meshes_for`]) then clears the upright moves its box flagged but
-//!   its real steel does not meet - a path down a vise's gap. The mesh
+//!   ([`meshes_for`]) then clears the moves its box flagged but its
+//!   real steel does not meet - a path down a vise's gap, upright, posed
+//!   or under a rotary (slice 3, `verify::mesh_posed`). The mesh
 //!   never adds a hit, and an open or refused mesh keeps its box
 //!   verdict (`camcraft_sim::verify::mesh_refined`).
 //! - **Steel is not kerf.** A retract through its own hole in STOCK is

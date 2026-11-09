@@ -159,6 +159,7 @@ mod engine;
 mod finish;
 mod hidden;
 mod laws;
+mod mesh_posed;
 mod mesh_steel;
 mod midpose;
 mod posed_steel;
