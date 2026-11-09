@@ -185,6 +185,11 @@ pub enum Warning {
     SweepHit { at: usize, part: bool },
     /// Rapid `move` travels under the clearance plane through stock.
     RapidInStock { at: usize },
+    /// Move `move` carries a modelled lathe holder body (#369) through
+    /// material standing about the spindle: `part` as ShankHit reads
+    /// it, `short_mm` the clearance shortfall - the radial depth the
+    /// body reaches into that material at its worst instant.
+    HolderHit { at: usize, part: bool, short_mm: f64 },
     /// Move `move` runs the named `fixture_part` of the machine through
     /// a fixture (M3.2 stage B): a band collision on a cutting move, or
     /// the tool body itself on a rapid. At most one per move - the
@@ -254,6 +259,11 @@ impl core::fmt::Display for Warning {
             Warning::Gouge { at } => {
                 write!(f, "move {at} cuts past the finish surface")
             }
+            Warning::HolderHit { at, part, short_mm } => write!(
+                f,
+                "holder body at move {at} rubs the {} - {short_mm:.3} mm short of clearance",
+                if *part { "part" } else { "uncut stock" }
+            ),
             Warning::ShankHit { at, part } => write!(
                 f,
                 "shank/holder at move {at} collides with the {}",

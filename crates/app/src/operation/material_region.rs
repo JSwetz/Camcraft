@@ -220,7 +220,7 @@ pub(super) fn drive_chains_of(world: &World, op: &Operation) -> Result<Vec<Vec<P
 /// (Contour, Pocket, Face's picked loops) take the region from the
 /// picks; every kind listed here is mesh-driven, and a picked loop
 /// could only disagree with the path the model authors.
-pub(super) fn selection_drives_region(params: &OpParams) -> bool {
+pub(crate) fn selection_drives_region(params: &OpParams) -> bool {
     !matches!(
         params,
         OpParams::Slot { .. }

@@ -61,6 +61,10 @@ pub mod tool_numbers;
 pub use camcraft_tools::tools;
 // #368: a tool's modelled body and the reads the judging laws take from it.
 pub mod tool_body;
+// #369: lathe-held tool bodies (the turning tool frame).
+pub mod tool_body_lathe;
 pub mod units;
 pub use camcraft_sim::verify;
+// #261: the moves a cached path's warnings name.
+pub mod warned_moves;
 pub mod world;

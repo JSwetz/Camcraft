@@ -13,6 +13,8 @@
 
 mod form;
 pub(crate) use form::*;
+#[cfg(test)]
+mod banner_tests;
 
 use egui::{Rect, Sense, Ui, Vec2};
 use egui_dock::{DockState, Node, NodePath, Split, SurfaceIndex};

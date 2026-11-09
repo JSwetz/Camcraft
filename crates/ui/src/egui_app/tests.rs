@@ -82,6 +82,7 @@ mod stock_fit_sides;
 mod layout;
 mod machines_pane;
 mod unsaved;
+mod post_refusal;
 mod gcode_viewer;
 mod first_setup;
 mod one_wcs;

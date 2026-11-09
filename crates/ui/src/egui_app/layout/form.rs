@@ -266,6 +266,14 @@ pub enum Tone {
 /// tone's ink; with `details`, a click expands them as a compact list
 /// (view state, never a command).
 pub fn status_banner(ui: &mut Ui, id: &str, line: &str, ink: Color32, details: &[String]) {
+    let _ = status_banner_located(ui, id, line, ink, details, &[]);
+}
+
+/// [`status_banner`] whose detail lines can be links (#261): a detail
+/// `i` with `links[i]` true reads as a link (hover says so) and a click
+/// on it returns `Some(i)` - the caller decides what it shows. A
+/// missing `links` entry is plain text.
+pub fn status_banner_located(ui: &mut Ui, id: &str, line: &str, ink: Color32, details: &[String], links: &[bool]) -> Option<usize> {
     let key = ui.make_persistent_id(("camcraft.banner", id));
     let mut open: bool = ui.ctx().data(|d| d.get_temp(key)).unwrap_or(false);
     let arrow = if details.is_empty() {
@@ -284,13 +292,22 @@ pub fn status_banner(ui: &mut Ui, id: &str, line: &str, ink: Color32, details: &
     if !details.is_empty() {
         r.on_hover_text(if open { "hide the details" } else { "show the details" });
     }
+    let mut hit = None;
     if open {
         ui.indent(key, |ui| {
-            for d in details {
-                ui.add(Label::new(RichText::new(d).small()).wrap());
+            for (i, d) in details.iter().enumerate() {
+                if links.get(i).copied().unwrap_or(false) {
+                    let r = ui.add(Label::new(RichText::new(d).small().underline()).sense(egui::Sense::click()).wrap());
+                    if r.on_hover_text("show this move in the viewport").clicked() {
+                        hit = Some(i);
+                    }
+                } else {
+                    ui.add(Label::new(RichText::new(d).small()).wrap());
+                }
             }
         });
     }
+    hit
 }
 
 /// An action bar button's role.
