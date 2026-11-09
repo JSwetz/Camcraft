@@ -270,7 +270,7 @@ fn a_bar_off_the_origin_is_turned_about_its_own_fitted_axis() {
     // axis is not the spindle).
     let (world, mut history) = lathe_world(40.0, revolve_at(&[(0.0, -16.0), (6.0, -16.0), (6.0, 2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)], (3.0, -2.0)));
     let on_axis = Location { pos: Point3::new(3.0, -2.0, 0.0), rot: IDENTITY_Q };
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", on_axis).expect("G54 on the bar's axis"));
+    history.execute(&world, SetWcsOrigin::new(&world, on_axis).expect("G54 on the bar's axis"));
     let p = OpParams::Facing {
         tolerance: 0.05,
         clearance_z: Height::fixed(25.0),

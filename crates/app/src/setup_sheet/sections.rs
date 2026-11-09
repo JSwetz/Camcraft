@@ -64,29 +64,36 @@ pub(super) fn render_stock(world: &World, ctx: Option<&str>, out: &mut String) {
 }
 
 pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
-    out.push_str("WCS OFFSETS\n");
-    let mut any = false;
-    for (slot, word) in WCS_SLOTS.iter().enumerate() {
-        if let Some(entity) = setup::wcs_entity(world, ctx, slot) {
-            any = true;
-            let pos = model::transform_of(world, &entity)
-                .unwrap_or_default()
-                .pos;
+    // #342: one WCS per setup, labelled with the word the post writes.
+    let label = setup::wcs_label(world, ctx);
+    out.push_str("WCS\n");
+    match setup::wcs_entity(world, ctx) {
+        Some(entity) => {
+            let loc = model::transform_of(world, &entity).unwrap_or_default();
+            let pos = loc.pos;
             let entity_name = model::name_of(world, &entity).unwrap_or_default();
             out.push_str(&format!(
-                "  {word}  X {}  Y {}  Z {}   (entity {entity_name})\n",
+                "  {label}  X {}  Y {}  Z {}   (entity {entity_name})\n",
                 mm(pos.x),
                 mm(pos.y),
                 mm(pos.z)
             ));
+            // #327: the rotation the translation line cannot show.
+            match crate::posting::offset_frame(&loc) {
+                crate::posting::OffsetFrame::Square => {}
+                crate::posting::OffsetFrame::Rotated { deg, axis } => out.push_str(&format!(
+                    "       rotated {deg:.3} deg about {axis} - the post refuses a rotated offset\n"
+                )),
+                crate::posting::OffsetFrame::NonFinite => out.push_str(
+                    "       placement is not finite - the post refuses this offset\n",
+                ),
+            }
         }
+        None => out.push_str(&format!("  {label}  (not placed - at the origin)\n")),
     }
-    if !any {
-        out.push_str("  (none placed)\n");
-    }
-    // #196, #329: the one word the setup's program runs in and its
-    // work-offset heights measure from: the setup's word, G54 when unset.
-    let slot = ctx.and_then(|s| setup::work_offset(world, s)).unwrap_or(0);
+    // #196, #329: the one word the setup's program runs in: the setup's
+    // label, G54 when unset.
+    let slot = setup::wcs_slot(world, ctx);
     out.push_str(&format!(
         "  program offset: {}\n",
         WCS_SLOTS.get(slot).copied().unwrap_or("G54")
@@ -113,6 +120,29 @@ pub(super) fn render_datum(world: &World, ctx: Option<&str>, out: &mut String) {
             crate::setup_align::describe(Some(a))
         ));
     }
+}
+
+/// #375: one line per inverted linear axis of the machine this setup
+/// mounts - the operator must know the slide runs the other way and the
+/// program is mirrored for it. A standard machine prints nothing (sheets
+/// unchanged).
+pub(super) fn render_machine_axes(world: &World, ctx: Option<&str>, out: &mut String) {
+    let (_, machine) = crate::machine::of_setup(world, ctx);
+    let Some(m) = machine else {
+        return;
+    };
+    let letters = m.inverted_axes();
+    if letters.is_empty() {
+        return;
+    }
+    out.push_str("MACHINE AXES\n");
+    for l in letters {
+        out.push_str(&format!(
+            "  {} - the program is mirrored in {l} for this machine\n",
+            crate::machine::inverted_axis_line(l)
+        ));
+    }
+    out.push('\n');
 }
 
 pub(super) fn render_fixtures(world: &World, ctx: Option<&str>, out: &mut String) {

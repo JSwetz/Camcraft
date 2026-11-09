@@ -36,7 +36,6 @@ fn face_chip_sets_origin_at_centroid_and_z_only_keeps_xy() {
 
     // Elsewhere first, then Z only: XY stays, Z lands on the face.
     harness.state_mut().state.pending.push_back(CommandKind::SetWcs {
-        slot: WCS_SLOTS[0].to_string(),
         pos: [5.0, 7.0, -3.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,

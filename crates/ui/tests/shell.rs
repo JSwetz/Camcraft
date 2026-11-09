@@ -391,21 +391,21 @@ fn stock_fit_without_models_is_a_polite_status() {
 }
 
 #[test]
-fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
+fn set_wcs_creates_the_wcs_undo_removes_and_a_bad_rotation_refuses() {
     use camcraft_app::model;
     use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G55".into(),
         pos: [10.0, 5.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,
         yaw_deg: 90.0,
     });
     state.drain_actions();
-    assert_eq!(state.status, "G55 origin set");
-    let g55 = model::find_by_name(&state.world, "G55").expect("offset entity");
+    assert_eq!(state.status, "WCS (G54) origin set");
+    // #342: one WCS - a document without setups keeps the legacy name.
+    let g55 = model::find_by_name(&state.world, "G54").expect("the WCS entity");
     assert!(model::is_wcs(&state.world, &g55));
     assert_eq!(model::facets_of(&state.world, &g55), None, "offsets are not solids");
     let loc = model::transform_of(&state.world, &g55).expect("location");
@@ -413,18 +413,18 @@ fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
 
     state.pending.push_back(CommandKind::Undo);
     state.drain_actions();
-    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert!(model::find_by_name(&state.world, "G54").is_none());
 
-    // Not a machine slot on this control: refused, and nothing was deleted.
+    // A rotation that is not a number: refused, and nothing was created.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G53".into(),
         pos: [0.0, 0.0, 0.0],
-        roll_deg: 0.0,
+        roll_deg: f64::INFINITY,
         pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
-    assert!(state.status.starts_with("offset not set"), "{:?}", state.status);
+    assert!(state.status.starts_with("WCS not set"), "{:?}", state.status);
+    assert!(model::find_by_name(&state.world, "G54").is_none());
 }
 
 #[test]
@@ -478,7 +478,6 @@ fn anchor_grid_places_origin_on_the_stock_box() {
     // "NE / Top": max X, max Y, max Z of the stock box.
     let p = model::anchor_point(&b, [2, 2, 2]);
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: p,
         roll_deg: 0.0,
         pitch_deg: 0.0,
@@ -505,9 +504,7 @@ fn origin_undo_leaves_no_stale_readout() {
     use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
-    state.wcs_ui.slot = 1; // G55
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G55".into(),
         pos: [12.0, 3.0, -1.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,
@@ -522,7 +519,7 @@ fn origin_undo_leaves_no_stale_readout() {
     state.pending.push_back(CommandKind::Undo);
     state.drain_actions();
     state.sync_setup_ui();
-    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert!(model::find_by_name(&state.world, "G54").is_none());
     assert_eq!(
         (state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z),
         (0.0, 0.0, 0.0),
@@ -539,14 +536,13 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
     let mut state = State::new();
     // A spindle that points along world -Y is a +90 roll about X.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: [10.0, 0.0, 0.0],
         roll_deg: 90.0,
         pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
-    assert_eq!(state.status, "G54 origin set");
+    assert_eq!(state.status, "WCS (G54) origin set");
     let g54 = model::find_by_name(&state.world, "G54").expect("origin");
     let loc = model::transform_of(&state.world, &g54).expect("location");
     let tip = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
@@ -562,7 +558,6 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
 
     // A second tilt replaces the first; undo returns exactly to it.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: [10.0, 0.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 90.0,
@@ -577,15 +572,14 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
 
     // A NaN angle is refused visibly and creates nothing (Prime Directive).
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G55".into(),
         pos: [0.0, 0.0, 0.0],
         roll_deg: f64::NAN,
         pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
-    assert!(state.status.starts_with("offset not set"), "{:?}", state.status);
-    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert!(state.status.starts_with("WCS not set"), "{:?}", state.status);
+    assert_eq!(model::transform_of(&state.world, &g54), Some(loc), "the WCS did not move");
 }
 
 #[test]
@@ -603,7 +597,6 @@ fn setup_furniture_stays_out_of_the_model_list() {
         [0.0, 0.0, 0.0],
     ));
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: [0.0, 0.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,

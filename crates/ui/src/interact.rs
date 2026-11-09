@@ -95,12 +95,8 @@ pub(crate) fn pick_at(state: &mut State, p: [f32; 2], mods: Mods) {
     if state.wcs_ui.pick_anchor
         && let Some((k, pos)) = anchor_hit(state, p, 12.0)
     {
-        let slot = *WCS_SLOTS
-            .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
-            .unwrap_or(&WCS_SLOTS[0]);
         state.wcs_ui.anchor_xy = k;
         state.pending.push_back(CommandKind::SetWcs {
-            slot: slot.to_string(),
             pos,
             roll_deg: state.wcs_ui.roll_deg,
             pitch_deg: state.wcs_ui.pitch_deg,
@@ -811,14 +807,17 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 let chip = if p.src.is_fixed() {
                     format!("{} · {} {}", state.op_ui.name, p.name, units::len(p.z, u, 2))
                 } else {
-                    // A work-offset plane names the setup's word (#329) -
-                    // the setup context `height_planes` resolved it in.
+                    // A work-offset plane names the setup's WCS and its
+                    // word (#329, #342) - the setup context
+                    // `height_planes` resolved it in.
                     let source = match p.src.reference {
-                        camcraft_app::operation::HeightReference::WorkOffset => camcraft_app::schema::WCS_SLOTS
-                            .get(camcraft_app::setup::wcs_slot(&state.world, shown_setup(state).as_deref()))
-                            .copied()
-                            .unwrap_or("G54")
-                            .to_owned(),
+                        camcraft_app::operation::HeightReference::WorkOffset => format!(
+                            "WCS {}",
+                            WCS_SLOTS
+                                .get(camcraft_app::setup::wcs_slot(&state.world, shown_setup(state).as_deref()))
+                                .copied()
+                                .unwrap_or("G54")
+                        ),
                         r => r.to_string(),
                     };
                     format!(
@@ -834,6 +833,10 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
             }
         }
     }
+    // #375: an inverted machine axis is noted once, on the first triad
+    // (the setup's own offset before the world axes) - the arrow is the
+    // program frame and is never flipped.
+    let mut notes = crate::axis_note::triad_notes(state);
     for gizmo in gizmos(state) {
         let base = Point3::new(gizmo.pos[0], gizmo.pos[1], gizmo.pos[2]);
         for (axis, (rgb, dir)) in AXES.iter().enumerate() {
@@ -855,6 +858,9 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 *rgb
             };
             out.push((uv, c, AXIS_NAMES[axis].to_string()));
+            if let Some(note) = notes.get_mut(axis).and_then(Option::take) {
+                out.push(([uv[0], uv[1] + crate::axis_note::NOTE_DROP_UV], c, note));
+            }
         }
     }
     out
