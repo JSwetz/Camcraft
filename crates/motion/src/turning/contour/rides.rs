@@ -6,7 +6,7 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::geometry::Triangle;
 use crate::machining2d::GenError;
 
-use crate::turning::{offset, prof};
+use crate::turning::{offset, prof, StockEnv};
 
 use super::{ChamferParams, MultiPassParams, TaperParams};
 use super::door::{self, face_ride};
@@ -21,6 +21,11 @@ const MAX_PASSES: u32 = 64;
 /// slope's size, and the model says which way it falls - so both
 /// readings are tried and the door judges the honest one.
 pub fn chamfer(facets: &[Triangle], p: &ChamferParams) -> Result<Toolpath, GenError> {
+    chamfer_in(facets, p, None)
+}
+
+/// [`chamfer`] in setup stock: rapids clear its OD and an exit inside its far end uses the plunge feed (#323).
+pub fn chamfer_in(facets: &[Triangle], p: &ChamferParams, stock: Option<StockEnv>) -> Result<Toolpath, GenError> {
     if !p.angle_deg.is_finite() {
         return Err(GenError::Invalid(
             "chamfer turning was asked with a number that is not one".into(),
@@ -77,6 +82,7 @@ pub fn chamfer(facets: &[Triangle], p: &ChamferParams) -> Result<Toolpath, GenEr
         p.clearance_z,
         p.feed,
         p.plunge_feed,
+        stock,
     )
 }
 
@@ -85,6 +91,11 @@ pub fn chamfer(facets: &[Triangle], p: &ChamferParams) -> Result<Toolpath, GenEr
 /// the door still judges honestly; the ride does not care which
 /// name the op carries.
 pub fn taper(facets: &[Triangle], p: &TaperParams) -> Result<Toolpath, GenError> {
+    taper_in(facets, p, None)
+}
+
+/// [`taper`] in setup stock: rapids clear its OD and an exit inside its far end uses the plunge feed (#323).
+pub fn taper_in(facets: &[Triangle], p: &TaperParams, stock: Option<StockEnv>) -> Result<Toolpath, GenError> {
     if !p.bottom_dia.is_finite() || !p.top_dia.is_finite() {
         return Err(GenError::Invalid(
             "taper turning was asked with a number that is not one".into(),
@@ -133,6 +144,7 @@ pub fn taper(facets: &[Triangle], p: &TaperParams) -> Result<Toolpath, GenError>
         p.clearance_z,
         p.feed,
         p.plunge_feed,
+        stock,
     )
 }
 
@@ -144,6 +156,11 @@ pub fn taper(facets: &[Triangle], p: &TaperParams) -> Result<Toolpath, GenError>
 /// program with more rides polishes toward the model instead of
 /// cutting stock - which is exactly what the extra passes are for.
 pub fn multi_pass(facets: &[Triangle], p: &MultiPassParams) -> Result<Toolpath, GenError> {
+    multi_pass_in(facets, p, None)
+}
+
+/// [`multi_pass`] in setup stock: rapids clear its OD and an exit inside its far end uses the plunge feed (#323).
+pub fn multi_pass_in(facets: &[Triangle], p: &MultiPassParams, stock: Option<StockEnv>) -> Result<Toolpath, GenError> {
     if !(p.stepdown.is_finite() && p.stock_to_leave.is_finite()) {
         return Err(GenError::Invalid(
             "multi-pass turning was asked with a number that is not one".into(),
@@ -196,7 +213,7 @@ pub fn multi_pass(facets: &[Triangle], p: &MultiPassParams) -> Result<Toolpath, 
     // The ladder, profile_rough's law: rungs outermost first, the
     // innermost standing at nose + stock - the floor every
     // finishing ride then walks from.
-    let e_max = prof_pd.r_max - pts.iter().map(|q| q.1).fold(f64::INFINITY, f64::min);
+    let e_max = StockEnv::top(stock, prof_pd.r_max, prof_pd.r_max) - pts.iter().map(|q| q.1).fold(f64::INFINITY, f64::min);
     let reach = 2.0 * p.nose_radius + p.stock_to_leave;
     let rungs = if e_max <= reach {
         0.0
@@ -222,6 +239,18 @@ pub fn multi_pass(facets: &[Triangle], p: &MultiPassParams) -> Result<Toolpath, 
             win.1,
         )?);
     }
+    // The clipped window may miss the part's deepest radius. As in
+    // profile_rough_in, discard roughing rungs that never reach stock;
+    // keep the leave floor and append every finishing ride afterwards.
+    if let Some(e) = StockEnv::usable(stock, prof_pd.r_max) {
+        let last = blocks.len().saturating_sub(1);
+        let mut k = 0usize;
+        blocks.retain(|cl| {
+            let keep = k == last || cl.iter().map(|q| q.1).fold(f64::INFINITY, f64::min) - p.nose_radius < e.r_out;
+            k += 1;
+            keep
+        });
+    }
     let passes = p.passes as f64;
     for k in 1..=p.passes {
         let d = p.nose_radius + p.stock_to_leave * (passes - k as f64) / passes;
@@ -238,9 +267,11 @@ pub fn multi_pass(facets: &[Triangle], p: &MultiPassParams) -> Result<Toolpath, 
         .flat_map(|cl| cl.iter().map(|q| q.1))
         .fold(0.0f64, f64::max)
         + p.tolerance;
+    let rho_clear = StockEnv::rapid_radius(stock, prof_pd.r_max, rho_clear, p.nose_radius);
+    let exit = prof::Exit::inside(stock, win.1);
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
     for cl in &blocks {
-        prof::ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed, prof::Exit::Rapid);
+        prof::ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed, exit);
     }
     b.push(
         MoveKind::Rapid,

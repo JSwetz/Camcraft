@@ -2325,7 +2325,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::chamfer(
+            let path = crate::turning::chamfer_in(
                 &material.facets,
                 &crate::turning::ChamferParams {
                     clearance_z: hl.clearance,
@@ -2337,6 +2337,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2362,7 +2363,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::taper(
+            let path = crate::turning::taper_in(
                 &material.facets,
                 &crate::turning::TaperParams {
                     clearance_z: hl.clearance,
@@ -2375,6 +2376,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2404,7 +2406,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::multi_pass(
+            let path = crate::turning::multi_pass_in(
                 &material.facets,
                 &crate::turning::MultiPassParams {
                     clearance_z: hl.clearance,
@@ -2418,6 +2420,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }

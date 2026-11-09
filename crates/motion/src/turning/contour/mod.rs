@@ -35,7 +35,7 @@
 mod door;
 mod rides;
 
-pub use rides::{chamfer, multi_pass, taper};
+pub use rides::{chamfer, chamfer_in, multi_pass, multi_pass_in, taper, taper_in};
 
 /// Chamfer turning as the kernel reads it: the window that bounds
 /// the face, the face's authored cone angle off the cylinder, and
