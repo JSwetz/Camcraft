@@ -153,3 +153,28 @@ fn the_file_read_refuses_missing_and_unknown_files_by_name() {
     assert!(e.contains("unsupported"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_display_assembly_runs_from_the_tip_through_the_shank_into_the_body() {
+    let t = catalog_tool(TOOL);
+    let zs = t.flute_len + t.shank_len;
+    let zr = |tris: &[Triangle]| {
+        tris.iter().flat_map(|q| [q.a.z, q.b.z, q.c.z]).fold((f64::INFINITY, f64::NEG_INFINITY), |a, z| (a.0.min(z), a.1.max(z)))
+    };
+    let r_at = |tris: &[Triangle], z: f64| {
+        tris.iter().flat_map(|q| [q.a, q.b, q.c]).filter(|p| (p.z - z).abs() < 1e-9).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max)
+    };
+    // Seated on the shank top.
+    let body = view::preview(&prism(20.0, 0.0, 30.0, 16), [0.0, 0.0, 1.0], zs).expect("seated");
+    let all = view::assembly(&t, &body);
+    assert_eq!(zr(&all), (0.0, zs + 30.0));
+    let steel = &all[..all.len() - body.facets.len()];
+    assert_eq!(zr(steel), (0.0, zs), "cutter and shank stop at the shank top");
+    assert!((r_at(steel, 0.0) - t.diameter * 0.5).abs() < 1e-9, "the cutter's radius at the tip");
+    assert!((r_at(steel, zs) - t.shank_d * 0.5).abs() < 1e-9, "the shank's radius at its top");
+    // Standing 10 mm clear: the shank is carried up to the body's foot.
+    let high = view::preview(&prism(20.0, 0.0, 30.0, 16), [0.0, 0.0, 1.0], zs + 10.0).expect("clear");
+    let all = view::assembly(&t, &high);
+    let steel = &all[..all.len() - high.facets.len()];
+    assert!((zr(steel).1 - (zs + 10.0)).abs() < 1e-9, "no floating body");
+}

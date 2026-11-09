@@ -60,6 +60,19 @@
   draws an axis marker only), so "unchanged cylinders" means unchanged:
   no body, no new geometry. Dropped: drawing the cylinder assembly for
   body-less tools (a separate display feature).
+- **Hands-on fix: the simulation draws the whole tool when it has a
+  body.** The first cut drew the body alone. On a real document it sat
+  a shank length (55 mm for the catalog end mill) above the tip with
+  nothing below it, off the top of a part-framed view, and the user saw
+  no difference. Now, while simulating, a tool with a body is drawn
+  whole: cutter and shank revolved from `Tool::profile` up to the shank
+  top (carried up to the body's foot if it stands clear, the same gap
+  the fixture laws fill with shank), then the body. Frame takes the
+  posed assembly in while the transport is up. Not done: auto-framing
+  on Simulate (it would shrink the part to fit a tall holder for every
+  run); drawing cutter/shank for tools without a body (no-body scenes
+  stay unchanged); a static tool marker outside playback (none exists
+  to put a body on).
 - **File read is synchronous** on the UI thread (`tool_body_view::load`,
   the model importer). A holder file is small next to a part; the
   worker-thread import path is wired to `ImportModel` and would need a

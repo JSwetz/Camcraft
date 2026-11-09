@@ -3215,6 +3215,20 @@ impl State {
                 }
             }
         }
+        // #371: while simulating, the posed tool assembly is part of
+        // "all" - a holder rides a shank length above the part.
+        for t in crate::egui_app::world::sim_tool_tris(self).unwrap_or_default() {
+            for p in [t.a, t.b, t.c] {
+                for axis in 0..3 {
+                    let v = [p.x, p.y, p.z][axis];
+                    if v.is_finite() {
+                        min[axis] = min[axis].min(v);
+                        max[axis] = max[axis].max(v);
+                        any = true;
+                    }
+                }
+            }
+        }
         // A work offset parked far from the parts is still "all": frame
         // their origins even though they carry no geometry.
         for (_, entity) in model::named_entities(&self.world) {

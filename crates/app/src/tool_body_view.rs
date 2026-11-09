@@ -19,6 +19,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::model;
 use crate::schema::ToolBody;
 use crate::tool_body;
+use crate::tools::Tool;
 
 /// The six model directions the editor offers as the tool axis.
 pub const AXIS_CHOICES: [(&str, [f64; 3]); 6] = [
@@ -119,6 +120,67 @@ pub fn posed(facets: &[Triangle], tip: [f64; 3], axis: [f64; 3]) -> Vec<Triangle
         Point3::new(r[0] + tip[0], r[1] + tip[1], r[2] + tip[2])
     };
     facets.iter().map(|t| Triangle::new(map(t.a), map(t.b), map(t.c))).collect()
+}
+
+/// Facets around the axis per revolved display ring.
+const RING: usize = 32;
+
+/// The whole tool for display, tool frame (tip at the origin, +Z up):
+/// the cutter and shank revolved from `Tool::profile` up to the shank
+/// top - carried up to the body's foot when the body stands clear of it,
+/// the gap the fixture laws also fill with shank - and then the body's
+/// own facets in place of the holder cylinder. Without the steel below
+/// it a body floats a shank length above the tip, off the frame of a
+/// part-sized view (#371 feedback).
+#[must_use]
+pub fn assembly(tool: &Tool, body: &ToolBody) -> Vec<Triangle> {
+    let zs = tool.flute_len.max(0.0) + tool.shank_len.max(0.0);
+    let top = zs.max(body.profile.bottom());
+    let rs = tool.shank_d.max(0.0) * 0.5;
+    let mut prof: Vec<(f64, f64)> =
+        tool.profile().into_iter().filter(|&(z, r)| z.is_finite() && r.is_finite() && z < zs - 1e-9).collect();
+    prof.extend([(zs, rs), (top, rs), (top, 0.0)]);
+    let mut out = revolve(&prof);
+    out.extend(body.facets.iter().copied());
+    out
+}
+
+/// A `(z, r)` meridian spun about +Z into triangles; rings at r = 0
+/// close to a point, flat steps make annuli.
+fn revolve(prof: &[(f64, f64)]) -> Vec<Triangle> {
+    let at = |z: f64, r: f64, k: usize| {
+        let a = std::f64::consts::TAU * k as f64 / RING as f64;
+        Point3::new(r * a.cos(), r * a.sin(), z)
+    };
+    let mut out = Vec::new();
+    for w in prof.windows(2) {
+        let ((z0, r0), (z1, r1)) = (w[0], w[1]);
+        if (z0 - z1).abs() < 1e-12 && (r0 - r1).abs() < 1e-12 {
+            continue;
+        }
+        for k in 0..RING {
+            let (a, b, c, d) = (at(z0, r0, k), at(z0, r0, k + 1), at(z1, r1, k + 1), at(z1, r1, k));
+            if r0 > 1e-12 {
+                out.push(Triangle::new(a, b, c));
+            }
+            if r1 > 1e-12 {
+                out.push(Triangle::new(a, c, d));
+            }
+        }
+    }
+    out
+}
+
+/// The display assembly (`assembly`) of the tool operation `op` runs,
+/// tool frame - only when that tool has a body.
+#[must_use]
+pub fn assembly_for_operation(world: &World, op: &str) -> Option<Vec<Triangle>> {
+    let e = model::find_by_name(world, op)?;
+    let tool_name = model::operation_of(world, &e)?.tool;
+    let te = model::find_by_name(world, &tool_name)?;
+    let tool = model::tool_of(world, &te)?;
+    let body = tool_body::body_of(world, &te)?;
+    Some(assembly(&tool, &body))
 }
 
 /// The body on the tool operation `op` runs, if that tool has one.

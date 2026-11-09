@@ -183,16 +183,98 @@ fn the_simulation_draws_the_body_at_the_playhead_and_nothing_without_one() {
     let sc = super::super::shell::cached_script(st);
     let scene = world::collect(st);
     assert_eq!(scene.parts.len(), bare + 1, "the body is one more part");
-    // Posed at the playhead: its lowest vertex sits the shank top above the tip.
+    // Posed at the playhead: the tool runs from its tip up through the
+    // body, whose foot sits the shank top above the tip.
     let f = sc.at(0.0);
-    let body = scene
-        .parts
-        .iter()
-        .find(|p| !p.stock && !p.fill && p.verts.len() == 96 * 3)
-        .expect("the posed body part");
-    let zmin = body.verts.iter().map(|v| f64::from(v[2])).fold(f64::INFINITY, f64::min);
-    assert!((zmin - (f.pos.z + top)).abs() < 1e-3, "foot at tip + {top}: {zmin} vs {}", f.pos.z);
+    let (verts, tip) = tool_part(st).expect("the posed tool part");
+    assert!((tip - f.pos.z).abs() < 1e-9);
+    let zmin = verts.iter().map(|v| f64::from(v[2])).fold(f64::INFINITY, f64::min);
+    let zmax = verts.iter().map(|v| f64::from(v[2])).fold(f64::NEG_INFINITY, f64::max);
+    assert!((zmin - f.pos.z).abs() < 1e-3, "tip at {}: {zmin}", f.pos.z);
+    assert!((zmax - (f.pos.z + top + 30.0)).abs() < 1e-3, "body top at tip + {top} + 30: {zmax}");
     st.sim = None;
     assert_eq!(world::collect(st).parts.len(), bare, "no transport, no body drawn");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The user's #371 hands-on document: StepBlock, 90x70x28 stock, the
+/// catalog end mill, Face1 generated (project v56, our own fixture).
+const STEP_BLOCK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/egui_app/tests/step_block_371.camproj");
+
+/// Is every vertex of `verts` inside the viewport image under the camera?
+fn on_screen(state: &State, verts: &[[f32; 3]]) -> usize {
+    let mvp = state.cam.mvp(1280.0 / 649.0);
+    verts
+        .iter()
+        .filter(|v| {
+            interact::project_uv(&mvp, [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
+                .is_some_and(|u| (0.0..=1.0).contains(&u[0]) && (0.0..=1.0).contains(&u[1]))
+        })
+        .count()
+}
+
+/// The posed tool part of the scene (the one model part that is no
+/// document model) and the frame's tip height.
+fn tool_part(state: &State) -> Option<(Vec<[f32; 3]>, f64)> {
+    let models = model::model_entities(&state.world).len();
+    let scene = world::collect(state);
+    let solids: Vec<_> = scene.parts.into_iter().filter(|p| !p.stock && !p.fill).collect();
+    let (_, sc) = state.sim_script_cache.as_ref()?;
+    let tip = sc.at(state.sim?.t).pos.z;
+    (solids.len() == models + 1).then(|| (solids.last().map(|p| p.verts.clone()).unwrap_or_default(), tip))
+}
+
+/// #371 feedback, bug 1: on the user's document the body was collected
+/// but posed a shank length (55 mm) above the tip with nothing below it,
+/// off the top of a part-sized view - "no difference with and without
+/// the body". The tool now draws whole (cutter and shank up into the
+/// body) at every playhead, stale or fresh, and Frame takes it in.
+#[test]
+fn the_simulated_tool_reaches_from_its_tip_into_the_body_on_the_users_document() {
+    let mut harness = shell_harness();
+    harness.run();
+    harness.state_mut().state.pending.push_back(CommandKind::OpenProjectFile(STEP_BLOCK.into()));
+    harness.run();
+    crate::actions::open_tool_editor(&mut harness.state_mut().state, TOOL);
+    harness.run();
+    let path = temp_stl("user");
+    prism_stl(&path, 20.0, 0.0, 50.0, 24);
+    harness.state_mut().state.import_tool_body_from(&path);
+    harness.state_mut().state.tool_body_ui.offset = 55.0;
+    harness.run();
+    harness.get_by_label("Apply body").click();
+    harness.run();
+    harness.run();
+    assert!(body_source(&harness.state().state).is_some(), "status: {}", harness.state().state.status);
+    harness.state_mut().state.close_tool_editor_window();
+    harness.state_mut().state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+    // Paused at 0, as the user saw it.
+    harness.state_mut().state.sim = Some(crate::state::Sim { t: 0.0, playing: false, speed: 1.0 });
+    harness.run();
+    harness.run();
+    let check = |st: &State, when: &str| {
+        let (verts, tip) = tool_part(st).unwrap_or_else(|| panic!("{when}: no tool part in the scene"));
+        let zmin = verts.iter().map(|v| f64::from(v[2])).fold(f64::INFINITY, f64::min);
+        let zmax = verts.iter().map(|v| f64::from(v[2])).fold(f64::NEG_INFINITY, f64::max);
+        assert!((zmin - tip).abs() < 1e-3, "{when}: the tool starts at its tip ({zmin} vs {tip})");
+        assert!((zmax - (tip + 105.0)).abs() < 1e-3, "{when}: and ends at the body's top ({zmax})");
+    };
+    check(&harness.state().state, "t = 0, Face1 stale");
+    let total = harness.state().state.sim_script_cache.as_ref().map(|(_, s)| s.total).unwrap();
+    for t in [total * 0.5, total] {
+        harness.state_mut().state.sim.as_mut().unwrap().t = t;
+        harness.run();
+        check(&harness.state().state, &format!("t = {t:.1}"));
+    }
+    // Frame takes the assembly in: the whole tool is on screen.
+    harness.state_mut().state.pending.push_back(CommandKind::FrameAll);
+    harness.run();
+    let (verts, _) = tool_part(&harness.state().state).unwrap();
+    assert_eq!(on_screen(&harness.state().state, &verts), verts.len(), "Frame shows the whole tool");
+    // Regenerated (fresh), still drawn.
+    harness.state_mut().state.pending.push_back(CommandKind::GenerateOperation("Face1".into()));
+    harness.run();
+    harness.run();
+    check(&harness.state().state, "after regenerate");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
