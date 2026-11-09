@@ -17,7 +17,7 @@
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
-    AddTool, AlignPartToSetup, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel,
+    ActivateSetup, AddTool, AlignPartToSetup, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel,
     SetSetupRelative, SetSetupStockSource, SetStock,
 };
 use camcraft_app::geometry::{Point3, cube};
@@ -131,12 +131,22 @@ fn unpicked_setups_read_the_317_rule_and_simulate_unchanged() {
 
 #[test]
 fn a_new_block_after_a_flip_starts_from_its_own_stock_and_undoes() {
+    // The verdict reads each column's top against the part, so the two
+    // starts must differ from above: Setup2's own block stands 4 mm
+    // taller (top 22) than the 18 mm Setup1 leaves (#415), and Face2
+    // stops at 19, above the part - 2 mm rest on the carried body (it
+    // cuts air), 3 mm on the new block. Faced down to the part, both
+    // starts finish to the same exact top and no verdict could tell.
     let (world, mut h) = document(16.0);
     h.execute(&world, AlignPartToSetup::preset(&world, "Setup2", AlignPreset::FlipX).expect("flip"));
-    add_face(&world, &mut h, "Face2", 16.0);
+    h.execute(&world, ActivateSetup::new(&world, Some("Setup2")).expect("activate Setup2"));
+    let at = Location { pos: Point3::new(0.0, 0.0, -2.0), ..Default::default() };
+    h.execute(&world, SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 24.0 }, at).expect("Setup2's stock"));
+    add_face(&world, &mut h, "Face2", 19.0);
     let carried = simulate_document(&world).expect("carried");
     let before = incoming_body(&world, "Setup2").expect("carried body");
     assert!(near(before.volume(), 60.0 * 60.0 * 18.0, 1e-6), "{}", before.volume());
+    assert!(near(carried.dev.max_rest, 2.0, 1e-6), "the carried top 18 over the part: {}", carried.dev.max_rest);
     assert!(fresh(&world, "Face2"));
 
     pick(&world, &mut h, StockSource::Own);
@@ -147,8 +157,9 @@ fn a_new_block_after_a_flip_starts_from_its_own_stock_and_undoes() {
     let stock2 = camcraft_app::stock_sim::stock_grid(&world, Some("Setup2"), 2.0).expect("Setup2's stock");
     let (lo, hi) = block.bounds().expect("material");
     assert!(near(hi.z, stock2.stock_z, 1e-9), "Setup2's own block top: {lo:?} {hi:?}");
-    assert!(near(block.volume(), 60.0 * 60.0 * 20.0, 1e-6), "the whole block: {}", block.volume());
+    assert!(near(block.volume(), 60.0 * 60.0 * 24.0, 1e-6), "the whole block: {}", block.volume());
     let new_block = simulate_document(&world).expect("judged on a new block");
+    assert!(near(new_block.dev.max_rest, 3.0, 1e-6), "Face2 at 19 over the part: {}", new_block.dev.max_rest);
     assert_ne!(bits(&new_block), bits(&carried), "the sim starts elsewhere");
 
     h.undo(&world); // the regeneration
@@ -213,7 +224,9 @@ fn the_pick_round_trips_and_older_or_broken_files_read_by_name() {
     project::save(&world, &path).expect("save");
     let first = std::fs::read_to_string(&path).expect("read");
     assert!(first.contains("\"stock_source\": \"from_previous\""), "{first}");
-    assert_eq!(project::PROJECT_VERSION, 57);
+    // The stock source arrived at v57 (#320); pin the floor so a later
+    // rung does not break this round trip (cf. #344).
+    const _: () = assert!(project::PROJECT_VERSION >= 57, "stock sources need project v57 or later");
     let world2 = new_world();
     project::load(&world2, &path).expect("load");
     assert_eq!(setup_stock::stored(&world2, "Setup2"), Some(StockSource::FromPrevious));

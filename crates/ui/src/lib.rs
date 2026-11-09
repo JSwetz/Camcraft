@@ -17,6 +17,8 @@ pub mod feedback;
 pub mod interact;
 pub mod machined;
 pub mod operations;
+pub mod path_lines;
+pub mod post_file;
 pub mod plane_pick;
 pub mod state;
 pub mod theme_dir;

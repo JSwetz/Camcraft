@@ -23,7 +23,9 @@
 //! tip's travel plus reach times the interval's proven swing, which
 //! bounds EVERY pose inside the interval, not only its two ends - so
 //! the capsules ENCLOSE the swept volume continuously: an over-report
-//! of a graze, never a hidden crash between two samples. A capsule
+//! of a graze, never a hidden crash between two samples. On an arc the
+//! tip's travel also takes the chord's bulge ([`super::arc_bulge`]):
+//! the true tip stands off its chord by up to the sagitta (#491). A capsule
 //! encloses its cylinder (its caps reach one radius past each end),
 //! the same err-toward-HIT direction. The segment-box distance is
 //! exact: the distance to a convex box along a segment is convex in
@@ -43,7 +45,9 @@ use crate::cl::{is_vertical, MoveKind, Toolpath};
 use crate::fixture::{FixtureBox, FIXTURE_HIT_TOL};
 use crate::geometry::Point3;
 use crate::tools::ToolGeom;
+use camcraft_tools::holder_profile::HolderStack;
 
+use super::arc_bulge::Bulge;
 use super::midpose;
 use super::rotary::RotaryAxis;
 use super::types::FixturePart;
@@ -60,12 +64,13 @@ const ROUNDS: usize = 90;
 pub(super) fn posed_hits(
     path: &Toolpath,
     tool: &ToolGeom,
+    holder: &HolderStack,
     fixtures: &[FixtureBox],
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
     rapids: bool,
 ) -> Vec<Option<FixturePart>> {
-    sweep(path, tool, fixtures, spindle, chord_tol, rapids, None)
+    sweep(path, tool, holder, fixtures, spindle, chord_tol, rapids, None)
         .into_iter()
         .map(|v| match v {
             Verdict::Hit(p) => Some(p),
@@ -98,9 +103,11 @@ pub(super) enum Verdict {
 /// turn): each interval's stack is carried through the rotation that
 /// stands its pose upright - the turn the machine itself must make -
 /// and judged against boxes stated at rotary zero.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn sweep(
     path: &Toolpath,
     tool: &ToolGeom,
+    holder: &HolderStack,
     fixtures: &[FixtureBox],
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
@@ -111,13 +118,13 @@ pub(super) fn sweep(
     if fixtures.is_empty() {
         return out;
     }
-    let (fl, sl, hl) = (tool.flute_len, tool.shank_len, tool.holder_len);
-    let mut stack: Vec<(FixturePart, f64, f64, f64)> = vec![
-        (FixturePart::Shank, fl, fl + sl, tool.shank_radius),
-        (FixturePart::Holder, fl + sl, fl + sl + hl, tool.holder_radius),
-    ];
+    let (fl, sl) = (tool.flute_len, tool.shank_len);
+    let mut stack: Vec<(FixturePart, f64, f64, f64)> = vec![(FixturePart::Shank, fl, fl + sl, tool.shank_radius)];
+    // What stands above the shank (#368): the holder cylinder - the
+    // same sums as ever - or a modelled body's bands.
+    stack.extend(holder.bands.iter().map(|b| (FixturePart::Holder, b.above, b.above + b.len, b.r)));
     if let Some((sr, slen)) = spindle {
-        stack.push((FixturePart::Spindle, fl + sl + hl, fl + sl + hl + slen, sr));
+        stack.push((FixturePart::Spindle, holder.top, holder.top + slen, sr));
     }
     stack.push((FixturePart::Flute, 0.0, fl, tool.radius));
     // A band of no length is no steel; a non-finite one fails closed
@@ -143,9 +150,13 @@ pub(super) fn sweep(
             out[i] = stack.first().map_or(Verdict::Clear, |e| hit(e.0));
             continue;
         }
+        // An arc's true tip strays off its chords by up to the bulge
+        // (#491): every capsule of the move grows by it (zero on a
+        // straight move, which keeps its reading).
+        let bulge = if m.arc.is_some() { Bulge::of(m, m.segments3(tol).len()).deviation() } else { 0.0 };
         let mut struck = Verdict::Clear;
         'walk: for iv in midpose::intervals(m, a, b, reach, tol) {
-            let travel = dist(iv.pm, iv.p0).max(dist(iv.pm, iv.p1));
+            let travel = dist(iv.pm, iv.p0).max(dist(iv.pm, iv.p1)) + bulge;
             // The machine frame: the turn standing `am` upright, and
             // the most the rotary turns off it within the interval -
             // the end poses' turns, and never under the proven swing

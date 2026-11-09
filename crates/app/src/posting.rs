@@ -132,6 +132,13 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach 1100MX", include_str!("../../../assets/machines/tormach-1100mx.mch")),
     ("Tormach 1500MX", include_str!("../../../assets/machines/tormach-1500mx.mch")),
     ("Tormach PCNC 440", include_str!("../../../assets/machines/tormach-pcnc440.mch")),
+    ("Tormach 1100M", include_str!("../../../assets/machines/tormach-1100m.mch")),
+    // #170: the Mach3-era R8 mills, each from its own operator's manual.
+    ("Tormach PCNC 770", include_str!("../../../assets/machines/tormach-pcnc770.mch")),
+    ("Tormach PCNC 770 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc770-s3.mch")),
+    ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
+    ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
+    ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
@@ -583,10 +590,30 @@ pub fn verification_report(world: &World) -> GateReport {
 /// `stream_records` refuses those by name before this ever releases
 /// metal; the gate's job is the steel, not the bookkeeping.
 fn fixture_problems(world: &World) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(ops) = program_ops(world) else {
-        return out;
+    let Ok(f) = fixture_findings(world) else {
+        return Vec::new();
     };
+    let hits = f.hits.into_iter().map(|(name, hit)| format!("{name}: {hit}"));
+    f.unjudged.into_iter().chain(hits).collect()
+}
+
+/// The fixture walk's verdict as data (#181), read by both the gate's
+/// strings and the MCP `get_fixture_findings` tool.
+#[derive(Debug, Default)]
+pub struct FixtureFindings {
+    /// `(operation key, warning)` per live collision, in program order.
+    pub hits: Vec<(String, crate::verify::Warning)>,
+    /// Operations the walk could not judge, by name and reason (#368: a
+    /// modelled tool body that no longer fits its tool) - each a problem
+    /// in its own right, never read as clear.
+    pub unjudged: Vec<String>,
+}
+
+/// The fixture walk (#181). `Err` is the program-order refusal (a stale
+/// op): no verdict, never "clear".
+pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
+    let mut out = FixtureFindings::default();
+    let ops = program_ops(world)?;
     let spindle = crate::machine::of(world)
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
@@ -598,10 +625,19 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
-        let Some(tool) = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let Some((tool_entity, tool)) = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t).map(|d| (t, d)))
         else {
             continue;
+        };
+        // #368: the body's enclosing cylinder and band stack; a body
+        // that no longer fits its tool is itself the problem, by name.
+        let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
+            Ok(v) => v,
+            Err(e) => {
+                out.unjudged.push(format!("{name}: tool {}: {e}", op.tool));
+                continue;
+            }
         };
         // `boxes_for` already folds in the machine-derived table, so an
         // empty list means no steel this op could strike at all (the
@@ -619,20 +655,20 @@ fn fixture_problems(world: &World) -> Vec<String> {
             axis: crate::fixture::rotary_axis_of(world, &op),
         };
         let geom = tool.geom();
-        let mut hits = crate::verify::bands_vs_workholding(
+        let holder = crate::tool_body::stack(&geom, body.as_ref());
+        let mut hits = crate::verify::bands_vs_workholding_held(
             &cache.path,
             &geom,
+            &holder,
             &wh,
             spindle,
             operation::GOUGE_TOL,
         );
         // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::rapids_vs_workholding(&cache.path, &geom, &wh, spindle));
-        for hit in hits {
-            out.push(format!("{name}: {hit}"));
-        }
+        hits.extend(crate::verify::rapids_vs_workholding_held(&cache.path, &geom, &holder, &wh, spindle));
+        out.hits.extend(hits.into_iter().map(|hit| (name.clone(), hit)));
     }
-    out
+    Ok(out)
 }
 
 /// The stream we would feed the engine: every operation's records,

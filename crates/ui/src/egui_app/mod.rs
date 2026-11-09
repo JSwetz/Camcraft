@@ -47,6 +47,10 @@ mod load_field;
 // pub(crate) past egui_app: `State::machine_editor` names its draft
 // type (M3.3 stage C), so state.rs has to see through the door.
 pub(crate) mod machine_editor;
+// pub(crate) for the same reason: `State::post_refusal` names its type.
+pub(crate) mod post_refusal;
+// pub(crate) for the same reason: `State::machines_pane` (#287).
+pub(crate) mod machines_pane;
 mod feeds_page;
 mod spindle_row;
 mod approach_page;
@@ -55,6 +59,8 @@ mod op_tabs;
 mod painted;
 mod tree_glyphs;
 mod pages;
+// #371: the tool editor's Body section and its picking preview.
+mod tool_body_page;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).
 mod setup_pages;
@@ -80,6 +86,8 @@ mod mill2d_page;
 mod mill3d_page;
 mod multiaxis_page;
 mod op_page;
+// #144: macOS Cmd+Q / app-menu Quit routed through the guarded Quit.
+pub(crate) mod os_quit;
 mod params_page;
 mod rotary_page;
 mod turning_more_page;

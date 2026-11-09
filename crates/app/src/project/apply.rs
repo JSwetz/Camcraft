@@ -502,7 +502,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
     if (53..=PROJECT_VERSION).contains(&file.version) {
         // v53 -> v54 (#342): one WCS per setup - each setup keeps the
         // origin of the slot it posts, slots no setup posts are dropped
-        // with a note; a v54 file is checked one-WCS (`wcs_one`).
+        // with a note; a v54+ file is checked one-WCS (`wcs_one`).
+        // v54 -> v55 (#343): a setup may own its machine and post;
+        // absent follows the document's. v55 -> v56 (#316): a setup may
+        // be placed relative to another; absent links nothing. v56 -> v57
+        // (#320): a setup may pick its stock source; absent is #317's
+        // implicit rule. v57 -> v58 (#368): a tool may carry a modelled
+        // body; absent is the holder cylinder every older tool judged.
+        // None of these rungs needs a rewrite.
         notes = super::wcs_one::settle(&mut file, from)?;
         file.version = PROJECT_VERSION;
     }
@@ -680,6 +687,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     tool: tdto.to_tool(),
                     number: tdto.number,
                 });
+                // #368: validate_kind already refused a body that is no body.
+                if let Some(b) = &tdto.body {
+                    let body = b.to_body(&dto.name).map_err(corrupt)?;
+                    crate::tool_body::set_body(world, &entity, Some(&body));
+                }
             }
             EntityKind::Operation => {
                 let odto = dto

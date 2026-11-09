@@ -16,6 +16,7 @@ use camcraft_app::operation::SrcRef;
 
 use crate::operations::quick_params;
 use crate::state::{CommandKind, State, UiTarget};
+use crate::viewport::ProjectionMode;
 
 /// The ribbon's machine modes (the ribbon law): the workspace kind,
 /// the Title-case caption it wears on the bar, and the built-in
@@ -311,6 +312,22 @@ pub(crate) fn view_iso(state: &mut State) {
     state.cam = state.cam.oriented(0.9, 0.5);
 }
 
+/// View: flip perspective and orthographic (parallel) projection
+/// (#434) - a direct field flip on the camera like every other view
+/// toggle (ephemeral, never a command, never saved); `target`, `dist`
+/// and orientation survive, and the ortho half-height equals what
+/// perspective sees at the target plane, so the framing never jumps.
+pub(crate) fn toggle_projection(state: &mut State) {
+    state.cam.projection = match state.cam.projection {
+        ProjectionMode::Perspective => ProjectionMode::Orthographic,
+        ProjectionMode::Orthographic => ProjectionMode::Perspective,
+    };
+    state.status = match state.cam.projection {
+        ProjectionMode::Perspective => "perspective projection".to_owned(),
+        ProjectionMode::Orthographic => "orthographic projection".to_owned(),
+    };
+}
+
 /// Point the context panes at `t`. Pure view state: the panes read it
 /// through `State::pane_target`, which validates it against the world each
 /// frame. Surfaces that also change what the world highlights (tree nodes,
@@ -335,6 +352,8 @@ pub(crate) fn open_tool_editor(state: &mut State, name: &str) {
         state.sync_tool_ui();
     }
     state.tool_editor = Some(name.to_owned());
+    // #371: a fresh body draft per opening; it mirrors the tool's body.
+    state.tool_body_ui = crate::state::ToolBodyUi::default();
 }
 
 /// Quick-add an operation of `kind` (index into the registry the ribbon's

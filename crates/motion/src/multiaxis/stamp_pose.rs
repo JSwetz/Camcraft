@@ -234,7 +234,8 @@ fn level_ruling(
 /// and the cap rings' turns off the lying pose. Never in air: a posed
 /// feed off the part is read by the verifier's posed contact law as a
 /// cut standing off its surface (the app blade's 14.8 mm Envelope rest
-/// when the hold rode the exit rise). None where the held
+/// when the hold rode the exit rise; that rise now runs as a rapid
+/// under the held pose instead, `super::stamp_rise`, #48). None where the held
 /// pose does not qualify, or the law's own pose is within the
 /// threshold: the law's pose stands.
 fn hold(
