@@ -1,4 +1,4 @@
-//! Project save/load: `.camproj`, JSON, version 55 (see `PROJECT_VERSION`).
+//! Project save/load: `.camproj`, JSON, version 56 (see `PROJECT_VERSION`).
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -139,3 +139,5 @@ mod wcs_one;
 // #343: a setup's own machine and post (v55).
 mod mount_dto;
 pub use mount_dto::{SetupMachineDto, SetupPostDto};
+// #316: setup links (v56), checked before any world write.
+mod setup_links;
