@@ -898,7 +898,7 @@ pub(super) fn sheet_footer(ui: &mut Ui, state: &mut State) {
 pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
     let fixtures = camcraft_app::fixture::tagged(&state.world, ctx);
-    let table = camcraft_app::fixture::table_box(&state.world);
+    let table = camcraft_app::fixture::table_box(&state.world, ctx);
     // A draft whose row vanished (deleted or untagged, here or via
     // undo) retires with it - the pane never edits a ghost.
     if !state.fixture_ui.name.is_empty()

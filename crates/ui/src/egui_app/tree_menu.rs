@@ -94,7 +94,14 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
     let flow = name.and_then(|name| model::find_by_name(&state.world, name))
         .and_then(|entity| model::operation_of(&state.world, &entity))
         .map(|op| (op.suppressed, op.after));
-    let machine = camcraft_app::machine::kind_of(&state.world);
+    // #388: an op's rows (its retype) read its own setup's machine, the
+    // one the retype gate judges; a new op joins the active setup.
+    let machine = match name.and_then(|name| model::find_by_name(&state.world, name))
+        .and_then(|entity| model::operation_of(&state.world, &entity))
+    {
+        Some(op) => camcraft_app::machine::kind_of_setup(&state.world, op.setup.as_deref()),
+        None => camcraft_app::machine::kind_of(&state.world),
+    };
     // The rows: section headers and kinds, in registry order, read
     // from the same taxonomy as the ribbon's cells - never a list.
     let mut lines: Vec<(&'static str, bool, Option<usize>)> = Vec::new();

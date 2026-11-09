@@ -63,7 +63,10 @@ fn matrix_of(rot: [f64; 4]) -> [[f64; 3]; 3] {
 /// named with both setups.
 pub(crate) fn carry_turn(world: &flecs_ecs::prelude::World, from: &str, to: &str) -> Result<LatticeTurn, String> {
     let head = format!("carrying the machined stock from setup '{from}' into setup '{to}'");
-    if crate::machine::kind_of(world) != crate::machine::Kind::Mill {
+    // #388: both ends on their own machines - a carry off a mill or
+    // onto one that is not is the same unverified turn.
+    let mill = |s: &str| crate::machine::kind_of_setup(world, Some(s)) == crate::machine::Kind::Mill;
+    if !mill(from) || !mill(to) {
         return Err(format!("{head}: {CARRY_MACHINE_REFUSAL}"));
     }
     let t = crate::setup_relative::transform_between(world, from, to).map_err(|e| format!("{head}: {e}"))?;

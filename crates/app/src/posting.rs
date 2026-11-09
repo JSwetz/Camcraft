@@ -155,10 +155,7 @@ pub fn default_machine() -> Value {
 /// clock - post, gate and timeline cannot disagree about the machine.
 #[must_use]
 pub fn machine_value(world: &World) -> Value {
-    match crate::machine::of(world).1 {
-        Some(m) => post::machine::mirror(&m),
-        None => default_machine(),
-    }
+    machine_value_for(&crate::machine::of(world))
 }
 
 /// The post the program runs: the active setup's (#343 - its own, else
@@ -167,7 +164,7 @@ pub fn machine_value(world: &World) -> Value {
 /// wearing the post's own clothes.
 #[must_use]
 pub fn post_of(world: &World) -> PostRef {
-    crate::setup_mount::post_of(world, crate::setup::active(world).as_deref())
+    post_of_setup(world, crate::setup::active(world).as_deref())
 }
 
 /// The document's post as stored - what every setup that owns no post
@@ -242,7 +239,12 @@ pub fn post_ref_label(post: &PostRef) -> String {
 /// the silent wrong answer this whole codebase exists to prevent; the
 /// Prime Directive).
 pub fn script_source(world: &World) -> Result<(String, String), String> {
-    match post_of(world) {
+    script_of(&post_of(world))
+}
+
+/// [`script_source`] for any post reference (#388: a mount's own).
+pub fn script_of(post: &PostRef) -> Result<(String, String), String> {
+    match post.clone() {
         PostRef::Builtin => BUILTINS
             .first()
             .map(|(name, cps)| (format!("{name} (built-in)"), (*cps).to_owned()))
@@ -297,7 +299,12 @@ mod suppressed;
 mod wcs_rotation;
 #[path = "posting_wcs_slot.rs"]
 mod wcs_slot;
+#[path = "posting_mounts.rs"]
+mod mounts;
 pub(crate) use wcs_rotation::{offset_frame, OffsetFrame};
+pub use mounts::{
+    machine_checks, machine_value_for, machine_value_of, post_mounts, post_mounts_script, post_of_setup, PostedMount,
+};
 pub use per_op::{file_stem, post_per_op, post_per_op_script, PostedFile};
 pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
 
@@ -313,8 +320,13 @@ pub struct GateReport {
 /// file. Every refusal names its reason; nothing partial is ever
 /// written. Cached generation warnings ride the stream as `WARN`
 /// records, so the engine's own warning count is the gate.
+///
+/// One file holds one post for one machine: the program's own mount
+/// (#388 - its setups', not the active one's). A program over several
+/// mounts is refused here by name; [`post_mounts`] writes it as one
+/// file per mount.
 pub fn post_setup(world: &World, out_path: &Path) -> Result<Posted, String> {
-    let (_label, cps) = script_source(world)?;
+    let (_label, cps) = script_of(&mounts::single(world, true)?.post)?;
     post_script(world, out_path, &cps)
 }
 
@@ -340,6 +352,8 @@ pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, 
 }
 
 fn post_script_body(world: &World, out_path: &Path, cps: &str) -> Result<Posted, String> {
+    // #388: the program's one machine (a program over several refuses).
+    let machine = mounts::single(world, false)?.machine;
     let records = stream_records(world)?;
     // The verification gate (M2.3 D): the same two program-level
     // judgments the Deviate cell shows, made binding. Evidence is
@@ -354,7 +368,7 @@ fn post_script_body(world: &World, out_path: &Path, cps: &str) -> Result<Posted,
         return Err(format!("post blocked - {}", report.problems.join("; ")));
     }
     let stream = cnc::serialize(&records);
-    let out = engine::run_with(cps, &machine_value(world), &stream, &options_value(post_options(world)))
+    let out = engine::run_with(cps, &machine_value_for(&machine), &stream, &options_value(post_options(world)))
         .map_err(|e| format!("post engine: {e}"))?;
     if !out.warnings.is_empty() {
         return Err(format!(
@@ -525,32 +539,13 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(suppressed::suppressed_problems(world));
     // The rotated-offset clause (#315): the post carries translation only.
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
-    // The one-mount clause (#343): one program, one post, one machine.
-    problems.extend(crate::setup_mount::program_problems(world));
     // The carried-stock clause (#319): a feed move into carried material
     // outside a setup's declared stock is engagement nothing verified.
     problems.extend(crate::operation::carried_problems(world));
 
-    if let Some(m) = crate::machine::of(world).1 {
-        // #374: an inverted axis the post cannot translate (Z, any letter
-        // but X/Y) would take standard-sign code; X/Y the engine mirrors.
-        problems.extend(m.inverted_post_refusal());
-        match crate::machine::check_document(world, &m) {
-            Ok(c) if !c.is_ok() => {
-                let more = if c.more > 0 { format!(" (+{} more)", c.more) } else { String::new() };
-                problems.push(format!(
-                    "machine {}: {} limit problem(s): {}{more}",
-                    m.model,
-                    c.problems.len(),
-                    c.problems.join("; ")
-                ));
-            }
-            Ok(_) => {}
-            // Unreachable in one thread - program_ops just walked the
-            // same ops - but silence is the forbidden arm, not this one.
-            Err(err) => problems.push(format!("machine: {err}")),
-        }
-    }
+    // The limit check (M2.3 D), each op against the machine its own
+    // setup mounts (#388): one block per machine, the program's order.
+    problems.extend(mounts::machine_problems(world));
 
     // The workholding clause (M3.2 B, live-gate law): the same fixture
     // bands and rapid laws generation reports early, re-run HERE against
@@ -586,7 +581,7 @@ fn fixture_problems(world: &World) -> Vec<String> {
     let Ok(ops) = program_ops(world) else {
         return out;
     };
-    let spindle = crate::machine::of(world)
+    let spindle_of = |setup: Option<&str>| crate::machine::of_setup(world, setup)
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
         .map(|(d, l)| (d * 0.5, l));
@@ -594,6 +589,7 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let Some(op) = model::operation_of(world, &e) else {
             continue;
         };
+        let spindle = spindle_of(op.setup.as_deref()); // #388: its own machine's
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
@@ -642,9 +638,16 @@ fn fixture_problems(world: &World) -> Vec<String> {
 /// through one script without the verification gate, which the
 /// posting suites lock separately - the golden locks the translation.
 pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
+    Ok(join_streams(op_streams(world)?))
+}
+
+/// Join per-op streams into one program's records, cycle anchors made
+/// stream-global - [`stream_records`]' join, and one mount's file's
+/// (#388) over its own ops.
+pub(crate) fn join_streams(streams: Vec<(String, Vec<cnc::Record>)>) -> Vec<cnc::Record> {
     let mut records: Vec<cnc::Record> = Vec::new();
     let mut moved = 0usize; // cycle AT anchors are stream-global
-    for (_name, mut recs) in op_streams(world)? {
+    for (_name, mut recs) in streams {
         if moved > 0 {
             for r in &mut recs {
                 if let cnc::Record::Cycle(c) = r {
@@ -661,7 +664,7 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             .count();
         records.extend(recs);
     }
-    Ok(records)
+    records
 }
 
 /// Each program operation's own records (op entity name, records), in

@@ -1835,7 +1835,7 @@ impl State {
         // mill asks nothing of the mesh's sides; its cross list stays
         // the empty one it was (an op typed at a machine that cannot
         // plunge it is the generator's refusal, not this click's).
-        let radial = if !is_drill || machine::kind_of(&self.world) == machine::Kind::Mill {
+        let radial = if !is_drill || machine::kind_of_setup(&self.world, op.setup.as_deref()) == machine::Kind::Mill {
             Ok(Vec::new())
         } else {
             operation::cross_holes_of(&self.world, op.setup.as_deref(), &op.src)
@@ -3654,8 +3654,12 @@ impl State {
     /// refused post leaves both the document and any previous program on
     /// disk exactly as they were.
     fn post_program_path(&mut self, path: PathBuf) {
-        match posting::post_setup(&self.world, &path) {
-            Ok(posted) => {
+        // #388: setups on different machines or posts write one file each.
+        match posting::post_mounts(&self.world, &path) {
+            Ok(files) if files.len() > 1 => self.show_posted_mounts(files),
+            Ok(files) => {
+                let Some(first) = files.into_iter().next() else { return };
+                let (path, posted) = (first.path, first.posted);
                 self.status = format!(
                     "posted {} op(s), {} lines to {}",
                     posted.ops,
