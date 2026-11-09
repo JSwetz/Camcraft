@@ -141,3 +141,6 @@ mod mount_dto;
 pub use mount_dto::{SetupMachineDto, SetupPostDto};
 // #316: setup links (v56), checked before any world write.
 mod setup_links;
+// #155: Pause / Home entries of the operation list.
+mod program_entry_dto;
+pub use program_entry_dto::ProgramEntryDto;

@@ -88,6 +88,8 @@ mod unsaved_prompt;
 mod panes;
 // #343: the browser tree, split from panes (rows / pane / operation menu).
 mod browser_tree;
+// #155: Pause / Home entry rows and their menu.
+mod tree_entry;
 mod browser_pane;
 mod tree_menu;
 pub(crate) mod shell;

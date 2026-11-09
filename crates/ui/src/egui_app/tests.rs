@@ -85,6 +85,8 @@ mod first_setup;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
+// #155: Pause / Home entries in the operation list.
+mod program_entry;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -4719,9 +4721,9 @@ fn operation_type_menu_requires_confirmation() {
         Some(TreeMenuTarget::Operation("Contour1".into())));
 
     // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
-    // (#110), section header, Face.
+    // (#110), add pause / home / optional stop (#155), section header, Face.
     let face = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
+        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 12.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);

@@ -39,6 +39,9 @@ use camcraft_app::{machine, model, posting, project, world::new_world};
 mod per_op;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_program_entry.rs"]
+mod program_entry;
+pub use program_entry::EntryVerb;
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -219,6 +222,9 @@ pub enum CommandKind {
     /// The op menu's Suppress / Unsuppress row (#110): left out of the
     /// posted program, toolpath kept - one undo unit.
     SuppressOperation { name: String, suppressed: bool },
+    /// The operation list's Pause / Home entries (#155): add, change,
+    /// suppress - each one undo unit.
+    ProgramEntry(EntryVerb),
     /// The post page's "Skip pauses and homes" switch (#110).
     SetSkipStops(bool),
     /// The post page's Output choice (#111): `true` = one file per op.
@@ -1072,6 +1078,8 @@ pub struct OperationClipboard {
 pub enum TreeMenuTarget {
     Operation(String),
     Operations,
+    /// A Pause / Home entry row (#155).
+    Entry(String),
 }
 
 pub struct State {
@@ -2770,6 +2778,7 @@ impl State {
                 }
             }
             CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
+            CommandKind::ProgramEntry(verb) => self.program_entry_verb(verb),
             CommandKind::SetSkipStops(skip) => {
                 let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
                 match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
