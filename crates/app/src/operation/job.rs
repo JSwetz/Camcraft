@@ -208,6 +208,15 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         OpParams::MultiAxisContour { .. } => Some(drive_chains_of(world, op)),
         _ => None,
     };
+    // #318: an op that reads the program ahead in a setup whose incoming
+    // stock must be carried across a boundary the carry refuses has no
+    // known stock to judge against - refused by name, never read as the
+    // setup's own fresh block.
+    if super::drill_prior::reads_prior(&op.params)
+        && let Some(why) = crate::rest::carry_refusal(world, op_name, setup)
+    {
+        return Err(GenError::Invalid(format!("{op_name}: {why}")));
+    }
     let prior = match &op.params {
         OpParams::Pocket3D { .. } | OpParams::MultiAxisRough { .. } => {
             // The mask the rest laws stand on, resolved NOW on the

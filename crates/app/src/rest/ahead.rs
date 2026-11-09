@@ -39,6 +39,9 @@ pub(super) struct Ahead {
     pub(super) nose: Option<f64>,
     pub(super) cut: bool,
     pub(super) moves: Vec<Move>,
+    /// The operation's effective setup (#318: the chain across setups
+    /// groups the program by it).
+    pub(super) setup: Option<String>,
 }
 
 /// The operations in program order ahead of `name` in the consumer's
@@ -52,8 +55,22 @@ pub(super) struct Ahead {
 /// the stale story pass `false` and read only the path signature stored
 /// with the cache (#109 review B1: `status_of` asks every frame).
 pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, with_moves: bool) -> Vec<Ahead> {
-    let ops = crate::setup::operation_order(world);
     let consumer = crate::setup::effective(world, consumer_setup);
+    // another setup's cut is not this block's rest
+    collect(world, name, with_moves, |s| *s == consumer)
+}
+
+/// Every operation ahead of `name` in program order, whatever its setup
+/// (#318): the chain across setups (`super::across`) cuts it into
+/// per-setup segments.
+pub(super) fn all_ahead(world: &World, name: &str, with_moves: bool) -> Vec<Ahead> {
+    collect(world, name, with_moves, |_| true)
+}
+
+/// The walk both readings share: the program in order up to `name`,
+/// keeping the operations whose effective setup `keep` accepts.
+fn collect(world: &World, name: &str, with_moves: bool, keep: impl Fn(&Option<String>) -> bool) -> Vec<Ahead> {
+    let ops = crate::setup::operation_order(world);
     let Some(self_ix) = ops
         .iter()
         .position(|(n, _)| n == name)
@@ -65,8 +82,9 @@ pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, 
         let Some(op) = model::operation_of(world, e) else {
             continue; // in the operation list; lost a beat later
         };
-        if crate::setup::effective(world, op.setup.as_deref()) != consumer {
-            continue; // another setup's cut is not this block's rest
+        let setup = crate::setup::effective(world, op.setup.as_deref());
+        if !keep(&setup) {
+            continue;
         }
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t));
@@ -116,6 +134,7 @@ pub(super) fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>, 
                 .filter(|n| n.is_finite() && *n > 0.0),
             cut,
             moves,
+            setup,
         });
     }
     out
