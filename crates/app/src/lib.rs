@@ -33,6 +33,8 @@ pub mod path_sig;
 pub mod posting;
 pub use camcraft_motion::probing;
 pub mod project;
+// #35: pocket and slot recognition on the model's faces.
+pub mod recognize;
 pub mod rest;
 pub mod ribbon;
 pub mod schema;

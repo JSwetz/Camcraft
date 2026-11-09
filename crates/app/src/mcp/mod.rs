@@ -21,6 +21,7 @@ mod features;
 mod fixture_tools;
 mod job;
 mod pick;
+mod pockets;
 mod setup_tools;
 mod tools;
 
