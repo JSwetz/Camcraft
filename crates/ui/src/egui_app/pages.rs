@@ -114,7 +114,7 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         super::op_page::operation_page(ui, state, n.as_str(), pal);
         return;
     }
-    let has_close = matches!(&t, UiTarget::Tool(_) | UiTarget::Stock | UiTarget::Wcs | UiTarget::Model(_));
+    let has_close = matches!(&t, UiTarget::Tool(_) | UiTarget::Stock | UiTarget::Wcs | UiTarget::Model(_) | UiTarget::SetupNode(..));
     let content_height = (ui.available_height() - if has_close { 40.0 } else { 0.0 }).max(80.0);
     ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -137,11 +137,22 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
                 ui.heading(camcraft_app::setup::wcs_label(&state.world, active.as_deref()));
                 ui.separator();
                 wcs_page(ui, state);
+                // #343: the WCS node's dialog names its post word too.
+                if let Some(name) = active.as_deref() {
+                    ui.separator();
+                    super::setup_wcs_pick::picker(ui, state, name);
+                }
                 setup_error(ui, state);
             }
             UiTarget::Model(n) => {
                 state.sync_setup_ui();
                 model_page(ui, state, n);
+                setup_error(ui, state);
+            }
+            // #343: a setup's own node pages.
+            UiTarget::SetupNode(name, page) => {
+                state.sync_setup_ui();
+                super::setup_pages::page(ui, state, &name, page);
                 setup_error(ui, state);
             }
             UiTarget::Setups => {
@@ -379,7 +390,7 @@ fn theme_section(ui: &mut Ui, state: &mut State) {
 /// document when the registry grows or reorders); loading a `.cps` of
 /// your own and returning to the default are commands too - undo puts
 /// the previous post back.
-fn post_section(ui: &mut Ui, state: &mut State) {
+pub(super) fn post_section(ui: &mut Ui, state: &mut State) {
     let current = posting::post_of(&state.world);
     ui.label("Post");
     ui.label(posting::post_label(&state.world));
@@ -497,7 +508,7 @@ fn post_offer_banner(ui: &mut Ui, state: &mut State) {
 /// same `LoadMachine` command, so every change here is undoable
 /// furniture, not a field poke. The kind line follows the DECLARED
 /// kind where the machine states one, the axis inventory otherwise.
-fn machine_section(ui: &mut Ui, state: &mut State) {
+pub(super) fn machine_section(ui: &mut Ui, state: &mut State) {
     let (path, m) = machine::of(&state.world);
     ui.label("Machine");
     ui.horizontal(|ui| {
@@ -835,7 +846,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
 /// the estimate. Read-only by law - tools live in the Tool Library and
 /// operations pick them; this page only reports what that wiring
 /// implies, so there is no draft and no command here.
-fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
+pub(super) fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
     let rows = camcraft_app::tool_list::for_setup(&state.world, ctx);
     if rows.is_empty() {
@@ -868,7 +879,7 @@ fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
 /// The setup-sheet export row (M3.2 stage D). Writing a sheet is a
 /// read of the document plus a file write - like posting - so the
 /// button queues the dialog arm and nothing touches the history.
-fn sheet_footer(ui: &mut Ui, state: &mut State) {
+pub(super) fn sheet_footer(ui: &mut Ui, state: &mut State) {
     ui.horizontal(|ui| {
         if ui.button("Export setup sheets…").clicked() {
             state.pending.push_back(CommandKind::SetupSheetDialog);

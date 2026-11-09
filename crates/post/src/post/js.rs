@@ -155,6 +155,11 @@ pub struct Script {
     /// `PARAM AfterOperation`. Without it a section asking a stop or a
     /// trip home is refused by name - the script would run straight on.
     after_modes: bool,
+    /// The `axisInversion = true` manifest flag (#374): the script's
+    /// output is verified (goldens + the equivalence test) on the
+    /// engine's mirrored stream for an inverted X / Y axis. Without it a
+    /// machine with an inverted axis is refused by name.
+    axis_inversion: bool,
 }
 
 impl Script {
@@ -172,6 +177,7 @@ impl Script {
             coolant_modes: false,
             live_tooling: false,
             after_modes: false,
+            axis_inversion: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -192,6 +198,10 @@ impl Script {
             .unwrap_or(false);
         s.after_modes = s
             .eval("typeof afterModes !== \"undefined\" && afterModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.axis_inversion = s
+            .eval("typeof axisInversion !== \"undefined\" && axisInversion === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         Ok(s)
@@ -285,6 +295,12 @@ impl Script {
     /// `PARAM AfterOperation` and writes the stop or home (#110).
     pub fn reads_after_operation(&self) -> bool {
         self.after_modes
+    }
+
+    /// True when the script declares `axisInversion = true` - verified
+    /// on the engine's mirrored stream for an inverted axis (#374).
+    pub fn translates_inverted_axes(&self) -> bool {
+        self.axis_inversion
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

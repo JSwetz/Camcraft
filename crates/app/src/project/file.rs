@@ -58,11 +58,15 @@ use super::*;
 /// posted; slots no setup posted are dropped with a load note
 /// (`wcs_one`). An old reader must refuse a v54 file rather than read a
 /// string where it expects a slot list.
-/// v55 (#368): a tool may carry a modelled body (`body` on the tool,
-/// `tool_body_wire`). Absent is the holder cylinder every v54 file
-/// judged; an old reader must refuse a v55 file rather than drop the
+/// v55 (#343): a setup may own its machine and post (`SetupDto::machine`
+/// / `SetupDto::post`); absent follows the document's, so a v54 file
+/// steps up unchanged. An old reader must refuse a v55 file rather than
+/// post every setup on the document's machine.
+/// v56 (#368): a tool may carry a modelled body (`body` on the tool,
+/// `tool_body_wire`). Absent is the holder cylinder every v55 file
+/// judged; an old reader must refuse a v56 file rather than drop the
 /// body and judge the smaller cylinder in its place.
-pub const PROJECT_VERSION: u32 = 55;
+pub const PROJECT_VERSION: u32 = 56;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -309,7 +313,7 @@ pub struct ToolDto {
     /// absent means "post by list position", what every older tool did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
-    /// #368 (v54): the tool's modelled body. Absent is none - the
+    /// #368 (v56): the tool's modelled body. Absent is none - the
     /// holder cylinder, what every older tool judged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<super::tool_body_wire::ToolBodyDto>,

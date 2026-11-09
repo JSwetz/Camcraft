@@ -131,6 +131,12 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     if let Some(why) = crate::setup_align::generation_problem(world, op) {
         return Err(GenError::Invalid(why));
     }
+    // #343: the mounted machine and post are the active setup's - an op
+    // of a setup mounting other steel is refused by name, never cut
+    // against the wrong machine.
+    if let Some(why) = crate::setup_mount::generation_problem(world, op) {
+        return Err(GenError::Invalid(why));
+    }
     let material = material_of(world, setup, &op.src)?;
     let part_solid = part_solid_of(world, setup, &op.src, &material);
     // Setup stock, when it is not the source itself: the swarf column
