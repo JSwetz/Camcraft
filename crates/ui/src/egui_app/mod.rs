@@ -139,6 +139,9 @@ mod setup_wcs_tests;
 mod setup_align_tests;
 #[cfg(test)]
 mod setup_relative_tests;
+mod setup_stock_pick;
+#[cfg(test)]
+mod setup_stock_tests;
 #[cfg(test)]
 mod setup_plane_tests;
 #[cfg(test)]

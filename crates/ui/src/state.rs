@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
-    ActivateSetup, AlignPartToSetup, SetSetupRelative, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
+    ActivateSetup, AlignPartToSetup, SetSetupRelative, SetSetupStockSource, SetSetupWorkOffset, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SetOperationGeometry,
@@ -299,6 +299,12 @@ pub enum CommandKind {
         setup: String,
         to: Option<String>,
         angles: [f64; 3],
+    },
+    /// Pick where a setup's stock comes from (#320): its own, or what the
+    /// setup before it leaves behind. Undoable (`SetSetupStockSource`).
+    SetSetupStockSource {
+        setup: String,
+        source: camcraft_app::setup_stock::StockSource,
     },
     /// Lay the part on a G17 / G18 / G19 plane in a setup (#330): one
     /// flat face or two straight edges, read by the app. Undoable
@@ -3015,6 +3021,19 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("setup not re-placed: {err}"));
+                    }
+                }
+            }
+            CommandKind::SetSetupStockSource { setup, source } => {
+                match SetSetupStockSource::new(&self.world, &setup, source) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        let words = camcraft_app::setup_stock::describe(&self.world, &setup).unwrap_or_default();
+                        self.status = format!("{setup} stock: {words}");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("stock source not changed: {err}"));
                     }
                 }
             }
