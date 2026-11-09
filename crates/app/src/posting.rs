@@ -612,6 +612,8 @@ pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
         .map(|(d, l)| (d * 0.5, l));
+    let mut mesh_cache: std::collections::HashMap<Option<String>, Vec<crate::fixture::MeshedFixture>> =
+        std::collections::HashMap::new();
     for (name, e) in ops {
         let Some(op) = model::operation_of(world, &e) else {
             continue;
@@ -644,6 +646,11 @@ pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
         if turning.is_empty() && fixed.is_empty() {
             continue;
         }
+        // #339: the tagged models' meshes, indexed once per setup and
+        // shared by every op in it.
+        let meshes = mesh_cache
+            .entry(crate::setup::effective(world, op.setup.as_deref()))
+            .or_insert_with(|| crate::fixture::meshes_for(world, op.setup.as_deref()));
         let wh = crate::verify::Workholding {
             turning: &turning,
             fixed: &fixed,
@@ -651,17 +658,22 @@ pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
         };
         let geom = tool.geom();
         let holder = crate::tool_body::stack(&geom, body.as_ref());
-        let mut hits = crate::verify::bands_vs_workholding_held(
-            &cache.path,
-            &geom,
-            &holder,
-            &wh,
-            spindle,
-            operation::GOUGE_TOL,
-        );
+        // #339: each law's hits on a meshed fixture re-read against its
+        // closed mesh - the mesh only ever acquits.
+        let stack = crate::verify::steel_stack(&geom, &holder, spindle);
+        let steel = crate::verify::MeshSteel { fixtures: meshes, stack: &stack, chord_tol: operation::GOUGE_TOL };
+        let path = &cache.path;
+        let mut hits = crate::verify::mesh_refined(path, &wh, &steel, false, |w| {
+            crate::verify::bands_vs_workholding_held(path, &geom, &holder, w, spindle, operation::GOUGE_TOL)
+        });
         // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::rapids_vs_workholding_held(&cache.path, &geom, &holder, &wh, spindle));
+        hits.extend(crate::verify::mesh_refined(path, &wh, &steel, true, |w| {
+            crate::verify::rapids_vs_workholding_held(path, &geom, &holder, w, spindle)
+        }));
         out.hits.extend(hits.into_iter().map(|hit| (name.clone(), hit)));
+    }
+    for meshes in mesh_cache.values() {
+        crate::fixture::log_mesh_refusals(meshes);
     }
     Ok(out)
 }

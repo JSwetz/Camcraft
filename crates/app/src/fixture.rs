@@ -32,6 +32,12 @@
 //!   reality. Fixtures are never gouge-relevant (they are not cut
 //!   material), so a false hit merely annoys while a false negative is a
 //!   silent crash: every tolerance here errs toward HIT.
+//! - **The mesh acquits, the box convicts (#339).** The box laws stay
+//!   the broad phase; a tagged model's closed world mesh
+//!   ([`meshes_for`]) then clears the upright moves its box flagged but
+//!   its real steel does not meet - a path down a vise's gap. The mesh
+//!   never adds a hit, and an open or refused mesh keeps its box
+//!   verdict (`camcraft_sim::verify::mesh_refined`).
 //! - **Steel is not kerf.** A retract through its own hole in STOCK is
 //!   safe (the material was removed); a retract or rapid dipping through
 //!   a fixture box is a crash, so the rapid law's vertical exemption
@@ -55,6 +61,7 @@ use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.
 use flecs_ecs::prelude::{Entity, World};
 
 pub use camcraft_sim::fixture::*;
+pub use camcraft_sim::fixture_mesh::MeshedFixture;
 
 use crate::geometry::Point3;
 use crate::schema::FixtureDef;
@@ -161,6 +168,33 @@ pub fn workholding_for(world: &World, declared: Option<&str>) -> (Vec<FixtureBox
     }
     fixed.extend(table_box(world, declared));
     (turning, fixed)
+}
+
+/// Every tagged model's world mesh, paired with the very box
+/// [`boxes_for`] reports for it (#339): the mesh law's input. The BVH is
+/// built only when a box law first flags that fixture
+/// ([`camcraft_sim::fixture_mesh::MeshedFixture::mesh`]).
+#[must_use]
+pub fn meshes_for(world: &World, declared: Option<&str>) -> Vec<MeshedFixture> {
+    tagged(world, declared)
+        .into_iter()
+        .filter_map(|(name, e)| {
+            let b = model::entity_world_aabb(world, &e)?;
+            let tris = model::world_facets(world, &e)?;
+            Some(MeshedFixture::new(name, FixtureBox { min: b.min, max: b.max }, tris.into()))
+        })
+        .collect()
+}
+
+/// Log every fixture whose mesh was asked to judge and refused (#339):
+/// it was judged by its box instead - conservative, but the user should
+/// know why a path through its gap still reports.
+pub fn log_mesh_refusals(fixtures: &[MeshedFixture]) {
+    for f in fixtures {
+        if let Some(why) = f.refusal() {
+            tracing::info!(fixture = %f.name, "fixture judged by its bounding box: {why}");
+        }
+    }
 }
 
 /// The rotary axis line a rotary kind turns its part about, in the

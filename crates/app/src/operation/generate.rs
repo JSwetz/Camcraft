@@ -85,6 +85,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         spindle,
         fixtures,
         workholding,
+        fixture_meshes,
         rotary_axis,
         part_solid,
         area,
@@ -100,6 +101,12 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     }
     // The program ahead, cut only when a law asks (#89, #96 review).
     let mut verify_prior = super::drill_prior::PriorCell::new(verify_prior);
+    // #339: the mesh law reads the tool as an upright rotating stack -
+    // a mill's cutter. A lathe's insert, blade or gauge keeps the box
+    // verdict (its body is not that stack).
+    use crate::tools::ToolKind as K;
+    let mesh_steel: &[crate::fixture::MeshedFixture] =
+        if is_mill && !matches!(tool.kind, K::Turning | K::Groove | K::Thread | K::Form) { &fixture_meshes } else { &[] };
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;
 
@@ -2840,7 +2847,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // the revolved stock standing at each instant.
             super::turning_holder::judge(&params, &path, &meridian, lathe_body.as_deref(), &tool, &mut verify_prior, &mut warns)
                 .map_err(GenError::Invalid)?;
-            warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle));
+            warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle, mesh_steel));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
             // - a grooved part is undercut BY DESIGN, material
@@ -3037,6 +3044,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &workholding,
                 rotary_axis,
                 spindle,
+                mesh_steel,
             ));
             Ok((path_world, warns))
         }
@@ -3068,7 +3076,11 @@ fn rotary_letter_gate(
 /// could strike at all (the machine-derived table included), and the
 /// spindle band is never tested on its own. A fixed box loses a hit only
 /// where the machine frame proves the move clear; the turning boxes keep
-/// the path-frame verdict untouched.
+/// the path-frame verdict untouched. #339: `meshes` (the tagged models'
+/// closed meshes, empty for a lathe's tool) then acquit the upright
+/// moves a box flagged and its real steel does not meet
+/// (`verify::mesh_refined` - the mesh never adds a hit).
+#[allow(clippy::too_many_arguments)] // the gate's inputs + the meshes
 fn workholding_warnings(
     path: &Toolpath,
     (geom, holder): (&crate::tools::ToolGeom, &camcraft_tools::holder_profile::HolderStack),
@@ -3076,13 +3088,21 @@ fn workholding_warnings(
     (turning, fixed): &(Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
     axis: Option<verify::RotaryAxis>,
     spindle: Option<(f64, f64)>,
+    meshes: &[crate::fixture::MeshedFixture],
 ) -> Vec<Warning> {
     if all.is_empty() {
         return Vec::new();
     }
     let wh = verify::Workholding { turning, fixed, axis };
-    let mut warns = verify::bands_vs_workholding_held(path, geom, holder, &wh, spindle, GOUGE_TOL);
-    warns.extend(verify::rapids_vs_workholding_held(path, geom, holder, &wh, spindle));
+    let stack = verify::steel_stack(geom, holder, spindle);
+    let steel = verify::MeshSteel { fixtures: meshes, stack: &stack, chord_tol: GOUGE_TOL };
+    let mut warns = verify::mesh_refined(path, &wh, &steel, false, |w| {
+        verify::bands_vs_workholding_held(path, geom, holder, w, spindle, GOUGE_TOL)
+    });
+    warns.extend(verify::mesh_refined(path, &wh, &steel, true, |w| {
+        verify::rapids_vs_workholding_held(path, geom, holder, w, spindle)
+    }));
+    crate::fixture::log_mesh_refusals(meshes);
     warns
 }
 
