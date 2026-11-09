@@ -103,7 +103,29 @@ go to `CHANGELOG.md`.
   outside the working folder u started up in?"), and are removed once their
   PR is pushed. One issue, one branch; every commit for it lands there, never
   on `main`.
-- **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
+- **A fork syncs from upstream at each cut tag, not continuously** (user,
+  2026-11-09: "If we are on a forked repository (check for upstream), we
+  pull from upstream, with every detected cut tag ex. jump from 0.14 to
+  0.15, 0.15 to 0.16. The upstream pulls makes sure fork is working of the
+  latest stable main - and not the main that is in constant change.").
+  Before claiming work, check for an upstream: `git remote get-url
+  upstream` (a fork of NeoTech/Camcraft has one; the canonical repo does
+  not - there, "Start from the latest main" above applies unchanged). In a
+  fork:
+  - `git fetch upstream --tags` and find the newest cut tag,
+    `git tag -l 'v*.*.0' --sort=-v:refname | head -1`.
+  - If the fork's `main` does not contain it yet (`git merge-base
+    --is-ancestor <tag> main` fails), sync: `git switch main && git merge
+    --ff-only <tag>` (or `git merge <tag>` if the fork's main carries its own
+    commits), then `git push origin main`. Sync only to a cut tag, never to
+    `upstream/main`: tags are the tested, released state; upstream's main
+    moves several times an hour.
+  - Branch issue work from the fork's synced `main` as above. A PR into
+    upstream still targets upstream's `main`; if it conflicts there, merge
+    the conflicting upstream change into the branch (`git merge
+    upstream/main`) on that branch only, never into the fork's `main`, which
+    advances only at the next cut tag.
+  - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0"). Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
   (not main) and its PR says "stacked on #M". Before the parent merges (any
