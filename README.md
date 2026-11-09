@@ -335,5 +335,12 @@ be resolved; only merge commits are allowed.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). Third-party notices are in
-`assets/ui/LICENSES.md`.
+Apache License 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+The copyright belongs to the CamCraft contributors, each holding the
+rights to their own contributions, and not to any one person. By opening a
+pull request you license your contribution under Apache-2.0 (section 5 of
+the license). Code contributed while CamCraft was MIT-licensed is
+redistributed under Apache-2.0, which MIT permits.
+
+Third-party notices are in `assets/ui/LICENSES.md`.
