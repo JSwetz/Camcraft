@@ -239,12 +239,12 @@ fn a_user_file_lists_by_its_model_and_an_unreadable_one_by_name() {
 #[test]
 fn the_catalogue_adds_the_documents_machine_file() {
     let world = camcraft_app::world::new_world();
-    assert_eq!(library::enumerate(&world).len(), posting::MACHINES.len(), "a built-in mount adds nothing");
+    assert_eq!(library::enumerate_with(&world, None).len(), posting::MACHINES.len(), "a built-in mount adds nothing");
     let p = std::env::temp_dir().join(format!("camcraft_machine_library_doc_{}.mch", std::process::id()));
     std::fs::write(&p, mill(|_| {})).expect("write");
     let m = camcraft_app::machine::parse_mch(&mill(|_| {})).expect("parse");
     camcraft_app::machine::set(&world, &p.display().to_string(), Some(&m));
-    let list = library::enumerate(&world);
+    let list = library::enumerate_with(&world, None);
     assert_eq!(list.len(), posting::MACHINES.len() + 1);
     assert_eq!(list.last().map(|e| e.source.clone()), Some(MachineSource::File(p.clone())));
     let _ = std::fs::remove_file(&p);
