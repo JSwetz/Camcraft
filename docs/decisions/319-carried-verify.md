@@ -23,11 +23,37 @@ there:
   material. The prior acquittal (#96, carried by #318) still clears a
   dive into what earlier setups really cut. The post gate's WARN records
   are those cached warnings, so the post agrees with generation.
-- *The mismatch is said by name.* Carried material outside the declared
-  stock rides the path as a note (`CARRIED_OUTSIDE_DECLARED`), naming both
-  setups and how far it stands out. A note, not a blocking warning: the
-  judge covered it; what the note warns about is that the op's machining
-  region (still the declared stock) did not.
+- *The mismatch is said by name, and blocks where it is cut* (PR #410
+  review, finding 3). The op's machining region is still the declared
+  stock, so a feed move (lead-in, side offset, plunge, or the tool body
+  under the carried top) reaching carried material outside the declared
+  stock engages stock no law verified. Such a path carries a
+  `CARRIED_OUTSIDE_DECLARED` note naming both setups, the overhang (mm
+  beside, mm above) and the first move that reaches it. The post gate
+  (`operation::carried_problems`, in `verification_report`) refuses on it
+  by name and tells the user to enlarge the later setup's stock. Where no
+  feed move reaches the overhang, it is only noted
+  (`CARRIED_OUTSIDE_NOTED`): the rapids, entries and links were judged
+  against the enclosing box, so posting is safe.
+  - *Which test: the cheap one, per feed move.* Each feed chord's
+    footprint box (chord bounds grown by the tool radius) is clipped to
+    the carried body. Then the carried grid's columns under it are read.
+    The move engages when a column stands above the move's tip and either
+    sits (by its whole cell square) outside the declared box, or stands
+    above the declared top. A column cut through still reads its top, and
+    an unreadable one engages. If the grid itself could not be cut, the
+    whole body box counts as standing to its top. So a near miss refuses,
+    but a real cut never passes. The grid is the one already simulated
+    for the body's bounds, so there is no second simulation. A first cut
+    read the body's box alone: one corner cell left high anywhere in the
+    body then refused every feed move. Dropped: refusing whenever the
+    overhang exists. That refuses the common "declared stock smaller than
+    the earlier setup's blank, op nowhere near the rim" case for nothing.
+  - *Why a gate clause over the cached note, not a new `Warning` kind.* The
+    warning enum is `Copy` (no setup names), and a new kind ripples
+    through the UI, MCP and serde. The note is part of the stamped cache,
+    so a fresh op's note is the verdict on the world as it stands. The
+    clause blocks exactly like a WARN record and names both setups.
 - *Declared material beyond the carried block is present* (#405 review).
   Where setup 2's declared stock reaches past the uncut carried block in
   XY, the carried grid cannot speak for that material - verify's prior
@@ -58,14 +84,16 @@ single-setup and clip-entered job unchanged.
   tilted laws read facets and boxes. The enclosing box serves all.
 - *Refusing every mismatch*: a user who declares setup 2's stock as the
   finished size of setup 1 (a common habit) would be refused even though
-  the box judge is safe. The note says it instead.
+  no feed move goes near the overhang. Only a feed move that reaches it
+  refuses.
 - *Acquitting lateral rapids against the carried grid*: the same-setup
   law acquits only vertical dives (#96); widening that is its own change
   to every setup's verdict, out of scope here.
 
 **Not done here (owed).** The machining REGION of non-rest kinds (Face,
 2D pocket/adaptive, contour) in a later setup is still the declared
-stock: carried material outside it is not machined (the note says so),
+stock: carried material outside it is not machined (the post refuses
+when a feed move reaches it, and the note says so otherwise),
 and a declared stock larger than the carried body still cuts air there
 (harmless). Pocket3D and Multi-Axis Rough already bound their cut by the
 carried rest mask (#318). Bounding every kind's region by the carried

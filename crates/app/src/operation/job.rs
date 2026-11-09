@@ -95,9 +95,10 @@ pub struct GenJob {
     /// share of the turned surface the axis fit set aside, which the
     /// op does not turn. Carried onto the path's notes by `run_job`.
     pub(super) spindle_note: Option<String>,
-    /// #319: carried material outside the declared stock, said by name
-    /// (`carried_stock::CARRIED_OUTSIDE_DECLARED`); a note, never a warning.
-    pub(super) carried_note: Option<String>,
+    /// #319: carried material outside the declared stock, said by name on
+    /// the path once it exists (`carried_stock::Overhang::note`) - the post
+    /// gate refuses when a feed move reaches it.
+    pub(super) carried_overhang: Option<super::carried_stock::Overhang>,
 }
 
 /// The tripwire phrase for a stored precompute whose arm never collected
@@ -226,7 +227,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         stock_aabb = Some(aabb);
         analytic_stock = true;
     }
-    let carried_note = carried.note;
+    let carried_overhang = carried.overhang;
     let prior = match &op.params {
         OpParams::Pocket3D { .. } | OpParams::MultiAxisRough { .. } => {
             // The mask the rest laws stand on, resolved NOW on the
@@ -324,7 +325,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         area,
         wcs_origin,
         spindle_note,
-        carried_note,
+        carried_overhang,
     })
 }
 

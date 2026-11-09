@@ -186,12 +186,13 @@ pub(super) fn carried_block(world: &World, chain: &Chain) -> Result<Option<(Poin
 /// still holds material in (their whole squares) and the highest top,
 /// clamped to `block` - both are supersets of the real body, so their
 /// intersection is one too. `None` when the grid holds nothing finite.
+/// The grid rides along: the engagement law reads its columns.
 pub(super) fn carried_body_bounds(
     world: &World,
     chain: &Chain,
     min_r: f64,
     block: (Point3, Point3),
-) -> Result<Option<(Point3, Point3)>, String> {
+) -> Result<Option<(Bounds, Dexel)>, String> {
     let dex = carried_grid(world, chain, min_r, false)?;
     let h = dex.cell * 0.5;
     let mut pts = Vec::new();
@@ -210,7 +211,7 @@ pub(super) fn carried_body_bounds(
     let (b0, b1) = block;
     let lo = Point3::new(lo.x.max(b0.x), lo.y.max(b0.y), b0.z);
     let hi = Point3::new(hi.x.min(b1.x), hi.y.min(b1.y), hi.z.min(b1.z));
-    Ok((lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some((lo, hi)))
+    Ok((lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some(((lo, hi), dex)))
 }
 
 /// The axis-aligned bounds of finite points; `None` for none.
@@ -249,7 +250,7 @@ pub fn carried_stock_body(
     setup: Option<&str>,
     tool_r: f64,
     block: (Point3, Point3),
-) -> Result<Option<(Point3, Point3)>, String> {
+) -> Result<Option<(Bounds, Dexel)>, String> {
     let chain = chain_of(world, name, setup, true)?;
     if !chain.crosses() {
         return Ok(None);

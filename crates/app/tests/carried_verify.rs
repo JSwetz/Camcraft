@@ -20,13 +20,13 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::MoveKind;
 use camcraft_app::commands::{
-    AddTool, AlignPartToSetup, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel, SetSetupRelative,
-    SetStock,
+    AddTool, AlignPartToSetup, CreateOperation, CreateSetup, EditOperationParams, GenerateOperation, History, ImportModel,
+    SetSetupRelative, SetStock,
 };
 use camcraft_app::geometry::{Point3, cube};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
-use camcraft_app::operation::{CARRIED_OUTSIDE_DECLARED, Height, OpParams, SrcRef};
+use camcraft_app::operation::{self, CARRIED_OUTSIDE_DECLARED, CARRIED_OUTSIDE_NOTED, Height, OpParams, OpStatus, SrcRef, Tilt};
 use camcraft_app::posting;
 use camcraft_app::schema::Location;
 use camcraft_app::setup_align::AlignPreset;
@@ -92,6 +92,8 @@ fn block(world: &World, w: f64, z0: f64, dz: f64) -> SetStock {
 enum Hold {
     SameAs,
     FlipX,
+    /// Same hold, not linked: the clip, nothing carried.
+    Clip,
 }
 
 /// The part (0..10)^2 x [0, 5] in Setup1's `w1`-wide block Z -5..10,
@@ -112,6 +114,7 @@ fn program(w1: f64, cut1: f64, hold: Hold, w2: f64) -> (World, History) {
     match hold {
         Hold::SameAs => h.execute(&world, SetSetupRelative::link(&world, "Setup2", "Setup1", [0.0; 3]).expect("same as")),
         Hold::FlipX => h.execute(&world, AlignPartToSetup::preset(&world, "Setup2", AlignPreset::FlipX).expect("flip")),
+        Hold::Clip => {}
     }
     h.execute(&world, block(&world, w2, -5.0, 10.0));
     let op = CreateOperation::new(&world, "Contour2", TOOL, SrcRef::Entity("part".into()), contour()).expect("create");
@@ -174,7 +177,10 @@ fn a_dive_clear_of_the_declared_block_into_carried_material_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
     match posted {
         Ok(_) => panic!("the carried-stock dive posted"),
-        Err(e) => assert!(e.contains("post blocked") && e.contains(&format!("rapid move {} ", d[0])), "{e}"),
+        Err(e) => assert!(
+            e.contains("post blocked") && e.contains("operation Contour2: ") && e.contains(CARRIED_OUTSIDE_DECLARED),
+            "{e}"
+        ),
     }
 }
 
@@ -229,4 +235,77 @@ fn a_turn_off_the_quarter_with_only_a_non_rest_op_after_it_is_refused_by_name() 
     );
     assert!(simulate_document(&world).is_err(), "the turned program is never judged");
     assert!(!posting::verification_report(&world).problems.is_empty(), "nor posted");
+}
+
+#[test]
+fn an_overhang_no_feed_move_reaches_is_noted_and_posts() {
+    // Setup1 holds a 140 mm block faced to the part's top; Setup2 declares
+    // 100 mm. The carried rim stands 20 mm beside the declared stock, far
+    // from the contour round the part: noted by name, never refused.
+    let (world, _h) = program(140.0, 5.0, Hold::SameAs, 100.0);
+    let notes = cached(&world, "Contour2").path.notes;
+    assert!(!noted(&world), "{notes:?}");
+    assert!(notes.iter().any(|n| n.starts_with(CARRIED_OUTSIDE_NOTED) && n.contains("'Setup2'")), "{notes:?}");
+    let problems = posting::verification_report(&world).problems;
+    assert!(!problems.iter().any(|p| p.contains(CARRIED_OUTSIDE_DECLARED)), "{problems:?}");
+}
+
+/// A posed (3+2, untilted angles) face in the active setup, created only:
+/// its stamp is read, never cut.
+fn posed(world: &World, h: &mut History, name: &str) {
+    let mut p = face(5.0);
+    if let OpParams::Face { tilt, .. } = &mut p {
+        *tilt = Some(Tilt { a_deg: 0.0, b_deg: 0.0, origin: [0.0; 3] });
+    }
+    h.execute(world, CreateOperation::new(world, name, TOOL, SrcRef::Stock, p).expect("create posed"));
+}
+
+fn stamp(world: &World, name: &str) -> Option<operation::GenStamp> {
+    let e = model::find_by_name(world, name).expect("op");
+    let op = model::operation_of(world, &e).expect("operation");
+    operation::current_stamp(world, &op.tool, &op.src, &op.params, name, op.setup.as_deref())
+}
+
+/// Re-face Setup1 one millimetre deeper and regenerate it.
+fn reface(world: &World, h: &mut History) {
+    h.execute(world, EditOperationParams::new(world, "Face1", face(8.0)).expect("edit"));
+    h.execute(world, GenerateOperation::new(world, "Face1").expect("regenerate"));
+}
+
+#[test]
+fn a_setup1_change_restamps_the_carried_setups_ops_whose_stock_grew() {
+    // Setup2's job stock grew to the carried body (Z 9 over a declared 5):
+    // re-facing Setup1 moves both a non-rest op's and a posed op's stamp.
+    let (world, mut h) = program(100.0, 9.0, Hold::SameAs, 100.0);
+    posed(&world, &mut h, "Posed2");
+    assert!(camcraft_app::rest::carried_digest(&world, "Posed2", Some("Setup2")).is_some());
+    let before = (stamp(&world, "Contour2"), stamp(&world, "Posed2"));
+    reface(&world, &mut h);
+    let after = (stamp(&world, "Contour2"), stamp(&world, "Posed2"));
+    assert_ne!(before.0, after.0, "the non-rest op reads the carried body");
+    assert_ne!(before.1, after.1, "the posed op judges the stock the carried body spans");
+    assert_eq!(operation::status_of(&world, &model::find_by_name(&world, "Contour2").expect("op")), OpStatus::Stale);
+}
+
+#[test]
+fn single_setup_and_clip_entered_stamps_do_not_read_the_carry() {
+    // Clip-entered Setup2: nothing is carried, so re-facing Setup1 moves
+    // neither Setup2 stamp, and no carried term exists.
+    let (world, mut h) = program(100.0, 9.0, Hold::Clip, 100.0);
+    posed(&world, &mut h, "Posed2");
+    assert!(camcraft_app::rest::carried_digest(&world, "Contour2", Some("Setup2")).is_none());
+    assert!(camcraft_app::rest::carried_digest(&world, "Posed2", Some("Setup2")).is_none());
+    let before = (stamp(&world, "Contour2"), stamp(&world, "Posed2"));
+    reface(&world, &mut h);
+    assert_eq!(before, (stamp(&world, "Contour2"), stamp(&world, "Posed2")));
+    assert_eq!(operation::status_of(&world, &model::find_by_name(&world, "Contour2").expect("op")), OpStatus::Ok);
+    // One setup: a posed op after Face1 never digests the program ahead,
+    // so its stamp is the pre-#319 one whatever Face1 cuts.
+    let (one, mut h1) = program(100.0, 9.0, Hold::Clip, 100.0);
+    h1.execute(&one, camcraft_app::commands::ActivateSetup::new(&one, Some("Setup1")).expect("activate Setup1"));
+    posed(&one, &mut h1, "Posed1");
+    assert!(camcraft_app::rest::carried_digest(&one, "Posed1", Some("Setup1")).is_none());
+    let before = stamp(&one, "Posed1");
+    reface(&one, &mut h1);
+    assert_eq!(before, stamp(&one, "Posed1"));
 }
