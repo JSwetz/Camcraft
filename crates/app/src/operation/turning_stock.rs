@@ -13,7 +13,7 @@ use super::OpParams;
 pub(super) const STOCK_CLEARANCE: f64 = 1.0;
 
 /// Does `params` name a kernel that approaches from the stock (#130)?
-/// Facing (#122) and the contour rides keep their own approach.
+/// Facing (#122) keeps its own approach; contour rides also read stock (#323).
 fn reads_stock(params: &OpParams) -> bool {
     matches!(
         params,
@@ -24,6 +24,9 @@ fn reads_stock(params: &OpParams) -> bool {
             | OpParams::Part { .. }
             | OpParams::Threading { .. }
             | OpParams::FormTurning { .. }
+            | OpParams::Chamfering { .. }
+            | OpParams::TaperTurning { .. }
+            | OpParams::MultiPassTurning { .. }
     )
 }
 

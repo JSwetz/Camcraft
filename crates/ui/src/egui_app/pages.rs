@@ -50,8 +50,8 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
-    Shape, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Layout, Pos2, RichText, ScrollArea,
+    Sense, Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
@@ -59,8 +59,7 @@ use camcraft_app::machine;
 use camcraft_app::model;
 use camcraft_app::operation::SrcRef;
 use camcraft_app::posting;
-use camcraft_app::commands::theme_of;
-use camcraft_app::schema::{PostRef, ThemeRef};
+use camcraft_app::schema::PostRef;
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools;
 use camcraft_app::units::{self, Unit};
@@ -321,65 +320,6 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
                 .push_back(CommandKind::DeleteByName(stock_name.clone()));
         }
     });
-    ui.add_space(10.0);
-    ui.separator();
-    machine_section(ui, state);
-    ui.add_space(10.0);
-    ui.separator();
-    post_section(ui, state);
-    ui.add_space(10.0);
-    ui.separator();
-    theme_section(ui, state);
-}
-
-/// The document's theme (M6.1 C): setup furniture, read live off the
-/// world singleton like the machine and post sections beside it - no
-/// mirror to go stale, the label is exactly the reference the command
-/// wrote. The combo offers the two built-ins and the discovered
-/// `assets/themes/*.json` files BY NAME (the `post_registry` law: an
-/// index into a file list would silently re-point the document when a
-/// file arrives), and "Load theme" reaches any `.json` through the
-/// file-pick law. The look itself lands on the next frame edge, in
-/// `State::sync_theme` - the click writes the reference, never a
-/// table - so undo puts the previous theme back exactly.
-fn theme_section(ui: &mut Ui, state: &mut State) {
-    let current = theme_of(&state.world);
-    ui.label("Theme");
-    ui.label(crate::state::theme_label(&state.world));
-    ui.horizontal(|ui| {
-        let mut pick: Option<CommandKind> = None;
-        egui::ComboBox::from_id_salt("theme_switcher")
-            .selected_text(state.theme_selection_text())
-            .show_ui(ui, |ui| {
-                for (label, cmd) in state.theme_options() {
-                    let on = match (&cmd, &current) {
-                        (CommandKind::SelectTheme(ThemeRef::Dark), ThemeRef::Dark) => true,
-                        (
-                            CommandKind::SelectTheme(ThemeRef::Named(n)),
-                            ThemeRef::Named(m),
-                        ) => n == m,
-                        (
-                            CommandKind::SelectTheme(ThemeRef::File(p)),
-                            ThemeRef::File(q),
-                        ) => p == q,
-                        _ => false,
-                    };
-                    if ui.selectable_label(on, &label).clicked() {
-                        pick = Some(cmd);
-                    }
-                }
-            });
-        if let Some(cmd) = pick {
-            state.pending.push_back(cmd);
-        }
-        if matches!(current, ThemeRef::File(_)) && ui.button("Built-in").clicked() {
-            state
-                .pending
-                .push_back(CommandKind::SelectTheme(ThemeRef::Dark));
-        }
-    });
-    // M13.4: the viewer's colour-vision remap rides beside the theme.
-    super::colorvision::picker(ui, state);
 }
 
 /// The document's post script (M3.3 A/B): setup furniture, read live
@@ -1292,10 +1232,23 @@ fn gcode_listing(
                 {
                     rt = rt.weak();
                 }
-                // add_sized pins every row to exactly row_h, so the
-                // cursor arithmetic above stays exact over a long
-                // program instead of drifting a row.
-                let resp = ui.add_sized([width, row_h], Label::new(rt).selectable(false));
+                // Every row is a left-to-right box exactly `width` by
+                // `row_h`, so the text starts at the left edge (#256:
+                // `add_sized` centred it) and the cursor arithmetic
+                // above stays exact over a long program instead of
+                // drifting a row. `truncate` keeps a line wider than
+                // the window on its one row (egui shows the whole line
+                // on hover) rather than wrapping it onto a second.
+                let resp = ui
+                    .allocate_ui_with_layout(
+                        Vec2::new(width, row_h),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_size(Vec2::new(width, row_h));
+                            ui.add(Label::new(rt).selectable(false).truncate())
+                        },
+                    )
+                    .inner;
                 if jump.get() == Some(i) {
                     resp.scroll_to_me(Some(Align::Center));
                     jump.set(None);

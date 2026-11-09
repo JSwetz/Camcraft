@@ -154,7 +154,9 @@ record is refused instead.
    mirror) and asserts declared kind == inferred kind, so a
    half-registered or self-contradictory definition fails the suite,
    not the shop.
-4. Gate: `cargo test -p camcraft-app --test machine --test posting`,
+4. Gate: `cargo test -p camcraft-app --test machine --test posting
+   --test machine_library` (the last runs the Machines pane's validator,
+   `app::machine::validate`, over every library entry - #287),
    plus a CLI smoke — `post.exe --machine <name>.mch <post>.cps
    <file>.cnc out.nc` over a committed golden stream (a 5-axis
    definition should drive the refusal path in fanuc.cps's `tilt()`

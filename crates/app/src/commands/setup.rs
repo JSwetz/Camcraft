@@ -1,4 +1,4 @@
-//! Setup commands: create, delete, activate, and move operations
+//! Setup commands: create, activate, and move operations
 //! between setups (M3.2 stage A).
 //!
 //! Provenance: our own design; one clamping = one datum system is
@@ -25,7 +25,8 @@
 //!   refuses while any operation belongs to it ([`crate::setup::belongs`],
 //!   by declaration or by the first/implicit position), naming the
 //!   operation. Furniture the setup alone owns goes with it; names the
-//!   legacy world or another setup also points at stay.
+//!   legacy world or another setup also points at stay. A setup another
+//!   is placed relative to (#316) is refused the same way, naming it.
 //! - **Activation is inert data** (AGENTS.md, M1.6): which setup is
 //!   ACTIVE changes no path, no stamp, no staleness - it only decides
 //!   where NEW things join. Commands write the singleton; readers
@@ -37,8 +38,9 @@
 //!   place their stock identically, and Stale when they do not - no
 //!   forced invalidation either way.
 
-use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::World;
+
+pub use super::setup_delete::DeleteSetup;
 
 use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
@@ -51,11 +53,11 @@ use crate::stock::StockShape;
 
 /// A setup's stock as the transfer copies it: entity name, parameters,
 /// placement, and the local facets a `FromModel` stock mirrors.
-struct StockSnap {
-    name: String,
-    shape: StockShape,
-    location: Location,
-    facets: std::sync::Arc<[Triangle]>,
+pub(super) struct StockSnap {
+    pub(super) name: String,
+    pub(super) shape: StockShape,
+    pub(super) location: Location,
+    pub(super) facets: std::sync::Arc<[Triangle]>,
 }
 
 /// Create a setup, optionally transferring a datum: cloning the named
@@ -122,6 +124,8 @@ impl CreateSetup {
                 part_alignment: None,
                 machine: None,
                 post: None,
+                relative_to: None,
+                stock_source: None,
             }
         } else {
             SetupDef {
@@ -139,6 +143,12 @@ impl CreateSetup {
                 // to a new setup - it keeps the source's machine and post.
                 machine: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.machine),
                 post: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.post),
+                // #316: a datum transfer starts in the source's frame (the
+                // transform between them is the identity) but links nothing:
+                // the clone does not follow the source's later edits.
+                relative_to: None,
+                // #320: a new setup takes the default stock source.
+                stock_source: None,
             }
         };
         let mut stock = None;
@@ -223,110 +233,6 @@ impl Command for CreateSetup {
         if let Some(e) = model::find_by_name(world, &self.name) {
             model::remove(world, &e);
         }
-    }
-}
-
-/// Delete a setup, its private furniture, and its claim on the program.
-/// Refused while any operation still machines in it.
-pub struct DeleteSetup {
-    name: String,
-    def: SetupDef,
-    /// Furniture that goes with the setup: entities this setup alone
-    /// names. Shared legacy names (`Stock`, `G54`..) and anything
-    /// another setup points at are NOT deleted.
-    stock: Option<StockSnap>,
-    wcs: Option<(String, Location)>,
-    prev_active: Option<String>,
-}
-
-impl DeleteSetup {
-    pub fn new(world: &World, name: &str) -> Result<Self, CommandError> {
-        let entity = model::find_by_name(world, name)
-            .ok_or_else(|| CommandError::NotFound(name.to_string()))?;
-        let def = entity
-            .entity_view(world)
-            .try_get::<&SetupDef>(|d| d.clone())
-            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a setup")))?;
-        // Refusal: an operation that would orphan its own program
-        // position. `belongs` is the single predicate the order law uses.
-        for (op_name, op_e) in setup::operation_order(world) {
-            let declared = model::operation_of(world, &op_e).and_then(|o| o.setup);
-            if setup::belongs(world, declared.as_deref(), name) {
-                return Err(CommandError::Invalid(format!(
-                    "'{op_name}' machines in '{name}' - move or delete it first"
-                )));
-            }
-        }
-        let owned = |n: &str| {
-            n != STOCK_NAME && !WCS_SLOTS.contains(&n) && !setup::is_furniture_of_other(world, n, name)
-        };
-        let stock = if owned(&def.stock) {
-            model::find_by_name(world, &def.stock).and_then(|e| {
-                model::stock_def_of(world, &e).map(|shape| StockSnap {
-                    name: def.stock.clone(),
-                    shape,
-                    location: model::transform_of(world, &e).unwrap_or_default(),
-                    facets: model::facets_of(world, &e).unwrap_or_default(),
-                })
-            })
-        } else {
-            None
-        };
-        let wcs = if owned(&def.wcs) {
-            model::find_by_name(world, &def.wcs)
-                .filter(|e| model::is_wcs(world, e))
-                .and_then(|e| model::transform_of(world, &e))
-                .map(|loc| (def.wcs.clone(), loc))
-        } else {
-            None
-        };
-        Ok(DeleteSetup {
-            name: name.to_string(),
-            def,
-            stock,
-            wcs,
-            prev_active: setup::active(world),
-        })
-    }
-}
-
-impl Command for DeleteSetup {
-    fn apply(&self, world: &World) {
-        if let Some(s) = &self.stock
-            && let Some(e) = model::find_by_name(world, &s.name)
-        {
-            model::remove(world, &e);
-        }
-        if let Some((wname, _)) = &self.wcs
-            && let Some(e) = model::find_by_name(world, wname)
-        {
-            model::remove(world, &e);
-        }
-        if let Some(e) = model::find_by_name(world, &self.name) {
-            model::remove(world, &e);
-        }
-        // The active-setup singleton is left pointing where it pointed:
-        // `setup::active`'s existence fallback makes a deleted name read
-        // as the first remaining setup, exactly the law.
-    }
-
-    fn invert(&self, world: &World) {
-        let entity = model::spawn(world, &self.name);
-        entity.entity_view(world).set(self.def.clone());
-        if let Some(s) = &self.stock {
-            let e = model::spawn(world, &s.name);
-            model::set_transform(world, &e, s.location);
-            model::set_facets(world, &e, s.facets.clone());
-            e.entity_view(world).set(StockDef {
-                shape: s.shape.clone(),
-            });
-        }
-        if let Some((wname, loc)) = &self.wcs {
-            let e = model::spawn(world, wname);
-            e.entity_view(world).add(Wcs);
-            model::set_transform(world, &e, *loc);
-        }
-        setup::set_active(world, self.prev_active.clone());
     }
 }
 

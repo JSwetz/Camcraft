@@ -26,6 +26,11 @@
 //!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
 //!   takes any rigid transform - the door the face/edge picks (#330) use,
 //!   through [`AlignPartToSetup::lay_on_plane`].
+//! - **Linked setups follow (#316).** Every setup placed relative to
+//!   this one (directly or through others, [`crate::setup_relative`])
+//!   keeps its transform to it: the command re-places each of them, with
+//!   its following stock, in the same undo unit - or refuses the whole
+//!   change, naming the setup that cannot follow.
 
 use flecs_ecs::prelude::World;
 
@@ -67,8 +72,8 @@ fn change_of(
     Ok((prev, next))
 }
 
-/// Write (or clear) a setup's part alignment.
-pub struct AlignPartToSetup {
+/// One setup's alignment change, with its following stock.
+struct Step {
     setup: String,
     prev: Option<Location>,
     next: Option<Location>,
@@ -76,12 +81,41 @@ pub struct AlignPartToSetup {
     stock: Option<(String, StockState, StockState)>,
 }
 
+/// Write (or clear) a setup's part alignment.
+pub struct AlignPartToSetup {
+    main: Step,
+    /// #316: the setups linked below this one, re-placed with it (parents
+    /// before children).
+    carried: Vec<Step>,
+}
+
 impl AlignPartToSetup {
     /// Any rigid transform document -> setup frame; `None` clears.
     pub fn new(world: &World, setup: &str, alignment: Option<Location>) -> Result<Self, CommandError> {
         let (prev, next) = change_of(world, setup, alignment)?;
         let stock = following_stock(world, setup, prev, next)?;
-        Ok(AlignPartToSetup { setup: setup.to_string(), prev, next, stock })
+        let mut carried = Vec::new();
+        for (child, c_prev, c_next) in crate::setup_relative::carried(world, setup, prev, next) {
+            let follow = |e: CommandError| {
+                let why = match e {
+                    CommandError::Invalid(m) => m,
+                    other => other.to_string(),
+                };
+                CommandError::Invalid(format!(
+                    "setup '{child}' is placed relative to '{setup}' and must follow the change, but {why}"
+                ))
+            };
+            let c_next = c_next.map(|a| check_location(a, "the carried part alignment")).transpose().map_err(follow)?;
+            let stock = following_stock(world, &child, c_prev, c_next).map_err(follow)?;
+            carried.push(Step { setup: child, prev: c_prev, next: c_next, stock });
+        }
+        Ok(AlignPartToSetup { main: Step { setup: setup.to_string(), prev, next, stock }, carried })
+    }
+
+    /// How many linked setups this change re-places with it (#316).
+    #[must_use]
+    pub fn carried_count(&self) -> usize {
+        self.carried.len()
     }
 
     /// Would [`Self::lay_on_plane`] be accepted? The same refusals, by
@@ -127,7 +161,9 @@ impl AlignPartToSetup {
             .ok_or_else(|| CommandError::Invalid("there is no part to align - import a model first".into()))?;
         Self::new(world, setup, setup_align::about_centre(rot, c))
     }
+}
 
+impl Step {
     fn write(&self, world: &World, alignment: Option<Location>, stock: Option<&StockState>) {
         if let Some(entity) = model::find_by_name(world, &self.setup) {
             let view = entity.entity_view(world);
@@ -152,11 +188,15 @@ impl AlignPartToSetup {
 
 impl Command for AlignPartToSetup {
     fn apply(&self, world: &World) {
-        self.write(world, self.next, self.stock.as_ref().map(|(_, _, after)| after));
+        for step in std::iter::once(&self.main).chain(&self.carried) {
+            step.write(world, step.next, step.stock.as_ref().map(|(_, _, after)| after));
+        }
     }
 
     fn invert(&self, world: &World) {
-        self.write(world, self.prev, self.stock.as_ref().map(|(_, before, _)| before));
+        for step in self.carried.iter().rev().chain(std::iter::once(&self.main)) {
+            step.write(world, step.prev, step.stock.as_ref().map(|(_, before, _)| before));
+        }
     }
 }
 

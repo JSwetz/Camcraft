@@ -79,6 +79,7 @@ mod stamp;
 pub use stamp::*;
 mod stamp_stock;
 pub use stamp_stock::reads_setup_stock;
+pub(crate) use stamp_stock::write_setup_stock;
 mod material;
 pub use material::*;
 mod material_region;
@@ -90,6 +91,10 @@ pub use footprint::machined_footprint;
 mod probe;
 // #108: the Probe operation's generation and protected-move law.
 pub mod probe_op;
+// #171: the Probe op seeded from one picked face, edge, vertex or round wall.
+mod probe_pick;
+mod probe_pick_round;
+pub use probe_pick::{PROBE_AXIS_TOL_DEG, ProbeSeed, probe_account, probe_from_picks, probe_seed, seeded_params};
 pub(crate) use probe::*;
 mod selection;
 pub use selection::*;
@@ -127,6 +132,8 @@ mod cross_spindle;
 mod cross_stock;
 mod drill_reach;
 mod drill_prior;
+mod carried_stock;
+pub use carried_stock::{CARRIED_OUTSIDE_DECLARED, CARRIED_OUTSIDE_NOTED, carried_problems};
 pub(crate) use drill_prior::reads_prior;
 mod plunge_solid;
 mod rotary_law;

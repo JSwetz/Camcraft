@@ -527,6 +527,9 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
     // The one-mount clause (#343): one program, one post, one machine.
     problems.extend(crate::setup_mount::program_problems(world));
+    // The carried-stock clause (#319): a feed move into carried material
+    // outside a setup's declared stock is engagement nothing verified.
+    problems.extend(crate::operation::carried_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
         // #374: an inverted axis the post cannot translate (Z, any letter
@@ -558,6 +561,9 @@ pub fn verification_report(world: &World) -> GateReport {
     // precedent: what the room is made of is verified now, never baked
     // into a digest).
     problems.extend(fixture_problems(world));
+    // #321: a carried setup's fixtures against the body it is entered
+    // with - workholding modelled into material the program carries in.
+    problems.extend(crate::fixture_carried::carried_fixture_problems(world));
 
     // The in-process measurement ask (M5.3 D): a Part op's probe
     // budget is a claim about the FINISHED part, and the finished
@@ -591,10 +597,19 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
-        let Some(tool) = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let Some((tool_entity, tool)) = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t).map(|d| (t, d)))
         else {
             continue;
+        };
+        // #368: the body's enclosing cylinder and band stack; a body
+        // that no longer fits its tool is itself the problem, by name.
+        let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
+            Ok(v) => v,
+            Err(e) => {
+                out.push(format!("{name}: tool {}: {e}", op.tool));
+                continue;
+            }
         };
         // `boxes_for` already folds in the machine-derived table, so an
         // empty list means no steel this op could strike at all (the
@@ -612,15 +627,17 @@ fn fixture_problems(world: &World) -> Vec<String> {
             axis: crate::fixture::rotary_axis_of(world, &op),
         };
         let geom = tool.geom();
-        let mut hits = crate::verify::bands_vs_workholding(
+        let holder = crate::tool_body::stack(&geom, body.as_ref());
+        let mut hits = crate::verify::bands_vs_workholding_held(
             &cache.path,
             &geom,
+            &holder,
             &wh,
             spindle,
             operation::GOUGE_TOL,
         );
         // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::rapids_vs_workholding(&cache.path, &geom, &wh, spindle));
+        hits.extend(crate::verify::rapids_vs_workholding_held(&cache.path, &geom, &holder, &wh, spindle));
         for hit in hits {
             out.push(format!("{name}: {hit}"));
         }

@@ -62,7 +62,22 @@ use super::*;
 /// / `SetupDto::post`); absent follows the document's, so a v54 file
 /// steps up unchanged. An old reader must refuse a v55 file rather than
 /// post every setup on the document's machine.
-pub const PROJECT_VERSION: u32 = 55;
+/// v56 (#316): a setup may be placed relative to another
+/// (`SetupDto::relative_to`), so a change of that setup's part alignment
+/// carries into it. Absent links nothing, so a v55 file steps up
+/// unchanged; a link naming no setup, or a loop of links, is corrupt. An
+/// old reader must refuse a v56 file rather than let an edit of one
+/// setup leave its re-clamp behind.
+/// v57 (#320): a setup may pick where its stock comes from
+/// (`SetupDto::stock_source`: its own, or what the setup before leaves).
+/// Absent reads as #317's implicit rule, so a v56 file steps up and
+/// simulates unchanged; an unknown word is corrupt. An old reader must
+/// refuse a v57 file rather than sim a setup from the wrong stock.
+/// v58 (#368): a tool may carry a modelled body (`body` on the tool,
+/// `tool_body_wire`). Absent is the holder cylinder every v57 file
+/// judged; an old reader must refuse a v58 file rather than drop the
+/// body and judge the smaller cylinder in its place.
+pub const PROJECT_VERSION: u32 = 58;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -309,6 +324,10 @@ pub struct ToolDto {
     /// absent means "post by list position", what every older tool did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
+    /// #368 (v58): the tool's modelled body. Absent is none - the
+    /// holder cylinder, what every older tool judged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<super::tool_body_wire::ToolBodyDto>,
 }
 
 fn centre_cutting() -> bool {
@@ -404,6 +423,7 @@ impl ToolDto {
             flutes: t.flutes,
             center_cutting: t.center_cutting,
             number: None,
+            body: None,
         }
     }
 

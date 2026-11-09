@@ -36,6 +36,7 @@ use crate::viewport::View3D;
 use super::icons;
 use super::layout;
 use super::machine_editor;
+use super::machines_pane;
 use super::unsaved_prompt;
 use super::frame_watch::FrameWatch;
 use super::gpu;
@@ -145,6 +146,7 @@ pub(crate) enum Tab {
     Viewport,
     Browser,
     Properties,
+    Machines,
 }
 
 impl Tab {
@@ -153,6 +155,7 @@ impl Tab {
             Tab::Viewport => "viewport",
             Tab::Browser => "browser",
             Tab::Properties => "properties",
+            Tab::Machines => "machines",
         }
     }
 }
@@ -926,6 +929,10 @@ impl TabViewer for ShellTabs<'_> {
             Tab::Properties => {
                 let pal = theme::current();
                 pages::properties(ui, self.state, &pal);
+            }
+            Tab::Machines => {
+                let pal = theme::current();
+                machines_pane::draw(ui, self.state, &pal);
             }
         }
     }

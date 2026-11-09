@@ -502,7 +502,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
     if (53..=PROJECT_VERSION).contains(&file.version) {
         // v53 -> v54 (#342): one WCS per setup - each setup keeps the
         // origin of the slot it posts, slots no setup posts are dropped
-        // with a note; a v54 file is checked one-WCS (`wcs_one`).
+        // with a note; a v54+ file is checked one-WCS (`wcs_one`).
+        // v54 -> v55 (#343): a setup may own its machine and post;
+        // absent follows the document's. v55 -> v56 (#316): a setup may
+        // be placed relative to another; absent links nothing. v56 -> v57
+        // (#320): a setup may pick its stock source; absent is #317's
+        // implicit rule. v57 -> v58 (#368): a tool may carry a modelled
+        // body; absent is the holder cylinder every older tool judged.
+        // None of these rungs needs a rewrite.
         notes = super::wcs_one::settle(&mut file, from)?;
         file.version = PROJECT_VERSION;
     }
@@ -535,6 +542,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
     }
+    super::setup_links::check(&file)?;
     let keys: std::collections::HashSet<&str> = file.entities.iter()
         .filter(|e| e.kind == Some(EntityKind::Operation))
         .map(|e| e.name.as_str()).collect();
@@ -679,6 +687,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     tool: tdto.to_tool(),
                     number: tdto.number,
                 });
+                // #368: validate_kind already refused a body that is no body.
+                if let Some(b) = &tdto.body {
+                    let body = b.to_body(&dto.name).map_err(corrupt)?;
+                    crate::tool_body::set_body(world, &entity, Some(&body));
+                }
             }
             EntityKind::Operation => {
                 let odto = dto
@@ -750,6 +763,13 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     None => None,
                     Some(m) => Some(m.to_def(&dto.name).map_err(corrupt)?),
                 };
+                // #320: an unknown stock-source word is a corrupt file.
+                let stock_source = match sdto.stock_source.as_deref() {
+                    None => None,
+                    Some(w) => Some(crate::setup_stock::StockSource::from_word(w).ok_or_else(|| {
+                        corrupt(format!("setup '{}' takes its stock from '{w}', which is no stock source", dto.name))
+                    })?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     // `wcs_one` left exactly one name on every setup.
@@ -764,6 +784,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     part_alignment,
                     machine,
                     post: sdto.post.as_ref().map(SetupPostDto::to_ref),
+                    relative_to: sdto.relative_to.clone(),
+                    stock_source,
                 });
             }
         }

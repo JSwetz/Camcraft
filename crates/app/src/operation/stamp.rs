@@ -38,8 +38,8 @@ pub fn current_stamp(
     let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
     h.write(tool_name.as_bytes());
     h.write_u8(0xff);
-    let tool = model::find_by_name(world, tool_name)
-        .and_then(|e| model::tool_of(world, &e))?;
+    let tool_entity = model::find_by_name(world, tool_name)?;
+    let tool = model::tool_of(world, &tool_entity)?;
     h.write_u8(match tool.kind {
         crate::tools::ToolKind::EndMill => 0,
         crate::tools::ToolKind::BallNose => 1,
@@ -116,6 +116,9 @@ pub fn current_stamp(
     if !tool.center_cutting {
         h.write_u8(0xCC);
     }
+    // #368: a modelled body's envelope - bytes only when there is one,
+    // so no digest without a body moves.
+    crate::tool_body::digest(world, &tool_entity, &mut h);
     params.stamp_with(world, setup, Some(src), &mut h);
     // #326: the setup's part alignment is a moved input for every op of
     // the setup (the parts it machines, verifies against or measures
@@ -126,6 +129,13 @@ pub fn current_stamp(
         for v in [a.pos.x, a.pos.y, a.pos.z, a.rot[0], a.rot[1], a.rot[2], a.rot[3]] {
             w(&mut h, v);
         }
+    }
+    // #320: a picked stock source is a moved input for every op of the
+    // setup (the material it machines). Written only once picked, so no
+    // stamp of an untouched setup changes.
+    if let Some(src) = crate::setup::effective(world, setup).and_then(|s| crate::setup_stock::stored(world, &s)) {
+        h.write(b"stock-source");
+        h.write(src.word().as_bytes());
     }
     // Issue #62: a kind that turns about the spindle measures every
     // diameter from its work offset's origin, so moving that origin is
@@ -231,9 +241,14 @@ pub fn current_stamp(
     // what the program ahead removed. Issue #109: so does every
     // unposed op's rapid law (prior acquittal, pilot and facing
     // credits) - each carries the digest (one-time Stale, by design).
-    if super::drill_prior::reads_prior(params)
-        && let Some(digest) = crate::rest::prior_digest(world, op_name, setup)
-    {
+    // #319: a posed op in a setup entered with a carried body judges the
+    // stock that body spans, so it digests the same chain - only then.
+    let digest = if super::drill_prior::reads_prior(params) {
+        crate::rest::prior_digest(world, op_name, setup)
+    } else {
+        crate::rest::carried_digest(world, op_name, setup)
+    };
+    if let Some(digest) = digest {
         h.write_u8(b'R');
         h.write_u64(digest);
     }
