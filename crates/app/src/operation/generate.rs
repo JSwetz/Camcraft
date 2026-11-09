@@ -60,6 +60,7 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let GenJob {
         tool,
+        body,
         tool_name,
         params,
         src,
@@ -2331,7 +2332,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::chamfer(
+            let path = crate::turning::chamfer_in(
                 &material.facets,
                 &crate::turning::ChamferParams {
                     clearance_z: hl.clearance,
@@ -2343,6 +2344,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2368,7 +2370,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::taper(
+            let path = crate::turning::taper_in(
                 &material.facets,
                 &crate::turning::TaperParams {
                     clearance_z: hl.clearance,
@@ -2381,6 +2383,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2410,7 +2413,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::multi_pass(
+            let path = crate::turning::multi_pass_in(
                 &material.facets,
                 &crate::turning::MultiPassParams {
                     clearance_z: hl.clearance,
@@ -2424,6 +2427,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2525,6 +2529,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // unstated-limit law means a file that names no spindle body adds
     // no band, exactly as it adds no feed or travel check.
     let geom = tool.geom();
+    // #368: what the fixture laws sweep above the shank.
+    let holder = crate::tool_body::stack(&geom, body.as_ref());
     let fixture_boxes = fixtures;
     let stl = match &params {
         OpParams::Face { .. }
@@ -2834,7 +2840,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // ...and a boring bar's head and shank on its FEEDS (#146),
             // against the same revolved material at each instant.
             super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
-            warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle, mesh_steel));
+            warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle, mesh_steel));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
             // - a grooved part is undercut BY DESIGN, material
@@ -3026,7 +3032,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             }
             warns.extend(workholding_warnings(
                 &path_world,
-                &geom,
+                (&geom, &holder),
                 &fixture_boxes,
                 &workholding,
                 rotary_axis,
@@ -3070,7 +3076,7 @@ fn rotary_letter_gate(
 #[allow(clippy::too_many_arguments)] // the gate's inputs + the meshes
 fn workholding_warnings(
     path: &Toolpath,
-    geom: &crate::tools::ToolGeom,
+    (geom, holder): (&crate::tools::ToolGeom, &camcraft_tools::holder_profile::HolderStack),
     all: &[crate::fixture::FixtureBox],
     (turning, fixed): &(Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
     axis: Option<verify::RotaryAxis>,
@@ -3081,11 +3087,14 @@ fn workholding_warnings(
         return Vec::new();
     }
     let wh = verify::Workholding { turning, fixed, axis };
-    let stack = verify::steel_stack(geom, spindle);
+    let stack = verify::steel_stack(geom, holder, spindle);
     let steel = verify::MeshSteel { fixtures: meshes, stack: &stack, chord_tol: GOUGE_TOL };
-    let mut warns =
-        verify::mesh_refined(path, &wh, &steel, false, |w| verify::bands_vs_workholding(path, geom, w, spindle, GOUGE_TOL));
-    warns.extend(verify::mesh_refined(path, &wh, &steel, true, |w| verify::rapids_vs_workholding(path, geom, w, spindle)));
+    let mut warns = verify::mesh_refined(path, &wh, &steel, false, |w| {
+        verify::bands_vs_workholding_held(path, geom, holder, w, spindle, GOUGE_TOL)
+    });
+    warns.extend(verify::mesh_refined(path, &wh, &steel, true, |w| {
+        verify::rapids_vs_workholding_held(path, geom, holder, w, spindle)
+    }));
     crate::fixture::log_mesh_refusals(meshes);
     warns
 }

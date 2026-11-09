@@ -1027,6 +1027,9 @@ pub struct PostView {
 pub enum Panel {
     Browser,
     Properties,
+    /// The Machines pane (#287): closed by default, opened from the View
+    /// door beside the properties pane.
+    Machines,
 }
 
 /// A dock-layout ask from the View door, applied by the shell on the
@@ -1048,6 +1051,7 @@ pub enum LayoutRequest {
 pub struct PanelsOpen {
     pub browser: bool,
     pub properties: bool,
+    pub machines: bool,
 }
 
 impl PanelsOpen {
@@ -1056,6 +1060,7 @@ impl PanelsOpen {
         match p {
             Panel::Browser => self.browser,
             Panel::Properties => self.properties,
+            Panel::Machines => self.machines,
         }
     }
 }
@@ -1191,6 +1196,9 @@ pub struct State {
     /// The View door's open flag: the same dropdown law as
     /// `ribbon_mode_open` (one door open at a time, a frame fact).
     pub ribbon_view_open: bool,
+    /// The Theme door's open flag (#441): the same dropdown law as
+    /// `ribbon_view_open` - a frame fact, one door open at a time.
+    pub ribbon_theme_open: bool,
     /// The dock's closable panels as of this frame (see [`PanelsOpen`]).
     pub panels_open: PanelsOpen,
     /// The View door's pending dock ask (see [`LayoutRequest`]).
@@ -1286,6 +1294,10 @@ pub struct State {
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
     /// which is the command, which is the undo.
     pub machine_editor: Option<crate::egui_app::machine_editor::MachineEditor>,
+    /// The Machines pane's view state (#287): the cached catalogue and
+    /// the selected row. Ephemeral like the dock itself - browsing a
+    /// machine is not a command; assigning one will be.
+    pub machines_pane: crate::egui_app::machines_pane::MachinesPane,
     /// M6.1 C's resolution furniture (never a command, never saved -
     /// the camera's law): the parse cache for `File` themes, the
     /// discovered theme files behind the switcher's rows, and the last
@@ -1459,7 +1471,8 @@ impl State {
             ribbon_more: None,
             ribbon_mode_open: false,
             ribbon_view_open: false,
-            panels_open: PanelsOpen { browser: true, properties: true },
+            ribbon_theme_open: false,
+            panels_open: PanelsOpen { browser: true, properties: true, machines: false },
             layout_request: None,
             tree_menu: None,
             retype_confirm: None,
@@ -1498,6 +1511,7 @@ impl State {
             },
             tool_editor: None,
             machine_editor: None,
+            machines_pane: Default::default(),
             theme_cache: theme_files::Cache::new(),
             // One walk per window, at construction: the switcher's file
             // rows are furniture, not live filesystem polling (the
@@ -3833,13 +3847,16 @@ pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     dialog.set_file_name(filename).save_file()
 }
 
-fn post_program_dialog() -> Option<PathBuf> {
+/// The Post dialog, opened where `crate::post_file::post_target` says
+/// (#258: the last post's folder and name, else the project's).
+fn post_program_dialog(target: &crate::post_file::PostTarget) -> Option<PathBuf> {
     // The extension law lives with the script (fanuc.cps's `extension`
     // is "nc"); the dialog just offers it.
-    rfd::FileDialog::new()
-        .add_filter("NC Program", &["nc"])
-        .set_file_name("program.nc")
-        .save_file()
+    let mut dialog = rfd::FileDialog::new().add_filter("NC Program", &["nc"]);
+    if let Some(dir) = &target.dir {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.set_file_name(&target.file_name).save_file()
 }
 
 fn save_stl_dialog() -> Option<PathBuf> {

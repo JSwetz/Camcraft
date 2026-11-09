@@ -44,6 +44,7 @@ use crate::fixture::{FixtureBox, FIXTURE_HIT_TOL};
 use crate::fixture_mesh::{FixtureMesh, MeshedFixture};
 use crate::geometry::Point3;
 use crate::tools::ToolGeom;
+use camcraft_tools::holder_profile::HolderStack;
 
 use super::types::{FixturePart, Warning};
 use super::workholding::Workholding;
@@ -62,14 +63,19 @@ pub struct SteelBand {
 /// holder, the spindle housing (radius, length) when the machine
 /// states it, then the flute.
 #[must_use]
-pub fn steel_stack(tool: &ToolGeom, spindle: Option<(f64, f64)>) -> Vec<SteelBand> {
-    let (fl, sl, hl) = (tool.flute_len, tool.shank_len, tool.holder_len);
-    let mut out = vec![
-        SteelBand { part: FixturePart::Shank, lo: fl, hi: fl + sl, r: tool.shank_radius },
-        SteelBand { part: FixturePart::Holder, lo: fl + sl, hi: fl + sl + hl, r: tool.holder_radius },
-    ];
+pub fn steel_stack(tool: &ToolGeom, holder: &HolderStack, spindle: Option<(f64, f64)>) -> Vec<SteelBand> {
+    let (fl, sl) = (tool.flute_len, tool.shank_len);
+    let mut out = vec![SteelBand { part: FixturePart::Shank, lo: fl, hi: fl + sl, r: tool.shank_radius }];
+    // #368: what stands above the shank - the holder's own bands, the
+    // same `HolderStack` the box laws (c2/d2) sweep.
+    out.extend(holder.bands.iter().map(|b| SteelBand {
+        part: FixturePart::Holder,
+        lo: b.above,
+        hi: b.above + b.len,
+        r: b.r,
+    }));
     if let Some((sr, slen)) = spindle {
-        out.push(SteelBand { part: FixturePart::Spindle, lo: fl + sl + hl, hi: fl + sl + hl + slen, r: sr });
+        out.push(SteelBand { part: FixturePart::Spindle, lo: holder.top, hi: holder.top + slen, r: sr });
     }
     out.push(SteelBand { part: FixturePart::Flute, lo: 0.0, hi: fl, r: tool.radius });
     out

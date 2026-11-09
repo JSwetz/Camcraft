@@ -83,7 +83,7 @@ fn judge(path: &Toolpath, f: &MeshedFixture) -> (Vec<Warning>, Vec<Warning>) {
     let boxes = [f.aabb];
     let wh = Workholding { turning: &boxes, fixed: &[], axis: None };
     let t = tool();
-    let stack = steel_stack(&t, None);
+    let stack = steel_stack(&t, &camcraft_tools::holder_profile::HolderStack::cylinder(&t), None);
     let fixtures = std::slice::from_ref(f);
     let steel = MeshSteel { fixtures, stack: &stack, chord_tol: 0.01 };
     let mut boxed = bands_vs_workholding(path, &t, &wh, None, 0.01);
@@ -213,7 +213,7 @@ fn posed_moves_and_unpaired_boxes_keep_the_box_verdict() {
     // A box no fixture owns (the machine table) stays a box.
     let upright = Toolpath::new(vec![feed(p(-60.0, 0.0, 25.0), p(60.0, 0.0, 25.0))]);
     let t = tool();
-    let stack = steel_stack(&t, None);
+    let stack = steel_stack(&t, &camcraft_tools::holder_profile::HolderStack::cylinder(&t), None);
     let table = [FixtureBox { min: p(-100.0, -100.0, -1000.0), max: p(100.0, 100.0, 30.0) }];
     let wh = Workholding { turning: &[], fixed: &table, axis: None };
     let steel = MeshSteel { fixtures: std::slice::from_ref(&f), stack: &stack, chord_tol: 0.01 };

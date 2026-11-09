@@ -27,6 +27,10 @@ pub struct GenJob {
     /// a preview with no entity.
     pub(super) op_name: String,
     pub(super) tool: crate::tools::Tool,
+    /// The tool's modelled body (#368): its envelope, for the fixture
+    /// laws' band stack. `tool` already carries the cylinder enclosing
+    /// it, for every law that reads one; None is no body.
+    pub(super) body: Option<camcraft_tools::holder_profile::HolderProfile>,
     /// The op's tool NAME as the component stored it - the error
     /// strings of the tilted kinds quote it verbatim.
     pub(super) tool_name: String,
@@ -125,6 +129,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let Some(tool) = model::tool_of(world, &tool_entity) else {
         return Err(GenError::Invalid(format!("'{}' is not a tool", op.tool)));
     };
+    let (tool, body) = crate::tool_body::judged(world, &tool_entity, tool)
+        .map_err(|e| GenError::Invalid(format!("tool '{}': {e}", op.tool)))?;
     let setup = op.setup.as_deref();
     // #326: an op this slice has not verified in an aligned setup is
     // refused by name here, at the one door every generation passes -
@@ -301,6 +307,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     Ok(GenJob {
         op_name: op_name.to_owned(),
         tool,
+        body,
         tool_name: op.tool.clone(),
         params: op.params.clone(),
         src: op.src.clone(),

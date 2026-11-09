@@ -91,12 +91,41 @@ fn patched(base: &OpParams, patch: &Value) -> Result<OpParams, String> {
         return Err("the patched parameters could not be read back".into());
     };
     let back = back.get(&key).and_then(Value::as_object).cloned().unwrap_or_default();
-    for (k, v) in patch {
-        if !v.is_null() && !back.contains_key(k) {
-            return Err(format!("bad params patch: a {key} operation has no field \"{k}\" - see list_operation_types"));
-        }
+    if let Some(path) = lost(patch, &back, "") {
+        return Err(format!("bad params patch: unknown field {path} - a {key} operation has no field \"{path}\"; see list_operation_types"));
     }
     Ok(next)
+}
+
+/// The first key path of `patch` (dotted, e.g. `clearance_z.ofset`) the
+/// typed round-trip did not keep, at any depth. A null value is a
+/// removal (RFC 7386) and has nothing to keep; an object is checked key
+/// by key against what came back; any other value is a leaf that must
+/// simply be present.
+fn lost(patch: &Map<String, Value>, back: &Map<String, Value>, prefix: &str) -> Option<String> {
+    for (k, v) in patch {
+        if v.is_null() {
+            continue;
+        }
+        let path = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+        match (v, back.get(k)) {
+            (_, None) => return Some(path),
+            (Value::Object(p), Some(Value::Object(b))) => {
+                if let Some(deeper) = lost(p, b, &path) {
+                    return Some(deeper);
+                }
+            }
+            // An object patch whose field came back as a scalar or null
+            // lost every key it carried.
+            (Value::Object(p), Some(_)) => {
+                if let Some(first) = p.iter().find(|(_, x)| !x.is_null()).map(|(n, _)| n) {
+                    return Some(format!("{path}.{first}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn merge(target: &mut Value, patch: &Value) {

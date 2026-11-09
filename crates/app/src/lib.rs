@@ -10,6 +10,7 @@ pub mod commands;
 pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
+pub mod fixture_carried;
 pub use camcraft_motion::finishing3d;
 pub use camcraft_geometry::geo2d;
 pub mod geometry;
@@ -58,6 +59,8 @@ pub mod tool_list;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
 pub use camcraft_tools::tools;
+// #368: a tool's modelled body and the reads the judging laws take from it.
+pub mod tool_body;
 pub mod units;
 pub use camcraft_sim::verify;
 pub mod world;

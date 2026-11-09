@@ -20,6 +20,7 @@ pub mod ribbon_pins;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
+pub mod setup_delete;
 // #196: a setup's picked program offset.
 pub mod setup_align;
 pub mod setup_wcs;
@@ -36,6 +37,8 @@ pub mod theme;
 pub mod color_vision;
 pub mod set_wcs;
 pub mod tool;
+// #368: a tool's modelled body.
+pub mod tool_body;
 // #221: a tool's controller number.
 pub mod tool_number;
 pub mod update_model;
@@ -72,6 +75,7 @@ pub use theme::{theme_of, theme_set, SetTheme};
 pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
+pub use tool_body::{SetToolBody, ToolBodySpec};
 pub use tool_number::SetToolNumber;
 pub use update_model::UpdateModel;
 
