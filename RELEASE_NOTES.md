@@ -1,3 +1,124 @@
+# CamCraft 0.15.0 (clean-room implementation)
+
+BREAKING: the project file format moved from v50 to v57, and two of those
+steps change what a project means. Files saved by 0.14.0 or earlier are
+migrated when opened, but a file saved by 0.15.0 is refused by older builds
+(save a copy first if you still need 0.14.0).
+- **One WCS per setup** (#342): a setup now owns a single work coordinate
+  system, and G54-G59 is only the label the post writes for it. Placed slots
+  that no setup posted are dropped on load, each with a load note naming the
+  entity and where it sat; single-WCS projects post byte for byte as before.
+  The `SetWcsOrigin` command lost its slot argument.
+- **The setup defines the work offset, not each height** (#329): a height
+  measured from the work offset reads its setup's offset, and the Heights
+  page no longer offers a per-height WCS choice. A project from 0.14.0 or
+  earlier whose operations used different G54-G59 slots inside one setup is
+  refused at load by name (open it in 0.14.0, make the slots agree, save,
+  then open it here).
+
+A minor release headlined by multi-setup machining: a setup tree in the
+browser, setups placed relative to one another, the stock carried from one
+setup into the next (including rest machining, verification and fixtures),
+plus inverted machine axes. Thanks to austin62jake, bherbruck, linuxguy123,
+mkinney and seelesturm for their contributions.
+
+## New
+- **Setups as a tree** (#343): the browser shows each setup as a node with an
+  active-setup radio and its own WCS, Stock, Machine, Post, Fixtures, Tool
+  list and Operations; a setup can have its own machine and post.
+- **Part alignment per setup** (#326, #330): hold the part flipped or turned
+  (presets or typed angles) with the stock following square to the setup
+  frame, or lay it on a G17/G18/G19 plane by picking a flat face or two
+  straight edges. Face, 2D Contour, 2D Pocket and 2D Adaptive generate and
+  post in an aligned setup; every other kind is refused by name.
+- **Place a setup relative to another** (#316): same way up, flipped, turned
+  or by angles; changing the previous setup's alignment carries into the
+  linked setups, and the transform between two setups is derived from their
+  alignments.
+- **Stock carried between setups**: the program sim carries the machined body
+  through the setup transform (#317); rest machining in a later setup reads
+  it, and an upstream change marks the later setup Stale (#318); rapids,
+  entries and links are judged against it (#319); a setup after the first can
+  take its own stock or what the setup before leaves behind, and the setup
+  page shows the incoming stock (#320); fixtures read the carried stock, a
+  lathe or mill-turn part flip is refused by name, and the carried body is
+  cached (#321).
+- **Pick the work offset a setup posts at** (#196) on the Setups page; the
+  setup sheet names it and conflicting picks are refused by name.
+- **Inverted machine axes**: the machine file states a per-axis direction
+  (#373); the Fanuc and Haas posts write the program mirrored (#374: signs,
+  I/J/K, G2/G3, G41/G42, work-offset origin; an inverted Z, helical arcs,
+  threading, rotary, live tooling, probing and every other post are refused by
+  name); the axis is shown on the viewport triad, the setup sheet and the NC
+  header (#375).
+- **Pause or home after an operation, suppress an operation, "Skip pauses
+  and homes" post option and one NC file per operation** (#110, #111).
+- **G41/G42 cutter compensation on Haas, Mazak and Siemens 840D** (#39).
+- **Continuous C-axis live tooling** (#33): rotary kinds on a mill-turn's
+  spindle state the C angle per move and post through the Fanuc lathe post.
+- **Comments in posted programs** naming the setup, each operation and each
+  tool, in every dialect's own syntax (#257, mkinney).
+- **Machine files for the other Tormach mills** (#170, mkinney): 770M, 1100MX,
+  1500MX and PCNC 440; a .mch can state spindle belt ranges and rigid-tap
+  ability.
+- **Lathe parts with a large keyway or flat** turn instead of being refused
+  (#113, mkinney); grooving, parting and form tools are cut with their true
+  blade profile in the lathe stock sim (#21).
+- **Probe**: the stylus stem and body are judged against the part (#172,
+  mkinney).
+- **Stock view and sim**: dual contouring for the machined-stock mesh keeps a
+  pocket's sharp edges (#23); the mesh paints deviation classes and lights the
+  hovered facet (#25); the hidden-rest scan answers past its old budget (#24).
+- **UI**: the Stock page shows stock only and the theme and colour-vision
+  picks have their own Theme ribbon button (#441); build version, time and
+  commit show in the toolbar and a Debug info window with a Copy button opens
+  from the status strip (#352, linuxguy123; #157, bherbruck); spindle speed is
+  editable as rpm or surface speed (#225, bherbruck); a refusal on the status
+  strip is drawn as an alert (#192, bherbruck); ribbon section and machine
+  doors wear glyphs (#207, bherbruck); a new document can reach the Setups page
+  to create its first setup (#322).
+- **Logging**: the launching terminal logs save, open, post, generation and
+  commands (#163, bherbruck; CAMCRAFT_LOG / RUST_LOG).
+- **Operation tops below the remaining stock are explained** during upright
+  2D/3D generation (#104, seelesturm).
+- **Packaging and tooling**: Arch and FreeBSD package targets (#72,
+  linuxguy123); the Windows installer's embedded uninstaller is signed when a
+  certificate is configured (#29); headless dev binaries per crate (#32); the
+  kernel seam gains union/intersection and edge blends, benched only (#27).
+
+## Fixed
+- **Cutter compensation** is engaged in G17, never in a stale G18/G19, on the
+  Fanuc, Haas, Mazak and Siemens 840D posts (#391).
+- **Work offsets**: a rotated work offset (3-2-1 alignment) is refused by name
+  instead of posting unrotated (#315); a non-finite or zero-length rotation
+  or a non-finite origin is refused by name (#327, mkinney).
+- **Turning**: a pass that ends inside a longer bar leaves its cut at feed
+  (#229, austin62jake); a plain two-ring bar fits its true axis and wraps
+  (#228, austin62jake).
+- **Deburr** leaves each edge run straight up before travelling (#304,
+  austin62jake).
+- **STEP import** reads the file's length unit (#306, austin62jake).
+- **CL text dump** keeps a C-axis path's spindle angle (#295, austin62jake).
+- **Facing** tells concave returns from narrow gaps between separate holes
+  (#260, seelesturm); cross-drill topology is stable under roundoff (#151,
+  seelesturm).
+- A fresh depth operation bottoms out at the part's floor, not the G54 plane
+  (#214, mkinney).
+- A loaded stock keeps its geometry revision, so a project resaves
+  byte-identically (#340, mkinney).
+- A ball nose's corner radius is its ball, shown and saved as half the
+  diameter (#263, austin62jake); Fit to Models' cylinder stock is snug (#230,
+  bherbruck).
+
+## Known issues
+- **#424 and #425 (P0, fixture law)**: an upright rapid checks only the flute
+  against fixtures, so the shank, holder and spindle housing can hit a clamp
+  unreported; and a ramp is judged at its lowest z, so the top of the tool
+  stack at the high end can hit a clamp unreported. Both predate 0.15.0 and
+  are being worked. Until they land, check clamp clearance for holder and
+  spindle by hand.
+
+---
 # CamCraft 0.14.0 (clean-room implementation)
 
 A minor release: a Probe operation, per-operation coolant, G76 threading,
