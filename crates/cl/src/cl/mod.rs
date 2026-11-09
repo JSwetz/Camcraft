@@ -24,6 +24,7 @@
 
 mod comp;
 mod cycle;
+mod edge_break;
 mod frame;
 mod moves;
 mod path;
@@ -36,6 +37,7 @@ mod touch;
 
 pub use comp::{CompSide, CompSpan};
 pub use cycle::{Cycle, CycleKind};
+pub use edge_break::EdgeBreak;
 pub use frame::TiltedFrame;
 pub use moves::{arc_chords, lattice, ArcMove, Move, MoveKind, MAX_ARC_CHORDS};
 pub use path::{PathBuilder, Toolpath};

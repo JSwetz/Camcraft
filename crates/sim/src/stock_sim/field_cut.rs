@@ -44,9 +44,11 @@
 //!   Moves carry TIP positions: a ball's center path is the tip path
 //!   lifted by `r` along the tool axis (the +Z lift when the move
 //!   carries no pose stamp - M5.1's `axis` field IS the inverted
-//!   trajectory input); a cone's apex is its tip (virtual sharp);
-//!   arcs reduce to chords with Z interpolated uniformly (the helix
-//!   law everywhere else uses); and rapids touch nothing (RS-274 G0).
+//!   trajectory input); a cone's apex is its tip (virtual sharp); an
+//!   upright mill tool's XY arc sweeps the true circle (#413,
+//!   `field_arc`, the column engine's #402 law), while a tilted pose
+//!   or a lathe tool reduces it to chords with Z interpolated
+//!   uniformly (the helix law); and rapids touch nothing (RS-274 G0).
 //!   The flat endmill's flank is finite and explicit (`flank`): a
 //!   cylinder, not the dexel's infinite column - above the flank the
 //!   field shows rest where the column law shows air, and the
@@ -59,6 +61,7 @@
 //!   refuses by name before a single brick is written.
 
 use super::field::SdfField;
+use super::field_arc::arc_sweeps;
 use super::field_blade::LatheProfile;
 use super::field_lathe::{LatheAxis, LatheSweep};
 use super::field_solid::{add, scale, tool_kind, RevKind, ToolKind};
@@ -164,33 +167,20 @@ impl SdfField {
                     [a[0] / nn, a[1] / nn, a[2] / nn]
                 }
             };
-            for (a, b) in chords(m, chord_tol) {
-                let sw = match &kind {
-                    ToolKind::Ball(r) => {
-                        let off = scale(ax, *r);
-                        Sweep::Ball { c0: add(a, off), c1: add(b, off), r: *r }
-                    }
-                    ToolKind::Shanked { r, shank } => {
-                        let off = scale(ax, *r);
-                        Sweep::Shanked { c0: add(a, off), c1: add(b, off), up: scale(ax, *shank), r: *r }
-                    }
-                    ToolKind::Flat { r, flank } => Sweep::Revolve {
-                        a,
-                        b,
-                        kind: RevKind::Flat { r: *r, flank: *flank },
-                    },
-                    ToolKind::Taper { r, cot } => Sweep::Revolve {
-                        a,
-                        b,
-                        kind: RevKind::Taper { r: *r, cot: *cot },
-                    },
-                    ToolKind::Bull { r, corner, flank } => Sweep::Revolve {
-                        a,
-                        b,
-                        kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank },
-                    },
-                    ToolKind::Lathe { foot, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, foot)?),
-                };
+            // An upright mill tool sweeps an XY arc on the true circle
+            // (#413, `field_arc`); everything else rides its chords.
+            let arc = match m.arc {
+                Some(arc) if arc.plane.is_xy() && ax == [0.0, 0.0, 1.0] => arc_sweeps(m, arc, &kind, chord_tol),
+                _ => None,
+            };
+            let built = match arc {
+                Some(v) => v,
+                None => chords(m, chord_tol)
+                    .into_iter()
+                    .map(|(a, b)| chord_sweep(&kind, ax, a, b))
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
+            for sw in built {
                 // The ceiling bounds the WORK: the window as clipped
                 // to the cut region, the only cells the walk can visit.
                 let work = self.clipped(sw.window(self.cell, self.cap, ax)).map_or(0, window_cells);
@@ -208,6 +198,26 @@ impl SdfField {
     }
 }
 
+/// One straight chord's swept solid for `kind`.
+fn chord_sweep(kind: &ToolKind, ax: [f64; 3], a: Point3, b: Point3) -> Result<Sweep, StockError> {
+    Ok(match kind {
+        ToolKind::Ball(r) => {
+            let off = scale(ax, *r);
+            Sweep::Ball { c0: add(a, off), c1: add(b, off), r: *r }
+        }
+        ToolKind::Shanked { r, shank } => {
+            let off = scale(ax, *r);
+            Sweep::Shanked { c0: add(a, off), c1: add(b, off), up: scale(ax, *shank), r: *r }
+        }
+        ToolKind::Flat { r, flank } => Sweep::Revolve { a, b, kind: RevKind::Flat { r: *r, flank: *flank } },
+        ToolKind::Taper { r, cot } => Sweep::Revolve { a, b, kind: RevKind::Taper { r: *r, cot: *cot } },
+        ToolKind::Bull { r, corner, flank } => {
+            Sweep::Revolve { a, b, kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank } }
+        }
+        ToolKind::Lathe { foot, axis } => Sweep::Lathe(LatheSweep::of(*axis, a, b, foot)?),
+    })
+}
+
 /// Cells in a chord's window: saturating, so an absurd dilation
 /// answers absurd (and refuses), never an overflowed count.
 fn window_cells(w: [(i32, i32); 3]) -> u64 {
@@ -218,8 +228,8 @@ fn window_cells(w: [(i32, i32); 3]) -> u64 {
 }
 
 /// The move's path as straight chords: one segment for a linear move,
-/// the sagitta chords with Z interpolated uniformly for an arc (the
-/// helix law `Dexel::subtract` reads).
+/// the sagitta chords with Z interpolated uniformly for an arc the
+/// exact sweep does not take (a tilted pose, a lathe tool).
 fn chords(m: &Move, chord_tol: f64) -> Vec<(Point3, Point3)> {
     match m.arc {
         None => vec![(m.from, m.to)],

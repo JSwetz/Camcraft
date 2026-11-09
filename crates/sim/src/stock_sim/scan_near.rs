@@ -24,7 +24,7 @@
 //! - **Counted.** Every distance paid and every cell visited is
 //!   added to `work`, so the scan's budget bounds the walk too.
 
-use super::scan::dist_pt_seg3;
+use super::scan_arc::{max_bulge, seg_dist, ScanArc};
 
 use crate::geometry::Point3;
 
@@ -33,6 +33,10 @@ const GRID_MAX: usize = 256;
 
 pub(super) struct SegGrid<'a> {
     segs: &'a [(Point3, Point3)],
+    /// Each segment's XY arc piece (#413): distances are read off it.
+    arcs: &'a [Option<ScanArc>],
+    /// The most any piece stands off its chord: the ring prune's slack.
+    bulge: f64,
     gx0: f64,
     gy0: f64,
     g: f64,
@@ -47,7 +51,7 @@ pub(super) struct SegGrid<'a> {
 impl<'a> SegGrid<'a> {
     /// Indexes the segments; `None` when there are none, a non-finite
     /// end, or more than `u32` can name (the caller scans linearly).
-    pub(super) fn new(segs: &'a [(Point3, Point3)], hint: f64) -> Option<Self> {
+    pub(super) fn new(segs: &'a [(Point3, Point3)], arcs: &'a [Option<ScanArc>], hint: f64) -> Option<Self> {
         if segs.is_empty() || segs.len() > u32::MAX as usize {
             return None;
         }
@@ -98,7 +102,14 @@ impl<'a> SegGrid<'a> {
                 }
             }
         }
-        Some(SegGrid { segs, gx0: x0, gy0: y0, g, gnx, gny, gz0, gz1, cells })
+        let bulge = max_bulge(arcs);
+        // An arc piece's Z stays within its chord's: the range holds.
+        Some(SegGrid { segs, arcs, bulge, gx0: x0, gy0: y0, g, gnx, gny, gz0, gz1, cells })
+    }
+
+    /// Segment `s`'s XY arc piece, when it stands for one.
+    fn arc(&self, s: u32) -> Option<&ScanArc> {
+        self.arcs.get(s as usize).and_then(Option::as_ref)
     }
 
     /// The least 3-D distance from `q` to any segment, or the first
@@ -126,7 +137,7 @@ impl<'a> SegGrid<'a> {
             && let Some((a, b)) = self.segs.get(s as usize)
         {
             *work = work.saturating_add(1);
-            best = dist_pt_seg3(q.x, q.y, q.z, *a, *b);
+            best = seg_dist(q, &(*a, *b), self.arc(s));
             if done(best) {
                 return best;
             }
@@ -144,7 +155,8 @@ impl<'a> SegGrid<'a> {
         let mut k = k0;
         while k <= k1 {
             // Every segment unseen lies wholly in rings at k or past it.
-            if ((k - 1).max(0) as f64 * self.g).hypot(zgap) >= best {
+            // An arc piece stands up to `bulge` off its indexed chord.
+            if ((k - 1).max(0) as f64 * self.g - self.bulge).max(0.0).hypot(zgap) >= best {
                 break;
             }
             let (j_lo, j_hi) = ((qj - k).max(0), (qj + k).min(ny - 1));
@@ -166,7 +178,7 @@ impl<'a> SegGrid<'a> {
                         for &s in list {
                             let Some((a, b)) = self.segs.get(s as usize) else { continue };
                             *work = work.saturating_add(1);
-                            let d = dist_pt_seg3(q.x, q.y, q.z, *a, *b);
+                            let d = seg_dist(q, &(*a, *b), self.arc(s));
                             if d < best {
                                 best = d;
                                 *hint = Some(s);

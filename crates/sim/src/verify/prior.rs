@@ -101,6 +101,7 @@ mod tests {
             comps: Vec::new(),
             threads: Vec::new(),
             probes: Vec::new(),
+            breaks: Vec::new(),
         }
     }
 

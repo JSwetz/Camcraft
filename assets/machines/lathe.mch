@@ -5,7 +5,7 @@
     "parts": [
       { "id": "base", "name": "bed", "type": "table", "parts": [
         { "id": "turret", "name": "X", "type": "linear", "travel": { "min": 0.0, "max": 320.0 }, "parts": [
-          { "id": "car", "name": "Z", "type": "linear", "travel": { "min": -615.0, "max": 0.0 } }
+          { "id": "car", "name": "Z", "type": "linear", "travel": { "min": -615.0, "max": 615.0 } }
         ] },
         { "id": "ms", "name": "head", "type": "head",
           "spindle": { "min_speed": 25.0, "max_speed": 5000.0, "power": 15.0,

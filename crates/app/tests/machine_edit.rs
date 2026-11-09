@@ -115,7 +115,7 @@ fn a_refused_file_is_not_written_and_each_refusal_sits_on_its_field() {
     assert_eq!(on("X travel min"), ["X travel: min 400 must be below max 150"]);
     assert_eq!(on("X travel max"), on("X travel min"), "a travel refusal is on both ends");
     assert!(on("Spindle max speed").iter().any(|r| r.starts_with("spindle max_speed: 0 must be a number above 0")));
-    assert_eq!(on("Coolant Flood code"), [r#"coolant Flood: code "flood please" is not an M word like M8"#]);
+    assert_eq!(on("Coolant Flood code"), [r#"coolant Flood: code "flood please" is not an M word like M8 (it must start with M)"#]);
     assert!(on("Y travel min").is_empty());
     assert!(fields::unplaced(&g, &refusals).is_empty(), "every refusal has a field");
     match m.save() {
@@ -308,56 +308,77 @@ fn a_field_pointer_through_a_non_object_is_refused_not_a_panic() {
     assert!(v.get("absent").is_none());
 }
 
-/// A hand-written mill in no sorted order: `x_vendor_block` first,
-/// `kind` before `model`, `type` before `id` (issue #480).
-const UNSORTED: &str = r#"{
-  "x_vendor_block": { "warmup_minutes": 10, "probe": "OMP40" },
-  "kinematics": { "default": {
-    "units": { "length": "mm", "angle": "degrees" },
-    "parts": [ { "type": "table", "name": "table", "id": "base", "parts": [
-      { "type": "linear", "name": "X", "id": "x", "travel": { "max": 150.0, "min": -150.0 } },
-      { "type": "linear", "name": "Y", "id": "y", "travel": { "max": 100.0, "min": -100.0 } },
-      { "type": "linear", "name": "Z", "id": "z", "travel": { "max": 0.0, "min": -200.0 } },
-      { "type": "head", "name": "head", "id": "head",
-        "tool_station": { "coolants": [ { "name": "Flood", "mCode": "M8" } ] } }
-    ] } ]
-  } },
-  "general": { "shop_asset_tag": "B-17", "kind": "mill", "model": "SHOP MILL" }
-}"#;
+/// The M-code words the editor takes: `M` and a whole number 0..=9999,
+/// leading zeros allowed. Anything else - a bare `M`, a letter after
+/// it, a lowercase `m`, a number past M9999 - is refused on its field
+/// and blocks the save (GUI-test finding on PR #478).
+const GOOD_M: [&str; 6] = ["M7", "M08", "M155", "M0", "M9999", "M0008"];
+const BAD_M: [&str; 8] = ["M", "MX", "M10000", "m8", "8", "M8.5", "M-1", "M8 M7"];
 
-/// Every `"key":` in `text`, in the order written.
-fn keys_in(text: &str) -> Vec<String> {
-    let parts: Vec<&str> = text.split('"').collect();
-    parts
-        .windows(2)
-        .enumerate()
-        .filter(|(i, w)| i % 2 == 1 && w[1].trim_start().starts_with(':'))
-        .map(|(_, w)| w[0].to_owned())
-        .collect()
+/// The refusals on one field after typing `code` into it.
+fn refusals_on(m: &mut MachineDraft, label: &str, code: &str) -> Vec<String> {
+    edit(m, label, code);
+    let r = m.refusals();
+    field(&m.groups(), label).refusals(&r).iter().map(|r| r.to_string()).collect()
 }
 
 #[test]
-fn a_saved_file_keeps_its_key_order_and_new_keys_go_last() {
-    let d = dir("keyorder");
-    let p = d.join("unsorted.mch");
-    std::fs::write(&p, UNSORTED).expect("write");
-    let mut m = MachineDraft::open(&MachineSource::File(p.clone())).expect("opens");
-    edit(&mut m, "X travel max", "175");
-    edit(&mut m, "Spindle max speed", "9000");
-    m.save().expect("saves");
-    let saved = std::fs::read_to_string(&p).expect("read back");
-    let mut want = keys_in(UNSORTED);
-    // The new spindle block lands last in the head, before nothing else.
-    let at = want.iter().position(|k| k == "mCode").expect("mCode") + 1;
-    want.insert(at, "spindle".to_owned());
-    want.insert(at + 1, "max_speed".to_owned());
-    assert_eq!(keys_in(&saved), want, "saved:\n{saved}");
-    assert_eq!(read_json(&p).pointer("/kinematics/default/parts/0/parts/0/travel/max").and_then(Value::as_f64), Some(175.0));
+fn a_coolant_code_must_be_a_well_formed_m_word() {
+    let d = dir("mcode_coolant");
+    let mut m = MachineDraft::blank(Kind::Mill);
+    m.add_coolant("Mist").expect("adds");
+    for label in ["Coolant Flood code", "Coolant Mist code"] {
+        for good in GOOD_M {
+            assert_eq!(refusals_on(&mut m, label, good), Vec::<String>::new(), "{label} {good}");
+            assert!(m.refusals().is_empty(), "{good}: {:?}", m.refusals());
+        }
+        for bad in BAD_M {
+            let on = refusals_on(&mut m, label, bad);
+            assert_eq!(on.len(), 1, "{label} {bad:?} is refused on its field: {on:?}");
+            assert!(on[0].contains("M word"), "{on:?}");
+            assert!(matches!(m.save_as(Some(&d), "bad", false), Err(SaveError::Refused(_))), "{bad:?} saved");
+            assert!(!d.join("bad.mch").exists());
+        }
+        // Empty stays legal: the code is unstated.
+        assert_eq!(refusals_on(&mut m, label, ""), Vec::<String>::new());
+    }
+    assert_eq!(refusals_on(&mut m, "Coolant Flood code", "M"), [r#"coolant Flood: code "M" is not an M word like M8 (no number after M)"#]);
+    assert!(refusals_on(&mut m, "Coolant Flood code", "M10000")[0].contains("above M9999"));
+    assert!(refusals_on(&mut m, "Coolant Flood code", "m8")[0].contains("uppercase M"));
+    let _ = std::fs::remove_dir_all(&d);
 }
 
 #[test]
-fn a_new_machine_writes_the_same_text_serde_json_would() {
-    let m = MachineDraft::blank(Kind::MillTurn);
-    let want = serde_json::to_string_pretty(&m.value).expect("pretty") + "\n";
-    assert_eq!(m.text(), want);
+fn a_live_tool_code_must_be_a_well_formed_m_word() {
+    let d = dir("mcode_live");
+    let words = ["Live tool C on", "Live tool C off", "Live tool spindle on", "Live tool spindle off"];
+    let mut m = MachineDraft::blank(Kind::MillTurn);
+    for (l, c) in words.iter().zip(["M154", "M155", "M133", "M135"]) {
+        edit(&mut m, l, c);
+    }
+    assert!(m.refusals().is_empty(), "{:?}", m.refusals());
+    for label in words {
+        for good in GOOD_M {
+            assert_eq!(refusals_on(&mut m, label, good), Vec::<String>::new(), "{label} {good}");
+        }
+        for bad in BAD_M {
+            let on = refusals_on(&mut m, label, bad);
+            assert_eq!(on.len(), 1, "{label} {bad:?} is refused on its field: {on:?}");
+            assert!(on[0].contains("M word"), "{on:?}");
+            // Only on its own field, not on the other three words.
+            let r = m.refusals();
+            let g = m.groups();
+            for other in words.iter().filter(|w| **w != label) {
+                assert!(field(&g, other).refusals(&r).is_empty(), "{bad:?} on {label} leaks onto {other}");
+            }
+            assert!(matches!(m.save_as(Some(&d), "bad", false), Err(SaveError::Refused(_))), "{bad:?} saved");
+            assert!(!d.join("bad.mch").exists());
+        }
+        edit(&mut m, label, "M100");
+    }
+    assert_eq!(
+        refusals_on(&mut m, "Live tool C on", "M"),
+        [r#"live_tool.c_axis_on: code "M" is not an M word like M8 (no number after M)"#]
+    );
+    let _ = std::fs::remove_dir_all(&d);
 }

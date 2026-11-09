@@ -215,6 +215,12 @@ gouge, crash, data loss), then `P1` (wrong behaviour a user hits), then `P2`
 (owed polish), oldest first. Each issue carries one `P*` label and one or
 more `area:*` labels. Issues opened by an agent also carry `source:agent`.
 
+**`P?` means paused.** The maintainer puts `P?` on an issue (in place of
+`P0`/`P1`/`P2`) to hold it: nobody picks it up, claims it or changes its
+priority until the maintainer swaps `P?` for a real priority or closes it.
+Comments with relevant facts (a duplicate, a related fix) are still
+welcome.
+
 **`needs-research` issues are not work items yet.** The label marks a large
 idea with open questions (a new machine type, a documentation site, a new
 kernel): research and decisions come first, and the outcome is a set of

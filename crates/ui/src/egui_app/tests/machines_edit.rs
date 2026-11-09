@@ -156,6 +156,37 @@ fn a_backwards_travel_is_refused_on_its_field_and_nothing_is_written() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// GUI-test finding on PR #478: a bare `M` in an M-code field passed
+/// validation. It is refused under its field and blocks both saves.
+#[test]
+fn a_bare_m_code_is_refused_on_its_field_and_blocks_the_save() {
+    let dir = user_dir("bare_m");
+    let mut h = harness_with_user_dir(Some(dir.clone()));
+    h.run();
+    open_machines(&mut h);
+    select_row(&mut h, "Lathe");
+    press(&mut h, "New from template");
+    for (f, c) in [("Live tool C on", "M154"), ("Live tool C off", "M155"), ("Live tool spindle on", "M133"), ("Live tool spindle off", "M135")] {
+        type_into(&mut h, f, c);
+    }
+    h.get_by_label("Validation: passes");
+    type_into(&mut h, "Live tool C on", "M");
+    h.get_by_label("Validation: 1 refusal - save blocked");
+    h.get_by_label(r#"live_tool.c_axis_on: code "M" is not an M word like M8 (no number after M)"#);
+    type_into(&mut h, "Coolant Flood code", "M");
+    h.get_by_label("Validation: 2 refusals - save blocked");
+    h.get_by_label(r#"coolant Flood: code "M" is not an M word like M8 (no number after M)"#);
+    press(&mut h, "Save machine");
+    press(&mut h, "Save machine as...");
+    assert_eq!(prompt(&h), None, "both saves are blocked");
+    assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
+    type_into(&mut h, "Live tool C on", "M08");
+    type_into(&mut h, "Coolant Flood code", "M7");
+    h.get_by_label("Validation: passes");
+    assert_no_commands(&h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn editing_a_shipped_machine_saves_as_a_copy() {
     let dir = user_dir("shipped");

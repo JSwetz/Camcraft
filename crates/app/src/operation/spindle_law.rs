@@ -235,13 +235,14 @@ fn refusal(r: &SpindleReading, slot: &str) -> GenError {
     ))
 }
 
-/// Whether `params` works about the spindle on the document's machine:
+/// Whether `params` works about the spindle on the machine its `setup`
+/// context mounts (#388 - the op's own, active or not):
 /// the turning family, the lathe's Drill (axial or cross), and the
 /// mill-turn's cross drill (issue #67) - whose standoffs are measured
 /// about this same spindle, so a revolved part off it is refused here
 /// by name rather than drilled about a line it is not on.
-pub(crate) fn turns(world: &World, params: &super::OpParams) -> bool {
-    let kind = crate::machine::kind_of(world);
+pub(crate) fn turns(world: &World, setup: Option<&str>, params: &super::OpParams) -> bool {
+    let kind = crate::machine::kind_of_setup(world, setup);
     params.kind().info().family() == super::Family::Turn
         || match params {
             super::OpParams::Drill { cross, .. } => {
@@ -258,10 +259,10 @@ pub(crate) fn turns(world: &World, params: &super::OpParams) -> bool {
 /// op that does not turn, or whose part still sits on the spindle.
 pub(crate) fn post_problem(world: &World, name: &str, e: &Entity) -> Option<String> {
     let op = crate::model::operation_of(world, e)?;
-    if !turns(world, &op.params) {
+    let setup = op.setup.as_deref();
+    if !turns(world, setup, &op.params) {
         return None;
     }
-    let setup = op.setup.as_deref();
     let (slot, origin) = crate::posting::wcs_context(world, setup);
     // A material that cannot be read is a source that moved or went:
     // the freshness check right after this names that, as it always has.
