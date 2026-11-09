@@ -219,7 +219,7 @@ fn undo_restores_and_redo_reapplies_the_body() {
     history.execute(&world, SetToolBody::new(&world, TOOL, Some(wide_body())).expect("a sane body"));
     let set = tool_body::body_of(&world, &tool_entity(&world)).expect("landed");
     assert_eq!(set.source, "collar.stl");
-    assert!(set.profile.reach_over(shank_top() + 10.0, shank_top() + 10.0) >= 40.0 * (std::f64::consts::PI / 32.0).cos());
+    assert!(set.profile().expect("a spindle body").reach_over(shank_top() + 10.0, shank_top() + 10.0) >= 40.0 * (std::f64::consts::PI / 32.0).cos());
     // Replace with a slimmer one, then walk the history both ways.
     let z0 = shank_top();
     let slim = ToolBodySpec { source: "slim.step".into(), facets: prism(15.0, z0, z0 + 20.0, 16), axis: [0.0, 0.0, 1.0], offset: 0.0 };
@@ -357,8 +357,9 @@ fn a_body_reads_from_an_stl_and_is_placed_by_axis_and_offset() {
     history.execute(&world, cmd.expect("a sane body"));
     let b = tool_body::body_of(&world, &tool_entity(&world)).expect("landed");
     assert!(b.source.ends_with(".stl"));
-    assert!((b.profile.bottom() - 60.0).abs() < 1e-6 && (b.profile.top() - 90.0).abs() < 1e-6, "{:?}", b.profile);
-    assert!(b.profile.bands().iter().all(|band| band.r <= 12.0 + 1e-5));
+    let profile = b.profile().expect("a spindle body");
+    assert!((profile.bottom() - 60.0).abs() < 1e-6 && (profile.top() - 90.0).abs() < 1e-6, "{profile:?}");
+    assert!(profile.bands().iter().all(|band| band.r <= 12.0 + 1e-5));
     // The enclosing cylinder every one-cylinder law reads.
     let (judged, _) = tool_body::judged(&world, &tool_entity(&world), catalog_tool(TOOL)).expect("fits");
     assert!((judged.holder_len - (90.0 - shank_top())).abs() < 1e-9);
