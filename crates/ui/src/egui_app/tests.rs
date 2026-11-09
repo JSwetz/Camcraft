@@ -4079,6 +4079,7 @@ fn simulate_cell_arms_transport_and_stop_disarms() {
 #[test]
 fn deviate_readout_sentences_each_truth() {
     use camcraft_app::geometry::Point3;
+    use camcraft_app::units::Unit;
     let d = |rest_cells, gouge_cells, max_rest, max_gouge, tol| {
         camcraft_app::stock_sim::Deviation {
             cells_x: 8,
@@ -4096,23 +4097,23 @@ fn deviate_readout_sentences_each_truth() {
             max_gouge_at: (gouge_cells > 0).then(|| Point3::new(-20.0, 5.5, 16.0)),
         }
     };
-    let clean = crate::actions::deviate_readout(&d(0, 0, 0.0, 0.005, 0.01));
+    let clean = crate::actions::deviate_readout(&d(0, 0, 0.0, 0.005, 0.01), Unit::Millimeters);
     assert_eq!(clean, "deviate: clean - the program meets the model everywhere");
     // A within-tolerance worst is still the clean sentence - the
     // display tolerance IS the verdict, per DEV_TOL's law.
     assert_eq!(
-        crate::actions::deviate_readout(&d(3, 0, 0.004, 0.0, 0.01)),
+        crate::actions::deviate_readout(&d(3, 0, 0.004, 0.0, 0.01), Unit::Millimeters),
         clean,
         "rest thinner than tolerance must not shout"
     );
-    let rest = crate::actions::deviate_readout(&d(40, 0, 2.0, 0.0, 0.01));
+    let rest = crate::actions::deviate_readout(&d(40, 0, 2.0, 0.0, 0.01), Unit::Millimeters);
     assert!(
         rest.starts_with("deviate: REST 40 cells (80.00")
             && rest.contains("worst 2.00 mm at (1.25, -0.75, z 18.00)"),
         "the rest sentence: {rest}"
     );
     assert!(!rest.contains("GOUGE"), "no gouge, no gouge clause: {rest}");
-    let both = crate::actions::deviate_readout(&d(1, 7, 0.5, 1.25, 0.01));
+    let both = crate::actions::deviate_readout(&d(1, 7, 0.5, 1.25, 0.01), Unit::Millimeters);
     assert!(both.contains("REST") && both.contains("GOUGE"), "two truths, one line: {both}");
     assert!(both.contains("(-20.00, 5.50, z 16.00)"), "the gouge locates too: {both}");
     // A located aggregate whose point is gone prints "?" - an honest
@@ -4120,12 +4121,46 @@ fn deviate_readout_sentences_each_truth() {
     let mut lost = d(0, 4, 0.0, 0.9, 0.01);
     lost.max_gouge_at = None;
     assert!(
-        crate::actions::deviate_readout(&lost).contains("GOUGE 4 cells") && both_needs_question(&lost),
+        crate::actions::deviate_readout(&lost, Unit::Millimeters).contains("GOUGE 4 cells") && both_needs_question(&lost),
         "the missing WHERE must show as '?'"
     );
     fn both_needs_question(d: &camcraft_app::stock_sim::Deviation) -> bool {
-        crate::actions::deviate_readout(d).ends_with("mm?)")
+        crate::actions::deviate_readout(d, camcraft_app::units::Unit::Millimeters).ends_with("mm?)")
     }
+}
+
+/// The same verdict told through the inch lens: every number divides by
+/// 25.4 with two extra decimals (the `len` law), volumes a third more,
+/// and the suffix words ride along - the `sim_readout` sibling, the
+/// same rule. The mm sentences above are pinned byte-identical.
+#[test]
+fn deviate_readout_rides_the_units_lens() {
+    use camcraft_app::geometry::Point3;
+    use camcraft_app::units::Unit;
+    let dev = camcraft_app::stock_sim::Deviation {
+        cells_x: 8,
+        cells_y: 8,
+        cell: 1.0,
+        tol: 0.01,
+        dev: Vec::new(),
+        rest_cells: 40,
+        gouge_cells: 7,
+        rest_volume: 80.0,
+        gouge_volume: 8.75,
+        max_rest: 2.0,
+        max_gouge: 1.25,
+        max_rest_at: Some(Point3::new(1.25, -0.75, 18.0)),
+        max_gouge_at: Some(Point3::new(-20.0, 5.5, 16.0)),
+    };
+    let s = crate::actions::deviate_readout(&dev, Unit::Inches);
+    assert!(
+        s.contains("REST 40 cells (0.00488 in³, worst 0.0787 in at (0.0492, -0.0295, z 0.7087))"),
+        "the rest sentence in inches: {s}"
+    );
+    assert!(
+        s.contains("GOUGE 7 cells (0.00053 in³, worst 0.0492 in at (-0.7874, 0.2165, z 0.6299))"),
+        "the gouge sentence in inches: {s}"
+    );
 }
 
 /// The Deviate ribbon cell is Simulate's sibling under the same laws:
@@ -4163,7 +4198,7 @@ fn deviate_cell_stores_the_verdict_as_view_state() {
     {
         let st = &harness.state().state;
         let ps = st.program_sim.as_ref().expect("the cell must arm the verdict");
-        assert_eq!(st.status, crate::actions::deviate_readout(&ps.dev));
+        assert_eq!(st.status, crate::actions::deviate_readout(&ps.dev, st.units()));
         assert!(!st.status.contains("refused"), "the seed judges: {}", st.status);
         assert!(panes::toggled(Cmd::Deviate, st));
         // The command law: judging the program writes no world state.

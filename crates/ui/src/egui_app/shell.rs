@@ -1055,7 +1055,7 @@ fn viewport_panel(
         let mut fly: Option<[f64; 3]> = None;
         let mut export = false;
         ui.horizontal(|ui| {
-            ui.label(crate::actions::deviate_readout(&ps.dev));
+            ui.label(crate::actions::deviate_readout(&ps.dev, state.units()));
             if ps.dev.rest_cells > 0
                 && let Some(q) = ps.dev.max_rest_at
                 && ui.button("Frame rest").on_hover_text("Look at the worst uncut cell").clicked()

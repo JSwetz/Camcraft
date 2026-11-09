@@ -2695,7 +2695,13 @@ impl State {
             CommandKind::ApplyCuttingData(name) => match ApplyCuttingData::new(&self.world, &name) {
                 Ok(command) => {
                     let s = command.suggestion();
-                    self.status = format!("{name}: suggestion applied - {:.0} rpm, {:.0} mm/min", s.rpm, s.feed);
+                    let u = self.units();
+                    self.status = format!(
+                        "{name}: suggestion applied - {:.0} rpm, {} {}",
+                        s.rpm,
+                        units::feed(s.feed, u),
+                        u.feed_suffix()
+                    );
                     self.history.execute(&self.world, command);
                     self.doc_version += 1;
                 }
