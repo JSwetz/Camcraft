@@ -31,6 +31,7 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // path whichever arm cut it: a note, never a warning - the post
     // is not held for features the op honestly leaves standing.
     let note = job.spindle_note.take();
+    let carried = job.carried_note.take();
     let kind = job.params.kind();
     let _span = tracing::info_span!("generate", op = %job.op_name).entered();
     let started = std::time::Instant::now();
@@ -45,10 +46,10 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         ms = crate::logging::elapsed_ms(started),
         "generated"
     );
-    if let Some(n) = note
-        && !path.notes.contains(&n)
-    {
-        path.notes.push(n);
+    for n in note.into_iter().chain(carried) {
+        if !path.notes.contains(&n) {
+            path.notes.push(n);
+        }
     }
     Ok((path, warns))
 }
@@ -85,6 +86,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         area,
         wcs_origin,
         spindle_note: _,
+        carried_note: _,
         op_name: _,
     } = job;
     // The probe (#108) cuts nothing: its own protected-move law judges

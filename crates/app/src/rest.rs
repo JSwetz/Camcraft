@@ -60,7 +60,7 @@ mod pilots;
 
 pub use pilots::{drills_ahead, turned_ahead, DrillAhead, TurnedAhead};
 
-pub use across::REST_CARRY_REFUSAL;
+pub use across::{REST_CARRY_REFUSAL, carried_digest, carried_stock_block, carried_stock_body};
 use across::{carried_grid, chain_of};
 use ahead::{ahead_of, digest_of, Ahead};
 use crate::cl::Move;
@@ -110,7 +110,7 @@ pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u6
 
 /// The refusal a rest reading of `name` meets (#318): `Some` when the
 /// stock its setup starts from has to be carried across a boundary the
-/// carry refuses. Generation refuses every op that reads the prior.
+/// carry refuses. Generation refuses every op of that setup (#319).
 #[must_use]
 pub fn carry_refusal(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
     chain_of(world, name, setup, false).err()
@@ -159,7 +159,7 @@ pub fn prior_state(
         // left, carried (#318) - a mask even when nothing ahead cut.
         let digest = prior_digest(world, name, setup);
         let min_r = chain.ops().filter(|a| a.cut && a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
-        let grid = carried_grid(world, &chain, min_r)
+        let grid = carried_grid(world, &chain, min_r, true)
             .map_err(|e| GenError::Invalid(format!("rest from previous setups: {e}")))?;
         return Ok(PriorState { grid: Some(grid), digest });
     }
