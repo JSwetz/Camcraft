@@ -83,6 +83,7 @@ pub(crate) use stamp_stock::write_setup_stock;
 mod material;
 pub use material::*;
 mod material_region;
+pub(crate) use material_region::selection_drives_region;
 mod circle_fit;
 pub use circle_fit::{CIRCLE_FIT_TOL, circle_of_region, circular_fit_of};
 mod material_source;
