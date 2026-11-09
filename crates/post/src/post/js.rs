@@ -35,6 +35,10 @@ var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants:
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
 function write(s) { if (s !== undefined) LINE += String(s); }
+// Lines written so far, a pending partial line included (#504): a
+// script marks where a block ended and later asks whether anything
+// followed it.
+function linesWritten() { _flushLine(); return OUT.length; }
 function writeBlock() {
   _flushLine();
   var parts = [];

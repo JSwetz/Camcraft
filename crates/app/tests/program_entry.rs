@@ -7,7 +7,8 @@
 //! (AddProgramEntry, EditProgramEntry, ReorderOperation, DeleteEntity,
 //! CreateOperation, DeleteSetup), app::posting (op_streams,
 //! stream_records), app::project (program_entry_dto), app::model
-//! (is_model), assets/posts/fanuc.cps, haas.cps, tormach.cps.
+//! (is_model), assets/posts/fanuc.cps, haas.cps, mazak.cps, sinumerik.cps,
+//! fanuc-lathe.cps, tormach.cps.
 
 mod common;
 
@@ -183,6 +184,83 @@ fn pause_and_home_entries_post_goldens_and_tormach_refuses_by_name() {
         "refused by name: {:?}",
         out.warnings
     );
+}
+
+/// The Z reference returns a program writes (`G28 Z0`, `G53 Z0`, the
+/// lathe's `G28 ... W0`): one per trip home, the program end's included.
+fn z_homes(program: &str) -> usize {
+    let z = |l: &&str| has_word(l, "Z0") || has_word(l, "W0");
+    program.lines().filter(|l| (has_word(l, "G28") || has_word(l, "G53")) && z(l)).count()
+}
+
+/// Every built-in post that homes at program end and reads a trip home.
+const HOMING: [&str; 4] = ["Fanuc", "Haas", "Mazak", "Siemens 840D"];
+
+#[test]
+fn a_trailing_home_entry_merges_with_the_program_end_home() {
+    // #504: a Go home last in the program IS the program-end home -
+    // written once, the close's own pair not repeated after it.
+    let (plain, _h0) = two_faces();
+    let (world, mut h) = two_faces();
+    let home = add(&world, &mut h, AfterOperation::GoHome, None);
+    for name in HOMING {
+        let out = post_with(&world, name);
+        assert!(out.warnings.is_empty(), "{name}: {:?}", out.warnings);
+        assert_eq!(z_homes(&out.program), 1, "{name}: one home before the end: {}", out.program);
+        let lines: Vec<&str> = out.program.lines().collect();
+        let end = lines.iter().position(|l| has_word(l, "M30") || has_word(l, "M2")).expect("program end");
+        let xy = lines.iter().position(|l| has_word(l, "X0") && has_word(l, "Y0")).expect("the asked XY home");
+        assert!(xy < end, "{name}: the trip home stands before the end: {}", out.program);
+        assert_eq!(z_homes(&post_with(&plain, name).program), 1, "{name}: the plain close homes once");
+    }
+    // Suppressed, or muted by "Skip pauses and homes": the program is
+    // the plain one, its own close home written as always.
+    h.execute(&world, EditProgramEntry::with_suppressed(&world, &home, true).expect("suppress"));
+    for name in HOMING {
+        assert_eq!(post_with(&world, name).program, post_with(&plain, name).program, "{name}: suppressed");
+    }
+    h.undo(&world);
+    h.execute(&world, SetPostOptions::new(&world, PostOptions { skip_stops: true, ..Default::default() }).expect("skip"));
+    for name in HOMING {
+        assert_eq!(post_with(&world, name).program, post_with(&plain, name).program, "{name}: skipped");
+    }
+    // Mid-program the trip home stays, and the close still homes.
+    let (world, mut h) = two_faces();
+    add(&world, &mut h, AfterOperation::GoHome, Some("Face1"));
+    for name in HOMING {
+        let out = post_with(&world, name);
+        assert_eq!(z_homes(&out.program), 2, "{name}: the mid home and the close's: {}", out.program);
+    }
+}
+
+#[test]
+fn the_lathe_post_writes_a_trailing_home_once() {
+    use camcraft_app::cl::{Move, MoveKind, Toolpath};
+    use camcraft_app::geometry::Point3;
+    let t = Toolpath::new(vec![Move::new(
+        MoveKind::Feed,
+        Point3 { x: 10.0, y: 0.0, z: 1.0 },
+        Point3 { x: 10.0, y: 0.0, z: -5.0 },
+        Some(100.0),
+    )]);
+    let posted = |first: AfterOperation, last: AfterOperation| {
+        let dump = |op_name, tool_number, tool_name, after| post::Dump {
+            op_name,
+            tool_number,
+            tool_name,
+            rpm: 800.0,
+            after,
+            ..Default::default()
+        };
+        let mut records = post::dump(&t, &dump("Turn1", 1, "T", first));
+        records.extend(post::dump(&t, &dump("Turn2", 2, "U", last)));
+        let out = post::post(script("Fanuc Lathe"), &posting::machine_value(&new_world()), &cnc::serialize(&records));
+        out.expect("runs").program
+    };
+    let trailing = posted(AfterOperation::None, AfterOperation::GoHome);
+    assert_eq!(z_homes(&trailing), 1, "X then Z, once, no close home after it: {trailing}");
+    let mid = posted(AfterOperation::GoHome, AfterOperation::None);
+    assert_eq!(z_homes(&mid), 2, "the mid home and the close's: {mid}");
 }
 
 #[test]

@@ -29,6 +29,7 @@ var inCycle = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var homedAt = -1;          // linesWritten() just after a trip home (#504): onClose skips its own home when nothing followed
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
 var compG = "";            // G41/G42/G40 pending for the next straight block (#39)
@@ -313,6 +314,7 @@ function afterOp() {
   if (ask === "home") {
     block(["G0", "G53", "Z0"]);   // machine coordinates, Z first (onClose's law)
     block(["G0", "G53", "X0", "Y0"]);
+    homedAt = linesWritten();
     return;
   }
   msg(coolantWho() + "unknown after-operation ask " + ask);
@@ -402,6 +404,10 @@ function onCycle() {
 // Homing rides machine coordinates (G53), not a stored home point.
 function onClose() {
   endPreamble();
-  block(["G53", "Z0"]);
+  // #504: a trip home with nothing written after it (a trailing Go
+  // home) already is the program-end home - written once, not twice.
+  if (linesWritten() !== homedAt) {
+    block(["G53", "Z0"]);
+  }
   block(["M2"]);
 }
