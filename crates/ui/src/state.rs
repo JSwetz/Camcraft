@@ -37,6 +37,8 @@ use camcraft_app::{machine, model, posting, project, world::new_world};
 
 #[path = "state_per_op.rs"]
 mod per_op;
+#[path = "state_tool_library.rs"]
+mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
 use flecs_ecs::prelude::World;
