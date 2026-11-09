@@ -20,7 +20,7 @@ use camcraft_app::commands::{
     ImportModel, SetSetupMachine, SetSetupPost, SetStock,
 };
 use camcraft_app::geometry::{Mesh, Point3, Triangle};
-use camcraft_app::machine::{self, Coolant, Kind, Machine};
+use camcraft_app::machine::{self, AxisLimits, Coolant, Kind, Machine};
 use camcraft_app::operation::{Height, OpParams, SrcRef};
 use camcraft_app::schema::{Location, PostRef};
 use camcraft_app::stock::StockShape;
@@ -70,6 +70,13 @@ fn lathe() -> Machine {
         coolants: vec![Coolant { name: "Flood".into(), m_code: "M8".into() }],
         ..Default::default()
     }
+}
+
+/// A mill whose Z stroke is [-5, 0] in program coordinates: the face at
+/// 19.5 is above it, whatever the shipped VMC's own bands are (#477).
+fn short_stroke_mill() -> Machine {
+    let z = AxisLimits { name: "Z".into(), travel: Some((-5.0, 0.0)), ..Default::default() };
+    Machine { model: "Short-stroke mill".into(), kind: Some("mill".into()), axes: vec![z], ..Default::default() }
 }
 
 /// A mill stating no strokes: nothing about where the face sits can
@@ -234,8 +241,8 @@ fn a_mill_and_a_lathe_post_two_files_each_byte_identical_to_posting_it_alone() {
 
 #[test]
 fn a_travel_limit_is_judged_on_the_ops_own_machine_only() {
-    // Two mills: Setup1 on the shipped VMC (its Z stroke ends at 0 - the
-    // face at 19.5 is above it), Setup2 on the strokeless bench mill.
+    // Two mills: Setup1 on a short-stroke mill (its Z stroke ends at 0 -
+    // the face at 19.5 is above it), Setup2 on the strokeless bench mill.
     let world = new_world();
     let mut h = History::default();
     add_tool(&world, &mut h, MILL_TOOL);
@@ -247,12 +254,12 @@ fn a_travel_limit_is_judged_on_the_ops_own_machine_only() {
         h.execute(&world, CreateOperation::new(&world, &op, MILL_TOOL, SrcRef::Stock, face()).expect("face"));
         let _ = name;
     }
-    h.execute(&world, SetSetupMachine::builtin(&world, "Setup1", "VMC 3-axis").expect("vmc"));
+    h.execute(&world, SetSetupMachine::new(&world, "Setup1", Some(("short.mch".into(), Some(short_stroke_mill())))).expect("short"));
     h.execute(&world, SetSetupMachine::new(&world, "Setup2", Some(("bench-mill.mch".into(), Some(bench_mill())))).expect("bench"));
     for op in ["Face1", "Face2"] {
         generate(&world, &mut h, op);
     }
-    let vmc = machine::of_setup(&world, Some("Setup1")).1.expect("vmc").model;
+    let vmc = machine::of_setup(&world, Some("Setup1")).1.expect("short").model;
     for active in ["Setup2", "Setup1"] {
         h.execute(&world, ActivateSetup::new(&world, Some(active)).expect("activate"));
         let gate = posting::verification_gate(&world);
@@ -265,7 +272,7 @@ fn a_travel_limit_is_judged_on_the_ops_own_machine_only() {
     }
     // Swap the steel: the verdict moves with it, to Face2 alone.
     h.execute(&world, SetSetupMachine::new(&world, "Setup1", Some(("bench-mill.mch".into(), Some(bench_mill())))).expect("bench"));
-    h.execute(&world, SetSetupMachine::builtin(&world, "Setup2", "VMC 3-axis").expect("vmc"));
+    h.execute(&world, SetSetupMachine::new(&world, "Setup2", Some(("short.mch".into(), Some(short_stroke_mill())))).expect("short"));
     let gate = posting::verification_gate(&world);
     assert!(gate.iter().any(|p| p.contains("Face2:")) && !gate.iter().any(|p| p.contains("Face1:")), "{gate:?}");
 }

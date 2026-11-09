@@ -44,6 +44,7 @@ The two #343 refusals are retired:
 | `commands::operation::gates::family_gate` | op | Create: active setup (the new op joins it); Paste: the op's setup; ChangeOperationKind: the op's setup |
 | UI tree menu kind rows | op / new op | an op's retype rows: its setup; the setups' "new op" rows: active |
 | UI drill radial holes (`state.rs`) | op | op's setup |
+| MCP `get_fixture_findings` | setup | each `workholding` entry carries its own setup's `machine` (`of_setup`); the top-level `machine` stays the active setup's, kept for older callers (the findings themselves are per op already). Considered: making the top-level field a list - dropped, it breaks callers for no gain over the per-entry field |
 | `cutting::...` power estimate, `setup_sheet` machine axes | op / setup | already `of_setup` (#343) |
 
 **Left on the active mount, and why.** These act on the active setup by
