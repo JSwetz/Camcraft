@@ -54,7 +54,7 @@ use crate::setup;
 
 use operations::render_operations;
 pub use sections::{FIXED_WORDING, TURNING_WORDING};
-use sections::{render_datum, render_fixtures, render_stock, render_wcs};
+use sections::{render_datum, render_fixtures, render_machine_axes, render_stock, render_wcs};
 use tools::render_tool_list;
 
 /// Format one millimeter number for the sheet: fixed three decimals, no
@@ -114,6 +114,7 @@ pub fn render(world: &World, setup_name: Option<&str>) -> Result<String, String>
     render_stock(world, ctx, &mut out);
     render_wcs(world, ctx, &mut out);
     render_datum(world, ctx, &mut out);
+    render_machine_axes(world, ctx, &mut out);
     render_fixtures(world, ctx, &mut out);
     render_operations(world, target.as_ref(), &mut out);
     render_tool_list(world, ctx, &mut out);

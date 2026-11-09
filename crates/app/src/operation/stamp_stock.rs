@@ -87,7 +87,7 @@ pub(super) fn write_stock_source(world: &World, entity: &Entity, h: &mut impl Ha
 /// term names the stock's definition, not only its tessellation.
 /// `None` when a present stock has no geometry left to digest - an
 /// unresolvable stamp, which reads Stale.
-pub(super) fn write_setup_stock(world: &World, setup: Option<&str>, h: &mut impl Hasher) -> Option<()> {
+pub(crate) fn write_setup_stock(world: &World, setup: Option<&str>, h: &mut impl Hasher) -> Option<()> {
     h.write_u8(b'X');
     match model::find_by_name(world, &crate::setup::stock_entity_name(world, setup)) {
         None => h.write_u8(0),
