@@ -1570,6 +1570,7 @@ pub(crate) mod headless {
             yaw: 0.9,
             pitch: 0.5,
             dist: 160.0,
+            ..Camera::default()
         };
         let (w, h) = view.extent();
         let mvp = cam.mvp(f64::from(w.max(1)) / f64::from(h.max(1)));
