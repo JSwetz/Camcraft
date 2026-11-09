@@ -995,6 +995,21 @@ fn make_targets(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, 
 /// basis `view_basis` returns is three of these.
 type UnitVec = (f64, f64, f64);
 
+/// How the viewport flattens the world to the screen (#434).
+/// Ephemeral view state, like the camera itself: a direct field flip,
+/// never a command, never saved in the project.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProjectionMode {
+    /// The house default: a 60-degree perspective cone, converging lines.
+    #[default]
+    Perspective,
+    /// Parallel projection (issue #434): the view half-height is fixed
+    /// at `dist * tan(30 deg)` - the height perspective sees at the
+    /// target plane - so switching mid-session never jumps the framing
+    /// and `dist` keeps spelling zoom for orbit, pan and `frame` alike.
+    Orthographic,
+}
+
 /// Orbit camera around a target point, Z-up (the CAM convention).
 #[derive(Clone, Copy, Debug)]
 pub struct Camera {
@@ -1002,6 +1017,9 @@ pub struct Camera {
     pub yaw: f64,
     pub pitch: f64,
     pub dist: f64,
+    /// How this camera projects; carried by every camera transform so
+    /// draw, pick and dolly math stay on one matrix by construction.
+    pub projection: ProjectionMode,
 }
 
 impl Default for Camera {
@@ -1011,6 +1029,7 @@ impl Default for Camera {
             yaw: 0.9,
             pitch: 0.5,
             dist: 80.0,
+            projection: ProjectionMode::default(),
         }
     }
 }
@@ -1052,6 +1071,10 @@ impl Camera {
 
     /// Ray through an NDC cursor position (x right, y up, -1..1):
     /// (origin, normalized direction), or None on degenerate math.
+    /// In [`ProjectionMode::Orthographic`] the ray is parallel to the
+    /// view axis and its origin is the cursor's point on the eye plane
+    /// - the mirror of the ortho box [`Camera::mvp`] draws, so a pick
+    ///   through the same matrix hits what the screen shows (#434).
     #[must_use]
     pub fn ray_through(&self, ndc: [f32; 2], aspect: f64) -> Option<([f64; 3], [f64; 3])> {
         let (fx, fy, fz) = self.fwd();
@@ -1064,6 +1087,24 @@ impl Camera {
             1.0
         };
         let (nx, ny) = (f64::from(ndc[0]), f64::from(ndc[1]));
+        if self.projection == ProjectionMode::Orthographic {
+            let h = self.ortho_half_height();
+            let w = h * aspect;
+            let e = self.eye();
+            let origin = [
+                e[0] + nx * w * rx + ny * h * ux,
+                e[1] + nx * w * ry + ny * h * uy,
+                e[2] + nx * w * rz + ny * h * uz,
+            ];
+            let dir = [fx, fy, fz];
+            if !origin.iter().all(|v| v.is_finite())
+                || !dir.iter().all(|v| v.is_finite())
+                || dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] < 1e-24
+            {
+                return None;
+            }
+            return Some((origin, dir));
+        }
         let dir = [
             fx + nx * g * aspect * rx + ny * g * ux,
             fy + nx * g * aspect * ry + ny * g * uy,
@@ -1086,6 +1127,11 @@ impl Camera {
     /// `ndc` is the cursor in normalized device coords (x right, y up,
     /// both -1..1) and `aspect` the viewport width/height. Returns the new
     /// target, or None on a degenerate ray (caller keeps plain behavior).
+    /// In [`ProjectionMode::Orthographic`] the fixed point is the
+    /// cursor's own point on the target plane - ortho's parallel rays
+    /// have no "closest point to target", and shrinking `dist` shrinks
+    /// the ortho box by the same factor the target moves, so the point
+    /// under the cursor is fixed exactly (#434).
     pub fn dolly_cursor(
         &mut self,
         ndc: [f32; 2],
@@ -1105,21 +1151,31 @@ impl Camera {
         if !nx.is_finite() || !ny.is_finite() {
             return None;
         }
-        let dir = [
-            fx + nx * g * aspect * rx + ny * g * ux,
-            fy + nx * g * aspect * ry + ny * g * uy,
-            fz + nx * g * aspect * rz + ny * g * uz,
-        ];
         let (tx, ty, tz) = (self.target[0], self.target[1], self.target[2]);
-        let (ex, ey, ez) = (self.eye()[0], self.eye()[1], self.eye()[2]);
-        // Closest point on the ray to the current target.
-        let (wx, wy, wz) = (tx - ex, ty - ey, tz - ez);
-        let dd = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-        if !dd.is_finite() || dd <= 1e-12 {
-            return None;
-        }
-        let s = (wx * dir[0] + wy * dir[1] + wz * dir[2]) / dd;
-        let (px, py, pz) = (ex + dir[0] * s, ey + dir[1] * s, ez + dir[2] * s);
+        let (px, py, pz) = if self.projection == ProjectionMode::Orthographic {
+            let h = self.ortho_half_height();
+            let w = h * aspect;
+            (
+                tx + nx * w * rx + ny * h * ux,
+                ty + nx * w * ry + ny * h * uy,
+                tz + nx * w * rz + ny * h * uz,
+            )
+        } else {
+            let (ex, ey, ez) = (self.eye()[0], self.eye()[1], self.eye()[2]);
+            let dir = [
+                fx + nx * g * aspect * rx + ny * g * ux,
+                fy + nx * g * aspect * ry + ny * g * uy,
+                fz + nx * g * aspect * rz + ny * g * uz,
+            ];
+            // Closest point on the ray to the current target.
+            let (wx, wy, wz) = (tx - ex, ty - ey, tz - ez);
+            let dd = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+            if !dd.is_finite() || dd <= 1e-12 {
+                return None;
+            }
+            let s = (wx * dir[0] + wy * dir[1] + wz * dir[2]) / dd;
+            (ex + dir[0] * s, ey + dir[1] * s, ez + dir[2] * s)
+        };
         let old_dist = self.dist;
         self.zoom(wheel_steps);
         let k = self.dist / old_dist;
@@ -1141,6 +1197,7 @@ impl Camera {
             yaw: 0.9,
             pitch: 0.5,
             dist: (radius * 3.2).clamp(1.0, 50_000.0),
+            projection: ProjectionMode::default(),
         }
     }
 
@@ -1173,6 +1230,7 @@ impl Camera {
             yaw: n[1].atan2(n[0]),
             pitch: n[2].clamp(-1.0, 1.0).asin(),
             dist: self.dist,
+            projection: self.projection,
         }
     }
 
@@ -1185,6 +1243,7 @@ impl Camera {
             yaw,
             pitch,
             dist: self.dist,
+            projection: self.projection,
         }
     }
 
@@ -1262,19 +1321,44 @@ impl Camera {
         ];
         let near = 0.1f64;
         let far = (self.dist * 40.0).max(1000.0);
-        let g = (std::f64::consts::FRAC_PI_6).tan().recip(); // 60 deg vertical fov
         let aspect = if aspect.is_finite() && aspect > 1e-6 {
             aspect
         } else {
             1.0
         };
-        let proj = [
-            [g / aspect, 0.0, 0.0, 0.0],
-            [0.0, g, 0.0, 0.0],
-            [0.0, 0.0, (far + near) / (near - far), -1.0],
-            [0.0, 0.0, 2.0 * far * near / (near - far), 0.0],
-        ];
+        let proj = if self.projection == ProjectionMode::Orthographic {
+            // Parallel box (#434): half-height is what perspective sees at
+            // the target plane, so `dist` keeps spelling zoom and the
+            // mode switch never jumps the framing. Depth is linear and
+            // clip.w is 1 everywhere, so every screen-space consumer that
+            // divides by w degenerates cleanly onto this matrix too.
+            let h = self.ortho_half_height();
+            let w = h * aspect;
+            [
+                [1.0 / w, 0.0, 0.0, 0.0],
+                [0.0, 1.0 / h, 0.0, 0.0],
+                [0.0, 0.0, 2.0 / (near - far), 0.0],
+                [0.0, 0.0, (near + far) / (near - far), 1.0],
+            ]
+        } else {
+            let g = (std::f64::consts::FRAC_PI_6).tan().recip(); // 60 deg vertical fov
+            [
+                [g / aspect, 0.0, 0.0, 0.0],
+                [0.0, g, 0.0, 0.0],
+                [0.0, 0.0, (far + near) / (near - far), -1.0],
+                [0.0, 0.0, 2.0 * far * near / (near - far), 0.0],
+            ]
+        };
         mat_mul(proj, view)
+    }
+
+    /// Orthographic view half-height: the height the perspective cone
+    /// sees at the target plane, so both modes frame identically at the
+    /// same `dist` (#434). `dist` is clamped >= 0.5 by `zoom`, so this
+    /// never vanishes.
+    #[must_use]
+    fn ortho_half_height(&self) -> f64 {
+        self.dist * (std::f64::consts::FRAC_PI_6).tan()
     }
 }
 

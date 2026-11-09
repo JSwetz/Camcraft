@@ -29,8 +29,10 @@
 //! (the swept band is connected and meets no facet, so one point
 //! decides). See [`crate::fixture_mesh`] for why each answer is
 //! conservative. The stack is the same one for rapids: an upright rapid
-//! the boxes flagged keeps its hit if ANY band meets the steel, not
-//! only the flute the rapid box law reads.
+//! the boxes flagged keeps its hit if ANY band meets the steel - the
+//! same whole stack the rapid box law (d2) sweeps since #424
+//! ([`super::stack_span`]), named the way that law names it: a band
+//! above the flute by its part, the flute itself as the rapid.
 //!
 //! Provenance: our own composition of the box laws with the mesh tests
 //! of [`crate::fixture_mesh`] (GJK, BVH, ray-crossing inclusion -
@@ -255,15 +257,16 @@ fn chords(m: &Move, chord_tol: f64) -> Option<Vec<(Point3, Point3, f64)>> {
 }
 
 /// One upright move against one closed mesh: the first band struck
-/// (shank, holder, spindle, flute; [`FixturePart::Rapid`] on a rapid),
-/// Clear only on proof.
+/// (shank, holder, spindle, flute; on a rapid the flute reads as
+/// [`FixturePart::Rapid`], law (d2)'s own naming since #424), Clear
+/// only on proof.
 fn judge_move(mesh: &FixtureMesh, m: &Move, steel: &MeshSteel<'_>, rapids: bool) -> Read {
     if !(m.from.is_finite() && m.to.is_finite()) {
         return Read::Unjudged;
     }
     let tol = if steel.chord_tol.is_finite() && steel.chord_tol > 0.0 { steel.chord_tol } else { 0.01 };
     let Some(segs) = chords(m, tol) else { return Read::Unjudged };
-    let label = |p: FixturePart| Read::Hit(if rapids { FixturePart::Rapid } else { p });
+    let label = |p: FixturePart| Read::Hit(if rapids && p == FixturePart::Flute { FixturePart::Rapid } else { p });
     for b in steel.stack {
         if !(b.lo.is_finite() && b.hi.is_finite() && b.r.is_finite()) {
             return label(b.part); // a band that is not a number is not proven clear

@@ -589,10 +589,30 @@ pub fn verification_report(world: &World) -> GateReport {
 /// `stream_records` refuses those by name before this ever releases
 /// metal; the gate's job is the steel, not the bookkeeping.
 fn fixture_problems(world: &World) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(ops) = program_ops(world) else {
-        return out;
+    let Ok(f) = fixture_findings(world) else {
+        return Vec::new();
     };
+    let hits = f.hits.into_iter().map(|(name, hit)| format!("{name}: {hit}"));
+    f.unjudged.into_iter().chain(hits).collect()
+}
+
+/// The fixture walk's verdict as data (#181), read by both the gate's
+/// strings and the MCP `get_fixture_findings` tool.
+#[derive(Debug, Default)]
+pub struct FixtureFindings {
+    /// `(operation key, warning)` per live collision, in program order.
+    pub hits: Vec<(String, crate::verify::Warning)>,
+    /// Operations the walk could not judge, by name and reason (#368: a
+    /// modelled tool body that no longer fits its tool) - each a problem
+    /// in its own right, never read as clear.
+    pub unjudged: Vec<String>,
+}
+
+/// The fixture walk (#181). `Err` is the program-order refusal (a stale
+/// op): no verdict, never "clear".
+pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
+    let mut out = FixtureFindings::default();
+    let ops = program_ops(world)?;
     let spindle = crate::machine::of(world)
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
@@ -616,7 +636,7 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
             Ok(v) => v,
             Err(e) => {
-                out.push(format!("{name}: tool {}: {e}", op.tool));
+                out.unjudged.push(format!("{name}: tool {}: {e}", op.tool));
                 continue;
             }
         };
@@ -654,14 +674,12 @@ fn fixture_problems(world: &World) -> Vec<String> {
         hits.extend(crate::verify::mesh_refined(path, &wh, &steel, true, |w| {
             crate::verify::rapids_vs_workholding_held(path, &geom, &holder, w, spindle)
         }));
-        for hit in hits {
-            out.push(format!("{name}: {hit}"));
-        }
+        out.hits.extend(hits.into_iter().map(|hit| (name.clone(), hit)));
     }
     for meshes in mesh_cache.values() {
         crate::fixture::log_mesh_refusals(meshes);
     }
-    out
+    Ok(out)
 }
 
 /// The stream we would feed the engine: every operation's records,
