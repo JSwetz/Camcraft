@@ -25,6 +25,10 @@ pub mod setup_align;
 pub mod setup_wcs;
 // #343: a setup's own machine and post.
 pub mod setup_mount;
+// #316: a setup placed relative to another (flip / turn presets).
+pub mod setup_relative;
+// #320: a setup's stock source.
+pub mod setup_stock;
 pub mod set_units;
 // M6.1 C: the document's theme choice, `SelectPost`'s twin.
 pub mod theme;
@@ -63,6 +67,8 @@ pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
 pub use setup_align::AlignPartToSetup;
 pub use setup_wcs::SetSetupWorkOffset;
 pub use setup_mount::{SetSetupMachine, SetSetupPost};
+pub use setup_relative::SetSetupRelative;
+pub use setup_stock::SetSetupStockSource;
 pub use set_units::SetUnits;
 pub use theme::{theme_of, theme_set, SetTheme};
 pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};

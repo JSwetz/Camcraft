@@ -142,21 +142,12 @@ fn settings(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
         }
         return;
     };
-    let names = setup::names(&state.world);
     let is_active = setup::active(&state.world).as_deref() == Some(name);
     if ui.radio(is_active, "Active setup - new operations and furniture join it").clicked() && !is_active {
         state.pending.push_back(CommandKind::ActivateSetup(Some(name.to_owned())));
     }
     ui.separator();
-    ui.label("Stock");
-    let _ = ui.radio(true, "Its own stock (the Stock node)");
-    // The inherit arm (#317 / #320): the previous setup's machined stock.
-    // Shown so the choice is visible, but not offered until it lands;
-    // the first setup has nothing before it to inherit from.
-    if let Some(prev) = names.iter().position(|n| n == name).and_then(|i| i.checked_sub(1)).and_then(|i| names.get(i)) {
-        ui.add_enabled(false, egui::RadioButton::new(false, format!("The stock {prev} leaves behind")))
-            .on_disabled_hover_text("not available yet - inheriting the machined stock arrives with #317 / #320");
-    }
+    super::setup_stock_pick::picker(ui, state, name);
     ui.separator();
     if let Some(def) = setup::def_of(&state.world, name) {
         let mut line = format!("Stock entity {}", def.stock);
@@ -166,6 +157,7 @@ fn settings(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
         ui.label(line);
     }
     super::setup_align_pick::picker(ui, state, name);
+    super::setup_relative_pick::picker(ui, state, name);
     super::setup_plane_pick::row(ui, state, name);
     super::setup_wcs_pick::picker(ui, state, name);
     ui.separator();
