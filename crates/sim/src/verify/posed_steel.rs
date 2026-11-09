@@ -43,6 +43,7 @@ use crate::cl::{is_vertical, MoveKind, Toolpath};
 use crate::fixture::{FixtureBox, FIXTURE_HIT_TOL};
 use crate::geometry::Point3;
 use crate::tools::ToolGeom;
+use camcraft_tools::holder_profile::HolderStack;
 
 use super::midpose;
 use super::rotary::RotaryAxis;
@@ -60,12 +61,13 @@ const ROUNDS: usize = 90;
 pub(super) fn posed_hits(
     path: &Toolpath,
     tool: &ToolGeom,
+    holder: &HolderStack,
     fixtures: &[FixtureBox],
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
     rapids: bool,
 ) -> Vec<Option<FixturePart>> {
-    sweep(path, tool, fixtures, spindle, chord_tol, rapids, None)
+    sweep(path, tool, holder, fixtures, spindle, chord_tol, rapids, None)
         .into_iter()
         .map(|v| match v {
             Verdict::Hit(p) => Some(p),
@@ -98,9 +100,11 @@ pub(super) enum Verdict {
 /// turn): each interval's stack is carried through the rotation that
 /// stands its pose upright - the turn the machine itself must make -
 /// and judged against boxes stated at rotary zero.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn sweep(
     path: &Toolpath,
     tool: &ToolGeom,
+    holder: &HolderStack,
     fixtures: &[FixtureBox],
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
@@ -111,13 +115,13 @@ pub(super) fn sweep(
     if fixtures.is_empty() {
         return out;
     }
-    let (fl, sl, hl) = (tool.flute_len, tool.shank_len, tool.holder_len);
-    let mut stack: Vec<(FixturePart, f64, f64, f64)> = vec![
-        (FixturePart::Shank, fl, fl + sl, tool.shank_radius),
-        (FixturePart::Holder, fl + sl, fl + sl + hl, tool.holder_radius),
-    ];
+    let (fl, sl) = (tool.flute_len, tool.shank_len);
+    let mut stack: Vec<(FixturePart, f64, f64, f64)> = vec![(FixturePart::Shank, fl, fl + sl, tool.shank_radius)];
+    // What stands above the shank (#368): the holder cylinder - the
+    // same sums as ever - or a modelled body's bands.
+    stack.extend(holder.bands.iter().map(|b| (FixturePart::Holder, b.above, b.above + b.len, b.r)));
     if let Some((sr, slen)) = spindle {
-        stack.push((FixturePart::Spindle, fl + sl + hl, fl + sl + hl + slen, sr));
+        stack.push((FixturePart::Spindle, holder.top, holder.top + slen, sr));
     }
     stack.push((FixturePart::Flute, 0.0, fl, tool.radius));
     // A band of no length is no steel; a non-finite one fails closed

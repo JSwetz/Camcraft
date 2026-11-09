@@ -593,10 +593,19 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
-        let Some(tool) = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let Some((tool_entity, tool)) = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t).map(|d| (t, d)))
         else {
             continue;
+        };
+        // #368: the body's enclosing cylinder and band stack; a body
+        // that no longer fits its tool is itself the problem, by name.
+        let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
+            Ok(v) => v,
+            Err(e) => {
+                out.push(format!("{name}: tool {}: {e}", op.tool));
+                continue;
+            }
         };
         // `boxes_for` already folds in the machine-derived table, so an
         // empty list means no steel this op could strike at all (the
@@ -614,15 +623,17 @@ fn fixture_problems(world: &World) -> Vec<String> {
             axis: crate::fixture::rotary_axis_of(world, &op),
         };
         let geom = tool.geom();
-        let mut hits = crate::verify::bands_vs_workholding(
+        let holder = crate::tool_body::stack(&geom, body.as_ref());
+        let mut hits = crate::verify::bands_vs_workholding_held(
             &cache.path,
             &geom,
+            &holder,
             &wh,
             spindle,
             operation::GOUGE_TOL,
         );
         // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::rapids_vs_workholding(&cache.path, &geom, &wh, spindle));
+        hits.extend(crate::verify::rapids_vs_workholding_held(&cache.path, &geom, &holder, &wh, spindle));
         for hit in hits {
             out.push(format!("{name}: {hit}"));
         }

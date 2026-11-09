@@ -59,8 +59,23 @@ impl SetOperationGeometry {
         // A pocket-family pick that bounds no area from above is refused
         // here, at the pick, with the fix - Generate stays the backstop.
         super::gates::area_gate(world, prev.setup.as_deref(), &src, &prev.params)?;
-        let next = Operation { src, ..prev.clone() };
+        // A probe's pick seeds its touch (#171) in this same command, so
+        // one undo takes back the pick and the seed together; a pick the
+        // probe cannot touch is refused here, by name.
+        let params = match crate::operation::probe_from_picks(world, &prev.params, src_items(&src)) {
+            Some(seeded) => seeded.map_err(CommandError::Invalid)?,
+            None => prev.params.clone(),
+        };
+        let next = Operation { src, params, ..prev.clone() };
         Ok(SetOperationGeometry { name: name.to_string(), prev, next })
+    }
+}
+
+/// The pick list of a selection source.
+fn src_items(src: &SrcRef) -> &[GeoSel] {
+    match src {
+        SrcRef::Selection(items) => items,
+        _ => &[],
     }
 }
 

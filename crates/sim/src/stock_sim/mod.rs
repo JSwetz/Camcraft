@@ -83,6 +83,7 @@ mod qef;
 pub mod iso;
 pub mod preview;
 mod ridge;
+mod ridge_scan;
 mod scan;
 mod scan_hidden;
 mod scan_near;
