@@ -202,6 +202,16 @@ function planeWord(g) {  // "" while modal; the word (and the new state) on chan
   return "G" + g;
 }
 function restorePlane() { var pw = planeWord(17); if (pw) block([pw]); }
+// #391: a control offsets the cutter in the ACTIVE plane, and every mill
+// generator compensates in XY - so the block that writes G41/G42/G40
+// states G17 when an XZ/YZ arc left G18/G19 modal, and no arc leaves
+// G17 while compensation is engaged (refused by name, see onCircular).
+function compPlaneWord(cg) { return cg ? planeWord(17) : ""; }
+function compPlaneRefuse(g) {
+  if (!compOn || g === 17) return false;
+  msg("an " + (g === 18 ? "XZ (G18)" : "YZ (G19)") + " arc while cutter compensation is engaged - the control would compensate in that plane; cancel compensation (G40) first");
+  return true;
+}
 // The center words of the arc's plane - I J (XY), I K (XZ), J K (YZ) -
 // as increments from the start point: a shared translation cancels in
 // an increment, so the origin must NOT enter them.
@@ -394,7 +404,7 @@ function onLinear() {
   // The pending comp word rides this straight block (M13.11).
   var cg = compG, cd = compD;
   compG = ""; compD = "";
-  block(["G01", cg].concat(xyz(properties), [cd], tw, [fw(properties.FeedRate)]));
+  block([compPlaneWord(cg), "G01", cg].concat(xyz(properties), [cd], tw, [fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
@@ -402,6 +412,7 @@ function onCircular() {
   var tw = tilt(properties);
   if (tw === null || inCycle) return;
   var p = properties;
+  if (compPlaneRefuse(planeOf(p))) return;
   block([
     planeWord(planeOf(p)),
     p.CircularDirection === "CW" ? "G02" : "G03",
