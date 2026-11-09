@@ -209,7 +209,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     let sel = if mods.alt {
         feature::singleton_chain_id(&features, edge).map(FeatureSel::Chain)
     } else if state.boundary_pick.is_some() || state.plane_pick.is_some() || crate::axis_pick::collecting(state) {
-        // A boundary (and a #330 lay-on-a-plane pick) takes ONE edge per click (M11.5 UX): the run - one
+        // A boundary (and a #557 axis pick) takes ONE edge per click (M11.5 UX): the run - one
         // straight stretch or one arc - never the whole tangent loop a
         // filleted rim chains into.
         feature::run_containing(&features, edge).map(|r| FeatureSel::Chain(r.id))
@@ -242,7 +242,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     }
     if state.plane_pick.is_some() {
-        crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #330
+        crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #554: refused by name
         return;
     }
     if state.boundary_pick.is_some() {

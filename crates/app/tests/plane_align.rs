@@ -1,7 +1,7 @@
-//! #330: lay the part on a G17 / G18 / G19 plane from picks - one flat
-//! face (its outward normal onto the plane's axis), or two straight edges
-//! (their plane's normal onto the axis, the first edge along the plane's
-//! first axis) - written as the setup's part alignment (#326) through the
+//! #330: lay the part on a G17 / G18 / G19 plane from a pick - one flat
+//! face, its outward normal onto the plane's axis (#554: a face only; an
+//! edge cannot set a plane and is refused by name) - written as the
+//! setup's part alignment (#326) through the
 //! undoable `AlignPartToSetup`. Pinned on a square block and on one tilted
 //! about all three axes, with the flip, the place-on-level choice, undo,
 //! and every refusal by name. The work offset is never touched.
@@ -154,29 +154,6 @@ fn place_on_level_sets_the_face_onto_the_plane() {
 }
 
 #[test]
-fn two_edges_set_the_plane_and_the_first_one_runs_along_its_first_axis() {
-    for tilt in [[0.0; 3], [20.0, 35.0, -50.0]] {
-        let (w, _) = block(tilt);
-        // Two edges of the front wall (y = 0): its bottom and its left side.
-        let (e1, a1, b1) = edge(&w, [0.0, 0.0, 0.0], [20.0, 0.0, 0.0]);
-        let (e2, _, _) = edge(&w, [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]);
-        let d1 = [b1[0] - a1[0], b1[1] - a1[1], b1[2] - a1[2]].map(|v| v / 20.0);
-        for (plane, first, axis) in [(ArcPlane::Xy, X, Z), (ArcPlane::Xz, X, Y), (ArcPlane::Yz, Y, X)] {
-            for flip in [false, true] {
-                let picks = [e1.clone(), e2.clone()];
-                let a = lay_on_plane(&w, &picks, lay(plane, flip, false)).expect("laid");
-                let want = if flip { axis.map(|v| -v) } else { axis };
-                // The wall's outward normal (-Y, away from the centre).
-                let n = laid_dir(&w, a, [0.0, -1.0, 0.0]);
-                assert!(on_axis(n, want), "tilt {tilt:?} {plane:?} flip {flip}: normal {n:?}");
-                let d = laid_dir(&w, a, d1);
-                assert!(on_axis(d, first), "tilt {tilt:?} {plane:?} flip {flip}: first edge {d:?}");
-            }
-        }
-    }
-}
-
-#[test]
 fn the_command_writes_the_setup_alignment_and_undo_restores_it() {
     let (w, mut h) = block([0.0; 3]);
     let before = setup_align::stored(&w, "Setup1");
@@ -229,11 +206,12 @@ fn every_pick_that_sets_no_plane_is_refused_by_name() {
     let top = face(&w, [10.0, 10.0, 10.0]);
     let (front, _, _) = edge(&w, [0.0, 0.0, 10.0], [20.0, 0.0, 10.0]);
     let (back, _, _) = edge(&w, [0.0, 20.0, 10.0], [20.0, 20.0, 10.0]);
-    says(&w, &[], "pick one flat face, or two straight edges");
-    says(&w, &[top.clone(), front.clone()], "pick one flat face, or two straight edges");
-    says(&w, std::slice::from_ref(&front), "pick one flat face, or two straight edges");
-    says(&w, &[front.clone(), back], "parallel");
-    says(&w, &[front.clone(), front.clone()], "coincident");
+    says(&w, &[], "pick one flat face");
+    says(&w, &[top.clone(), top.clone()], "pick one flat face");
+    // #554: an edge never sets a plane - alone, paired, or beside a face.
+    says(&w, &[top.clone(), front.clone()], "an edge cannot set a plane");
+    says(&w, std::slice::from_ref(&front), "an edge cannot set a plane");
+    says(&w, &[front.clone(), back], "an edge cannot set a plane");
     let f = features(&w, "block");
     let vid = feature::corner_verts(&f).first().and_then(|&vi| feature::vertex_id(&f, vi)).expect("a corner");
     says(&w, &[GeoSel { entity: "block".into(), feature: FeatureSel::Vertex(vid) }], "is a vertex");
@@ -247,7 +225,7 @@ fn every_pick_that_sets_no_plane_is_refused_by_name() {
 }
 
 #[test]
-fn a_curved_face_and_a_curved_edge_are_refused_by_name() {
+fn a_curved_face_and_a_rim_edge_are_refused_by_name() {
     let w = new_world();
     let mut h = History::default();
     h.execute(&w, ImportModel::from_mesh("block", cylinder(20.0, 10.0, 48)));
@@ -258,5 +236,5 @@ fn a_curved_face_and_a_curved_edge_are_refused_by_name() {
     let rims: Vec<_> = feature::chains(&f).into_iter().filter(|c| c.closed).map(|c| c.id).take(2).collect();
     assert_eq!(rims.len(), 2, "the cylinder has two rims");
     let picks: Vec<GeoSel> = rims.iter().map(|&id| GeoSel { entity: "block".into(), feature: FeatureSel::Chain(id) }).collect();
-    says(&w, &picks, "is a closed loop");
+    says(&w, &picks, "an edge cannot set a plane");
 }

@@ -24,7 +24,7 @@
 //! - **The pivot is the parts' centre.** The presets and the numeric
 //!   angles turn the parts about the centre of their bounds, so a flip
 //!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
-//!   takes any rigid transform - the door the face/edge picks (#330) use,
+//!   takes any rigid transform - the door the face pick (#330) uses,
 //!   through [`AlignPartToSetup::lay_on_plane`], and the in-plane axis
 //!   picks (#557), through [`AlignPartToSetup::turn_in_plane`].
 //! - **Linked setups follow (#316).** Every setup placed relative to
@@ -132,8 +132,9 @@ impl AlignPartToSetup {
         change_of(world, setup, Some(at)).map(|_| ())
     }
 
-    /// Lay the part on a G17 / G18 / G19 plane from picks (#330): one flat
-    /// face or two straight edges, read by [`crate::pick::lay_on_plane`].
+    /// Lay the part on a G17 / G18 / G19 plane from a pick (#330): one
+    /// flat face, read by [`crate::pick::lay_on_plane`] (an edge is
+    /// refused by name, #554).
     /// A refused pick is refused here, by name, before anything is written.
     pub fn lay_on_plane(
         world: &World,

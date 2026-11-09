@@ -325,7 +325,7 @@ pub enum CommandKind {
         source: camcraft_app::setup_stock::StockSource,
     },
     /// Lay the part on a G17 / G18 / G19 plane in a setup (#330): one
-    /// flat face or two straight edges, read by the app. Undoable
+    /// flat face (#554: faces only), read by the app. Undoable
     /// (`AlignPartToSetup`). Never touches the work offset.
     LayPartOnPlane {
         setup: String,
@@ -1318,7 +1318,7 @@ pub struct State {
     /// the selection as always.
     pub boundary_pick: Option<BoundaryPick>,
     /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
-    /// Face/Edge picks into it ahead of the boundary and the selection.
+    /// Face picks into it ahead of the boundary and the selection.
     pub plane_pick: Option<crate::plane_pick::PlanePick>,
     /// The Setups page's axes-in-the-plane draft (#557); while it is
     /// collecting, Edge/Vertex picks land in it ahead of everything else.

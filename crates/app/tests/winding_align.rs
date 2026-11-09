@@ -1,13 +1,14 @@
 //! #366: face-normal alignment picks trust a face's facet winding only on
 //! a body that is closed and wound outward (positive signed volume). An
-//! inside-out cube refuses the plane lay, the two-edge lay and the 3-2-1
-//! by name; the same cube wound outward still works; an open box, a body
+//! inside-out cube refuses the plane lay and the 3-2-1 by name (#554:
+//! two edges no longer lay a plane - refused as edges, whatever the
+//! winding); the same cube wound outward still works; an open box, a body
 //! wound both ways and a non-manifold body refuse by name. The shipped
 //! test models (STL, OBJ, STEP) read as outward.
 //! Provenance: our own fixtures over the divergence-theorem volume sign.
 //!
 //! Gate map (#366): covers app::pick::winding, app::pick::align
-//! (outward_normal), app::pick::plane (face and edge datums).
+//! (outward_normal), app::pick::plane (face datum, edge refusal).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use std::path::Path;
@@ -94,11 +95,13 @@ fn an_inside_out_cube_refuses_the_face_lay_by_name() {
 }
 
 #[test]
-fn an_inside_out_cube_refuses_the_two_edge_lay_by_name() {
+fn an_inside_out_cube_refuses_two_edges_as_edges() {
+    // #554: the two-edge lay is gone; the refusal is the edge's, before
+    // any winding is read.
     let w = world_of(inverted(&block()));
     let picks = [edge(&w, FRONT_TOP.0, FRONT_TOP.1), edge(&w, RIGHT_TOP.0, RIGHT_TOP.1)];
     let e = lay_on_plane(&w, &picks, G17).expect_err("refused");
-    assert_named(&e, "inside-out");
+    assert!(e.contains("an edge cannot set a plane"), "{e}");
 }
 
 #[test]
@@ -116,8 +119,6 @@ fn the_same_cube_wound_outward_still_aligns() {
         .expect("face lay");
     // Flipped onto -Z: the top (local +Z) turns over, a half turn.
     assert!(a.rot[3].abs() < 1e-9, "a half turn: {a:?}");
-    let picks = [edge(&w, FRONT_TOP.0, FRONT_TOP.1), edge(&w, RIGHT_TOP.0, RIGHT_TOP.1)];
-    lay_on_plane(&w, &picks, G17).expect("edge lay");
     let a = align_321(&w, &[face(&w, TOP), edge(&w, FRONT_TOP.0, FRONT_TOP.1)]).expect("3-2-1");
     assert!((a.z[2] - 1.0).abs() < 1e-9, "Z out of the top: {:?}", a.z);
 }
@@ -134,8 +135,6 @@ fn an_open_box_refuses_face_normal_picks_by_name() {
     let w = world_of(Mesh::from_facets(f));
     let e = lay_on_plane(&w, &[face(&w, TOP)], G17).expect_err("refused");
     assert_named(&e, "open body");
-    let picks = [edge(&w, FRONT_TOP.0, FRONT_TOP.1), edge(&w, RIGHT_TOP.0, RIGHT_TOP.1)];
-    assert_named(&lay_on_plane(&w, &picks, G17).expect_err("refused"), "open body");
     let picks = [face(&w, TOP), edge(&w, FRONT_TOP.0, FRONT_TOP.1)];
     assert_named(&align_321(&w, &picks).expect_err("refused"), "open body");
 }

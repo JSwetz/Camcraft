@@ -231,9 +231,9 @@ fn tool_editor_structure() {
     );
 }
 
-/// #557: a setup's own page carries the part-alignment rows in the
-/// properties leaf - the plane row and the axes-in-the-plane rows, each
-/// saying which pick it takes, with nothing armed and Apply hidden until
+/// #557 / #554: a setup's own page carries the part-alignment rows in
+/// the properties leaf - the plane row (a face) and the axes-in-the-plane
+/// rows (an edge or two points), each saying which pick it takes, with nothing armed and Apply hidden until
 /// an axis is picked.
 #[test]
 fn setup_page_alignment_rows_structure() {
@@ -248,7 +248,10 @@ fn setup_page_alignment_rows_structure() {
         crate::actions::target(st, UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Settings));
     }
     h.run_steps(3);
-    let plane = h.query_by_label_contains("Lay on a plane").expect("the plane row shows").rect();
+    // #554: each row says which pick it takes - a face for the plane.
+    let plane = h.query_by_label_contains("Lay on a plane - pick a face").expect("the plane row shows").rect();
+    assert!(h.query_by_label("Pick a face").is_some_and(|n| !n.accesskit_node().is_disabled()), "the plane row picks a face");
+    assert!(h.query_by_label("Pick face or edges").is_none(), "#554: the plane row offers no edge pick");
     let axes = h.query_by_label_contains("Axes in the plane - pick an edge or two points").expect("the axes rows show");
     assert!(plane.min.y < axes.rect().min.y, "the axes rows follow the plane row");
     for label in ["+Y by Edge", "+Y by Two points", "Pick +Y edge", "Flip +Y", "+X by Edge", "+X by Two points", "Pick +X edge", "Flip +X"] {
