@@ -132,6 +132,13 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach 1100MX", include_str!("../../../assets/machines/tormach-1100mx.mch")),
     ("Tormach 1500MX", include_str!("../../../assets/machines/tormach-1500mx.mch")),
     ("Tormach PCNC 440", include_str!("../../../assets/machines/tormach-pcnc440.mch")),
+    ("Tormach 1100M", include_str!("../../../assets/machines/tormach-1100m.mch")),
+    // #170: the Mach3-era R8 mills, each from its own operator's manual.
+    ("Tormach PCNC 770", include_str!("../../../assets/machines/tormach-pcnc770.mch")),
+    ("Tormach PCNC 770 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc770-s3.mch")),
+    ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
+    ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
+    ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the

@@ -6,7 +6,7 @@
 //! Provenance: our own tool surface over this repo's commands and the
 //! script verbs; schemas are JSON Schema as the MCP spec carries them.
 
-use super::{edit, job};
+use super::{area, edit, features, job, pick};
 use crate::script::{api, Env};
 
 use serde_json::{json, Map, Value};
@@ -34,6 +34,10 @@ const TOOLS: &[Tool] = &[
     Tool { name: "detect_holes", description: "Fill a Drill, Bore or Thread operation's hole list from its source model's holes (the app's Detect holes button). One undo step.", schema: s_name, run: edit::detect_holes },
     Tool { name: "delete_operation", description: "Delete an operation and its cached toolpath.", schema: s_name, run: edit::delete_operation },
     Tool { name: "set_tool", description: "Assign a document tool to an operation (the tool must suit the operation's kind).", schema: s_set_tool, run: edit::set_tool },
+    Tool { name: "list_features", description: "A model's pickable features with stable ids: faces (each boundary loop with the edge chains that run it), edge chains, welded smooth faces and vertices, in world coordinates.", schema: pick::s_list_features, run: features::list_features },
+    Tool { name: "get_operation_geometry", description: "What an operation machines: its source (stock, a model, or picked features), its area controls, and what the picks resolve to.", schema: pick::s_op, run: pick::get_operation_geometry },
+    Tool { name: "set_operation_geometry", description: "Set the features an operation machines (faces, edge chains, loops) by list_features ids. One undo step; undo restores the previous source.", schema: pick::s_set_geometry, run: pick::set_operation_geometry },
+    Tool { name: "set_operation_area", description: "Replace an operation's area controls (containment, offset, corner, extension, extra include/exclude boundaries, open boundary). One undo step.", schema: area::s_set_area, run: area::set_operation_area },
     Tool { name: "undo", description: "Undo the last document change.", schema: s_empty, run: edit::undo },
     Tool { name: "redo", description: "Redo the last undone change.", schema: s_empty, run: edit::redo },
     Tool { name: "generate", description: "Generate toolpaths: one named operation (always regenerated) or, with no name, every operation that is not current.", schema: s_opt_name, run: generate },
