@@ -251,6 +251,14 @@ pub fn translate_with(records: Vec<Record>, f: Flip, probing: bool) -> Result<Ve
                 m.z *= sz;
                 Record::Move(m)
             }
+            // A protected positioning move (#174) is an absolute straight
+            // feed: it mirrors like one. The touches around it carry the
+            // probing verdict.
+            Record::Guard(mut g) => {
+                pos = (g.to[0], g.to[1], g.to[2]);
+                g.to = [g.to[0] * sx, g.to[1] * sy, g.to[2] * sz];
+                Record::Guard(g)
+            }
             Record::Cycle(mut c) => {
                 if f.z {
                     refuse(&op, "a canned cycle on an inverted Z");

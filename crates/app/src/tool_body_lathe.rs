@@ -56,7 +56,7 @@ pub fn build(source: &str, place: LathePlacement, zone: Option<InsertZone>, plac
     }
     let tris: Vec<[[f64; 3]; 3]> = placed.iter().map(tri).collect();
     let clearance = LatheClearance::of_zoned(&tris, zone.as_ref()).map_err(|e| e.to_string())?;
-    Ok(ToolBody { source: source.to_owned(), facets: Arc::from(placed), frame: BodyFrame::Lathe { place, zone, clearance: Arc::new(clearance) } })
+    Ok(ToolBody { source: source.to_owned(), facets: Arc::from(placed), frame: BodyFrame::Lathe { place, zone, clearance: Arc::new(clearance) }, spun: None })
 }
 
 /// Can `tool` carry a lathe body (with insert zone `zone`)? Only a

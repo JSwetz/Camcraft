@@ -6,7 +6,7 @@
 //! Provenance: our own tool surface over this repo's commands and the
 //! script verbs; schemas are JSON Schema as the MCP spec carries them.
 
-use super::{area, edit, features, job, pick};
+use super::{area, edit, features, job, pick, render};
 use crate::script::{api, Env};
 
 use serde_json::{json, Map, Value};
@@ -45,6 +45,7 @@ const TOOLS: &[Tool] = &[
     Tool { name: "generate", description: "Generate toolpaths: one named operation (always regenerated) or, with no name, every operation that is not current.", schema: s_opt_name, run: generate },
     Tool { name: "verify", description: "Verify the job without posting: per-operation status and findings (op, move index, kind, message, whether it blocks the post) plus the program-level post gate.", schema: s_opt_name, run: job::verify },
     Tool { name: "post", description: "Post the program to an NC file through a post processor (a built-in name or a .cps path; default the document's own). Returns the written files, or refuses with the reasons.", schema: s_post, run: post },
+    Tool { name: "render_stock", description: "Render the program's simulated stock as a PNG (an image content block), painted by deviation class (clean, rest, gouge, unjudged), optionally with the toolpath over it; plus rest and gouge volume and the bounds of the stock and the rest. Generate first.", schema: render::schema, run: render::render_stock },
 ];
 
 /// Every row: this table, then the setup furniture's (#181).
@@ -138,8 +139,11 @@ fn post(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
         opts["cps"] = json!(p);
     }
     let mut out = api::v_post(env, vec![opts])?;
-    // What v_post itself reports as written, not the path asked for.
-    out["files"] = json!([out.get("path").cloned().unwrap_or_else(|| json!(to))]);
+    // #388: a program over several mounts names its files itself;
+    // otherwise what v_post itself reports as written, not the path asked for.
+    if out.get("files").is_none() {
+        out["files"] = json!([out.get("path").cloned().unwrap_or_else(|| json!(to))]);
+    }
     Ok(out)
 }
 

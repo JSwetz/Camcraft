@@ -66,7 +66,9 @@ fn two_faces(first: CoolantMode, second: CoolantMode) -> (World, History) {
 }
 
 fn mount(world: &World, history: &mut History, coolants: Vec<Coolant>) {
-    let m = Machine { model: "CoolBench".into(), coolants, ..Default::default() };
+    // States Z0 as its safe retract (#495/#503): the Siemens post refuses
+    // a machine that leaves "up" unstated, which is not this suite's law.
+    let m = Machine { model: "CoolBench".into(), coolants, safe_retract_z: Some(0.0), ..Default::default() };
     history.execute(world, LoadMachine::new(world, "cool.mch".into(), Some(m)).expect("sane"));
 }
 

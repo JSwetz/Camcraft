@@ -1,6 +1,7 @@
 {
   "name": "VMC 3-AXIS",
   "capabilities": { "milling": true, "toolChange": true },
+  "safeRetractZ": 0.0,
   "kinematics": {
     "static": {
       "head": {

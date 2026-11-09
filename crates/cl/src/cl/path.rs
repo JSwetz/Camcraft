@@ -6,6 +6,7 @@ use crate::geometry::Point3;
 use crate::geometry::units::Unit;
 
 use super::comp::CompSpan;
+use super::edge_break::EdgeBreak;
 use super::thread::ThreadCycle;
 use super::touch::ProbeTouch;
 use super::moves::{lattice, Move, MoveKind};
@@ -41,6 +42,11 @@ pub struct Toolpath {
     /// every cutting path. A post that cannot write a probing block
     /// refuses the path rather than posting the touch as a feed.
     pub probes: Vec<ProbeTouch>,
+    /// The edge breaks a chamfer or deburr was asked to cut (#303,
+    /// [`EdgeBreak`]): empty for every other path. The program sim
+    /// judges the moves against the part WITH these bevels, so the
+    /// break the op exists to cut is not a gouge and nothing past it is.
+    pub breaks: Vec<EdgeBreak>,
 }
 
 impl Toolpath {
@@ -52,6 +58,7 @@ impl Toolpath {
             comps: Vec::new(),
             threads: Vec::new(),
             probes: Vec::new(),
+            breaks: Vec::new(),
         }
     }
 
@@ -383,6 +390,7 @@ impl PathBuilder {
             comps: self.comps,
             threads: Vec::new(),
             probes: Vec::new(),
+            breaks: Vec::new(),
         }
     }
 }

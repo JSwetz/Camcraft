@@ -60,11 +60,22 @@ go to `CHANGELOG.md`.
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research"`
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research -label:\"P?\""`
   (then drop any whose comments hold a live contributor claim - "A claim
   comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
+- **`P?` is paused, not prioritised** (user, 2026-11-09: "a P? label that
+  holds an issue paused until maintainer tells it to be changed"). An issue
+  labelled `P?` is held by the maintainer: Pick never takes it, no lane
+  slot works it, no agent claims, researches, files sub-issues for or
+  re-prioritises it, and the bug/enhancement lanes skip it the same way.
+  It carries `P?` *instead of* a `P0`/`P1`/`P2` label, never beside one -
+  an agent that finds both reports it rather than choosing. Only the
+  maintainer swaps `P?` for a real priority (or closes the issue); until
+  then agents may only read it, link it, and comment facts that belong on
+  it (e.g. a duplicate or a related fix), without changing its labels.
+  An agent filing a new issue never uses `P?` - it picks `P0`/`P1`/`P2`.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
   limit to 2 bugs 2 enhancements.. as we are now just working on the latest
   issues and not the old ones"). At most four issues are worked at once: two
@@ -92,7 +103,29 @@ go to `CHANGELOG.md`.
   outside the working folder u started up in?"), and are removed once their
   PR is pushed. One issue, one branch; every commit for it lands there, never
   on `main`.
-- **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
+- **A fork syncs from upstream at each cut tag, not continuously** (user,
+  2026-11-09: "If we are on a forked repository (check for upstream), we
+  pull from upstream, with every detected cut tag ex. jump from 0.14 to
+  0.15, 0.15 to 0.16. The upstream pulls makes sure fork is working of the
+  latest stable main - and not the main that is in constant change.").
+  Before claiming work, check for an upstream: `git remote get-url
+  upstream` (a fork of NeoTech/Camcraft has one; the canonical repo does
+  not - there, "Start from the latest main" above applies unchanged). In a
+  fork:
+  - `git fetch upstream --tags` and find the newest cut tag,
+    `git tag -l 'v*.*.0' --sort=-v:refname | head -1`.
+  - If the fork's `main` does not contain it yet (`git merge-base
+    --is-ancestor <tag> main` fails), sync: `git switch main && git merge
+    --ff-only <tag>` (or `git merge <tag>` if the fork's main carries its own
+    commits), then `git push origin main`. Sync only to a cut tag, never to
+    `upstream/main`: tags are the tested, released state; upstream's main
+    moves several times an hour.
+  - Branch issue work from the fork's synced `main` as above. A PR into
+    upstream still targets upstream's `main`; if it conflicts there, merge
+    the conflicting upstream change into the branch (`git merge
+    upstream/main`) on that branch only, never into the fork's `main`, which
+    advances only at the next cut tag.
+  - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0"). Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
   (not main) and its PR says "stacked on #M". Before the parent merges (any

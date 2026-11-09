@@ -153,6 +153,7 @@ pub fn is_model(world: &World, entity: &Entity) -> bool {
         && !is_tool(world, entity)
         && !is_operation(world, entity)
         && !is_setup(world, entity)
+        && !crate::program_entry::is_entry(world, entity) // #155
 }
 
 /// The model's geometry revision counter (M3.1): `0` for an entity that

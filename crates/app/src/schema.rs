@@ -130,6 +130,10 @@ pub struct ToolBody {
     pub source: String,
     /// The placed facets, in the frame `frame` names.
     pub facets: std::sync::Arc<[Triangle]>,
+    /// The drawn outline when the body is a spun profile (#93): the
+    /// facets are its revolve and the spindle frame's `profile` its exact
+    /// bands. `None` for an imported mesh (and every lathe-frame body).
+    pub spun: Option<camcraft_tools::spun::SpunProfile>,
     /// The frame, the placement it landed with, and the derived read.
     pub frame: crate::tool_body::BodyFrame,
 }
@@ -267,6 +271,22 @@ pub struct Operation {
 pub struct OperationMeta {
     pub label: Option<String>,
     pub order: Option<u32>,
+}
+
+/// A standalone Pause or Home entry in the operation list (#155): an
+/// after-action with no tool and no toolpath, placed between operations
+/// by the same `OperationMeta::order` its siblings use. It is not an
+/// `Operation`, so every program walk that needs a tool or a toolpath
+/// (`setup::operation_order` and all who walk it) never sees it; the
+/// post folds it into the gap it stands in (`program_entry`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ProgramEntry {
+    /// What the machine does here - never `AfterOperation::None`.
+    pub action: AfterOperation,
+    /// The setup it stands in, the `Operation::setup` law.
+    pub setup: Option<String>,
+    /// Left out of the posted program, like a suppressed operation.
+    pub suppressed: bool,
 }
 
 /// The cached result of generating an operation: the path plus the
@@ -468,6 +488,7 @@ pub fn register_schema(world: &World) {
     world.component::<ToolBody>();
     world.component::<Operation>();
     world.component::<OperationMeta>();
+    world.component::<ProgramEntry>();
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();

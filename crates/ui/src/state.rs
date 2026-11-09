@@ -20,7 +20,7 @@ use camcraft_app::commands::{
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetToolNumber, SetUnits, SetWcsOrigin,
-    SetWorkMaterial, TagFixture, UntagFixture,
+    SetWorkMaterial, TagFixture, UntagFixture, ImportFixture,
     UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
@@ -41,9 +41,17 @@ mod per_op;
 mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_fixture.rs"]
+mod fixture_view;
+#[path = "state_program_entry.rs"]
+mod program_entry;
+pub use program_entry::EntryVerb;
 #[path = "state_tool_body.rs"]
 mod tool_body_ui;
 pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
+#[path = "state_tool_profile.rs"]
+mod tool_profile_ui;
+pub use tool_profile_ui::{ToolColumn, ToolProfileUi, is_spun_kind, parametric_points};
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -190,6 +198,13 @@ pub enum CommandKind {
         name: String,
         body: Option<BodyDraft>,
     },
+    /// #93: set a milling tool's drawn spun holder (`Some` points) or
+    /// return it to its parametric cylinder (`None`) - the tool editor's
+    /// Apply profile, one `SetToolBody::spun`.
+    SetToolProfile {
+        name: String,
+        points: Option<Vec<camcraft_app::spun::SpunPoint>>,
+    },
     /// The document's workpiece material (M13.2); `None` states none.
     SetWorkMaterial(Option<camcraft_app::tools::WorkMaterial>),
     /// The op page's "Apply suggestion" (M13.2): feed + spindle speed
@@ -230,6 +245,9 @@ pub enum CommandKind {
     /// The op menu's Suppress / Unsuppress row (#110): left out of the
     /// posted program, toolpath kept - one undo unit.
     SuppressOperation { name: String, suppressed: bool },
+    /// The operation list's Pause / Home entries (#155): add, change,
+    /// suppress - each one undo unit.
+    ProgramEntry(EntryVerb),
     /// The post page's "Skip pauses and homes" switch (#110).
     SetSkipStops(bool),
     /// The post page's Output choice (#111): `true` = one file per op.
@@ -1088,6 +1106,16 @@ pub struct OperationClipboard {
 pub enum TreeMenuTarget {
     Operation(String),
     Operations,
+    /// #339 slice 4: a model row (Models section, or a setup's Fixtures
+    /// child) - "Use as fixture" / "Stop using as fixture". `row` is the
+    /// clicked row's index, so the menu anchors on the row clicked even
+    /// when the name stands in the tree twice.
+    Model { name: String, row: usize },
+    /// A setup's Fixtures node (`""` - the implicit setup): "Import
+    /// fixture…".
+    Fixtures(String),
+    /// A Pause / Home entry row (#155).
+    Entry(String),
 }
 
 pub struct State {
@@ -1271,6 +1299,11 @@ pub struct State {
     /// implicit first setup. Public so tests run the dialog hand-off
     /// without a modal file picker.
     pub import_as_fixture: Option<Option<String>>,
+    /// #339 slice 4: each fixture's mesh state, per document version
+    /// (view cache - never truth, never saved).
+    pub fixture_mesh_cache: camcraft_app::fixture_view::MeshStateCache,
+    /// The selected op's struck fixtures, per (version, op, path sig).
+    pub struck_cache: camcraft_app::fixture_view::StruckCache,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
     pub op_ui: OpUi,
     /// Viewport click routing: whole models vs feature faces vs edge
@@ -1311,6 +1344,9 @@ pub struct State {
     /// #371: the tool editor's body draft (imported mesh, placement,
     /// pick mode). Ephemeral like `tool_ui`; Apply body is the command.
     pub tool_body_ui: ToolBodyUi,
+    /// #93: the tool editor's spun-profile draft (Parametric/Custom, the
+    /// points). Ephemeral like `tool_body_ui`; Apply profile is the command.
+    pub tool_profile_ui: ToolProfileUi,
     /// The machine editor window (M3.3 stage C): `None` closed. An
     /// ephemeral draft like [`State::tool_editor`] - the numbers under
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
@@ -1522,6 +1558,8 @@ impl State {
             model_ui: ModelUi::default(),
             repair_ui: RepairUi::default(),
             import_as_fixture: None,
+            fixture_mesh_cache: Default::default(),
+            struck_cache: Default::default(),
             // The tool draft carries a plausible name from the first
             // frame: an empty Name field made Add look dead (refused
             // silently). The operation draft has no form to prefill
@@ -1535,6 +1573,7 @@ impl State {
             },
             tool_editor: None,
             tool_body_ui: ToolBodyUi::default(),
+            tool_profile_ui: ToolProfileUi::default(),
             machine_editor: None,
             machines_pane: Default::default(),
             theme_cache: theme_files::Cache::new(),
@@ -2180,6 +2219,7 @@ impl State {
         self.tool_editor = None;
         self.tool_synced = (String::new(), self.doc_version);
         self.tool_body_ui = ToolBodyUi::default();
+        self.tool_profile_ui = ToolProfileUi::default();
     }
 
     pub(crate) fn copy_operation(&mut self, name: &str) {
@@ -2639,6 +2679,7 @@ impl State {
                 }
             }
             CommandKind::SetToolBody { name, body } => self.run_set_tool_body(&name, body),
+            CommandKind::SetToolProfile { name, points } => self.run_set_tool_profile(&name, points),
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {
@@ -2767,6 +2808,7 @@ impl State {
                 }
             }
             CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
+            CommandKind::ProgramEntry(verb) => self.program_entry_verb(verb),
             CommandKind::SetSkipStops(skip) => {
                 let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
                 match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
@@ -3345,6 +3387,27 @@ impl State {
                 // the name exists; the worker stayed world-blind on purpose.
                 // UpdateModel::new classifies further: setup furniture
                 // under this name is refused as Invalid, never overwritten.
+                // #339 slice 4: an import-as-fixture lands mesh and
+                // marker as ONE undo unit (`ImportFixture`) - one Ctrl+Z
+                // takes the whole import away.
+                if let Some(binding) = self.import_as_fixture.take() {
+                    match ImportFixture::new(&self.world, command, binding.as_deref()) {
+                        Ok(cmd) => {
+                            let verb = match cmd.update_summary() {
+                                Some(summary) => timed("updated", &format!(" ({summary})")),
+                                None => timed("imported", ""),
+                            };
+                            self.history.execute(&self.world, cmd);
+                            self.doc_version += 1;
+                            self.status = match &binding {
+                                Some(s) => format!("{verb}; marked as {s}'s fixture"),
+                                None => format!("{verb}; marked as a fixture"),
+                            };
+                        }
+                        Err(err) => self.refuse(ErrorScope::Setup, format!("fixture not imported: {err}")),
+                    }
+                    return;
+                }
                 if model::find_by_name(&self.world, &name).is_some() {
                     match UpdateModel::new(&self.world, &name, command.mesh) {
                         Ok(upd) => {
@@ -3361,29 +3424,12 @@ impl State {
                     self.doc_version += 1;
                     self.status = timed("imported", "");
                 }
-                // Stage B: an import-as-fixture tags whatever landed.
-                // Two undo units (the import, then the marker) is the
-                // honest shape - each is invertible on its own, and the
-                // worker never needed a world to begin with.
-                if let Some(binding) = self.import_as_fixture.take() {
-                    match TagFixture::new(&self.world, &name, binding.as_deref()) {
-                        Ok(tag) => {
-                            self.history.execute(&self.world, tag);
-                            self.doc_version += 1;
-                            let note = match &binding {
-                                Some(s) => format!("; marked as {s}'s fixture"),
-                                None => "; marked as a fixture".to_string(),
-                            };
-                            self.status.push_str(&note);
-                        }
-                        Err(err) => self.refuse(
-                            ErrorScope::Setup,
-                            format!("imported, but not marked as a fixture: {err}"),
-                        ),
-                    }
-                }
             }
-            Err(err) => self.status = format!("import refused: {err}"),
+            Err(err) => {
+                // A refused import-as-fixture must not tag the NEXT import.
+                self.import_as_fixture = None;
+                self.status = format!("import refused: {err}");
+            }
         }
     }
 
@@ -3658,8 +3704,17 @@ impl State {
     /// refused post leaves both the document and any previous program on
     /// disk exactly as they were.
     fn post_program_path(&mut self, path: PathBuf) {
-        match posting::post_setup(&self.world, &path) {
-            Ok(posted) => {
+        // #388: setups on different machines or posts write one file each.
+        match posting::post_mounts(&self.world, &path) {
+            Ok(files) if files.len() > 1 => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
+                self.show_posted_mounts(files);
+            }
+            Ok(files) => {
+                let Some(first) = files.into_iter().next() else { return };
+                let (path, posted) = (first.path, first.posted);
                 // A program went out: an earlier refusal no longer
                 // describes the document's post (#265).
                 self.post_refusal = None;

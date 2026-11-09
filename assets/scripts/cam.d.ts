@@ -51,6 +51,19 @@ interface PostResult {
   ops: number;
   lines: number;
   program?: string;
+  /** Setups on different machines or posts: every file written, one per mount. */
+  files?: string[];
+  mounts?: PostedMountInfo[];
+}
+
+interface PostedMountInfo {
+  path: string;
+  setups: string[];
+  machine: string;
+  post: string;
+  ops: number;
+  lines: number;
+  program?: string;
 }
 
 interface ToolRow {
