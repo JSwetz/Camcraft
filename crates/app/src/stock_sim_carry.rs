@@ -215,15 +215,18 @@ pub(crate) fn walk(
         let eff = crate::setup::effective(world, p.setup.as_deref());
         if eff != frame {
             spanned = true;
-            // #404: the program sim judges one machine's program - a
-            // setup change onto another machine refuses here, whether the
-            // entry would carry or clip (the clip keeps what the earlier
-            // setup left standing, so it hands material across too).
-            if let (Some(from), Some(to)) = (frame.as_deref(), eff.as_deref()) {
-                one_machine(world, from, to)?;
-            }
             match entry(world, frame.as_deref(), eff.as_deref())? {
-                Entry::Clip => clip_to_setup_stock(held.dex_mut(), world, eff.as_deref(), min_r)?,
+                Entry::Clip => {
+                    // #404: material never crosses a machine change. The
+                    // carry refuses in `carry_turn`; the clip keeps what the
+                    // earlier setup left standing, so it hands material
+                    // across too and refuses here. A new block hands nothing
+                    // across, so it may start on another machine.
+                    if let (Some(from), Some(to)) = (frame.as_deref(), eff.as_deref()) {
+                        one_machine(world, from, to)?;
+                    }
+                    clip_to_setup_stock(held.dex_mut(), world, eff.as_deref(), min_r)?;
+                }
                 Entry::Carry(turn) => {
                     let body = match held {
                         Held::Plain(d) => first_body(world, origin.as_deref(), d)?,

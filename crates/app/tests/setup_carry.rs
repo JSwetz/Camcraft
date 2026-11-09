@@ -5,8 +5,9 @@
 //! judged after the flip. A quarter turn re-indexes the body, a link
 //! "Same as" carries it unchanged, and a turn the lattice cannot carry
 //! exactly is refused by name. #404: a carry (or clip) between setups on
-//! different machines is refused by name at the setup change, and a flip
-//! about a part centre off the grid pitch carries whole cells.
+//! different machines is refused by name at the setup change, a new block
+//! on another machine is not (nothing crosses), and a flip about a part
+//! centre off the grid pitch carries whole cells.
 //! Provenance: our own fixtures (a faced block) over plain re-clamp
 //! practice; no vendor material consulted.
 //!
@@ -20,13 +21,14 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     AddTool, AlignPartToSetup, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel,
-    SetSetupMachine, SetSetupRelative, SetStock,
+    SetSetupMachine, SetSetupRelative, SetSetupStockSource, SetStock,
 };
 use camcraft_app::geometry::{Point3, cube};
 use camcraft_app::operation::{Height, OpParams, SrcRef};
 use camcraft_app::rest::REST_CARRY_REFUSAL;
 use camcraft_app::schema::Location;
 use camcraft_app::setup_align::AlignPreset;
+use camcraft_app::setup_stock::StockSource;
 use camcraft_app::stock::StockShape;
 use camcraft_app::stock_sim::{CARRY_MACHINE_CHANGE_REFUSAL, CARRY_TURN_REFUSAL, DEV_TOL, ProgramSim, incoming_body, simulate_document};
 use camcraft_app::tools::catalog;
@@ -228,6 +230,23 @@ fn a_clip_between_setups_on_different_machines_is_refused_by_name() {
     let err = simulate_document(&world).expect_err("refused across the machine change");
     assert!(err.contains(CARRY_MACHINE_CHANGE_REFUSAL) && err.contains("from setup 'Setup1' into setup 'Setup2'"), "{err}");
     assert!(err.contains("'Setup2' on Tormach 770M"), "{err}");
+}
+
+#[test]
+fn a_new_block_on_another_machine_is_judged_not_refused() {
+    // #404 review: Setup2 flips onto its own block (`StockSource::Own`,
+    // not the same hold) on its own machine. Nothing Setup1 cut crosses
+    // the machine change, so the program is judged, Setup1's verdict
+    // folded in, never refused.
+    let (world, mut h) = document(30.0, 30.0, -2.0, 20.0, 16.0);
+    second_setup(&world, &mut h);
+    h.execute(&world, AlignPartToSetup::preset(&world, "Setup2", AlignPreset::FlipX).expect("flip"));
+    add_face(&world, &mut h, "Face2", 16.0);
+    h.execute(&world, SetSetupStockSource::new(&world, "Setup2", StockSource::Own).expect("own block"));
+    h.execute(&world, SetSetupMachine::builtin(&world, "Setup2", "Tormach 770M").expect("Setup2's own machine"));
+    h.execute(&world, GenerateOperation::new(&world, "Face2").expect("Face2 regenerated on its own block"));
+    simulate_document(&world).expect("a new block hands nothing across the machine change");
+    incoming_body(&world, "Setup2").expect("Setup2 starts from its own block");
 }
 
 #[test]

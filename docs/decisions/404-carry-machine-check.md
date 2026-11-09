@@ -39,3 +39,10 @@
 - **Cost to change later:** carrying across machines (a part moved from a
   mill to another mill) needs the two machines' frames and fixtures
   related; lifting the refusal is one check in `one_machine`.
+
+## Review fix: a new block may start on another machine
+
+The review on PR #411 found that the machine check ran before the entry was chosen, so it also refused `Entry::NewBlock`, where the later setup takes its own block and nothing crosses. The check now runs only where material crosses: in `carry_turn` (the carry) and in the `Clip` arm of `walk`. A new block on another machine is judged, with the earlier setup's verdict folded in.
+
+- **Considered:** skipping the check only when `entry` returns `NewBlock`. That is the same rule, but it's easier to read when each arm states its own reason.
+- **Pinned by:** `setup_carry::a_new_block_on_another_machine_is_judged_not_refused`.
