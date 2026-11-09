@@ -269,7 +269,10 @@ fn an_inverted_x_machine_posts_the_mirrored_program() {
     let inverted = post_text(&world, "flip").expect("an inverted X posts");
     assert_ne!(standard, inverted, "the inverted program is not the standard one");
     let a: Vec<&str> = standard.lines().collect();
-    let b: Vec<&str> = inverted.lines().collect();
+    // #375: the header states the inverted axis - the one added line.
+    let note = "(MACHINE X+ MOVES LEFT - INVERTED AXIS)";
+    assert_eq!(inverted.lines().filter(|l| *l == note).count(), 1, "the header note:\n{inverted}");
+    let b: Vec<&str> = inverted.lines().filter(|l| *l != note).collect();
     assert_eq!(a.len(), b.len(), "the same blocks");
     for (x, y) in a.iter().zip(&b) {
         assert_eq!(mirrored_in_x(x), *y, "every X word negated, G2/G3 swapped");

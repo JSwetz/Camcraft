@@ -281,10 +281,23 @@ function toolNote() {  // just before the tool change it describes
   toolKind = ""; toolCr = 0;
 }
 
+// The machine's inverted linear axes (#375): the engine has mirrored the
+// stream into the controller's frame, and the header says so in the
+// operator's words, one comment per axis. A standard machine lists none.
+function invertedNotes() {
+  var a = (typeof machine !== "undefined" && machine.invertedAxes) || [];
+  var where = { X: "LEFT", Y: "TOWARD THE FRONT", Z: "DOWN" };
+  for (var i = 0; i < a.length; i++) {
+    var l = String(a[i]);
+    block(["(MACHINE " + l + "+ MOVES " + (where[l] || "THE OTHER WAY") + " - INVERTED AXIS)"]);
+  }
+}
+
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
   block([oWord(), "(" + nm + ")"]);
+  invertedNotes();
 }
 
 function onParameter(name, value) {

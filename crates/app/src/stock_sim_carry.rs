@@ -127,7 +127,7 @@ pub(crate) struct Walked {
 /// bottom (the box and cylinder from their placement, a from-model
 /// stock from its mesh read from below). Upright cuts never move the
 /// floor, so it is read when the first carry needs it.
-fn first_body(world: &flecs_ecs::prelude::World, setup: Option<&str>, dex: Dexel) -> Result<Body, String> {
+pub(crate) fn first_body(world: &flecs_ecs::prelude::World, setup: Option<&str>, dex: Dexel) -> Result<Body, String> {
     use crate::{model, stock::StockShape};
     let name = crate::setup::stock_entity_name(world, setup);
     let e = model::find_by_name(world, &name).ok_or_else(|| format!("no stock '{name}' to carry"))?;
