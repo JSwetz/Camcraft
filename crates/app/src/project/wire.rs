@@ -262,6 +262,8 @@ pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
 /// Each note is logged as well.
 pub fn open_noted(world: &World, text: &str) -> Result<Vec<String>, ProjectError> {
     let file: ProjectFile = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
+    // #321: the carried-body cache is freed with the document it served.
+    crate::rest::clear_carried_cache();
     let notes = check_and_apply(world, file)?;
     for n in &notes {
         tracing::warn!("project load note: {n}");
