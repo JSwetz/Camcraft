@@ -3255,7 +3255,10 @@ impl State {
             }
         }
         if !any {
-            self.cam = Camera::default();
+            self.cam = Camera {
+                projection: self.cam.projection,
+                ..Camera::default()
+            };
             self.status = String::from("nothing to frame");
             return;
         }
@@ -3266,7 +3269,10 @@ impl State {
             .fold(0.0f64, |acc, r| acc.max(*r))
             .max(f64::EPSILON)
             * 3.0f64.sqrt();
-        self.cam = Camera::frame(center, radius);
+        self.cam = Camera {
+            projection: self.cam.projection,
+            ..Camera::frame(center, radius)
+        };
     }
 
     fn import_path(&mut self, path: PathBuf) {
