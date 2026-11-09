@@ -108,10 +108,15 @@ fn the_locate_tools_sit_on_the_fixtures_page_and_the_model_page() {
     h.get_by_label("Locate part…").click();
     h.run_steps(2);
     assert!(h.state().state.locate_pick.as_ref().is_some_and(|d| d.fixture == "cube"), "the row arms the mates");
-    for label in ["Move the part", "Move the fixture", "Offset X", "Offset Y", "Offset Z", "Turn about mate normal", "Apply locate", "Remove last"] {
+    for label in ["Move the part", "Move the fixture", "Offset X", "Offset Y", "Offset Z", "Turn (deg)", "Apply locate", "Remove last"] {
         assert_inside(&h, rect, label);
     }
     assert!(h.get_by_label("Apply locate").accesskit_node().is_disabled(), "no mate yet");
+    // #561 review: with no mate the reason stands on the page, not only
+    // in the disabled button's tooltip, and the offset names its frame.
+    assert!(h.query_by_label_contains("Not yet: ").is_some(), "the why is visible");
+    assert!(h.query_by_label_contains("Offset (setup X / Y / Z)").is_some(), "the offset's frame is named");
+    assert!(h.query_by_label_contains("Turn about setup +Z (+ = counter-clockwise").is_some(), "the turn's axis and sense");
     assert!(h.state().state.pending.is_empty(), "{:?}", h.state().state.pending);
     // The Model page of the fixture offers the same verb.
     crate::actions::target(&mut h.state_mut().state, UiTarget::Model("cube".into()));

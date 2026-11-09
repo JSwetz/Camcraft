@@ -97,6 +97,21 @@
   fixture: "Locate part…"); the form lists the mates, offers Move the
   part / Move the fixture, Offset X/Y/Z, Turn, Apply locate (greyed with
   the solve's refusal) and Remove last.
+- **UI review fixes (hands-on drive).** Mates read in plain words in
+  the fixture's setup frame - a face by its outward normal ("part face -Z
+  (bottom), #1"; off the axes, its components) plus its number on the
+  body, a point by its coordinates - instead of the raw feature id
+  (dropped: naming faces by their role, floor/jaw/stop, which the app
+  cannot know). The drafted picks were already outlined in the viewport
+  through `selection_feature_lines` (pinned now). The Next hint offers
+  Apply only when the solve accepts the draft, else it says why; the
+  refusal also stands on its own line under Apply, zero mates included
+  (it was hover-only). The offset names its frame (setup X / Y / Z, part
+  relative to the fixture) and the turn names its mate and sense (the
+  first face-to-face mate's fixture normal, + counter-clockwise looking
+  down it; else setup +Z), on wrapped lines above short row labels the
+  label column cannot truncate. A fixture pick while a part face is
+  wanted adds "hide the fixture (eye) to pick part faces hidden in it".
 - **MCP:** `locate_part` (mates by `list_features` ids, offset, turn,
   move), and `list_features` now lists a fixture's features too so its
   face ids can be named.

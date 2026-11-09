@@ -3,6 +3,11 @@
 //! Vertex pick lands in the draft (never in an operation), part first,
 //! then fixture; Apply queues `Locate` and the drain lands it as one
 //! undo unit; picks that do not solve leave Apply disabled with the why.
+//! #561 review: the mates read in plain words (a face by its outward
+//! normal, a point by its coordinates), the drafted picks stay drawn,
+//! a refused draft never offers Apply in its hint, the turn names its
+//! mate and sense, and a fixture hit while a part face is wanted says
+//! how to reach a part face hidden in the steel.
 //! Provenance: our own page law; no vendor material consulted.
 
 use egui::accesskit::Role;
@@ -138,4 +143,63 @@ fn the_model_page_brings_the_fixture_to_the_part() {
     assert!(h.state().status.contains("located vise on part"), "{}", h.state().status);
     key(&mut h, Key::Z);
     assert_eq!(loc(h.state(), "vise"), Location::default(), "undo puts the vise back");
+}
+
+fn vertex(state: &State, name: &str, v: [f64; 3]) -> GeoSel {
+    let e = model::find_by_name(&state.world, name).expect("entity");
+    let f = model::features_of(&state.world, &e).expect("features");
+    let vi = feature::corner_verts(&f).into_iter().find(|&i| f.verts[i as usize] == v).expect("a corner there");
+    GeoSel { entity: name.into(), feature: FeatureSel::Vertex(feature::vertex_id(&f, vi).expect("vertex id")) }
+}
+
+#[test]
+fn the_mates_read_in_plain_words_and_stay_drawn() {
+    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(fixtures_frame, with_vise());
+    h.run();
+    h.get_by_label("Locate part…").click();
+    h.run();
+    // No mate yet: the why stands on the page, and the hint offers no Apply.
+    assert!(h.query_by_label_contains("Not yet: pick at least one mate").is_some(), "the zero-mate reason is visible");
+    // A fixture hit while a part face is wanted: how to reach one hidden in the steel.
+    let top = face(h.state(), "vise", [50.0, 30.0, 0.0]);
+    crate::locate_pick::take(h.state_mut(), top.clone());
+    assert!(h.state().status.contains("hide the fixture (eye) to pick part faces hidden in it"), "{}", h.state().status);
+    { let f = face(h.state(), "part", [10.0, 5.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+    crate::locate_pick::take(h.state_mut(), top);
+    h.run();
+    let mate = h.query_by_label_contains("Mate 1:").and_then(|n| n.accesskit_node().value()).expect("the mate is listed");
+    assert!(mate.contains("part face -Z (bottom), #") && mate.contains("on vise face +Z (top), #"), "{mate}");
+    assert!(!mate.contains("0x"), "no raw ids: {mate}");
+    assert!(
+        h.query_by_label_contains("Turn about mate 1 normal (+ = counter-clockwise looking down the normal)").is_some(),
+        "the turn names its mate and its sense"
+    );
+    assert!(!crate::interact::selection_feature_lines(h.state()).is_empty(), "the drafted faces stay drawn");
+    // A point reads as its coordinates in the setup frame.
+    let corner = crate::locate_pick::describe(h.state(), "vise", &vertex(h.state(), "part", [0.0, 0.0, 0.0]));
+    assert_eq!(corner, "part point (150.00, 80.00, 30.00) mm");
+}
+
+#[test]
+fn a_refused_draft_says_why_instead_of_offering_apply() {
+    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(fixtures_frame, with_vise());
+    h.run();
+    // Locate once, then draft the same mate again: nothing would move.
+    for _ in 0..2 {
+        h.get_by_label("Locate part…").click();
+        h.run();
+        { let f = face(h.state(), "part", [10.0, 5.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+        { let f = face(h.state(), "vise", [50.0, 30.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+        h.run();
+        if apply_enabled(&h) {
+            h.get_by_label("Apply locate").click();
+            h.run();
+        }
+    }
+    assert!(h.state().locate_pick.is_some(), "the second draft is still open");
+    assert!(!apply_enabled(&h), "the part already sits there");
+    let next = h.query_by_label_contains("Next:").and_then(|n| n.accesskit_node().value()).expect("the hint");
+    assert!(!next.contains("Apply,") && next.contains("nothing would move"), "{next}");
+    assert!(!h.state().status.contains("Apply,"), "the status hint agrees: {}", h.state().status);
+    assert!(h.query_by_label_contains("Not yet: nothing would move").is_some());
 }

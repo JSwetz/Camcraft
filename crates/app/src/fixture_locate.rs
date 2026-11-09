@@ -128,6 +128,17 @@ pub fn plan(world: &World, spec: &LocateSpec) -> Result<Plan, String> {
     Ok(Plan { setup, delta })
 }
 
+/// One pick read where the locate reads it - the frame of the setup
+/// `fixture` belongs to - for the mate list's plain words (#561 review):
+/// a face's outward normal, a point's coordinates. Refused by name as
+/// [`mate_datum`] refuses.
+pub fn read_pick(world: &World, fixture: &str, g: &GeoSel) -> Result<crate::pick::MateDatum, String> {
+    let setup = model::find_by_name(world, fixture).and_then(|fe| fixture::def_of(world, &fe)).and_then(|d| d.setup);
+    let e = model::find_by_name(world, &g.entity).ok_or_else(|| format!("no model named '{}'", g.entity))?;
+    let pose = setup_align::pose_in(world, &e, setup.as_deref()).unwrap_or_default();
+    mate_datum(world, g, pose)
+}
+
 /// Is this transform the identity (nothing would move)?
 #[must_use]
 pub fn is_still(delta: Location) -> bool {
