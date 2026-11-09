@@ -72,8 +72,17 @@ fn assert_shell_skeleton(h: &Harness<'static, ShellUi>) {
         assert!(at(&texts, t).y < tab_y, "ribbon text {t:?} must sit above the dock tabs");
     }
     // The build line rides the ribbon's corner (#352's fixed test identity).
-    let ver = format!("v{} · test", env!("CARGO_PKG_VERSION"));
-    assert!(at(&texts, &ver).y < tab_y, "the build identity sits on the ribbon");
+    // The build identity's version, from the same helper the toolbar paints
+    // (#556): tests pin it (#449), so the real CARGO_PKG_VERSION never shows
+    // here, and the ribbon paints the full "v… · test" or, when the ribbon is
+    // crowded, the version alone - either form starts with the version.
+    let ver = crate::build_info::toolbar_version();
+    let build = texts
+        .iter()
+        .find(|(t, _)| t.starts_with(&ver))
+        .map(|(_, p)| *p)
+        .unwrap_or_else(|| panic!("no painted build identity starting {ver:?}"));
+    assert!(build.y < tab_y, "the build identity sits on the ribbon");
     // Dock: three leaves, left to right, titles on one row.
     let (b, v, p) = (at(&texts, "browser"), at(&texts, "viewport"), at(&texts, "properties"));
     assert!(b.x < v.x && v.x < p.x, "dock order must be browser | viewport | properties");

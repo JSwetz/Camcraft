@@ -95,6 +95,13 @@ write (the gate), so the released program never carries one.
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.
+- **Up is the machine's word.** A retract in machine coordinates
+  (`G53 G0 Z..`) reads `machine.safeRetractZ` (#495); machine Z0 is the
+  top of travel only by convention (Tormach's), and a machine homed
+  with Z0 at the bottom would rapid down into the part. Unstated and
+  not a known-convention machine is a `message()` refusal by name
+  (`sinumerik.cps`, #503: no name is a known convention there - only
+  "no machine at all" keeps the old `G53 Z0`).
 - **Refuse, never lie.** A record you cannot honor in this dialect
   gets a counted `message()` naming why (Fanuc's `tilt()` returns null
   after one refusal per program — a per-line refusal is noise, a

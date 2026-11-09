@@ -199,15 +199,17 @@ fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 
 /// translucent cut-region fills - `App::collect_parts`'s exact law, fills
 /// included so the region reads as an area, not only an outline.
 fn collect_parts(state: &State) -> Vec<GpuPart> {
+    // #339 slice 4: the fixtures the selected op's warnings strike are
+    // tinted (display only - the classes ride the vertex, nothing else).
+    let struck = state.fixture_highlight();
     let mut parts: Vec<GpuPart> = model::model_entities(&state.world)
         .into_iter()
         .filter(|(name, _)| !state.hidden_models.iter().any(|h| h == name))
-        .map(|(_, entity)| GpuPart {
-            verts: world_verts(state, &entity),
-            selected: model::is_selected(&state.world, &entity),
-            stock: false,
-            fill: false,
-            classes: Vec::new(),
+        .map(|(name, entity)| {
+            let verts = world_verts(state, &entity);
+            let classes =
+                if struck.contains(&name) { vec![crate::viewport::STRUCK_CLASS; verts.len()] } else { Vec::new() };
+            GpuPart { verts, selected: model::is_selected(&state.world, &entity), stock: false, fill: false, classes }
         })
         .collect();
     parts.extend(sim_body_part(state));

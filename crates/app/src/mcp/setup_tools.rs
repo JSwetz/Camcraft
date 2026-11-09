@@ -221,7 +221,9 @@ fn load_machine(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> 
         "setup": target,
         "machine": m.as_ref().map(|m| m.model.clone()),
         "path": (!path.is_empty()).then_some(path),
-        "table": crate::fixture::table_box(&env.world).map(|b| json!({
+        // #388: the table of the machine just named - the setup's own,
+        // or the document's - never the active setup's.
+        "table": m.as_ref().and_then(crate::fixture::table_of).map(|b| json!({
             "min": [fnum(b.min.x), fnum(b.min.y), fnum(b.min.z)],
             "max": [fnum(b.max.x), fnum(b.max.y), fnum(b.max.z)],
         })),

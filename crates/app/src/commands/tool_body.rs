@@ -10,6 +10,8 @@ use std::path::Path;
 
 use flecs_ecs::prelude::World;
 
+use camcraft_tools::spun::{SpunPoint, SpunProfile};
+
 use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
 use crate::model;
@@ -64,6 +66,29 @@ impl SetToolBody {
                 let placed = tool_body::place(&s.facets, s.axis, s.offset).map_err(CommandError::Invalid)?;
                 let body = tool_body::build(&s.source, s.axis, s.offset, placed)
                     .map_err(|e| CommandError::Invalid(format!("tool '{name}': {e}")))?;
+                tool_body::fits(&tool, &body).map_err(|e| CommandError::Invalid(format!("tool '{name}': {e}")))?;
+                Some(body)
+            }
+        };
+        Ok(SetToolBody { name: name.to_string(), prev: tool_body::body_of(world, &entity), next })
+    }
+
+    /// Set (`Some`) a drawn spun holder profile (#93) as the tool's
+    /// body, or clear it (`None`, back to the holder cylinder). The
+    /// outline is validated here and refused by name ("holder profile:
+    /// point 3 ..."), then judged against the tool like any body.
+    pub fn spun(world: &World, name: &str, points: Option<Vec<SpunPoint>>) -> Result<Self, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let tool = model::tool_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a tool")))?;
+        let next = match points {
+            None => None,
+            Some(p) => {
+                let spun = SpunProfile::new(p)
+                    .map_err(|e| CommandError::Invalid(format!("tool '{name}': holder profile: {e}")))?;
+                let body = tool_body::build_spun(spun);
                 tool_body::fits(&tool, &body).map_err(|e| CommandError::Invalid(format!("tool '{name}': {e}")))?;
                 Some(body)
             }

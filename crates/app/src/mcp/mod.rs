@@ -21,6 +21,7 @@ mod features;
 mod fixture_tools;
 mod job;
 mod pick;
+mod render;
 mod setup_tools;
 mod tools;
 
@@ -158,14 +159,22 @@ get_job shows the whole document; list_operation_types shows each kind's paramet
 
 /// A tool answer: the JSON as text (every client reads that) and as
 /// `structuredContent` (clients that read data take it from there).
+/// A picture (#182) rides the answer under `render::PNG_KEY` and is
+/// lifted out into an image content block after the text, so the JSON
+/// copies never carry the base64 twice.
 fn tool_ok(value: Value) -> Value {
-    let structured = match value {
+    let mut structured = match value {
         Value::Object(_) => value,
         other => json!({ "result": other }),
     };
+    let png = structured.as_object_mut().and_then(|m| m.remove(render::PNG_KEY));
     let text = serde_json::to_string_pretty(&structured).unwrap_or_default();
+    let mut content = vec![json!({ "type": "text", "text": text })];
+    if let Some(Value::String(data)) = png {
+        content.push(json!({ "type": "image", "data": data, "mimeType": "image/png" }));
+    }
     json!({
-        "content": [{ "type": "text", "text": text }],
+        "content": content,
         "structuredContent": structured,
         "isError": false,
     })

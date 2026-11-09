@@ -60,11 +60,22 @@ go to `CHANGELOG.md`.
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research"`
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research -label:\"P?\""`
   (then drop any whose comments hold a live contributor claim - "A claim
   comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
+- **`P?` is paused, not prioritised** (user, 2026-11-09: "a P? label that
+  holds an issue paused until maintainer tells it to be changed"). An issue
+  labelled `P?` is held by the maintainer: Pick never takes it, no lane
+  slot works it, no agent claims, researches, files sub-issues for or
+  re-prioritises it, and the bug/enhancement lanes skip it the same way.
+  It carries `P?` *instead of* a `P0`/`P1`/`P2` label, never beside one -
+  an agent that finds both reports it rather than choosing. Only the
+  maintainer swaps `P?` for a real priority (or closes the issue); until
+  then agents may only read it, link it, and comment facts that belong on
+  it (e.g. a duplicate or a related fix), without changing its labels.
+  An agent filing a new issue never uses `P?` - it picks `P0`/`P1`/`P2`.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
   limit to 2 bugs 2 enhancements.. as we are now just working on the latest
   issues and not the old ones"). At most four issues are worked at once: two

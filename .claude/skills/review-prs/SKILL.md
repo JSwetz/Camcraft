@@ -154,6 +154,9 @@ For each line `<N> <login> <time>`:
   `<time>`: skip silently. A withdrawn claim's old comment is never
   mirrored again (without this the Withdraw pass and this one would flip
   the label every run);
+- **paused issue** (labelled `P?` - AGENTS.md "`P?` is paused"): do not
+  mirror; reply once (only if no later comment mentions `@<login>`)
+  `This issue is paused by the maintainer (P?) - it isn't open for work yet; the claim isn't recorded. It will be once the maintainer sets a priority.`;
 - **closed issue**, or **already mirrored** (`claimed` set and `<login>`
   assigned, or `claimed` set and a "Claim recorded for @<login>" reply
   exists): skip silently;

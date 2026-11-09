@@ -84,6 +84,7 @@ mod stock_size;
 mod stock_fit_sides;
 mod layout;
 mod machines_pane;
+mod machines_edit;
 mod unsaved;
 mod post_refusal;
 mod gcode_viewer;
@@ -94,10 +95,16 @@ mod one_wcs;
 mod setup_tree;
 // #389: per-setup post options and the tool-list export.
 mod setup_post_options;
+// #155: Pause / Home entries in the operation list.
+mod program_entry;
 // #371: the tool editor's Body section.
 mod tool_body;
+// #93: the tool editor's spun-profile (Profile) section.
+mod tool_profile;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
+// #509: the Fixtures page rows fit the pane.
+mod fixture_rows;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -4796,9 +4803,9 @@ fn operation_type_menu_requires_confirmation() {
         Some(TreeMenuTarget::Operation("Contour1".into())));
 
     // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
-    // (#110), section header, Face.
+    // (#110), add pause / home / optional stop (#155), section header, Face.
     let face = egui::pos2(90.0,
-        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 12.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);

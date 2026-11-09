@@ -83,26 +83,28 @@ pub(super) fn check_tool(world: &World, tool: &str) -> Result<(), CommandError> 
 }
 
 /// The family gate (M5.2 stage A): which machine a kind lives on is
-/// registry data - the row's [`Family`] read against the document's
-/// machine kind - so the door opens on the table in `kinds.rs`, not
+/// registry data - the row's [`Family`] read against the kind of the
+/// machine the op's setup mounts (#388) - so the door opens on the table in `kinds.rs`, not
 /// on a hand-typed list that forgets the twenty-second kind. A
 /// mill-turn admits both families; an unstated machine is a mill
 /// (the kind_of law the whole app already reads the document by).
 /// The ribbon's darkening is a courtesy; this door is the law - an
 /// op whose family the steel cannot spin never enters the document,
 /// and the refusal names both sides by name.
-pub(super) fn family_gate(world: &World, params: &OpParams) -> Result<(), CommandError> {
+pub(super) fn family_gate(world: &World, context: Option<&str>, params: &OpParams) -> Result<(), CommandError> {
     use crate::operation::Family;
     let info = params.kind().info();
     let family = info.family();
-    let machine = crate::machine::kind_of(world);
+    // #388: the machine of the setup the op lives in - the active one
+    // for a new op, the op's own for a paste or a retype.
+    let machine = crate::machine::kind_of_setup(world, context);
     // The per-kind word (M13.5 A): the family table, plus the Drill
     // kind's admission on a plain lathe for the axial hole.
     if info.admits(machine) {
         return Ok(());
     }
     Err(CommandError::Invalid(format!(
-        "a {} operation is {} work; the document's machine is a {} - mount a {} (or a mill-turn) first",
+        "a {} operation is {} work; the setup's machine is a {} - mount a {} (or a mill-turn) first",
         params.kind(),
         match family {
             Family::Mill => "milling",

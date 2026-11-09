@@ -55,8 +55,11 @@ pub use camcraft_post::machine::*;
 pub mod library;
 mod sheet;
 pub mod validate;
+// #383: the machine editor - property grid, draft, user folder and save.
+pub mod draft;
+pub mod fields;
+pub mod store;
 
-use flecs_ecs::core::WorldGet;
 use flecs_ecs::prelude::World;
 
 use crate::geometry::Point3;
@@ -100,17 +103,14 @@ pub fn set(world: &World, path: &str, machine: Option<&Machine>) {
 }
 
 /// The mounted machine's kind (the active setup's, #343) - the
-/// per-frame accessor for ribbon gating. Reads the singleton without a
-/// clone unless the active setup owns its machine.
+/// per-frame accessor for ribbon gating and the new-op door (a new op
+/// joins the active setup). An op's own laws read [`kind_of_setup`].
 #[must_use]
 pub fn kind_of(world: &World) -> Kind {
-    if let Some(own) = crate::setup_mount::own_machine(world, crate::setup::active(world).as_deref()) {
-        return kind(own.machine.as_ref());
-    }
-    world
-        .try_get::<&MachineDef>(|d| kind(d.machine.as_ref()))
-        .unwrap_or(Kind::Mill)
+    kind_of_setup(world, crate::setup::active(world).as_deref())
 }
+
+pub use crate::setup_mount::kind_of_setup;
 
 /// What a program asks that the machine cannot give. Located like the
 /// deviation verdict - every line names its op - because a limit
@@ -136,7 +136,13 @@ const REPORT_CAP: usize = 40;
 /// share, so the gate that stage D wires sees one machine judgment
 /// over exactly what would post. Never re-plans: cached moves only.
 pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, String> {
-    let ops = posting::program_ops(world)?;
+    check_ops(world, machine, &posting::program_ops(world)?)
+}
+
+/// [`check_document`] over a slice of the program (#388): the ops one
+/// machine runs, when setups mount different machines.
+pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs::prelude::Entity)]) -> Result<MachineCheck, String> {
+    let ops = program.to_vec();
     let mut out = MachineCheck::default();
 
     // The changer (M3.3 C): a program whose ops draw on more distinct

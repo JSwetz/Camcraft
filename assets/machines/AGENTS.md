@@ -69,6 +69,17 @@ unstated capability into existence.
     also declares `probeAxisInversion = true`, #392); an inverted Z or any
     other letter refuses posting by name. A rotary part's numeric `-1` refuses (a reversed
     rotary is not supported).
+  - linear Z only: `safe_retract` (#495) - the Z, in MACHINE
+    coordinates (the file's length unit, scaled like travel), a post
+    rapids to with `G53 G0 Z..` before a tool change and at program
+    end. Zero is a statement here, not "unstated": `0.0` says machine
+    Z0 is the top of travel (every shipped Tormach file, `vmc.mch`,
+    `tilthead.mch`; the mirror-form default `3axis-vmc.mch` states
+    `"safeRetractZ": 0.0`). Absent or null is unstated, and the
+    Tormach post refuses a non-Tormach machine that states none (the
+    Siemens 840D post, #503, any machine that states none); a
+    non-number, or the key on any other axis, refuses the file naming
+    the axis. The mirror carries it as `safeRetractZ` (mm).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
     finite numbers or the file refuses NAMING the axis (a garbled
     tilt vector must never read as "no tilt": the RTCP judgment rides

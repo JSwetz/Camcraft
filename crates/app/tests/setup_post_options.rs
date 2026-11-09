@@ -267,3 +267,21 @@ fn face_op_with(world: &World, h: &mut History, name: &str, tool: &str) {
     h.execute(world, op.expect("create"));
     h.execute(world, GenerateOperation::new(world, name).expect("generate"));
 }
+
+/// #389 x #155: a Pause / Home entry folds into the gap of the op before
+/// it, so the skip switch of THAT op's setup mutes it - an entry after a
+/// skipping setup's op neither posts nor refuses, while the other setup
+/// keeps its stop.
+#[test]
+fn an_entry_in_a_skipping_setups_gap_is_muted_with_its_op() {
+    use camcraft_app::commands::AddProgramEntry;
+    let (world, mut h) = doc(2);
+    h.execute(&world, AddProgramEntry::new(&world, AfterOperation::GoHome, Some("Face2")).expect("entry"));
+    let err = posting::op_streams(&world).expect_err("a stop and a trip home in one gap");
+    assert!(err.contains("already ends with"), "{err}");
+    h.execute(&world, SetSetupPostOptions::new(&world, "Setup2", Some(skip())).expect("Setup2 skips"));
+    posting::op_streams(&world).unwrap_or_else(|e| panic!("the muted gap posts: {e}"));
+    assert_eq!(stops(&world), 1, "Setup1's face keeps its stop; Setup2's op and its entry are muted");
+    h.undo(&world);
+    assert!(posting::op_streams(&world).is_err(), "undo brings the clash back");
+}

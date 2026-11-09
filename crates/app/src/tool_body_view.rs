@@ -2,7 +2,8 @@
 //! the simulation need from a body without committing anything - the
 //! file read, the six axis presets, the placement preview (the same
 //! place-and-envelope `SetToolBody` runs), the tip/axis picks on the
-//! model-frame mesh, and the body posed at a tool position for drawing.
+//! model-frame mesh, the body posed at a tool position for drawing, and
+//! the drawn spun holder's preview (#93).
 //! Specced from plain linear algebra (Rodrigues' rotation formula, the
 //! ray/triangle crossing `pick::soup_hit` already uses); our own design,
 //! no vendor file or source consulted.
@@ -20,6 +21,7 @@ use crate::model;
 use crate::schema::ToolBody;
 use crate::tool_body;
 use crate::tools::{Tool, ToolKind};
+use camcraft_tools::spun::{SpunPoint, SpunProfile};
 
 /// The six model directions the editor offers as the tool axis.
 pub const AXIS_CHOICES: [(&str, [f64; 3]); 6] = [
@@ -56,6 +58,23 @@ pub fn load(path: &Path) -> Result<(String, Vec<Triangle>), String> {
 pub fn preview(model: &[Triangle], axis: [f64; 3], offset: f64) -> Result<ToolBody, String> {
     let placed = tool_body::place(model, axis, offset)?;
     tool_body::build("preview", axis, offset, placed)
+}
+
+/// A drawn holder profile (#93) as `SetToolBody::spun` would judge it
+/// against `tool`, without landing it: the validated profile, or the
+/// refusal by name (the outline's own law, then the tool fit - lathe
+/// kinds and a holder reaching into the flutes). Builds no facets, so
+/// the editor can run it every frame while the table is edited.
+pub fn spun_preview(tool: &Tool, points: &[SpunPoint]) -> Result<SpunProfile, String> {
+    let spun = SpunProfile::new(points.to_vec()).map_err(|e| format!("holder profile: {e}"))?;
+    let probe = ToolBody {
+        source: tool_body::SPUN_SOURCE.to_owned(),
+        facets: std::sync::Arc::from(Vec::new()),
+        frame: tool_body::BodyFrame::Spindle { axis: [0.0, 0.0, 1.0], offset: 0.0, profile: spun.holder_profile() },
+        spun: None,
+    };
+    tool_body::fits(tool, &probe)?;
+    Ok(spun)
 }
 
 /// What a click on the model-frame body found: the facet, the hit
@@ -148,7 +167,7 @@ pub fn assembly(tool: &Tool, body: &ToolBody) -> Vec<Triangle> {
 
 /// A `(z, r)` meridian spun about +Z into triangles; rings at r = 0
 /// close to a point, flat steps make annuli.
-fn revolve(prof: &[(f64, f64)]) -> Vec<Triangle> {
+pub(crate) fn revolve(prof: &[(f64, f64)]) -> Vec<Triangle> {
     let at = |z: f64, r: f64, k: usize| {
         let a = std::f64::consts::TAU * k as f64 / RING as f64;
         Point3::new(r * a.cos(), r * a.sin(), z)

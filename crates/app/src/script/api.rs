@@ -205,13 +205,14 @@ pub(crate) fn v_post(env: &mut Env, args: Vec<Value>) -> Result<Value, String> {
         Some(_) => return Err("\"to\" must be a path string".into()),
         None => return Err("a \"to\" path is required - a program that exists nowhere is not a result".into()),
     };
+    // Omitted: each mount's own post (#388); named: that script for all.
     let cps = match opts.get("cps") {
-        None | Some(Value::Null) => posting::script_source(&env.world).map(|(_, text)| text)?,
+        None | Some(Value::Null) => None,
         Some(Value::String(s)) => {
             if let Some(text) = builtin_cps(s) {
-                text.to_owned()
+                Some(text.to_owned())
             } else if Path::new(s).extension().is_some_and(|e| e.eq_ignore_ascii_case("cps")) {
-                std::fs::read_to_string(s).map_err(|e| format!("cannot read post script {s}: {e}"))?
+                Some(std::fs::read_to_string(s).map_err(|e| format!("cannot read post script {s}: {e}"))?)
             } else {
                 let names: Vec<&str> = crate::posting::BUILTINS.iter().map(|(n, _)| *n).collect();
                 return Err(format!("unknown built-in post '{s}' - names: {}; or give a .cps file path", names.join(", ")));
@@ -224,16 +225,12 @@ pub(crate) fn v_post(env: &mut Env, args: Vec<Value>) -> Result<Value, String> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err("\"program\" must be true or false".into()),
     };
-    let posted = posting::post_script(&env.world, &to, &cps).map_err(|e| e.to_string())?;
-    env.posted = Some(to.clone());
-    let mut out = json!({ "path": to.display().to_string(), "ops": posted.ops, "lines": posted.lines });
-    if let Some(line) = &posted.not_judged {
-        out["not_judged"] = json!(line);
+    let files = match &cps {
+        None => posting::post_mounts(&env.world, &to),
+        Some(text) => posting::post_mounts_script(&env.world, &to, text),
     }
-    if with_program {
-        out["program"] = json!(posted.program);
-    }
-    Ok(out)
+    .map_err(|e| e.to_string())?;
+    Ok(super::report::posted_view(env, files, with_program))
 }
 
 /// `cam.report()` - the job on one page: the tree, the tool list, the

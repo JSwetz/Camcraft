@@ -47,3 +47,8 @@
   history (the setup-sheet law). Dropped: a separate format picker
   (the save dialog's extension is enough); document units (the sheet is
   mm-only today; a unit-aware sheet and list belong together).
+
+**Merged with main's #155 program entries and #388 per-mount files (review fix):**
+- `program_entry::posted_afters` takes a per-op skip predicate instead of one document-wide bool. Each op's after-action is muted by its own setup's switch.
+- A Pause/Home entry folding into a muted op's gap is muted with it, so it cannot refuse. An entry ahead of every posted op follows the first posted op's switch.
+- The Output/thread agreement check (`setup_post_options::program_problems`) moved into the program gate, since #388 replaced the one-mount refusal it used to ride. It stays program-wide, which is stricter than #388's per-mount files. Relaxing it to "agree within each mount's file" is possible later.

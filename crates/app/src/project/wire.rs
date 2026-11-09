@@ -51,6 +51,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 Some(EntityKind::Operation)
             } else if model::is_setup(world, &entity) {
                 Some(EntityKind::Setup)
+            } else if crate::program_entry::is_entry(world, &entity) {
+                Some(EntityKind::Entry)
             } else {
                 None
             };
@@ -131,7 +133,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 Some(EntityKind::Wcs)
                 | Some(EntityKind::Tool)
                 | Some(EntityKind::Operation)
-                | Some(EntityKind::Setup) => None,
+                | Some(EntityKind::Setup)
+                | Some(EntityKind::Entry) => None,
                 Some(EntityKind::Stock)
                     if matches!(
                         stock,
@@ -156,6 +159,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 operation,
                 setup,
                 fixture,
+                entry: super::program_entry_dto::collect(world, &entity),
             }
         })
         .collect();
