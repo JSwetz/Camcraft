@@ -24,19 +24,22 @@ const CONE: &str = "CM-0600-90";
 /// The rapids plane, above the brick's 10 mm top.
 const CLEARANCE: f64 = 25.0;
 
+/// The brick and a second block standing beside it, one model: two
+/// top rims, so the ride is two runs and has a link to test (#303 took
+/// the vertical corner edges out of the ride - they were the other runs).
+fn two_bricks() -> camcraft_app::geometry::Mesh {
+    let mut f: Vec<_> = cube(Point3::new(-20.0, -10.0, 0.0), Point3::new(20.0, 10.0, 10.0)).facets.to_vec();
+    f.extend(cube(Point3::new(25.0, -5.0, 0.0), Point3::new(35.0, 5.0, 10.0)).facets.iter().copied());
+    camcraft_app::geometry::Mesh::from_facets(f)
+}
+
 #[test]
 fn a_deburr_on_a_finished_brick_links_its_runs_without_a_rapid_in_stock() {
     let world = new_world();
     let mut history = History::default();
     history.execute(
         &world,
-        ImportModel::from_mesh(
-            "brick",
-            cube(
-                Point3::new(-20.0, -10.0, 0.0),
-                Point3::new(20.0, 10.0, 10.0),
-            ),
-        ),
+        ImportModel::from_mesh("brick", two_bricks()),
     );
     // The stock is the brick itself: a finished part, the deburr's
     // own premise, so a rapid through it is a rapid through the part.
