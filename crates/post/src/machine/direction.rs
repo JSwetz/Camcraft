@@ -115,6 +115,28 @@ impl Machine {
     }
 }
 
+/// Where an inverted axis's + moves, in the operator's words (#375):
+/// the program frame's + (ISO 841, standing at the front of a vertical
+/// mill) is X right, Y toward the back, Z up, so the inverted + is the
+/// opposite. Every display (viewport triad, setup sheet, NC header)
+/// reads this one table.
+#[must_use]
+pub fn inverted_motion(letter: &str) -> &'static str {
+    match letter {
+        "X" => "left",
+        "Y" => "toward the front",
+        "Z" => "down",
+        _ => "the other way",
+    }
+}
+
+/// "Machine X+ moves left (inverted axis)" - the one line every display
+/// of an inverted axis states (#375).
+#[must_use]
+pub fn inverted_axis_line(letter: &str) -> String {
+    format!("Machine {letter}+ moves {} (inverted axis)", inverted_motion(letter))
+}
+
 /// "machine M has an inverted X axis" / "... inverted X and Y axes".
 #[must_use]
 pub fn inverted_phrase(model: &str, letters: &[&str]) -> String {
