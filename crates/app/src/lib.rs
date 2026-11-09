@@ -11,6 +11,8 @@ pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
 pub mod fixture_carried;
+// #561: locate the part in a fixture (or the fixture on the part) by mates.
+pub mod fixture_locate;
 pub mod fixture_struck;
 pub mod fixture_view;
 pub use camcraft_motion::finishing3d;

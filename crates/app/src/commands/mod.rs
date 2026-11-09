@@ -10,6 +10,8 @@ pub mod fixture;
 pub mod import_fixture;
 pub mod import_model;
 pub mod load_machine;
+// #561: locate the part in a fixture (or the fixture on the part) by mates.
+pub mod locate;
 pub mod move_model;
 pub mod operation;
 pub mod post;
@@ -58,6 +60,7 @@ pub use fixture::{
 pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;
+pub use locate::{Locate, LocateFixture, LocatePart};
 pub use move_model::MoveModel;
 pub use operation::{
     ChangeOperationKind, ClearToolpath, CreateOperation, DeleteOperation, EditOperationLinks,

@@ -269,3 +269,54 @@ fn bad_setup_input_is_a_tool_error() {
     let e = c.refused("set_wcs", json!({ "origin": [0.0, 0.0, 0.0], "typo": 1 }));
     assert!(e.contains("unknown argument"), "{e}");
 }
+
+/// #561: `locate_part` mates a part face onto a fixture face by
+/// `list_features` ids (a fixture's features list too), one undo step;
+/// an edge is refused by name.
+#[test]
+fn locate_part_seats_the_part_on_the_fixture_by_feature_ids() {
+    let dir = tmp_dir("locate");
+    let part = dir.join("block.stl");
+    let vise = dir.join("vise.stl");
+    write_box_stl(&part, (10.0, 5.0, 8.0));
+    write_box_stl(&vise, (40.0, 30.0, 15.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+    c.ok("import_model", json!({ "path": vise.display().to_string() }));
+    c.ok("add_fixture", json!({ "model": "vise" }));
+    c.ok("move_fixture", json!({ "name": "vise", "position": [100.0, 0.0, -20.0] }));
+    // The flat face lying at world Z `z` ("facing" is winding-free).
+    let face = |c: &mut Client, model: &str, z: f64| -> String {
+        let f = c.ok("list_features", json!({ "model": model, "kinds": ["faces"] }));
+        f["faces"]
+            .as_array()
+            .and_then(|fs| {
+                fs.iter().find(|fa| fa["bounds"]["min"][2] == json!(z) && fa["bounds"]["max"][2] == json!(z))
+            })
+            .and_then(|fa| fa["id"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| panic!("{model} has a face at Z {z}: {f}"))
+    };
+    let bottom = face(&mut c, "block", 0.0);
+    let top = face(&mut c, "vise", -5.0);
+    let placed = c.ok(
+        "locate_part",
+        json!({ "part": "block", "fixture": "vise", "mates": [{ "part": bottom, "fixture": top }], "offset": [0.0, 0.0, 2.0] }),
+    );
+    assert_eq!(placed["moved"], json!("block"), "{placed}");
+    assert_eq!(placed["origin"][2], json!(-3.0), "the bottom 2 mm above the vise top at Z -5: {placed}");
+    assert_eq!(placed["warning"], Value::Null, "{placed}");
+    c.ok("undo", json!({}));
+    let job = c.ok("get_job", json!({}));
+    assert!(job.to_string().contains("block"), "{job}");
+
+    let chain = c.ok("list_features", json!({ "model": "block", "kinds": ["chains"] }))["chains"][0]["id"]
+        .as_str()
+        .map(str::to_owned)
+        .expect("a chain");
+    let e = c.refused("locate_part", json!({ "part": "block", "fixture": "vise", "mates": [{ "part": chain, "fixture": top }] }));
+    assert!(e.contains("is an edge"), "{e}");
+    let e = c.refused("locate_part", json!({ "part": "block", "fixture": "vise", "mates": [{ "part": bottom, "fixture": top }], "move": "both" }));
+    assert!(e.contains("\"move\""), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -6,12 +6,15 @@
 
 pub mod align;
 pub mod face;
+// #561: face / point datums for the fixture locate mates.
+pub mod mate;
 pub mod plane;
 pub mod winding;
 
 pub use align::{Alignment, align_321};
 pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
+pub use mate::{MateDatum, mate_datum};
 
 use flecs_ecs::prelude::World;
 
