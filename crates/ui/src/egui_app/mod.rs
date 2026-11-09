@@ -140,6 +140,8 @@ mod after_op_tests;
 #[cfg(test)]
 mod colorvision_tests;
 #[cfg(test)]
+mod tree_ink_tests;
+#[cfg(test)]
 mod pin_tests;
 #[cfg(test)]
 mod ribbon_icon_tests;
