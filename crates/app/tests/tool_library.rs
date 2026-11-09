@@ -12,7 +12,9 @@
 use camcraft_app::commands::{AddTool, History, ImportTools};
 use camcraft_app::model;
 use camcraft_app::project;
-use camcraft_app::tool_library::{LibraryTool, export_tool_library, parse_tool_library};
+use camcraft_app::tool_library::{
+    LibraryTool, export_tool_library, parse_tool_library, with_library_extension,
+};
 use camcraft_app::tools::{Tool, catalog};
 use camcraft_app::world::new_world;
 use flecs_ecs::prelude::World;
@@ -211,4 +213,16 @@ fn import_is_one_undo_unit_and_redo_restores_it() {
     for (n, t) in &tools {
         assert_eq!(tool_named(&w, n).as_ref(), Some(t));
     }
+}
+
+/// A name typed without a suffix still writes a `.camtools` file
+/// (macOS's save panel keeps the typed name as is); a name that already
+/// has an extension is kept as typed. Hands-on finding on PR #348.
+#[test]
+fn an_export_name_without_a_suffix_gets_the_library_extension() {
+    use std::path::Path;
+    assert_eq!(with_library_extension(Path::new("/tmp/shop")), Path::new("/tmp/shop.camtools"));
+    assert_eq!(with_library_extension(Path::new("/tmp/shop.camtools")), Path::new("/tmp/shop.camtools"));
+    assert_eq!(with_library_extension(Path::new("/tmp/shop.json")), Path::new("/tmp/shop.json"));
+    assert_eq!(with_library_extension(Path::new("/tmp/my.tools/shop")), Path::new("/tmp/my.tools/shop.camtools"));
 }
