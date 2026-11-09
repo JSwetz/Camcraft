@@ -289,14 +289,14 @@ fn the_alignment_round_trips_and_older_files_load_as_modelled() {
     assert_eq!(setup_align::stored(&w, "Setup1"), None);
     let bad = old.replace("\"version\": 52", &format!("\"version\": {}", project::PROJECT_VERSION)).replace(
         "\"wcs\": [\"G54\"]",
-        "\"wcs\": [\"G54\"], \"part_alignment\": {\"translation\": [0.0, 0.0, 0.0], \"rotation\": [2.0, 0.0, 0.0, 0.0]}",
+        "\"wcs\": \"G54\", \"part_alignment\": {\"translation\": [0.0, 0.0, 0.0], \"rotation\": [2.0, 0.0, 0.0, 0.0]}",
     );
     let err = project::open(&new_world(), &bad).expect_err("a stretched rotation is no rigid transform");
     assert!(err.to_string().contains("rigid"), "{err}");
 }
 
 #[test]
-fn the_program_sim_refuses_by_name_across_differently_held_setups() {
+fn the_program_sim_carries_the_stock_across_differently_held_setups() {
     let (world, mut h) = document(60.0);
     h.execute(&world, CreateSetup::new(&world, None, Some("Setup1")).expect("Setup2"));
     h.execute(&world, AlignPartToSetup::preset(&world, "Setup2", AlignPreset::FlipX).expect("align 2"));
@@ -304,8 +304,11 @@ fn the_program_sim_refuses_by_name_across_differently_held_setups() {
         .expect("create in Setup2 (the active one)");
     h.execute(&world, op);
     generate(&world, &mut h, "Contour2").expect("generates in Setup2's frame");
-    let err = camcraft_app::stock_sim::simulate_document(&world).map(|_| ()).expect_err("refused");
-    assert!(err.contains("part alignment"), "{err}");
+    // #317 lifted #326's refusal: the flip is carried (setup_carry.rs
+    // pins the body), and the verdict is read in Setup2's frame.
+    camcraft_app::stock_sim::simulate_document(&world).expect("the flip is carried");
+    let body = camcraft_app::stock_sim::incoming_body(&world, "Setup2").expect("Setup2 starts from Setup1's cut");
+    assert!(body.floor_judged(), "the contoured side lies underneath");
 }
 
 #[test]

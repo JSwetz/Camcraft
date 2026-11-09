@@ -52,7 +52,28 @@ use super::*;
 /// rigid transform document -> setup frame). Absent reads as "as
 /// modelled", so every v52 file loads unchanged; an old reader must
 /// refuse a v53 file rather than machine a flipped setup unflipped.
-pub const PROJECT_VERSION: u32 = 53;
+/// v54 (#342): one WCS per setup - a setup names one WCS entity
+/// (`"wcs": "<name>"`), and `work_offset` is only the word the post
+/// writes for it. Each older setup keeps the origin of the slot it
+/// posted; slots no setup posted are dropped with a load note
+/// (`wcs_one`). An old reader must refuse a v54 file rather than read a
+/// string where it expects a slot list.
+/// v55 (#343): a setup may own its machine and post (`SetupDto::machine`
+/// / `SetupDto::post`); absent follows the document's, so a v54 file
+/// steps up unchanged. An old reader must refuse a v55 file rather than
+/// post every setup on the document's machine.
+/// v56 (#316): a setup may be placed relative to another
+/// (`SetupDto::relative_to`), so a change of that setup's part alignment
+/// carries into it. Absent links nothing, so a v55 file steps up
+/// unchanged; a link naming no setup, or a loop of links, is corrupt. An
+/// old reader must refuse a v56 file rather than let an edit of one
+/// setup leave its re-clamp behind.
+/// v57 (#320): a setup may pick where its stock comes from
+/// (`SetupDto::stock_source`: its own, or what the setup before leaves).
+/// Absent reads as #317's implicit rule, so a v56 file steps up and
+/// simulates unchanged; an unknown word is corrupt. An old reader must
+/// refuse a v57 file rather than sim a setup from the wrong stock.
+pub const PROJECT_VERSION: u32 = 57;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
