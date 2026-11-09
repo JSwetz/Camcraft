@@ -294,6 +294,7 @@ re-tested, and only then is flagged ready again.
 | `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
 | `needs-rework` (red) | review found blockers | a maintainer PR goes back to draft; fix, push, flag ready again (a fork PR stays as its contributor set it; the review comment says what to fix) |
 | `conflicts` (orange) | no longer merges with `main` | a maintainer PR goes back to draft; merge `main`, re-test, flag ready again (a fork PR: the contributor merges `main`) |
+| `needs-maintainer` (yellow) | reviewed with no blockers, but it adds a dependency or changes `build.rs`, scripts or `.github`, so it was read, not built | waits for the maintainer's decision |
 
 When a PR comes back from draft with a new head, that head gets a fresh
 review; the marker `<!-- pr-reviewer: <head sha> -->` in the review comment
