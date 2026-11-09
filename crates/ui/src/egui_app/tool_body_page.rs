@@ -29,7 +29,11 @@ const PITCH0: f32 = 0.45;
 
 /// The envelope bands of the draft's placed body, for the profile
 /// preview: `(above, len, r)` per band, or `None` with no usable draft.
+/// Re-mirrors the world's body first (a no-op unless it changed), so
+/// the preview follows Apply profile, undo and reload whichever tab
+/// shows - not only once the Body tab has been drawn.
 pub(super) fn envelope(state: &mut State) -> Option<Vec<(f64, f64, f64)>> {
+    state.sync_tool_body_ui();
     match state.tool_body_preview()? {
         Ok(b) => Some(b.profile()?.bands().iter().map(|q| (q.above, q.len, q.r)).collect()),
         Err(_) => None,

@@ -18,6 +18,10 @@ use camcraft_app::tools::{Tool, ToolKind};
 
 use super::{CommandKind, ErrorScope, State};
 
+/// The head of an Apply profile refusal, so a later valid outline can
+/// retire exactly that message.
+const PROFILE_REFUSED: &str = "holder profile not set: ";
+
 /// Which section the editor's third column shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToolColumn {
@@ -41,6 +45,9 @@ pub struct ToolProfileUi {
     /// The world body the draft last mirrored (identity): Apply, Undo,
     /// Redo or Open re-mirror.
     seen: Option<Arc<[Triangle]>>,
+    /// The outline an Apply refused (`None` after any other outcome):
+    /// once the draft moves off it and validates, the refusal retires.
+    refused: Option<Vec<SpunPoint>>,
 }
 
 /// Is `kind` a milling tool - one a spun profile describes?
@@ -136,6 +143,8 @@ impl State {
     /// the Tool pane by name and the draft stays for correction.
     pub(crate) fn run_set_tool_profile(&mut self, name: &str, points: Option<Vec<SpunPoint>>) {
         let clearing = points.is_none();
+        self.tool_profile_ui.refused = None;
+        let tried = points.clone();
         match SetToolBody::spun(&self.world, name, points) {
             Ok(command) => {
                 self.history.execute(&self.world, command);
@@ -146,7 +155,32 @@ impl State {
                     format!("tool {name}: holder profile set")
                 };
             }
-            Err(err) => self.refuse(ErrorScope::Tool, format!("holder profile not set: {err}")),
+            Err(err) => {
+                self.tool_profile_ui.refused = tried;
+                self.refuse(ErrorScope::Tool, format!("{PROFILE_REFUSED}{err}"));
+            }
         }
+    }
+
+    /// The draft outline validates: an Apply refusal of a DIFFERENT
+    /// earlier outline no longer describes it, so it leaves the banner
+    /// (and the status line, when that still shows it). A refusal of
+    /// this very outline (e.g. the tool is gone) and any other refusal
+    /// stand.
+    pub(crate) fn retire_profile_refusal(&mut self) {
+        let d = &self.tool_profile_ui;
+        if d.refused.as_ref().is_none_or(|r| *r == d.points) {
+            return;
+        }
+        self.tool_profile_ui.refused = None;
+        if !self.error_for(ErrorScope::Tool).is_some_and(|m| m.starts_with(PROFILE_REFUSED)) {
+            return;
+        }
+        if let Some((_, msg)) = self.feedback.take()
+            && self.status == msg
+        {
+            self.status = String::from("ready");
+        }
+        self.feedback_ctx = None;
     }
 }

@@ -5,6 +5,7 @@
 //! Apply. Provenance: our own page law; the outlines are our own.
 
 use super::*;
+use crate::state::ErrorScope;
 use camcraft_app::spun::SpunPoint;
 
 const TOOL: &str = "EM-0600-4FL";
@@ -132,4 +133,58 @@ fn insert_and_remove_edit_the_table() {
     harness.state_mut().state.remove_profile_point(2);
     harness.run();
     assert_eq!(harness.state().state.tool_profile_ui.points.len(), n);
+}
+
+/// The to-scale preview's body envelope, as the editor's middle column
+/// reads it this frame.
+fn preview_reach(harness: &mut Harness<'static, ShellUi>) -> Option<f64> {
+    let st = &mut harness.state_mut().state;
+    match st.tool_body_preview()? {
+        Ok(b) => b.profile().map(|p| p.bands().iter().fold(0.0f64, |m, q| m.max(q.r))),
+        Err(_) => None,
+    }
+}
+
+/// The middle to-scale preview follows Apply profile and its undo while
+/// the Profile tab shows - the Body tab is never opened (#475 hands-on).
+#[test]
+fn the_to_scale_preview_follows_the_profile_without_the_body_tab() {
+    let mut harness = profile_tab();
+    assert_eq!(preview_reach(&mut harness), None, "no body yet: the plain cylinder");
+    harness.get_by_label("Custom").click();
+    harness.run();
+    harness.state_mut().state.tool_profile_ui.points[1].r = 40.0;
+    harness.state_mut().state.tool_profile_ui.points[2].r = 40.0;
+    harness.run();
+    harness.get_by_label("Apply profile").click();
+    harness.run();
+    harness.run();
+    assert!(drawn(&harness.state().state).is_some(), "status: {}", harness.state().state.status);
+    let reach = preview_reach(&mut harness).expect("the preview shows the drawn holder");
+    assert!((reach - 40.0).abs() < 1.0, "the preview reaches r {reach}, the drawn holder r 40");
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    harness.run();
+    assert!(drawn(&harness.state().state).is_none());
+    assert_eq!(preview_reach(&mut harness), None, "undo: the preview is the cylinder again");
+}
+
+/// An Apply refusal retires once the outline is corrected and validates.
+#[test]
+fn a_profile_refusal_retires_when_the_outline_validates() {
+    let mut harness = profile_tab();
+    harness.get_by_label("Custom").click();
+    harness.run();
+    let last = harness.state().state.tool_profile_ui.points.len() - 1;
+    harness.state_mut().state.tool_profile_ui.points[last].r = 5.0;
+    harness.run();
+    harness.get_by_label("Apply profile").click();
+    harness.run();
+    harness.run();
+    assert!(harness.state().state.error_for(ErrorScope::Tool).is_some(), "Apply refused");
+    harness.state_mut().state.tool_profile_ui.points[last].r = 0.0;
+    harness.run();
+    harness.run();
+    assert!(harness.state().state.error_for(ErrorScope::Tool).is_none(), "the corrected outline retires it");
+    assert!(harness.query_all_by_label_contains("holder profile not set").next().is_none());
 }

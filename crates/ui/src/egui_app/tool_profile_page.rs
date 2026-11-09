@@ -83,6 +83,7 @@ fn profile_section(ui: &mut Ui, state: &mut State, exists: bool, u: Unit) {
     side_view(ui, &tool, &points, check.as_ref().ok(), u);
     match &check {
         Ok(s) => {
+            state.retire_profile_refusal();
             let top = s.points().last().map_or(0.0, |p| p.z);
             let foot = s.points().first().map_or(0.0, |p| p.z);
             let wide = s.max_radius();
