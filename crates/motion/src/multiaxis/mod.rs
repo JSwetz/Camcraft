@@ -33,6 +33,7 @@ mod entry_ramp;
 mod linalg;
 mod stamp;
 mod stamp_pose;
+mod stamp_rise;
 #[cfg(test)]
 mod stamp_tests;
 pub mod axis;
