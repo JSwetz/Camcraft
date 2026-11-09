@@ -1,4 +1,5 @@
-//! LoadMachine: set the document's machine definition (M2.3 stage C).
+//! LoadMachine: set the document's machine definition (M2.3 stage C) -
+//! what every setup that owns no machine mounts (#343).
 //!
 //! Setup furniture, like `SetUnits`: no geometry changes, the command
 //! writes only the world singleton and its inverse writes the previous
@@ -29,7 +30,7 @@ impl LoadMachine {
                 "machine states a limit that cannot be meant".to_owned(),
             ));
         }
-        let prev = machine::of(world);
+        let prev = machine::document_of(world);
         if prev.0 == path && prev.1 == machine {
             return Err(CommandError::Invalid(if machine.is_none() {
                 "no machine is loaded".to_owned()
