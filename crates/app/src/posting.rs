@@ -184,6 +184,15 @@ pub fn document_post_of(world: &World) -> PostRef {
     crate::setup_mount::document_post(world)
 }
 
+/// The spindle speed a program commands for `tool`, rpm (#565): a touch
+/// probe is never spun (0 - its catalog `rpm` is never posted, and the
+/// posts start no spindle for it, #523); every cutter runs its own. The
+/// one answer the post and the machine's spindle-range check both read.
+#[must_use]
+pub fn posted_rpm(tool: &crate::tools::Tool) -> f64 {
+    if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm }
+}
+
 /// Write the singleton. For the `SelectPost` command and the project
 /// reader only.
 pub fn post_set(world: &World, next: &PostRef) {
@@ -761,7 +770,7 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             }),
             _ => None,
         };
-        let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
+        let rpm = posted_rpm(&tool);
         // Commentary for the program (#257): kinds by their panel
         // labels, the setup by the resolution law (implicit members
         // name the first setup, as the setup sheet does).
