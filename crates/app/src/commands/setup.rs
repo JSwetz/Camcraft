@@ -11,13 +11,13 @@
 //! ## The laws these commands keep
 //!
 //! - **Materialization, never renaming.** Creating the first setup on a
-//!   document that has none points it at the existing `Stock`/`G54`..
+//!   document that has none points it at the existing `Stock`/`G54`
 //!   entities ([`crate::setup`]'s implicit-setup law). Nothing is
 //!   renamed: every cached stamp, path and saved file predating setups
 //!   keeps resolving, byte for byte.
 //! - **Datum transfer = clone, not alias.** Transferring a datum copies
 //!   the source setup's stock (parameters, placement, facets) and its
-//!   `G54` placement into the new setup's OWN entities. A shop then
+//!   WCS placement into the new setup's OWN entities (#342: one WCS). A shop then
 //!   re-places the copy to describe the re-clamp - placement IS the
 //!   flip (M3.3 adds the rotated form). `datum_from` records where the
 //!   clone came from; it is sheet provenance, inert for every stamp.
@@ -25,7 +25,8 @@
 //!   refuses while any operation belongs to it ([`crate::setup::belongs`],
 //!   by declaration or by the first/implicit position), naming the
 //!   operation. Furniture the setup alone owns goes with it; names the
-//!   legacy world or another setup also points at stay.
+//!   legacy world or another setup also points at stay. A setup another
+//!   is placed relative to (#316) is refused the same way, naming it.
 //! - **Activation is inert data** (AGENTS.md, M1.6): which setup is
 //!   ACTIVE changes no path, no stamp, no staleness - it only decides
 //!   where NEW things join. Commands write the singleton; readers
@@ -59,8 +60,8 @@ struct StockSnap {
 }
 
 /// Create a setup, optionally transferring a datum: cloning the named
-/// source setup's stock and `G54`..`G59` placements into the new
-/// setup's own entities. With no source the new setup starts with empty
+/// source setup's stock and WCS placement into the new setup's own
+/// entities. With no source the new setup starts with empty
 /// furniture (lazily spawned by `SetStock`/`SetWcsOrigin` when used).
 pub struct CreateSetup {
     name: String,
@@ -68,7 +69,7 @@ pub struct CreateSetup {
     /// Furniture the datum transfer clones in (owned names only - the
     /// materialization case clones nothing; it points at what exists).
     stock: Option<StockSnap>,
-    wcs: Vec<(String, Location)>,
+    wcs: Option<(String, Location)>,
     /// The active setup before this command, restored by its inverse.
     prev_active: Option<String>,
 }
@@ -116,27 +117,38 @@ impl CreateSetup {
         let def = if materializing {
             SetupDef {
                 stock: STOCK_NAME.to_string(),
-                wcs: WCS_SLOTS.iter().map(|s| s.to_string()).collect(),
+                wcs: WCS_SLOTS[0].to_string(),
                 datum_from: String::new(),
                 work_offset: None,
                 part_alignment: None,
+                machine: None,
+                post: None,
+                relative_to: None,
             }
         } else {
             SetupDef {
                 stock: format!("{name}/Stock"),
-                wcs: WCS_SLOTS.iter().map(|w| format!("{name}/{w}")).collect(),
+                wcs: format!("{name}/{}", setup::WCS_SUFFIX),
                 datum_from: datum_from.unwrap_or("").to_string(),
-                // The datum transfer carries the source's picked program
-                // offset with its placements (#196): the slot is part of
-                // the datum system being cloned.
+                // The datum transfer carries the source's work-offset
+                // label with its WCS (#196): the word is part of the
+                // datum system being cloned.
                 work_offset: datum_from.and_then(|f| setup::work_offset(world, f)),
                 // #326: the cloned stock and offsets sit in the source's
                 // part frame, so the part alignment rides the transfer.
                 part_alignment: datum_from.and_then(|f| crate::setup_align::stored(world, f)),
+                // #343: a datum transfer is the same clamping system moved
+                // to a new setup - it keeps the source's machine and post.
+                machine: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.machine),
+                post: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.post),
+                // #316: a datum transfer starts in the source's frame (the
+                // transform between them is the identity) but links nothing:
+                // the clone does not follow the source's later edits.
+                relative_to: None,
             }
         };
         let mut stock = None;
-        let mut wcs = Vec::new();
+        let mut wcs = None;
         if let Some(from) = datum_from {
             if !setup::exists(world, from) {
                 return Err(CommandError::NotFound(from.to_string()));
@@ -151,16 +163,10 @@ impl CreateSetup {
                     facets: model::facets_of(world, &entity).unwrap_or_default(),
                 });
             }
-            for i in 0..WCS_SLOTS.len() {
-                let Some(entity) = setup::wcs_entity(world, Some(from), i) else {
-                    continue;
-                };
-                if let (Some(wname), Some(loc)) = (
-                    setup::wcs_entity_name(world, Some(name.as_str()), i),
-                    model::transform_of(world, &entity),
-                ) {
-                    wcs.push((wname, loc));
-                }
+            if let Some(loc) = setup::wcs_entity(world, Some(from))
+                .and_then(|entity| model::transform_of(world, &entity))
+            {
+                wcs = Some((def.wcs.clone(), loc));
             }
         }
         Ok(CreateSetup {
@@ -195,7 +201,7 @@ impl Command for CreateSetup {
                 shape: s.shape.clone(),
             });
         }
-        for (wname, loc) in &self.wcs {
+        if let Some((wname, loc)) = &self.wcs {
             let e = match model::find_by_name(world, wname) {
                 Some(e) => e,
                 None => model::spawn(world, wname),
@@ -215,10 +221,10 @@ impl Command for CreateSetup {
         {
             model::remove(world, &e);
         }
-        for (wname, _) in &self.wcs {
-            if let Some(e) = model::find_by_name(world, wname) {
-                model::remove(world, &e);
-            }
+        if let Some((wname, _)) = &self.wcs
+            && let Some(e) = model::find_by_name(world, wname)
+        {
+            model::remove(world, &e);
         }
         if let Some(e) = model::find_by_name(world, &self.name) {
             model::remove(world, &e);
@@ -235,7 +241,7 @@ pub struct DeleteSetup {
     /// names. Shared legacy names (`Stock`, `G54`..) and anything
     /// another setup points at are NOT deleted.
     stock: Option<StockSnap>,
-    wcs: Vec<(String, Location)>,
+    wcs: Option<(String, Location)>,
     prev_active: Option<String>,
 }
 
@@ -257,6 +263,13 @@ impl DeleteSetup {
                 )));
             }
         }
+        // #316: a setup placed relative to this one would lose the setup
+        // its edits follow - refused by name, like an operation.
+        if let Some(child) = crate::setup_relative::dependents(world, name).first() {
+            return Err(CommandError::Invalid(format!(
+                "'{child}' is placed relative to '{name}' - unlink it first"
+            )));
+        }
         let owned = |n: &str| {
             n != STOCK_NAME && !WCS_SLOTS.contains(&n) && !setup::is_furniture_of_other(world, n, name)
         };
@@ -272,18 +285,14 @@ impl DeleteSetup {
         } else {
             None
         };
-        let mut wcs = Vec::new();
-        for (i, wname) in def.wcs.iter().enumerate() {
-            if i >= WCS_SLOTS.len() || !owned(wname) {
-                continue;
-            }
-            if let Some(e) = model::find_by_name(world, wname)
-                && model::is_wcs(world, &e)
-                && let Some(loc) = model::transform_of(world, &e)
-            {
-                wcs.push((wname.clone(), loc));
-            }
-        }
+        let wcs = if owned(&def.wcs) {
+            model::find_by_name(world, &def.wcs)
+                .filter(|e| model::is_wcs(world, e))
+                .and_then(|e| model::transform_of(world, &e))
+                .map(|loc| (def.wcs.clone(), loc))
+        } else {
+            None
+        };
         Ok(DeleteSetup {
             name: name.to_string(),
             def,
@@ -301,10 +310,10 @@ impl Command for DeleteSetup {
         {
             model::remove(world, &e);
         }
-        for (wname, _) in &self.wcs {
-            if let Some(e) = model::find_by_name(world, wname) {
-                model::remove(world, &e);
-            }
+        if let Some((wname, _)) = &self.wcs
+            && let Some(e) = model::find_by_name(world, wname)
+        {
+            model::remove(world, &e);
         }
         if let Some(e) = model::find_by_name(world, &self.name) {
             model::remove(world, &e);
@@ -325,7 +334,7 @@ impl Command for DeleteSetup {
                 shape: s.shape.clone(),
             });
         }
-        for (wname, loc) in &self.wcs {
+        if let Some((wname, loc)) = &self.wcs {
             let e = model::spawn(world, wname);
             e.entity_view(world).add(Wcs);
             model::set_transform(world, &e, *loc);
