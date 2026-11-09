@@ -12,7 +12,9 @@
 //! clear: an upright move (rotary at zero - both frames agree), a pose
 //! the rotary alone cannot stand upright, or no axis stated keep the
 //! part-frame laws byte-identical. The turning boxes keep theirs
-//! untouched.
+//! untouched. Under the spindle C (#486, [`super::c_steel`]) every
+//! box is read at the station pose the C states, and fixed boxes are
+//! read in the machine frame as well - that reading only ADDS hits.
 //!
 //! Provenance: rigid rotation of a rotary work about its axis line is
 //! textbook machine kinematics (RS-274 rotary addresses; 4-axis
@@ -23,6 +25,7 @@ use crate::fixture::FixtureBox;
 use crate::tools::ToolGeom;
 use camcraft_tools::holder_profile::HolderStack;
 
+use super::c_steel::{fixed_hits, merge, station_poses};
 use super::laws::{bands_vs_fixtures_held, rapids_vs_fixtures_held};
 use super::posed_steel::{sweep, Verdict};
 use super::rotary::RotaryAxis;
@@ -67,13 +70,17 @@ pub fn bands_vs_workholding_held(
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
 ) -> Vec<Warning> {
-    judge(
+    // Under the spindle C (#486): the pose the machine holds, and the
+    // fixed steel read in the machine frame too ([`super::c_steel`]).
+    let path = &*station_poses(path);
+    let warns = judge(
         path,
         wh,
         false,
         |boxes| bands_vs_fixtures_held(path, tool, holder, boxes, spindle, chord_tol),
         |boxes, ax| sweep(path, tool, holder, boxes, spindle, chord_tol, false, Some(ax)),
-    )
+    );
+    merge(warns, &fixed_hits(path, tool, holder, wh.fixed, wh.axis.as_ref(), spindle, chord_tol, false))
 }
 
 /// Law (d2) over split workholding: every rapid, the spindle housing
@@ -98,13 +105,15 @@ pub fn rapids_vs_workholding_held(
     wh: &Workholding<'_>,
     spindle: Option<(f64, f64)>,
 ) -> Vec<Warning> {
-    judge(
+    let path = &*station_poses(path);
+    let warns = judge(
         path,
         wh,
         true,
         |boxes| rapids_vs_fixtures_held(path, tool, holder, boxes, spindle),
         |boxes, ax| sweep(path, tool, holder, boxes, spindle, 0.01, true, Some(ax)),
-    )
+    );
+    merge(warns, &fixed_hits(path, tool, holder, wh.fixed, wh.axis.as_ref(), spindle, 0.01, true))
 }
 
 /// The merge: per move the turning boxes' verdict first; else the
