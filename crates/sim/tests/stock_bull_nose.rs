@@ -283,8 +283,35 @@ fn both_engines_cut_a_bull_nose_alike() {
         let (c, f) = both(&moves, 2.0, Some(0.75));
         let dc = c.deviate(&plate(plate_z), DEV_TOL).expect("column deviate");
         let df = f.deviate(&plate(plate_z), DEV_TOL).expect("field deviate");
-        parity(&dc, &df, 1e-5, label);
         assert!(dc.gouge_cells + dc.rest_cells > 0, "{label}: the fixture judges something");
+        if moves.iter().any(|m| m.arc.is_some()) {
+            arc_parity(&dc, &df, label);
+        } else {
+            parity(&dc, &df, 1e-5, label);
+        }
+    }
+}
+
+/// #402: the column engine sweeps an XY arc exactly; the field engine
+/// still rides inscribed chords at a quarter cell, so on the helix arc
+/// (centre (6,6), R 3, upper half) the two agree only to that chord's
+/// error. Columns whose true distance to the arc keeps a sagitta clear
+/// of the rim differ by at most the bull's profile change across one
+/// sagitta (its slope at `r - sag` times `sag`); the rim band itself is
+/// where one engine reaches and the other does not - the column
+/// engine's answer there is pinned against a dense scan of the true arc
+/// in `arc_sweep.rs`.
+fn arc_parity(a: &Deviation, b: &Deviation, label: &str) {
+    let (r, c, sag) = (2.0f64, 0.75f64, a.cell * 0.25);
+    let e = c - sag; // the corner offset at d = r - sag
+    let bound = sag * e / (c * c - e * e).sqrt() + 1e-5;
+    for (k, (x, y)) in a.dev.iter().zip(&b.dev).enumerate() {
+        let (qx, qy) = ((k % a.cells_x) as f64 * a.cell + 0.5 * a.cell, (k / a.cells_x) as f64 * a.cell + 0.5 * a.cell);
+        let ends = (qx - 9.0).hypot(qy - 6.0).min((qx - 3.0).hypot(qy - 6.0));
+        let d = if qy >= 6.0 { ((qx - 6.0).hypot(qy - 6.0) - 3.0).abs().min(ends) } else { ends };
+        if x.is_finite() && y.is_finite() && d < r - sag {
+            assert!((x - y).abs() <= bound, "{label}: column {k} ({qx}, {qy}): {x} vs {y}, bound {bound}");
+        }
     }
 }
 
@@ -351,3 +378,4 @@ fn bull_refusals_say_the_same_words_either_way() {
         assert!(a.contains("corner") || a.contains("no tool is both"), "{what}: {a}");
     }
 }
+

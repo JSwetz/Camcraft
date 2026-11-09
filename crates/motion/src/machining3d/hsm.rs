@@ -18,7 +18,9 @@
 //! the rest pass and the offset shells keep the rings too, said once:
 //! their proofs are the planes' (a rest target is the simulation's
 //! crumbs, entered by plunges; a shell lifts every vertex off the plane
-//! the microlift returns were proved on).
+//! the microlift returns were proved on). On the rotary wrap a level too
+//! narrow for the asked helix is refused before planning, named with
+//! both radii (issue #55, [`NARROW_HELIX`]).
 //!
 //! Provenance: `machining2d::adaptive`'s (Stori & Wright 2000; Held &
 //! Spielberger 2009; Otkur & Lazoglu 2007) and the ladder's own; no
@@ -29,9 +31,10 @@ use super::params::Pocket3DParams;
 use crate::cl::{MoveKind, PathBuilder};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
+use crate::entry::Entry3D;
 use crate::machining2d::{
-    ARC_FIT_TOL, GenError, PocketParams, PocketStrategy, ProofTally, Return, Seg, adaptive_passes, crossing_free,
-    fit_proved, microlift_link, plan_passes, push_segs,
+    ARC_FIT_TOL, GenError, PocketParams, PocketStrategy, ProofTally, Return, Seg, adaptive_passes, choose_entry,
+    crossing_free, fit_proved, microlift_link, plan_passes, push_segs,
 };
 
 /// Said once per path where the rest pass runs under Adaptive.
@@ -159,6 +162,13 @@ pub(super) fn plan_level(
         Some(_) => format!("the developed level at radius {z:.3}"),
         None => format!("the level at Z {z:.3}"),
     };
+    if seam.is_some()
+        && let Some(why) = narrowed_helix(center, &pp)
+    {
+        b.note(format!("adaptive: {why} - Offset rings cut {what} instead"));
+        let passes = plan_passes(center, step, p.climb, PocketStrategy::OffsetRings)?;
+        return Ok(LevelPlan::rings(passes, p.helix_radius));
+    }
     // On the wrap a hard planner refusal (no room for an entry, ...)
     // costs the level, not the op: rings cut it, said by name - the
     // planar ladder keeps the refusal it always had.
@@ -209,6 +219,34 @@ pub(super) fn plan_level(
     Ok(LevelPlan { passes, joins, arcs: Some(runs), helix_r, hsm: true })
 }
 
+/// Said (with the radii) per developed level refused for a narrowed helix.
+pub const NARROW_HELIX: &str = "the developed level is too narrow for the helix entry";
+
+/// Issue #55: on the wrap, a level whose area the plan would narrow the
+/// helix for (`machining2d::choose_entry`: the room about the plan's
+/// entry spot holds less than the asked radius with room to spiral out)
+/// is refused before planning, by name. Such an area is a thin band (a
+/// short station window, a groove): there the spiral out of the narrowed
+/// bore overloaded its own law (15.7 % D against 14.6 % + 5 % on a
+/// 10 long window of the r7 bar) - the plan is never posted overloaded.
+/// `None`: the helix fits (or the entry is no helix, or the planner's own
+/// entry law decides - its refusals stay its own).
+fn narrowed_helix(center: &Region, pp: &PocketParams) -> Option<String> {
+    if pp.entry != Entry3D::Helix {
+        return None;
+    }
+    // An entry-law error is not swallowed: the plan asks the same law
+    // next and names its refusal (`plan_level`'s wrap arm).
+    let mut scratch = Vec::new();
+    let room = choose_entry(center, pp, &mut scratch).ok().flatten()?;
+    (room.helix_r < pp.helix_radius - 1e-9).then(|| {
+        format!(
+            "{NARROW_HELIX} (radius {:.3} asked, {:.3} fits with room to spiral out)",
+            pp.helix_radius, room.helix_r
+        )
+    })
+}
+
 /// The microlift return onto the next pass's start at plane `z`.
 pub(super) fn microlift(b: &mut PathBuilder, ret: &Return, z: f64, hop_z: f64, feed: f64) {
     microlift_link(b, ret, z, hop_z, feed);
@@ -216,8 +254,10 @@ pub(super) fn microlift(b: &mut PathBuilder, ret: &Return, z: f64, hop_z: f64, f
 
 #[cfg(test)]
 mod tests {
-    use super::Seam;
+    use super::{NARROW_HELIX, Seam, narrowed_helix};
+    use crate::entry::Entry3D;
     use crate::geo2d::{Loop, Point2, Region};
+    use crate::machining2d::{PocketParams, PocketStrategy};
 
     fn rect(x0: f64, x1: f64) -> Region {
         let pts = vec![Point2::new(x0, 0.0), Point2::new(x1, 0.0), Point2::new(x1, 10.0), Point2::new(x0, 10.0)];
@@ -237,5 +277,45 @@ mod tests {
         assert!(sm.crossed_by(&rect(80.0, 95.0)), "at the high end");
         assert!(!sm.crossed_by(&rect(30.0, 60.0)), "inside the cover");
         assert!(!sm.crossed_by(&rect(2.0, 98.0)), "a whole lap band");
+    }
+
+    fn band(width: f64) -> Region {
+        let pts = vec![Point2::new(0.0, 0.0), Point2::new(40.0, 0.0), Point2::new(40.0, width), Point2::new(0.0, width)];
+        let Ok(l) = Loop::new(pts) else { panic!("band loop") };
+        let Ok(r) = Region::new(vec![l]) else { panic!("band region") };
+        r
+    }
+
+    fn pp(entry: Entry3D) -> PocketParams {
+        PocketParams {
+            tool_diameter: 6.0,
+            stepover: 4.0,
+            stock_to_leave: 0.5,
+            clearance_z: 25.0,
+            top_z: 7.0,
+            bottom_z: 7.0,
+            stepdown: 2.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+            strategy: PocketStrategy::Adaptive,
+            retract_z: None,
+            entry,
+            helix_radius: 1.0,
+            optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
+            blend_turns: false,
+            links: crate::links::Links::ROUGH3D,
+        }
+    }
+
+    /// Issue #55's door, before any planning: a 3 mm centre band (the r7
+    /// bar's 10 long window) would narrow the r1 helix and is named; a
+    /// 12 mm band holds it whole, and a plunge entry is never asked.
+    #[test]
+    fn a_band_too_narrow_for_the_helix_is_named_before_planning() {
+        let why = narrowed_helix(&band(3.0), &pp(Entry3D::Helix));
+        assert!(why.as_deref().is_some_and(|w| w.starts_with(NARROW_HELIX) && w.contains("radius 1.000 asked")), "{why:?}");
+        assert_eq!(narrowed_helix(&band(12.0), &pp(Entry3D::Helix)), None);
+        assert_eq!(narrowed_helix(&band(3.0), &pp(Entry3D::Plunge)), None);
     }
 }

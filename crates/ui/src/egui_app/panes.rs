@@ -162,6 +162,11 @@ pub(super) enum Cmd {
     /// The View door: one cell whose list toggles the dock's closable
     /// panels and resets the layout (layout.rs). View state, no command.
     View,
+    /// The Theme door (#441): the document's look - the built-in and
+    /// discovered themes plus the colour-vision remap - right of the
+    /// View door. Opening it is view state; a pick queues the same
+    /// `SelectTheme` / `SelectColorVision` commands, so undo holds.
+    Theme,
 }
 
 /// The four anchor groups: file work opens the row, setup follows, and
@@ -181,7 +186,7 @@ const MAX_PINS: usize = 4;
 const MODIFY: (&str, &[Cmd]) = ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]);
 const INSPECT: (&str, &[Cmd]) =
     ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate, Cmd::Deviate]);
-const VIEW: (&str, &[Cmd]) = ("View", &[Cmd::View]);
+const VIEW: (&str, &[Cmd]) = ("View", &[Cmd::View, Cmd::Theme]);
 
 /// One ribbon group before layout: its caption and every cell it would
 /// show in a row that never ran out of width. `section` marks the
@@ -296,6 +301,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Simulate => "Simulate",
         Cmd::Deviate => "Deviate",
         Cmd::View => "Panels",
+        Cmd::Theme => "Theme",
         Cmd::More(s) => s.label(),
     }
 }
@@ -320,7 +326,7 @@ fn text_of(c: Cmd, state: &State) -> String {
         Cmd::Machine => {
             format!("{}…", mode_caption(camcraft_app::machine::kind_of(&state.world)))
         }
-        Cmd::View => format!("{}…", label_of(c)),
+        Cmd::View | Cmd::Theme => format!("{}…", label_of(c)),
         // The ribbon caption is registry data (M5.0.2) - imgui's strings,
         // same order as the Create cells below. The list here is built
         // from the table, so an out-of-range index means a table bug:
@@ -413,7 +419,8 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Deviate => {
             "Judge the program's stock against the model (deviation map)".into()
         }
-        Cmd::View => "Show or hide the browser and properties panes, or reset the layout".into(),
+        Cmd::View => "Show or hide the browser, properties and machines panes, or reset the layout".into(),
+        Cmd::Theme => "Pick the document's theme and colour-vision mode (undoable)".into(),
     }
 }
 
@@ -559,6 +566,7 @@ pub(super) fn follow_gate(c: Cmd, state: &mut State) {
         Some(GateRoute::Machine) => {
             state.ribbon_more = None;
             state.ribbon_view_open = false;
+            state.ribbon_theme_open = false;
             state.ribbon_mode_open = true;
             state.status = format!("{why} - pick a workspace");
         }
@@ -587,6 +595,7 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
         Cmd::More(s) => state.ribbon_more == Some(s),
         Cmd::Machine => state.ribbon_mode_open,
         Cmd::View => state.ribbon_view_open,
+        Cmd::Theme => state.ribbon_theme_open,
         _ => false,
     }
 }
@@ -654,7 +663,9 @@ pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
         Cmd::Deviate => Some(Icon::Stock),
         // The machine door's no-new-asset law: the caption names the
         // door, the ellipsis says a list opens.
-        Cmd::View => None,
+        // The Theme door follows the View door: a list door captioned by
+        // its own word (no fitting glyph in the bundled set).
+        Cmd::View | Cmd::Theme => None,
     }
 }
 
@@ -774,12 +785,14 @@ fn run_cmd(c: Cmd, state: &mut State) {
             state.ribbon_more = (state.ribbon_more != Some(s)).then_some(s);
             state.ribbon_mode_open = false;
             state.ribbon_view_open = false;
+            state.ribbon_theme_open = false;
         }
         Cmd::Machine => {
             state.ribbon_mode_open = !state.ribbon_mode_open;
             if state.ribbon_mode_open {
                 state.ribbon_more = None;
                 state.ribbon_view_open = false;
+                state.ribbon_theme_open = false;
             }
         }
         // Same door law; the dock itself is the shell's (layout.rs).
@@ -788,6 +801,15 @@ fn run_cmd(c: Cmd, state: &mut State) {
             if state.ribbon_view_open {
                 state.ribbon_more = None;
                 state.ribbon_mode_open = false;
+                state.ribbon_theme_open = false;
+            }
+        }
+        Cmd::Theme => {
+            state.ribbon_theme_open = !state.ribbon_theme_open;
+            if state.ribbon_theme_open {
+                state.ribbon_more = None;
+                state.ribbon_mode_open = false;
+                state.ribbon_view_open = false;
             }
         }
     }
@@ -1315,6 +1337,20 @@ pub fn ribbon(
             }
         }
     }
+    // The Theme door's dropdown (#441): theme_drop.rs, same popup law.
+    if state.ribbon_theme_open {
+        match cells.iter().find(|c| c.cmd == Cmd::Theme) {
+            None => {
+                debug_assert!(false, "ribbon: theme door missing from the bar");
+                eprintln!("ribbon: closing a theme list whose button is gone");
+                state.ribbon_theme_open = false;
+            }
+            Some(cell) => {
+                let rows = super::theme_drop::rows_of(state, cell.rect, rect, pal);
+                super::theme_drop::show(ui, state, pal, base.with("theme-drop"), cell.rect, &rows);
+            }
+        }
+    }
     // The source/build label is the rightmost toolbar item. At small window
     // widths it contracts to version plus source, then version alone; the
     // full text remains available on hover.
@@ -1328,7 +1364,7 @@ pub fn ribbon(
     } else if badge_rect.width() >= 145.0 {
         Some(build_info::toolbar_lines(true))
     } else if badge_rect.width() >= 50.0 {
-        Some((format!("v{}", build_info::VERSION), String::new()))
+        Some((build_info::toolbar_version(), String::new()))
     } else {
         None
     };
