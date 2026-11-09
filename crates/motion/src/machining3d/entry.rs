@@ -121,7 +121,7 @@ pub fn pocket3d_air_split(
     };
     let (sm_air, sm_cut) = (seam_of(air_footprint), seam_of(footprint));
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    let k = zs.iter().take_while(|z| **z > air_above).count();
+    let k = air_levels(&zs, air_above);
     if k == 0 || air_footprint.is_empty() {
         return ladder(facets, footprint, p, &zs, None, None, home(p), false, sm_cut.as_ref());
     }
@@ -154,6 +154,16 @@ pub fn pocket3d_air_split(
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
     Ok(path)
+}
+
+/// How many of the ladder's planes `zs` (top down) stand above
+/// `air_above` (issue #55): a plane within [`EPS`] of it touches the
+/// part's leave envelope, so it is a material plane, not an air one.
+/// The bare `>` sorted the plane AT the envelope by the last bit of the
+/// wrap's own radius arithmetic (6.500000000000001 against 6.5 on the
+/// r7 bar), so the same work could sweep one lap or two by float noise.
+pub(super) fn air_levels(zs: &[f64], air_above: f64) -> usize {
+    zs.iter().take_while(|z| **z > air_above + EPS).count()
 }
 
 /// The rest-material sibling (M2.1b): the same level ladder, then a

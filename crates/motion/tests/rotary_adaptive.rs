@@ -19,186 +19,23 @@
 //! Gate map (M4.4): covers camcraft_motion::multiaxis (rotary_offset,
 //! wrap_exit), camcraft_motion::machining3d (hsm, entry), and
 //! camcraft_motion::quality, on this suite's own revolve fixtures.
-//! Lane shape (M4.4): the rings digest runs in seconds in debug; both
-//! Adaptive plans (window ~3 min, whole bar ~10 min debug) are the heavy
-//! lane's (release --ignored, ~2 min).
+//! Lane shape (M4.4): the rings digest and the narrow window's refusal
+//! (issue #55, rings only) run in seconds in debug; the Adaptive plans
+//! (window ~3 min, r6.2 bar ~3 min, whole bar ~10 min debug) are the
+//! heavy lane's (release --ignored, ~1 min). The fixtures and the level
+//! reader live in `rotary_adaptive_fixture/`.
 
-use camcraft_motion::cl::{MoveKind, PathBuilder, Toolpath};
-use camcraft_motion::geo2d::{Loop, Point2, Region};
-use camcraft_motion::geometry::{Point3, Triangle};
-use camcraft_motion::load::{load_at_rim, DEFAULT_OPTIMAL_LOAD};
+mod rotary_adaptive_fixture;
+
+use camcraft_motion::cl::{PathBuilder, Toolpath};
+use camcraft_motion::geometry::Point3;
+use camcraft_motion::load::DEFAULT_OPTIMAL_LOAD;
 use camcraft_motion::machining2d::PocketStrategy;
-use camcraft_motion::machining3d::{Entry3D, Pocket3DParams};
-use camcraft_motion::multiaxis::{rotary_offset_developed, rotary_offset_in, AxisControl};
-use camcraft_motion::quality::{measure, stock_for, QualitySpec};
-
-const TAU: f64 = std::f64::consts::TAU;
-const D: f64 = 6.0;
-const R: f64 = D * 0.5;
-
-/// A closed solid of revolution about Z at `n` turns: the meridian
-/// (rho, z) swept.
-fn swept(n: usize, meridian: &[(f64, f64)]) -> Vec<Triangle> {
-    let pt = |rho: f64, z: f64, j: usize| {
-        let th = TAU * (j % n) as f64 / n as f64;
-        Point3::new(rho * th.cos(), rho * th.sin(), z)
-    };
-    let mut f = Vec::new();
-    for w in meridian.windows(2) {
-        let ((ra, za), (rb, zb)) = (w[0], w[1]);
-        for j in 0..n {
-            let (a1, a2, b1, b2) = (pt(ra, za, j), pt(ra, za, j + 1), pt(rb, zb, j), pt(rb, zb, j + 1));
-            if ra <= 1e-12 {
-                f.push(Triangle::new(a1, b2, b1));
-            } else if rb <= 1e-12 {
-                f.push(Triangle::new(a1, a2, b2));
-            } else {
-                f.push(Triangle::new(a1, a2, b2));
-                f.push(Triangle::new(a1, b2, b1));
-            }
-        }
-    }
-    f
-}
-
-/// The app suites' turned bar: wall r6, shoulder, neck r5.
-const MERIDIAN: [(f64, f64); 6] = [(0.0, -16.0), (6.0, -16.0), (6.0, -2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)];
-
-fn bar() -> Vec<Triangle> {
-    swept(16, &MERIDIAN)
-}
-
-/// A coaxial round bar of radius `rho` (the app suites clamp r6.2).
-fn stock(rho: f64, z0: f64, z1: f64) -> Vec<Triangle> {
-    swept(32, &[(0.0, z0), (rho, z0), (rho, z1), (0.0, z1)])
-}
-
-fn params(strategy: PocketStrategy) -> Pocket3DParams {
-    Pocket3DParams {
-        links: camcraft_motion::links::Links::ROUGH3D,
-        tool_diameter: D,
-        stepover: 4.0,
-        stock_to_leave: 0.5,
-        clearance_z: 25.0,
-        top_z: 14.0,
-        bottom_z: -14.0,
-        stepdown: 0.5,
-        feed: 500.0,
-        plunge_feed: 100.0,
-        climb: true,
-        strategy,
-        retract_z: None,
-        entry: Entry3D::Helix,
-        helix_radius: 1.0,
-        optimal_load: DEFAULT_OPTIMAL_LOAD,
-    }
-}
-
-fn control() -> AxisControl {
-    AxisControl { lead_deg: 0.0, lag_deg: 0.0, max_tilt_deg: None }
-}
-
-/// The developed path's own box, padded by the tool: the measuring
-/// stock's footprint.
-fn box_of(path: &Toolpath) -> Region {
-    let (mut lo, mut hi) = (Point2::new(f64::INFINITY, f64::INFINITY), Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
-    for m in &path.moves {
-        lo = Point2::new(lo.x.min(m.to.x), lo.y.min(m.to.y));
-        hi = Point2::new(hi.x.max(m.to.x), hi.y.max(m.to.y));
-    }
-    let (a, b) = (Point2::new(lo.x - R, lo.y - R), Point2::new(hi.x + R, hi.y + R));
-    let Ok(l) = Loop::new(vec![a, Point2::new(b.x, a.y), b, Point2::new(a.x, b.y)]) else { panic!("box") };
-    let Ok(rg) = Region::new(vec![l]) else { panic!("box region") };
-    rg
-}
-
-/// Per developed level (its radius): planar feed moves, arcs, the worst
-/// load (ae/D) read on the dexel stock, in-cut breaks past 5 degrees,
-/// and whether a note names it ring-cut.
-struct LevelRead {
-    rho: f64,
-    moves: usize,
-    arcs: usize,
-    load: f64,
-    breaks: usize,
-    named: bool,
-}
-
-/// The note every ring-cut developed level carries (seam, planner
-/// fallback, hard planner refusal alike).
-fn ring_tag(rho: f64) -> String {
-    format!("Offset rings cut the developed level at radius {rho:.3} instead")
-}
-
-impl LevelRead {
-    /// Cut by rings, read from the program's SHAPE: planar moves and not
-    /// one proved arc (the HSM plan's arc output; rings post lines). A
-    /// skin level (zero depth) counts only when named.
-    fn ringed(&self, skin: f64) -> bool {
-        self.moves > 0 && self.arcs == 0 && (self.rho < skin - 1e-6 || self.named)
-    }
-}
-
-/// Every level rings cut is named by its radius, and every named level
-/// is cut by rings (no proved arc).
-fn assert_refusals_named(reads: &[LevelRead], skin: f64) {
-    for r in reads {
-        if r.ringed(skin) {
-            assert!(r.named, "radius {:.3} is cut by rings without a note naming it", r.rho);
-        }
-        if r.named {
-            assert_eq!(r.arcs, 0, "radius {:.3} is named ring-cut yet posts HSM arcs", r.rho);
-        }
-    }
-}
-
-fn read_levels(path: &Toolpath, top: f64, floor: f64) -> Vec<LevelRead> {
-    let mut spec = QualitySpec::new(D);
-    spec.cell = D / 60.0;
-    spec.break_deg = 5.0;
-    let Ok(mut dex) = stock_for(&box_of(path), top, floor, 1.0, &spec) else { panic!("stock") };
-    let q = measure(path, &mut dex, &spec);
-    // The reader's own bore law (`quality::measure`'s `bores`, as the
-    // planar suite pocket3d_hsm reads it): a planar cut inside a helical
-    // descent's circle is the bore's cleanup - entry engagement, not the
-    // clearing's load.
-    let bores: Vec<(Point2, f64)> = path
-        .moves
-        .iter()
-        .filter(|m| (m.to.z - m.from.z).abs() > 1e-9)
-        .filter_map(|m| m.arc.map(|a| (a.center, (m.from.x - a.center.x).hypot(m.from.y - a.center.y))))
-        .collect();
-    let in_bore = |m: &camcraft_motion::cl::Move| {
-        bores.iter().any(|&(c, rr)| {
-            (m.from.x - c.x).hypot(m.from.y - c.y) <= rr + 1e-6 && (m.to.x - c.x).hypot(m.to.y - c.y) <= rr + 1e-6
-        })
-    };
-    let at = |m: &camcraft_motion::cl::Move| m.kind == MoveKind::Feed && m.from.z == m.to.z;
-    let mut zs: Vec<f64> = path.moves.iter().filter(|m| at(m)).map(|m| m.to.z).collect();
-    zs.sort_by(|a, b| b.total_cmp(a));
-    zs.dedup();
-    // The CUT levels only: a plane some cutting descent (plunge, helix,
-    // ramp, microlift return) ends on (to the micron: the ladder's level
-    // and its descent's end differ in the last bit). A microlift's lifted
-    // run is planar too, but nothing descends onto its height.
-    zs.retain(|&z| path.moves.iter().any(|m| m.kind != MoveKind::Rapid && (m.to.z - z).abs() < 1e-6 && m.from.z > z + 1e-6));
-    zs.iter()
-        .map(|&z| {
-            let idx: Vec<usize> =
-                path.moves.iter().enumerate().filter(|(_, m)| at(m) && m.to.z == z).map(|(i, _)| i).collect();
-            let deg = idx.iter().filter(|&&i| !in_bore(&path.moves[i])).filter_map(|&i| q.move_max.get(i)).copied().fold(0.0, f64::max);
-            let tag = ring_tag(z);
-            LevelRead {
-                rho: z,
-                moves: idx.len(),
-                arcs: idx.iter().filter(|&&i| path.moves[i].arc.is_some()).count(),
-                load: load_at_rim(deg, D, q.rim),
-                breaks: q.break_list.iter().filter(|(p, t)| p.z == z && *t > 5.0).count(),
-                named: path.notes.iter().any(|n| n.ends_with(&tag)),
-            }
-        })
-        .collect()
-}
+use camcraft_motion::machining3d::{NARROW_HELIX, Pocket3DParams};
+use camcraft_motion::multiaxis::{rotary_offset_developed, rotary_offset_in};
+use rotary_adaptive_fixture::{
+    assert_refusals_named, bar, control, params, planner_overloads, read_levels, ring_tag, stock, LevelRead, R, TAU,
+};
 
 /// The whole turned bar in an r7 bar stock: three developed levels of
 /// real material (radius 6.5, 6.0, 5.5) go to the HSM planner. About
@@ -348,10 +185,80 @@ fn the_developed_window_reaches_the_planner_and_names_each_refusal() {
     }
 }
 
-/// The planner's own overload notes: its worst load past the law, or a
-/// spiral step out of the entry bore that could not hold it.
-fn planner_overloads(notes: &[String]) -> Vec<&String> {
-    notes.iter().filter(|n| n.contains("no spiral step holds the load") || n.contains("worst planned load")).collect()
+/// Issue #55: a 10 long window of the neck in the r7 bar at a 2 mm
+/// stepdown. Its centre area is a 3 mm band, where the plan narrowed
+/// the r1 helix to 0.900 and then named its own overload (15.7 % D
+/// against the 14.6 % law + 5 %). Now the wrap asks the entry law
+/// first: the band is refused before planning, named by radius with
+/// both helix radii, and Offset rings cut it - the planner never
+/// narrows, and nothing names an overload. (The 5.0 level, the same
+/// band, is refused the same way - round 2 ground 197 revolutions into
+/// its planning budget first.) Rings only: under a second in debug.
+#[test]
+fn a_window_too_narrow_for_the_helix_is_refused_by_name_before_planning() {
+    let (f, st) = (bar(), stock(7.0, -16.0, 16.0));
+    let p = Pocket3DParams { top_z: 16.0, bottom_z: 6.0, stepdown: 2.0, ..params(PocketStrategy::Adaptive) };
+    let dev = match rotary_offset_developed(&f, Some(&st), &p) {
+        Ok(t) => t,
+        Err(e) => panic!("the narrow window: {e}"),
+    };
+    assert!(dev.is_chained() && dev.all_finite());
+    println!("narrow window notes: {:?}", dev.notes);
+    assert!(!dev.notes.iter().any(|n| n.contains("does not fit the area")), "the planner narrowed a helix: {:?}", dev.notes);
+    let tag = ring_tag(7.0);
+    assert!(
+        dev.notes.iter().any(|n| n.contains(NARROW_HELIX) && n.contains("radius 1.000 asked, 0.900 fits") && n.ends_with(&tag)),
+        "the skin band is refused for the narrowed helix, by name: {:?}",
+        dev.notes
+    );
+    let over = planner_overloads(&dev.notes);
+    assert!(over.is_empty(), "the planner's own load reading broke the law: {over:?}");
+    let reads = read_levels(&dev, 7.0, 0.0);
+    for r in &reads {
+        println!("radius {:.3}: {} planar moves ({} arcs), rings {}", r.rho, r.moves, r.arcs, r.ringed(7.0));
+    }
+    assert!(reads.iter().any(|r| (r.rho - 7.0).abs() < 1e-6 && r.moves > 0 && r.arcs == 0), "rings cut the band");
+    assert_refusals_named(&reads, 7.0);
+}
+
+/// Issue #55, decided final: on the app suites' r6.2 bar the neck's
+/// material levels (5.7, 5.2) stay refused for out-of-cut travel. Each
+/// is a band ~78 x 7.8 (5.2: ~78 x 5.8) round the developed neck; the
+/// spiral re-walks the whole cleared ring every revolution, so only its
+/// microlift returns keep it in cut, and those read 48.0 deg against the
+/// plan's 47.5 bound (a named overload if posted). Unlifted the spiral
+/// rides 8208 mm out of cut for 2529 in cut (5.2: 8828 for 2254), past
+/// the 1.5x budget. The band's own planner is the thin-band work (#44,
+/// #47), not the wrap's: here the refusal is pinned by name, the skin
+/// level still HSM-planned. ~3 min debug: heavy lane.
+#[test]
+#[ignore = "heavy lane: release --ignored (three HSM plans over the r6.2 bar, ~3 min debug)"]
+fn the_r62_neck_levels_are_refused_for_travel_by_name() {
+    let (f, st) = (bar(), stock(6.2, -16.0, 16.0));
+    let p = params(PocketStrategy::Adaptive);
+    let dev = match rotary_offset_developed(&f, Some(&st), &p) {
+        Ok(t) => t,
+        Err(e) => panic!("the r6.2 developed ladder: {e}"),
+    };
+    assert!(dev.is_chained() && dev.all_finite());
+    println!("r6.2 notes: {:?}", dev.notes);
+    let reads = read_levels(&dev, 6.2, 0.0);
+    for r in &reads {
+        println!("radius {:.3}: {} planar moves ({} arcs), rings {}", r.rho, r.moves, r.arcs, r.ringed(6.2));
+    }
+    for rho in [5.7, 5.2] {
+        let tag = ring_tag(rho);
+        assert!(
+            dev.notes.iter().any(|n| n.contains("out of cut") && n.contains("(over 1.5x)") && n.ends_with(&tag)),
+            "radius {rho}: refused for travel, by name: {:?}",
+            dev.notes
+        );
+        assert!(reads.iter().any(|r| (r.rho - rho).abs() < 1e-6 && r.ringed(6.2)), "radius {rho} is cut by rings");
+    }
+    assert!(reads.iter().any(|r| (r.rho - 6.2).abs() < 1e-6 && r.arcs > 0), "the skin level stays HSM-planned");
+    assert_refusals_named(&reads, 6.2);
+    let over = planner_overloads(&dev.notes);
+    assert!(over.is_empty(), "the planner's own load reading broke the law: {over:?}");
 }
 
 /// FNV-1a over the moves at a 1e-6 lattice: the program, portable (the
