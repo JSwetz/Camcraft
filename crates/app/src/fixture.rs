@@ -101,7 +101,8 @@ pub fn table_box(world: &World) -> Option<FixtureBox> {
         m.axes
             .iter()
             .find(|a| a.name.eq_ignore_ascii_case(n))
-            .and_then(|a| a.travel)
+            // #373: an inverted axis's stroke, mapped into the program frame.
+            .and_then(machine::AxisLimits::program_travel)
     };
     let (x, y, z) = (span("X")?, span("Y")?, span("Z")?);
     if !(x.0.is_finite() && x.1.is_finite() && y.0.is_finite() && y.1.is_finite() && z.0.is_finite())

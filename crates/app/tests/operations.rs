@@ -302,7 +302,7 @@ fn create_operation_validates_every_reference() {
     );
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 0.0)).expect("wcs"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 0.0)).expect("wcs"),
     );
 
     // unknown tool, and a name that is a model rather than a tool

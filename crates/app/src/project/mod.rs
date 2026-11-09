@@ -134,6 +134,8 @@ use apply::*;
 mod validate;
 use validate::*;
 mod wcs_migrate;
+// #342: the v53 -> v54 one-WCS-per-setup rung.
+mod wcs_one;
 // #368: a tool's modelled body on file (v54).
 mod tool_body_wire;
 pub use tool_body_wire::ToolBodyDto;

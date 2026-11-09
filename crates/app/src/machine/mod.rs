@@ -305,16 +305,19 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
             }
             // Travel: endpoints and - for arcs - the quarter points
             // the sweep can bulge past. A straight move's extremes
-            // ARE its endpoints.
+            // ARE its endpoints. The stroke is the machine's own; an
+            // inverted axis (#373) reads program `v` as `-v`, so the
+            // band is judged in the machine's coordinates.
             for p in move_extremes(mv) {
                 for (k, w) in [p.x, p.y, p.z].iter().enumerate() {
-                    let v = w - origin[k];
-                    if let Some((lo, hi)) = machine.axis(k).and_then(|a| a.travel)
-                        && (v < lo || v > hi)
-                    {
+                    let Some(ax) = machine.axis(k) else { continue };
+                    let Some((lo, hi)) = ax.travel else { continue };
+                    let v = (w - origin[k]) * ax.direction.sign();
+                    if v < lo || v > hi {
+                        let inv = if ax.direction.is_standard() { "" } else { " (inverted axis)" };
                         say(&mut out, format!(
-                            "{name}: move {i} reaches {v:.3} in {}, the stroke is {lo:.3}..{hi:.3}",
-                            machine.axis(k).map_or("?", |a| a.name.as_str())
+                            "{name}: move {i} reaches {v:.3} in {}{inv}, the stroke is {lo:.3}..{hi:.3}",
+                            ax.name
                         ));
                     }
                 }

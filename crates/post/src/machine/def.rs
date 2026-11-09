@@ -8,6 +8,7 @@
 //! Crate-boundary home (M4.1 R0): pure data - no flecs, no world. The
 //! document glue and the program checker stay in the parent module.
 
+use super::direction::AxisDirection;
 use serde::{Deserialize, Serialize};
 
 /// One axis as the machine file describes it - prismatic or, since
@@ -50,6 +51,10 @@ pub struct AxisLimits {
     /// one for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis: Option<[f64; 3]>,
+    /// Which way a linear axis moves for a positive command (#373), the
+    /// file's `"direction": 1 | -1`; the program frame never changes.
+    #[serde(default, skip_serializing_if = "AxisDirection::is_standard")]
+    pub direction: AxisDirection,
 }
 
 fn is_false(b: &bool) -> bool {

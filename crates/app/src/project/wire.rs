@@ -68,7 +68,7 @@ pub fn collect(world: &World) -> ProjectFile {
                     .entity_view(world)
                     .try_get::<&SetupDef>(|d| SetupDto {
                         stock: d.stock.clone(),
-                        wcs: d.wcs.clone(),
+                        wcs: WcsDto::One(d.wcs.clone()),
                         datum_from: d.datum_from.clone(),
                         work_offset: d
                             .work_offset
@@ -231,13 +231,18 @@ pub fn save(world: &World, path: &Path) -> Result<(), ProjectError> {
 /// Rebuild world content from a project file. Not a command: opening a
 /// project replaces the document and clears the history (M1.2 wires that).
 pub fn load(world: &World, path: &Path) -> Result<(), ProjectError> {
+    load_noted(world, path).map(|_| ())
+}
+
+/// [`load`], returning the load notes ([`open_noted`]).
+pub fn load_noted(world: &World, path: &Path) -> Result<Vec<String>, ProjectError> {
     let text = std::fs::read_to_string(path).inspect_err(|e| {
         tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
     })?;
-    match open(world, &text) {
-        Ok(()) => {
+    match open_noted(world, &text) {
+        Ok(notes) => {
             tracing::info!(file = %crate::logging::file_name(path), bytes = text.len(), "project opened");
-            Ok(())
+            Ok(notes)
         }
         Err(e) => {
             tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
@@ -247,6 +252,17 @@ pub fn load(world: &World, path: &Path) -> Result<(), ProjectError> {
 }
 
 pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
+    open_noted(world, text).map(|_| ())
+}
+
+/// [`open`], returning the load notes: what a migration changed that the
+/// user should hear about (#342: dropped work offsets no setup posted).
+/// Each note is logged as well.
+pub fn open_noted(world: &World, text: &str) -> Result<Vec<String>, ProjectError> {
     let file: ProjectFile = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
-    check_and_apply(world, file)
+    let notes = check_and_apply(world, file)?;
+    for n in &notes {
+        tracing::warn!("project load note: {n}");
+    }
+    Ok(notes)
 }

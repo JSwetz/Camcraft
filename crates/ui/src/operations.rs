@@ -325,7 +325,7 @@ mod height_row_tests {
         );
         assert_eq!(
             height_echo(&world, None, None, &Height::of(HeightReference::WorkOffset, 0.0)),
-            "(unresolved: that work offset has no origin yet - place it in Setup)"
+            "(unresolved: the setup's WCS has no origin yet - place it in Setup)"
         );
         // From: Selection with an empty pick list names the fix (M11.3 A).
         let empty = SrcRef::Selection(Vec::new());
