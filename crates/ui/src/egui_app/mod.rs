@@ -141,6 +141,8 @@ mod setup_stock_pick;
 #[cfg(test)]
 mod setup_stock_tests;
 #[cfg(test)]
+mod incoming_view_tests;
+#[cfg(test)]
 mod setup_plane_tests;
 #[cfg(test)]
 mod ball_corner_tests;

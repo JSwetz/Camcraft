@@ -118,6 +118,9 @@ fn fs_edge(in: VSOut) -> @location(0) vec4<f32> {
 // stock parts upload cls = 0 everywhere and look exactly as before.
 // Verdict columns keep their color even when selected (the amber lift is
 // only for steel), and judged columns sit denser so the color reads.
+// Class 4 is no verdict but the incoming stock a carried setup starts
+// from (#406): a fixed teal, denser than steel, readable on the light and
+// the dark viewport alike (our own display choice).
 @fragment
 fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
     let cr = cross(dpdx(in.world), dpdy(in.world));
@@ -132,6 +135,7 @@ fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
         case 1: { tint = u.rest.xyz; alpha = 0.75; }  // rest
         case 2: { tint = u.gouge.xyz; alpha = 0.85; }  // gouge
         case 3: { tint = u.unjudged.xyz; alpha = 0.25; }  // no verdict
+        case 4: { tint = vec3<f32>(0.12, 0.66, 0.74); alpha = 0.45; }  // incoming stock (#406)
         default: {}
     }
     let judged = step(0.5, in.cls);
@@ -183,7 +187,8 @@ pub struct GpuPart {
     pub stock: bool,
     pub fill: bool,
     /// Per-vertex deviation class (stock_sim's `color_classes` law: 0
-    /// clean, 1 rest, 2 gouge, 3 unjudged), read only by `fs_stock`.
+    /// clean, 1 rest, 2 gouge, 3 unjudged; 4 the incoming-stock preview,
+    /// #406), read only by `fs_stock`.
     /// Empty means "no verdict rendered" - the part uploads class 0
     /// everywhere and paints exactly as an ordinary stock part.
     pub classes: Vec<f32>,
