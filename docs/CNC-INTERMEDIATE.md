@@ -133,6 +133,8 @@ behavior only):
 - writes: `writeln(s)`, `write(s)` (appends to the open line),
   `writeBlock(...parts)`, `writeWord(w)`, `writeAddress(letter, value, dp)`,
   `writeComment(s)`, `writeBlankLine()`, `writeOutput(...)`
+- `linesWritten()` — lines written so far (#504): a script marks where
+  a block ended and later asks whether anything followed it
 - `getProperty(k)` / `setProperty(k, v)` — the `properties` object
 - `message(s)` — counted warning, not text
 - format helpers `formatUnit` / `formatMotion` / `formatFeed`
