@@ -220,7 +220,7 @@ fn the_table_box_maps_an_inverted_stroke() {
     m.axes[0].travel = Some((-10.0, 300.0));
     let cmd = LoadMachine::new(&world, "flip.mch".into(), Some(m)).expect("sane");
     History::default().execute(&world, cmd);
-    let b = fixture::table_box(&world).expect("all three strokes stated");
+    let b = fixture::table_box(&world, None).expect("all three strokes stated");
     assert_eq!((b.min.x, b.max.x), (-300.0, 10.0), "X -10..300 on the machine is -300..10 in the program");
     assert_eq!((b.min.y, b.max.y), (-100.0, 100.0), "standard Y unchanged");
 }

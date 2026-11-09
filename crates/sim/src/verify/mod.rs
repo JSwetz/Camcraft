@@ -152,6 +152,7 @@ pub use crate::tools::ToolGeom;
 
 
 mod air;
+mod arc_bulge;
 mod contact;
 mod crossing;
 mod cut_index;
@@ -159,6 +160,7 @@ mod engine;
 mod finish;
 mod hidden;
 mod laws;
+mod mesh_posed;
 mod mesh_steel;
 mod midpose;
 mod posed_steel;

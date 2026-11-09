@@ -167,6 +167,13 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
     // #374: the inverted linear axes, which the engine mirrors the stream
     // in (`post::invert`). Absent for a standard machine, so every
     // standard mirror is byte-identical to the one before #374.
+    // #495: the safe Z retract, machine coordinates (mm), only when the
+    // file states it - an unstated machine's mirror is unchanged.
+    if let Some(z) = m.safe_retract_z
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("safeRetractZ".to_owned(), json!(z));
+    }
     let inverted = m.inverted_axes();
     if !inverted.is_empty()
         && let Some(o) = out.as_object_mut()
@@ -315,11 +322,36 @@ pub fn script_props(m: &Value) -> Value {
             .or(get(m, &["rigidTapping"]))
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        // #495: the machine-coordinate Z a post retracts to (mm), or
+        // null when the machine does not state one; `model` is the
+        // machine's model name through either door (the mirror's
+        // `name`, or a raw file's `general.model`), for the posts that
+        // judge an unstated retract by whose machine it is.
+        "safeRetractZ": safe_retract_z(m).map_or(Value::Null, |z| json!(z)),
+        "model": get(m, &["name"])
+            .and_then(Value::as_str)
+            .filter(|n| !n.is_empty())
+            .or_else(|| get(m, &["general", "model"]).and_then(Value::as_str))
+            .unwrap_or(""),
         // #375: the inverted linear axes, for the header comment a post
         // that translates them writes ([] for every standard machine). A
         // statement the reader refuses was refused before the script ran.
         "invertedAxes": super::invert::stated(m).map(|(_, l)| l).unwrap_or_default(),
     })
+}
+
+/// The stated safe Z retract (#495), mm: the mirror's `safeRetractZ`,
+/// or - through the raw door - the file form's Z part, read by the
+/// same parser the app mounts with (so units scale the same way). A
+/// raw file the parser refuses states no retract.
+fn safe_retract_z(m: &Value) -> Option<f64> {
+    if let Some(z) = get(m, &["safeRetractZ"]).and_then(Value::as_f64) {
+        return z.is_finite().then_some(z);
+    }
+    if get(m, &["kinematics", "default", "parts"]).is_some() {
+        return crate::machine::parse_mch(&m.to_string()).ok()?.safe_retract_z;
+    }
+    None
 }
 
 /// Whether the machine is programmed in inches (#131): the mirror's

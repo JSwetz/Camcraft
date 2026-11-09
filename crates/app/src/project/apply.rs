@@ -678,6 +678,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
             EntityKind::Wcs => {
                 entity.entity_view(world).add(Wcs);
             }
+            EntityKind::Entry => super::program_entry_dto::apply(world, &entity, dto.entry)?,
             EntityKind::Tool => {
                 // validate_kind already refused a missing or insane one.
                 let tdto = dto

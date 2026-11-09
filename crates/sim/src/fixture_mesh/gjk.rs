@@ -42,7 +42,7 @@ pub(super) fn cross(a: V, b: V) -> V {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
-fn scale(a: V, s: f64) -> V {
+pub(super) fn scale(a: V, s: f64) -> V {
     [a[0] * s, a[1] * s, a[2] * s]
 }
 
@@ -56,45 +56,66 @@ pub(super) trait Support {
     fn support(&self, d: V) -> V;
 }
 
-/// An upright tool band swept along a straight tip segment: the
-/// vertical cylinder of radius `r` standing `lo..hi` above the tip,
-/// carried from `p0` to `p1`. Exactly the Minkowski sum segment +
-/// axial segment + horizontal disc - convex, so its support is the sum
-/// of the three supports.
+/// A tool band swept along a straight tip segment: the cylinder of
+/// radius `r` about the unit axis `a`, standing `lo..hi` along it from
+/// the tip, carried from `p0` to `p1` with its axis held. Exactly the
+/// Minkowski sum segment + axial segment + disc normal to `a` - convex,
+/// so its support is the sum of the three supports. `a` = +Z is the
+/// upright band of the prismatic laws (#339 slice 1); any other unit
+/// axis is a posed band (slice 3).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct SweptBand {
     pub p0: V,
     pub p1: V,
+    pub a: V,
     pub lo: f64,
     pub hi: f64,
     pub r: f64,
 }
 
+/// The upright axis.
+pub(super) const UP: V = [0.0, 0.0, 1.0];
+
 impl Support for SweptBand {
     fn support(&self, d: V) -> V {
         let run = sub(self.p1, self.p0);
         let mut p = if dot(d, run) > 0.0 { self.p1 } else { self.p0 };
-        p[2] += if d[2] > 0.0 { self.hi } else { self.lo };
-        let h = d[0].hypot(d[1]);
+        if self.a == UP {
+            // The upright band, float for float as slice 1 wrote it.
+            p[2] += if d[2] > 0.0 { self.hi } else { self.lo };
+            let h = d[0].hypot(d[1]);
+            if h > 0.0 && h.is_finite() {
+                p[0] += self.r * d[0] / h;
+                p[1] += self.r * d[1] / h;
+            }
+            return p;
+        }
+        let da = dot(d, self.a);
+        p = add(p, scale(self.a, if da > 0.0 { self.hi } else { self.lo }));
+        // The disc's support: `d` with its axial part removed, scaled
+        // to the radius (none when `d` runs along the axis).
+        let perp = sub(d, scale(self.a, da));
+        let h = dot(perp, perp).sqrt();
         if h > 0.0 && h.is_finite() {
-            p[0] += self.r * d[0] / h;
-            p[1] += self.r * d[1] / h;
+            p = add(p, scale(perp, self.r / h));
         }
         p
     }
 }
 
 impl SweptBand {
-    /// The band's axis-aligned bounds.
+    /// The band's axis-aligned bounds: the parallelogram's corners
+    /// (segment + axial segment), grown per axis by the disc's own
+    /// extent `r * sqrt(1 - a_k^2)`.
     pub(super) fn bounds(&self) -> (V, V) {
         let mut lo = [0.0; 3];
         let mut hi = [0.0; 3];
-        for k in 0..2 {
-            lo[k] = self.p0[k].min(self.p1[k]) - self.r;
-            hi[k] = self.p0[k].max(self.p1[k]) + self.r;
+        for k in 0..3 {
+            let (s0, s1) = (self.a[k] * self.lo, self.a[k] * self.hi);
+            let disc = self.r * (1.0 - self.a[k] * self.a[k]).max(0.0).sqrt();
+            lo[k] = self.p0[k].min(self.p1[k]) + s0.min(s1) - disc;
+            hi[k] = self.p0[k].max(self.p1[k]) + s0.max(s1) + disc;
         }
-        lo[2] = self.p0[2].min(self.p1[2]) + self.lo;
-        hi[2] = self.p0[2].max(self.p1[2]) + self.hi;
         (lo, hi)
     }
 }

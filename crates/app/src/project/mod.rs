@@ -144,3 +144,6 @@ mod setup_links;
 // #368: a tool's modelled body on file (v57).
 mod tool_body_wire;
 pub use tool_body_wire::ToolBodyDto;
+// #155: Pause / Home entries of the operation list.
+mod program_entry_dto;
+pub use program_entry_dto::ProgramEntryDto;
