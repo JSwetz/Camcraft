@@ -75,6 +75,8 @@ pub fn collect(world: &World) -> ProjectFile {
                             .and_then(|i| crate::schema::WCS_SLOTS.get(i))
                             .map(|w| (*w).to_string()),
                         part_alignment: d.part_alignment.as_ref().map(AlignmentDto::from_location),
+                        machine: d.machine.as_ref().map(SetupMachineDto::from_def),
+                        post: d.post.as_ref().map(SetupPostDto::from_ref),
                     })
             } else {
                 None
@@ -166,7 +168,7 @@ pub fn collect(world: &World) -> ProjectFile {
         // the mm/units law again: only a loaded machine pays for
         // saying so, and an absent key is the mute state verbatim.
         machine: {
-            let (path, m) = crate::machine::of(world);
+            let (path, m) = crate::machine::document_of(world);
             m.map(|machine| MachineDto { path, machine })
         },
         // The raw singleton, not the resolved one: a document where the
@@ -188,7 +190,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 },
             })
         },
-        post: match crate::posting::post_of(world) {
+        post: match crate::posting::document_post_of(world) {
             crate::schema::PostRef::Builtin => None,
             crate::schema::PostRef::Named(name) => Some(PostDto::Named(name)),
             crate::schema::PostRef::File(path) => Some(PostDto::File(path)),

@@ -96,6 +96,9 @@ pub fn run_numbered_with(
 ) -> Result<PostOutput, PostError> {
     let records = super::normalize_program_order(cnc::parse(stream)?);
     let mut s = Script::load(cps)?;
+    // #374: an inverted machine axis - the one place the stream is
+    // mirrored into the controller's frame, or refused by name.
+    let records = super::invert::apply(records, mch, &s)?;
     s.set_machine(&machine::script_props(mch))?;
     s.set_program_number(program)?;
     if options.is_object() {

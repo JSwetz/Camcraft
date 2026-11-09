@@ -503,9 +503,10 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
         // v53 -> v54 (#342): one WCS per setup - each setup keeps the
         // origin of the slot it posts, slots no setup posts are dropped
         // with a note; a v54+ file is checked one-WCS (`wcs_one`).
-        // v54 -> v55 (#368): a tool may carry a modelled body. Absent
-        // is the holder cylinder - what every v54 tool judged - so the
-        // rung needs no rewrite.
+        // v54 -> v55 (#343): a setup may own its machine and post;
+        // absent follows the document's. v55 -> v56 (#368): a tool may
+        // carry a modelled body; absent is the holder cylinder every
+        // older tool judged. Neither rung needs a rewrite.
         notes = super::wcs_one::settle(&mut file, from)?;
         file.version = PROJECT_VERSION;
     }
@@ -752,6 +753,12 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                         corrupt(format!("setup '{}' holds the part at a placement that is not a rigid transform", dto.name))
                     })?),
                 };
+                // #343: the setup's own machine, sanity-checked like the
+                // document's - a corrupt file, never a guessed limit.
+                let machine = match &sdto.machine {
+                    None => None,
+                    Some(m) => Some(m.to_def(&dto.name).map_err(corrupt)?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     // `wcs_one` left exactly one name on every setup.
@@ -764,6 +771,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     datum_from: sdto.datum_from,
                     work_offset,
                     part_alignment,
+                    machine,
+                    post: sdto.post.as_ref().map(SetupPostDto::to_ref),
                 });
             }
         }

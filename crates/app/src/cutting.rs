@@ -155,7 +155,7 @@ pub fn suggest(world: &World, name: &str) -> Result<Suggestion, String> {
         .tool_material
         .ok_or_else(|| format!("tool {} states no tool material (HSS or carbide)", op.tool))?;
     let z = tool.flutes.ok_or_else(|| format!("tool {} states no flute count", op.tool))?;
-    Ok(compute(&op.tool, &tool, z, tm, material, adaptive_load(&op.params), crate::machine::of(world).1.as_ref()))
+    Ok(compute(&op.tool, &tool, z, tm, material, adaptive_load(&op.params), crate::machine::of_setup(world, op.setup.as_deref()).1.as_ref()))
 }
 
 /// The arithmetic, pure: n = Vc*1000/(pi*D), fz scaled by diameter and

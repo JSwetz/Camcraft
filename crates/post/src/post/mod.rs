@@ -31,6 +31,7 @@ pub mod cnc;
 pub mod cnc_thread;
 mod coolant;
 pub mod engine;
+pub mod invert;
 pub mod js;
 pub mod machine;
 pub mod probe_rec;
@@ -55,6 +56,10 @@ pub enum PostError {
     Json(#[from] serde_json::Error),
     #[error("post script: {0}")]
     Script(String),
+    /// A refusal by name before any script runs (#374: an inverted axis
+    /// the post cannot translate). Nothing is posted.
+    #[error("{0}")]
+    Refused(String),
 }
 
 /// Post a stream text with one script (the CLI's whole job, and the
