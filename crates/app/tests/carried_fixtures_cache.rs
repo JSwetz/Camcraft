@@ -205,3 +205,14 @@ fn a_carry_on_a_lathe_or_mill_turn_is_refused_by_name_on_every_path() {
         assert!(gate.iter().any(|p| p.contains("Contour2")), "{machine}: the carried program posted: {gate:?}");
     }
 }
+
+#[test]
+fn a_fixture_narrower_than_a_cell_is_judged_by_the_column_under_it() {
+    // A 0.1 mm dowel pin (no column centre inside its footprint) standing
+    // Z 2..8 in material Setup1 left to Z 5: 3 mm deep, never skipped.
+    let (world, mut h) = program(5.0, 100.0, 15.0);
+    h.execute(&world, ImportModel::from_mesh("Pin", cube(Point3::new(40.0, 5.0, 2.0), Point3::new(40.1, 5.1, 8.0))));
+    h.execute(&world, TagFixture::new(&world, "Pin", Some("Setup2")).expect("tag pin"));
+    let p = carried_fixture_problems(&world);
+    assert!(p.len() == 1 && p[0].contains("fixture 'Pin'") && p[0].contains("3.00 mm deep"), "{p:?}");
+}

@@ -527,6 +527,9 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
     // The one-mount clause (#343): one program, one post, one machine.
     problems.extend(crate::setup_mount::program_problems(world));
+    // The carried-stock clause (#319): a feed move into carried material
+    // outside a setup's declared stock is engagement nothing verified.
+    problems.extend(crate::operation::carried_problems(world));
 
     if let Some(m) = crate::machine::of(world).1 {
         // #374: an inverted axis the post cannot translate (Z, any letter

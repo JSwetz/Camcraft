@@ -22,7 +22,8 @@
 //!   strictly inside the fixture's footprint and its material
 //!   (`floor..top`) overlaps the fixture's Z span by more than
 //!   [`FIXTURE_HIT_TOL`] - jaws gripping a side face and a part seated on
-//!   a plate are contact by design. The column sampling resolves to the
+//!   a plate are contact by design. A footprint narrower than a cell
+//!   (holding no centre) is judged by the column under its own centre. The column sampling resolves to the
 //!   carried grid's pitch: an overlap narrower than half a cell beside a
 //!   face can pass, and is stated so in the decision record.
 //! - **Live, like every workholding law.** Read at the post gate against
@@ -36,6 +37,7 @@
 use flecs_ecs::prelude::World;
 
 use crate::fixture::{FIXTURE_HIT_TOL, FixtureBox};
+use crate::geo2d::Point2;
 use crate::model;
 use crate::stock_sim::Body;
 
@@ -67,6 +69,16 @@ pub fn penetration(body: &Body, b: &FixtureBox) -> Option<f64> {
     let (ix0, ix1) = span(bx0, bx1, dex.x0, dex.nx);
     let (iy0, iy1) = span(by0, by1, dex.y0, dex.ny);
     let mut worst: Option<f64> = None;
+    let mut any_inside = false;
+    let judge = |k: usize, worst: &mut Option<f64>| {
+        if body.empty_at(k) {
+            return;
+        }
+        let depth = dex.top_at(k).min(bz1) - body.floor_at(k).max(bz0);
+        if depth.is_finite() && depth > FIXTURE_HIT_TOL {
+            *worst = Some(worst.map_or(depth, |w: f64| w.max(depth)));
+        }
+    };
     for iy in iy0..iy1 {
         for ix in ix0..ix1 {
             let c = dex.center(ix, iy);
@@ -74,15 +86,16 @@ pub fn penetration(body: &Body, b: &FixtureBox) -> Option<f64> {
                 && c.x < bx1 - FIXTURE_HIT_TOL
                 && c.y > by0 + FIXTURE_HIT_TOL
                 && c.y < by1 - FIXTURE_HIT_TOL;
-            let k = ix + iy * dex.nx;
-            if !inside || body.empty_at(k) {
-                continue;
-            }
-            let depth = dex.top_at(k).min(bz1) - body.floor_at(k).max(bz0);
-            if depth.is_finite() && depth > FIXTURE_HIT_TOL {
-                worst = Some(worst.map_or(depth, |w: f64| w.max(depth)));
+            if inside {
+                any_inside = true;
+                judge(ix + iy * dex.nx, &mut worst);
             }
         }
+    }
+    // A footprint narrower than a cell holds no column centre: the column
+    // under its own centre speaks for it, never nothing.
+    if !any_inside && let Some(k) = dex.col(Point2::new((bx0 + bx1) * 0.5, (by0 + by1) * 0.5)) {
+        judge(k, &mut worst);
     }
     worst
 }

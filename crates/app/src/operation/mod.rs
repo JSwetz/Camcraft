@@ -129,7 +129,7 @@ mod cross_stock;
 mod drill_reach;
 mod drill_prior;
 mod carried_stock;
-pub use carried_stock::CARRIED_OUTSIDE_DECLARED;
+pub use carried_stock::{CARRIED_OUTSIDE_DECLARED, CARRIED_OUTSIDE_NOTED, carried_problems};
 pub(crate) use drill_prior::reads_prior;
 mod plunge_solid;
 mod rotary_law;

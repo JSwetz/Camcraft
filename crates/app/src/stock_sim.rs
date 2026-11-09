@@ -133,10 +133,14 @@ pub fn simulate_document(
     } else {
         part_facets(world)?
     };
-    let (dev, display) = match walked.held {
+    let (mut dev, display) = match walked.held {
         carry::Held::Plain(dex) => (deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?, dex),
         carry::Held::Carried(body) => (body.deviate(&model_facets, DEV_TOL).map_err(|e| e.to_string())?, body.display()),
     };
+    // #320: a gouge on a block a later setup set aside for a new one.
+    if let Some(left) = &walked.left {
+        carry::fold_left(&mut dev, left);
+    }
     let classes = color_classes(&dev);
     let surface = display.surface(&classes);
     Ok(ProgramSim { dev, surface })

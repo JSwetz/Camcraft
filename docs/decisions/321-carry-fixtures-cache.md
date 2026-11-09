@@ -44,7 +44,9 @@ a modelled hold that contradicts the material is refused, not trusted.
   loosely declared block; out of scope.
 
 **Limits (stated).** The column sampling resolves to the carried grid's
-pitch: an overlap narrower than half a cell beside a face can pass. The
+pitch: an overlap narrower than half a cell beside a face can pass. A
+footprint narrower than a cell (no column centre inside it, a dowel pin)
+is judged by the column under its own centre, never skipped (review). The
 law is a model-consistency refusal; the tool's own steel and stock laws
 still judge every move.
 

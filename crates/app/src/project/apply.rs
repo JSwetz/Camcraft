@@ -751,6 +751,13 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     None => None,
                     Some(m) => Some(m.to_def(&dto.name).map_err(corrupt)?),
                 };
+                // #320: an unknown stock-source word is a corrupt file.
+                let stock_source = match sdto.stock_source.as_deref() {
+                    None => None,
+                    Some(w) => Some(crate::setup_stock::StockSource::from_word(w).ok_or_else(|| {
+                        corrupt(format!("setup '{}' takes its stock from '{w}', which is no stock source", dto.name))
+                    })?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     // `wcs_one` left exactly one name on every setup.
@@ -766,6 +773,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     machine,
                     post: sdto.post.as_ref().map(SetupPostDto::to_ref),
                     relative_to: sdto.relative_to.clone(),
+                    stock_source,
                 });
             }
         }

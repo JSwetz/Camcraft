@@ -10,11 +10,12 @@
 //!
 //! - **One law with the program sim.** A boundary counts exactly when the
 //!   program sim carries the body across it (`carry::entry` decides, by
-//!   call). A setup entered by the M3.2 A clip (same hold, not linked)
-//!   breaks the chain: its rest starts from its own block as before -
-//!   whether a fresh block or the same part is loaded there is not stated
-//!   until #320, and the fresh block is the side that never assumes
-//!   material gone.
+//!   call), so the setup's stock source (#320) decides: "What <setup>
+//!   leaves behind" extends the chain; "Its own stock" breaks it, both
+//!   in the same hold (the M3.2 A clip) and in a different hold (a new
+//!   block) - its rest starts from its own block, the side that never
+//!   assumes material gone. Extending the chain into a new blank would
+//!   read cuts that blank never had: gouge-class.
 //! - **A refused carry refuses the rest.** If the body cannot be carried
 //!   into the consumer's setup (a turn the lattice cannot hold, a lathe),
 //!   the stock that setup starts from is unknown: the rest reading is
@@ -106,12 +107,12 @@ pub(super) fn chain_of(world: &World, name: &str, setup: Option<&str>, with_move
         segments.push(Segment { setup: consumer, turn: None, ops: Vec::new() });
     }
     // Back from the consumer: every carried boundary extends the chain,
-    // the first clip ends it.
+    // the first clip or new block (#320, "Its own stock") ends it.
     let mut start = segments.len() - 1;
     while start > 0 {
         let (from, to) = (segments[start - 1].setup.as_deref(), segments[start].setup.as_deref());
         match carry::entry(world, from, to) {
-            Ok(Entry::Clip) => break,
+            Ok(Entry::Clip | Entry::NewBlock) => break,
             Ok(Entry::Carry(t)) => {
                 segments[start].turn = Some(t);
                 start -= 1;
@@ -198,12 +199,13 @@ pub(super) fn carried_block(world: &World, chain: &Chain) -> Result<Option<(Poin
 /// still holds material in (their whole squares) and the highest top,
 /// clamped to `block` - both are supersets of the real body, so their
 /// intersection is one too. `None` when the grid holds nothing finite.
+/// The grid rides along: the engagement law reads its columns.
 pub(super) fn carried_body_bounds(
     world: &World,
     chain: &Chain,
     min_r: f64,
     block: (Point3, Point3),
-) -> Result<Option<(Point3, Point3)>, String> {
+) -> Result<Option<(Bounds, Dexel)>, String> {
     let body = carried_body(world, chain, min_r, false)?;
     let dex = &body.dex;
     let h = dex.cell * 0.5;
@@ -223,7 +225,7 @@ pub(super) fn carried_body_bounds(
     let (b0, b1) = block;
     let lo = Point3::new(lo.x.max(b0.x), lo.y.max(b0.y), b0.z);
     let hi = Point3::new(hi.x.min(b1.x), hi.y.min(b1.y), hi.z.min(b1.z));
-    Ok((lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some((lo, hi)))
+    Ok((lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some(((lo, hi), dex.clone())))
 }
 
 /// The axis-aligned bounds of finite points; `None` for none.
@@ -262,7 +264,7 @@ pub fn carried_stock_body(
     setup: Option<&str>,
     tool_r: f64,
     block: (Point3, Point3),
-) -> Result<Option<(Point3, Point3)>, String> {
+) -> Result<Option<(Bounds, Dexel)>, String> {
     let chain = chain_of(world, name, setup, true)?;
     if !chain.crosses() {
         return Ok(None);
