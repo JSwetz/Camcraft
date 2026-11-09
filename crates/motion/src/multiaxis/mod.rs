@@ -49,6 +49,8 @@ pub mod rough;
 pub mod rotary;
 pub mod rotary_offset;
 mod rotary_seam;
+mod rotary_seam_angle;
+mod rotary_sheet;
 pub mod rotary_bar;
 mod rotary_links;
 mod wrap_exit;
