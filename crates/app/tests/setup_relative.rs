@@ -225,7 +225,9 @@ fn links_round_trip_and_older_or_broken_files_are_read_by_name() {
     let first = std::fs::read_to_string(&path).expect("read");
     assert!(first.contains("\"relative_to\": \"Setup1\""), "{first}");
     assert!(first.contains(&format!("\"version\": {}", project::PROJECT_VERSION)));
-    assert_eq!(project::PROJECT_VERSION, 56);
+    // Links arrived at v56 (#316); a later rung must not break them, so
+    // pin the floor, not the exact number (cf. #344).
+    assert!(project::PROJECT_VERSION >= 56, "setup links need project v56 or later");
     let world2 = new_world();
     project::load(&world2, &path).expect("load");
     assert_eq!(link_of(&world2, "Setup2").as_deref(), Some("Setup1"));
