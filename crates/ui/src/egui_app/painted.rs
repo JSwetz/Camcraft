@@ -188,6 +188,23 @@ pub struct TreeHit {
     pub radio: Option<usize>,
 }
 
+/// A tree row's (label, suffix) ink (#506). The label is body text; the
+/// suffix and a hidden row step down to the dim tier - never the faint
+/// (disabled) one, which reads ~3:1 on the light strip. A selected row is
+/// all body text: the dim tier does not clear the selection fill. Every
+/// ink here clears `contrast::BODY` on the ground it is painted on,
+/// pinned by tree_ink_tests.
+#[must_use]
+pub fn row_inks(pal: &Tokens, hidden: bool, selected: bool) -> (Color32, Color32) {
+    if selected {
+        (pal.text, pal.text)
+    } else if hidden {
+        (pal.text_dim, pal.text_dim)
+    } else {
+        (pal.text, pal.text_dim)
+    }
+}
+
 /// Paint the rows and collect this frame's clicks. Input first (real
 /// `ui.interact` responses), then the ink - so hover state and painted
 /// background cannot disagree within a frame.
@@ -286,8 +303,7 @@ pub fn tree(
         // The column model: one galley, label + suffix, truncated into the
         // text column - everything right of it belongs to the eye, never
         // to overflowing ink (divergence 1's fix).
-        let ink = if row.hidden { pal.text_faint } else { pal.text };
-        let suffix_ink = if row.hidden { pal.text_faint } else { pal.text_dim };
+        let (ink, suffix_ink) = row_inks(pal, row.hidden, row.selected);
         let reserve = if has_eye(row.kind) { EYE_RESERVE } else { 6.0 };
         let max_w = (rr.right() - reserve - (gx + 12.0)).max(0.0);
         let mut job = LayoutJob {
