@@ -75,6 +75,8 @@ pub fn collect(world: &World) -> ProjectFile {
                         part_alignment: d.part_alignment.as_ref().map(AlignmentDto::from_location),
                         machine: d.machine.as_ref().map(SetupMachineDto::from_def),
                         post: d.post.as_ref().map(SetupPostDto::from_ref),
+                        relative_to: d.relative_to.clone(),
+                        stock_source: d.stock_source.map(|s| s.word().to_string()),
                     })
             } else {
                 None
@@ -260,6 +262,8 @@ pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
 /// Each note is logged as well.
 pub fn open_noted(world: &World, text: &str) -> Result<Vec<String>, ProjectError> {
     let file: ProjectFile = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
+    // #321: the carried-body cache is freed with the document it served.
+    crate::rest::clear_carried_cache();
     let notes = check_and_apply(world, file)?;
     for n in &notes {
         tracing::warn!("project load note: {n}");

@@ -14,6 +14,8 @@ use crate::schema;
 /// (a world made elsewhere on another thread would bring back #379).
 pub fn new_world() -> World {
     init_flecs_os_api();
+    // #321: a new document starts with no carried body cached.
+    crate::rest::clear_carried_cache();
     let world = World::new();
     schema::register_schema(&world);
     world
