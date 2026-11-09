@@ -20,7 +20,7 @@ use camcraft_app::commands::{
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetToolNumber, SetUnits, SetWcsOrigin,
-    SetWorkMaterial, TagFixture, UntagFixture,
+    SetWorkMaterial, TagFixture, UntagFixture, ImportFixture,
     UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
@@ -41,6 +41,8 @@ mod per_op;
 mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_fixture.rs"]
+mod fixture_view;
 #[path = "state_program_entry.rs"]
 mod program_entry;
 pub use program_entry::EntryVerb;
@@ -1104,6 +1106,14 @@ pub struct OperationClipboard {
 pub enum TreeMenuTarget {
     Operation(String),
     Operations,
+    /// #339 slice 4: a model row (Models section, or a setup's Fixtures
+    /// child) - "Use as fixture" / "Stop using as fixture". `row` is the
+    /// clicked row's index, so the menu anchors on the row clicked even
+    /// when the name stands in the tree twice.
+    Model { name: String, row: usize },
+    /// A setup's Fixtures node (`""` - the implicit setup): "Import
+    /// fixture…".
+    Fixtures(String),
     /// A Pause / Home entry row (#155).
     Entry(String),
 }
@@ -1286,6 +1296,11 @@ pub struct State {
     /// implicit first setup. Public so tests run the dialog hand-off
     /// without a modal file picker.
     pub import_as_fixture: Option<Option<String>>,
+    /// #339 slice 4: each fixture's mesh state, per document version
+    /// (view cache - never truth, never saved).
+    pub fixture_mesh_cache: camcraft_app::fixture_view::MeshStateCache,
+    /// The selected op's struck fixtures, per (version, op, path sig).
+    pub struck_cache: camcraft_app::fixture_view::StruckCache,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
     pub op_ui: OpUi,
     /// Viewport click routing: whole models vs feature faces vs edge
@@ -1539,6 +1554,8 @@ impl State {
             model_ui: ModelUi::default(),
             repair_ui: RepairUi::default(),
             import_as_fixture: None,
+            fixture_mesh_cache: Default::default(),
+            struck_cache: Default::default(),
             // The tool draft carries a plausible name from the first
             // frame: an empty Name field made Add look dead (refused
             // silently). The operation draft has no form to prefill
@@ -3364,6 +3381,27 @@ impl State {
                 // the name exists; the worker stayed world-blind on purpose.
                 // UpdateModel::new classifies further: setup furniture
                 // under this name is refused as Invalid, never overwritten.
+                // #339 slice 4: an import-as-fixture lands mesh and
+                // marker as ONE undo unit (`ImportFixture`) - one Ctrl+Z
+                // takes the whole import away.
+                if let Some(binding) = self.import_as_fixture.take() {
+                    match ImportFixture::new(&self.world, command, binding.as_deref()) {
+                        Ok(cmd) => {
+                            let verb = match cmd.update_summary() {
+                                Some(summary) => timed("updated", &format!(" ({summary})")),
+                                None => timed("imported", ""),
+                            };
+                            self.history.execute(&self.world, cmd);
+                            self.doc_version += 1;
+                            self.status = match &binding {
+                                Some(s) => format!("{verb}; marked as {s}'s fixture"),
+                                None => format!("{verb}; marked as a fixture"),
+                            };
+                        }
+                        Err(err) => self.refuse(ErrorScope::Setup, format!("fixture not imported: {err}")),
+                    }
+                    return;
+                }
                 if model::find_by_name(&self.world, &name).is_some() {
                     match UpdateModel::new(&self.world, &name, command.mesh) {
                         Ok(upd) => {
@@ -3380,29 +3418,12 @@ impl State {
                     self.doc_version += 1;
                     self.status = timed("imported", "");
                 }
-                // Stage B: an import-as-fixture tags whatever landed.
-                // Two undo units (the import, then the marker) is the
-                // honest shape - each is invertible on its own, and the
-                // worker never needed a world to begin with.
-                if let Some(binding) = self.import_as_fixture.take() {
-                    match TagFixture::new(&self.world, &name, binding.as_deref()) {
-                        Ok(tag) => {
-                            self.history.execute(&self.world, tag);
-                            self.doc_version += 1;
-                            let note = match &binding {
-                                Some(s) => format!("; marked as {s}'s fixture"),
-                                None => "; marked as a fixture".to_string(),
-                            };
-                            self.status.push_str(&note);
-                        }
-                        Err(err) => self.refuse(
-                            ErrorScope::Setup,
-                            format!("imported, but not marked as a fixture: {err}"),
-                        ),
-                    }
-                }
             }
-            Err(err) => self.status = format!("import refused: {err}"),
+            Err(err) => {
+                // A refused import-as-fixture must not tag the NEXT import.
+                self.import_as_fixture = None;
+                self.status = format!("import refused: {err}");
+            }
         }
     }
 

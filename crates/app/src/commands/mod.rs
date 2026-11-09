@@ -7,6 +7,7 @@
 pub mod cutting_data;
 pub mod delete_entity;
 pub mod fixture;
+pub mod import_fixture;
 pub mod import_model;
 pub mod load_machine;
 pub mod move_model;
@@ -54,6 +55,7 @@ pub use delete_entity::DeleteEntity;
 pub use fixture::{
     AddFixtureModel, DeleteFixture, MoveFixture, SetFixtureFixed, TagFixture, UntagFixture,
 };
+pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;
 pub use move_model::MoveModel;

@@ -57,6 +57,12 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
     let Some(target) = state.tree_menu.clone() else {
         return;
     };
+    // #339 slice 4: model rows and a setup's Fixtures node carry the
+    // fixture verbs, drawn by their own menu.
+    if matches!(target, TreeMenuTarget::Model { .. } | TreeMenuTarget::Fixtures(_)) {
+        super::fixture_menu::fixture_menu(ui, state, pal, rect, leaves, &target);
+        return;
+    }
     // A setup's Operations row anchors Paste: the active setup's (the
     // menu's click activated it), else - for the frame its activation is
     // still queued - the first one.
@@ -68,7 +74,10 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
         _ => false,
     }).or_else(|| match target {
         TreeMenuTarget::Operations => leaves.iter().position(|leaf| matches!(leaf, Leaf::SetupOps(_))),
-        TreeMenuTarget::Operation(_) | TreeMenuTarget::Entry(_) => None,
+        TreeMenuTarget::Operation(_)
+        | TreeMenuTarget::Entry(_)
+        | TreeMenuTarget::Model { .. }
+        | TreeMenuTarget::Fixtures(_) => None,
     });
     let Some(ix) = row_ix else {
         state.tree_menu = None;
@@ -101,7 +110,10 @@ pub(super) fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect
             }
             Some(name.as_str())
         }
-        TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => None,
+        TreeMenuTarget::Operations
+        | TreeMenuTarget::Entry(_)
+        | TreeMenuTarget::Model { .. }
+        | TreeMenuTarget::Fixtures(_) => None,
     };
     let here = name.and_then(|name| model::find_by_name(&state.world, name))
         .and_then(|entity| model::operation_of(&state.world, &entity))
