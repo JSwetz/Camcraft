@@ -27,7 +27,7 @@
 //!   rotary and posed programs are refused before the walk, as before.
 //! - **One machine (#404).** A carry into a setup whose machine (its own
 //!   or the document's, #343) differs from the setup before it refuses
-//!   by name ([`CARRY_MACHINE_REFUSAL`]) in [`entry`], so the rest
+//!   by name ([`CARRY_MACHINE_CHANGE_REFUSAL`]) in [`entry`], so the rest
 //!   reading (#318) refuses it too. The program walk refuses every setup
 //!   change onto another machine, the clip included: the clip keeps
 //!   what the earlier setup left standing. (A rest chain that meets a
@@ -41,7 +41,14 @@ use crate::stock_sim::{Body, Deviation, Dexel, LatticeTurn, Planned, SimOp, simu
 /// different machines (#404). The program sim judges one machine's
 /// program, the post writes one (#343's one-mount law), so the material
 /// is never handed across a machine change on a guess.
-pub const CARRY_MACHINE_REFUSAL: &str = "the setups are on different machines - the program sim carries the stock only between setups on one machine; simulate each machine's setups on their own";
+pub const CARRY_MACHINE_CHANGE_REFUSAL: &str = "the setups are on different machines - the program sim carries the stock only between setups on one machine; simulate each machine's setups on their own";
+
+/// The refusal for a carry on a lathe or mill-turn machine (#321 decided:
+/// the part flip / sub-spindle hand-off is not implemented - the column
+/// lattice carries milled bodies only, and a turned body lives in the
+/// meridian field). Every reader of the carry - the program sim, the rest
+/// and judged stock of generation, and so the post - says this by name.
+pub const CARRY_MACHINE_REFUSAL: &str = "a part flip or sub-spindle hand-off is not supported yet on a lathe or mill-turn machine";
 
 /// How the program enters a setup from the setup before it.
 pub(crate) enum Entry {
@@ -67,7 +74,7 @@ fn carry_head(from: &str, to: &str) -> String {
 }
 
 /// The machine both setups mount (#343: each its own, else the
-/// document's), or [`CARRY_MACHINE_REFUSAL`] naming both setups and both
+/// document's), or [`CARRY_MACHINE_CHANGE_REFUSAL`] naming both setups and both
 /// machines when they differ (#404).
 ///
 /// # Errors
@@ -81,7 +88,7 @@ pub(crate) fn one_machine(
     let (m_from, m_to) = (machine_of(world, Some(from)), machine_of(world, Some(to)));
     if m_from != m_to {
         return Err(format!(
-            "{}: {CARRY_MACHINE_REFUSAL} ('{from}' on {}, '{to}' on {})",
+            "{}: {CARRY_MACHINE_CHANGE_REFUSAL} ('{from}' on {}, '{to}' on {})",
             carry_head(from, to),
             machine_label(&m_from),
             machine_label(&m_to),
@@ -103,7 +110,7 @@ pub(crate) fn carry_turn(world: &flecs_ecs::prelude::World, from: &str, to: &str
     // setup's - the body never crosses a machine change.
     let m_to = one_machine(world, from, to)?;
     if crate::machine::kind(m_to.1.as_ref()) != crate::machine::Kind::Mill {
-        return Err(format!("{head}: not supported yet on a lathe or mill-turn machine"));
+        return Err(format!("{head}: {CARRY_MACHINE_REFUSAL}"));
     }
     let t = crate::setup_relative::transform_between(world, from, to).map_err(|e| format!("{head}: {e}"))?;
     LatticeTurn::from_matrix(matrix_of(t.rot), [t.pos.x, t.pos.y, t.pos.z]).map_err(|e| format!("{head}: {e}"))

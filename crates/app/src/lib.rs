@@ -10,6 +10,7 @@ pub mod commands;
 pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
+pub mod fixture_carried;
 pub use camcraft_motion::finishing3d;
 pub use camcraft_geometry::geo2d;
 pub mod geometry;

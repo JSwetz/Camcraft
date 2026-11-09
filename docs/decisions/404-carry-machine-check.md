@@ -3,7 +3,7 @@
 - **Chosen: the machine is each setup's own, checked at the setup change.**
   `stock_sim::carry::one_machine` compares the two setups' machines through
   `setup_mount::machine_of` (#343: the setup's own machine, else the
-  document's) and refuses by name with `CARRY_MACHINE_REFUSAL`, naming both
+  document's) and refuses by name with `CARRY_MACHINE_CHANGE_REFUSAL`, naming both
   setups and both machines. The lathe / mill-turn gate now reads that shared
   machine's kind instead of `machine::kind_of` (the ACTIVE setup's), which is
   what let a carry across a machine change through before.
@@ -24,7 +24,7 @@
   say "setups with different machines (#390's refusal)". No such refusal
   existed in the sim: #390 is the browser tree, and the only mount refusals
   (#343) are at generation (op vs active setup) and at post. That refusal is
-  now `CARRY_MACHINE_REFUSAL` (this entry). The 317 file is left as written
+  now `CARRY_MACHINE_CHANGE_REFUSAL` (this entry). The 317 file is left as written
   (one PR, one file); the module docs of `stock_sim_carry.rs` state the law.
 - **Off-grid alignment: pinned, not refused.** `Body::carry` derives the image
   origin from the turned lattice corners, so an image cell centre IS a

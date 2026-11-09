@@ -28,7 +28,7 @@ use camcraft_app::rest::REST_CARRY_REFUSAL;
 use camcraft_app::schema::Location;
 use camcraft_app::setup_align::AlignPreset;
 use camcraft_app::stock::StockShape;
-use camcraft_app::stock_sim::{CARRY_MACHINE_REFUSAL, CARRY_TURN_REFUSAL, DEV_TOL, ProgramSim, incoming_body, simulate_document};
+use camcraft_app::stock_sim::{CARRY_MACHINE_CHANGE_REFUSAL, CARRY_TURN_REFUSAL, DEV_TOL, ProgramSim, incoming_body, simulate_document};
 use camcraft_app::tools::catalog;
 use camcraft_app::world::new_world;
 
@@ -197,7 +197,7 @@ fn a_carry_between_setups_on_different_machines_is_refused_by_name() {
     // on the other machine is refused by name at the carry, never cut
     // from a body handed across the machine change.
     let err = GenerateOperation::new(&world, "Face2").err().expect("generation refused").to_string();
-    assert!(err.contains(REST_CARRY_REFUSAL) && err.contains(CARRY_MACHINE_REFUSAL), "{err}");
+    assert!(err.contains(REST_CARRY_REFUSAL) && err.contains(CARRY_MACHINE_CHANGE_REFUSAL), "{err}");
     assert!(err.contains("from setup 'Setup1' into setup 'Setup2'"), "names both setups: {err}");
     assert!(err.contains("'Setup1' on no machine") && err.contains("'Setup2' on Tormach 770M"), "names both machines: {err}");
     // Nor is the program judged, nor Setup2's incoming stock read.
@@ -226,7 +226,7 @@ fn a_clip_between_setups_on_different_machines_is_refused_by_name() {
     // its own block, on Setup2's machine.
     h.execute(&world, GenerateOperation::new(&world, "Face2").expect("Face2 regenerated on Setup2's machine"));
     let err = simulate_document(&world).expect_err("refused across the machine change");
-    assert!(err.contains(CARRY_MACHINE_REFUSAL) && err.contains("from setup 'Setup1' into setup 'Setup2'"), "{err}");
+    assert!(err.contains(CARRY_MACHINE_CHANGE_REFUSAL) && err.contains("from setup 'Setup1' into setup 'Setup2'"), "{err}");
     assert!(err.contains("'Setup2' on Tormach 770M"), "{err}");
 }
 
