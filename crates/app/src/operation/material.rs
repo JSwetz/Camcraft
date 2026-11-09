@@ -30,8 +30,14 @@ pub(super) const Z_TOL: f64 = 1e-6;
 pub(super) const FOOTPRINT_SAMPLES: usize = 16;
 /// One micron under a grazing section plane, for the slice retry.
 pub(super) const SLICE_NUDGE: f64 = 1e-3;
-/// Points per semicircular slot cap when building the stadium region.
-pub(super) const CAP_SEGMENTS: usize = 16;
+/// How far a slot cap's polygon may stand OUTSIDE the true arc, mm
+/// (#510). The verifier's slack for a real over-cut is this plus
+/// `GOUGE_TOL`, so it is held a decade under the tolerance.
+pub(super) const CAP_SAG_BUDGET: f64 = 0.001;
+/// Floor and ceiling of the chords per semicircular slot cap: the floor
+/// keeps a tiny cap a real polygon, the ceiling keeps a huge one cheap.
+pub(super) const CAP_MIN_SEGMENTS: usize = 16;
+pub(super) const CAP_MAX_SEGMENTS: usize = 2048;
 
 /// The source geometry in world coordinates, plus its top.
 pub(super) struct Material {
@@ -223,10 +229,40 @@ pub(super) fn section(facets: &[Triangle], z: f64) -> Result<Region, GenError> {
     }
 }
 
-/// Closed-form stadium: `a`/`b` centers, half-width `h`, semicircles of
-/// `CAP_SEGMENTS` points at each end. The region only feeds verification
-/// (the slot generator computes the path in closed form), and any finite
-/// inputs build a simple closed ring.
+/// Chords per semicircular cap of half-width `h` such that the
+/// circumscribed polygon's corners stand at most `CAP_SAG_BUDGET`
+/// outside the arc: a step of `phi` puts the corner at `h / cos(phi/2)`.
+pub(super) fn cap_segments(h: f64) -> usize {
+    if !(h.is_finite() && h > 0.0) {
+        return CAP_MIN_SEGMENTS;
+    }
+    let half = (h / (h + CAP_SAG_BUDGET)).clamp(-1.0, 1.0).acos();
+    if !(half.is_finite() && half > 0.0) {
+        return CAP_MAX_SEGMENTS;
+    }
+    let n = (std::f64::consts::PI / (2.0 * half)).ceil();
+    if n.is_finite() && n >= 1.0 {
+        (n as usize).clamp(CAP_MIN_SEGMENTS, CAP_MAX_SEGMENTS)
+    } else {
+        CAP_MAX_SEGMENTS
+    }
+}
+
+/// Closed-form stadium: `a`/`b` centers, half-width `h`. The region only
+/// feeds verification and the drawn outline (the slot generator computes
+/// the path in closed form), and any finite inputs build a simple closed
+/// ring.
+///
+/// Each round end is the polygon CIRCUMSCRIBED about its semicircle
+/// (#510): `n` tangent chords of step `phi = pi / n`, whose corners sit
+/// at radius `h / cos(phi/2)` midway between tangent points. Every chord
+/// is tangent to the true arc, so a cutter tangent to the cap is never
+/// nearer to the polygon than to the arc - an inscribed cap put its
+/// chords up to `h (1 - cos(phi/2))` INSIDE the arc (16 chords, 6 mm
+/// cutter: 0.0145 mm, past `GOUGE_TOL`) and convicted every pass that
+/// reached the end. The corners give a real over-cut at most
+/// `CAP_SAG_BUDGET` of slack. The first and last corner of each cap lie
+/// on the straight sides' lines, so the sides stay exact.
 pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let len = (dx * dx + dy * dy).sqrt();
@@ -236,14 +272,17 @@ pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> 
         (1.0, 0.0)
     };
     let (nx, ny) = (-uy, ux);
-    let mut pts = Vec::with_capacity(2 * CAP_SEGMENTS + 2);
-    for (c, t0, t1) in [(b, -90.0f64, 90.0), (a, 90.0, 270.0)] {
-        for i in 0..=CAP_SEGMENTS {
-            let th = (t0 + (t1 - t0) * i as f64 / CAP_SEGMENTS as f64).to_radians();
+    let n = cap_segments(h);
+    let phi = std::f64::consts::PI / n as f64;
+    let rc = h / (phi * 0.5).cos();
+    let mut pts = Vec::with_capacity(2 * n);
+    for (c, t0) in [(b, -std::f64::consts::FRAC_PI_2), (a, std::f64::consts::FRAC_PI_2)] {
+        for i in 0..n {
+            let th = t0 + phi * (i as f64 + 0.5);
             let (ca, sa) = (th.cos(), th.sin());
             pts.push(Point2::new(
-                c.x + h * (ca * ux + sa * nx),
-                c.y + h * (ca * uy + sa * ny),
+                c.x + rc * (ca * ux + sa * nx),
+                c.y + rc * (ca * uy + sa * ny),
             ));
         }
     }
