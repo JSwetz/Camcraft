@@ -2,7 +2,7 @@
 //! way. The reader states it (`"direction": 1 | -1`, standard when absent)
 //! and refuses anything else by name; the travel check judges the stroke
 //! in the machine's own coordinates; the project file round-trips it; and
-//! until the post translates (#374) a machine with an inverted axis
+//! the post (#374) writes an inverted X / Y mirrored while an inverted Z
 //! refuses posting by name - never standard-sign code for it.
 //!
 //! Fixture law (clean-room): every value below is our own invention.
@@ -225,35 +225,79 @@ fn the_table_box_maps_an_inverted_stroke() {
     assert_eq!((b.min.y, b.max.y), (-100.0, 100.0), "standard Y unchanged");
 }
 
-// ---- the post refusal until #374 ----
+// ---- the post (#374): an inverted X / Y translates, an inverted Z refuses ----
 
-const REFUSAL: &str =
-    "machine Flip 1 has an inverted X axis; posting for inverted axes is not supported yet (#374)";
+const Z_REFUSAL: &str = "machine Flip 1 has an inverted Z axis; posting for an inverted Z is not supported yet - tool-length compensation (G43) and the canned cycles' retract assume the controller's +Z leaves the work";
+
+fn post_text(world: &World, tag: &str) -> Result<String, String> {
+    let out = std::env::temp_dir().join(format!("camcraft_axisdir_{tag}_{}.nc", std::process::id()));
+    let r = posting::post_setup(world, &out).map(|p| p.program);
+    let _ = std::fs::remove_file(&out);
+    r
+}
+
+/// One posted line with every X word negated and G2/G3 swapped - what
+/// the standard program's line becomes on a machine whose X is inverted.
+fn mirrored_in_x(line: &str) -> String {
+    line.split(' ')
+        .map(|w| match w {
+            "G02" => "G03".to_owned(),
+            "G03" => "G02".to_owned(),
+            "G2" => "G3".to_owned(),
+            "G3" => "G2".to_owned(),
+            _ if (w.starts_with('X') || w.starts_with('I')) && w[1..].parse::<f64>().is_ok_and(|v| v != 0.0) => {
+                let body = &w[1..];
+                let flipped = body.strip_prefix('-').map_or_else(|| format!("-{body}"), str::to_owned);
+                format!("{}{flipped}", &w[..1])
+            }
+            _ => w.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 #[test]
-fn an_inverted_machine_refuses_posting_by_name() {
+fn an_inverted_x_machine_posts_the_mirrored_program() {
     let (world, mut history) = faced_doc();
-    history.execute(&world, LoadMachine::new(&world, "flip.mch".into(), Some(flipped())).expect("sane"));
-    let gate = posting::verification_gate(&world);
-    assert!(gate.iter().any(|p| p == REFUSAL), "{gate:?}");
-    let out = std::env::temp_dir().join(format!("camcraft_axisdir_{}.nc", std::process::id()));
-    let e = posting::post_setup(&world, &out).expect_err("never standard-sign code");
-    assert!(e.contains(REFUSAL), "{e}");
-    assert!(!out.exists(), "nothing written");
-
-    // The same machine with X standard posts on.
     let mut std_m = flipped();
     std_m.axes[0].direction = AxisDirection::Standard;
     history.execute(&world, LoadMachine::new(&world, "std.mch".into(), Some(std_m)).expect("sane"));
-    assert!(!posting::verification_gate(&world).iter().any(|p| p.contains("inverted")));
+    let standard = post_text(&world, "std").expect("a standard machine posts");
+    history.execute(&world, LoadMachine::new(&world, "flip.mch".into(), Some(flipped())).expect("sane"));
+    let gate = posting::verification_gate(&world);
+    assert!(!gate.iter().any(|p| p.contains("inverted")), "an inverted X is translated, not refused: {gate:?}");
+    let inverted = post_text(&world, "flip").expect("an inverted X posts");
+    assert_ne!(standard, inverted, "the inverted program is not the standard one");
+    let a: Vec<&str> = standard.lines().collect();
+    let b: Vec<&str> = inverted.lines().collect();
+    assert_eq!(a.len(), b.len(), "the same blocks");
+    for (x, y) in a.iter().zip(&b) {
+        assert_eq!(mirrored_in_x(x), *y, "every X word negated, G2/G3 swapped");
+    }
+}
+
+#[test]
+fn an_inverted_z_refuses_posting_by_name() {
+    let (world, mut history) = faced_doc();
+    let mut m = flipped();
+    m.axes[0].direction = AxisDirection::Standard;
+    m.axes[2].direction = AxisDirection::Inverted;
+    history.execute(&world, LoadMachine::new(&world, "flipz.mch".into(), Some(m)).expect("sane"));
+    let gate = posting::verification_gate(&world);
+    assert!(gate.iter().any(|p| p == Z_REFUSAL), "{gate:?}");
+    let e = post_text(&world, "flipz").expect_err("never standard-sign code");
+    assert!(e.contains(Z_REFUSAL), "{e}");
 }
 
 #[test]
 fn the_refusal_names_every_inverted_axis() {
     let mut m = flipped();
+    assert_eq!(m.inverted_post_refusal(), None, "an inverted X alone is translated");
     m.axes[2].direction = AxisDirection::Inverted;
     assert_eq!(
         m.inverted_post_refusal().as_deref(),
-        Some("machine Flip 1 has inverted X and Z axes; posting for inverted axes is not supported yet (#374)")
+        Some(
+            "machine Flip 1 has inverted X and Z axes; posting for an inverted Z is not supported yet - tool-length compensation (G43) and the canned cycles' retract assume the controller's +Z leaves the work"
+        )
     );
 }
