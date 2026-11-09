@@ -70,6 +70,9 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
         }
     };
     event_loop.set_control_flow(ControlFlow::Wait);
+    // #144: macOS's terminate path (Cmd+Q, the app menu's Quit) asks
+    // through the guarded Quit instead of ending the process.
+    let _ = super::os_quit::install();
     let mut shell = Shell::new(pick, want);
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
@@ -775,6 +778,19 @@ impl winit::application::ApplicationHandler for Shell {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // #144: an OS quit (macOS Cmd+Q / app-menu Quit) is a Quit like
+        // the window X; the window comes forward so the prompt is seen.
+        if super::os_quit::route_pending(&mut self.state) {
+            if self.failed {
+                el.exit();
+                return;
+            }
+            if let Some(window) = &self.window {
+                window.set_minimized(false);
+                window.focus_window();
+                window.request_redraw();
+            }
+        }
         if self.occluded {
             el.set_control_flow(ControlFlow::Wait);
             return;

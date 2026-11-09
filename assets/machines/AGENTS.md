@@ -65,7 +65,8 @@ unstated capability into existence.
     (ISO 841); the stated `travel` is the machine's own stroke, so an
     inverted axis is judged as `-v` against it. The post (#374) writes
     an inverted X / Y mirrored (sign, I/J/K, G2/G3, G41/G42) through a
-    script that declares `axisInversion = true`; an inverted Z or any
+    script that declares `axisInversion = true` (probing too only when it
+    also declares `probeAxisInversion = true`, #392); an inverted Z or any
     other letter refuses posting by name. A rotary part's numeric `-1` refuses (a reversed
     rotary is not supported).
   - linear Z only: `safe_retract` (#495) - the Z, in MACHINE

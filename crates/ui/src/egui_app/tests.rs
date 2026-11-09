@@ -18,7 +18,10 @@
 //! gesture tests drive `crate::interact::pick_at` and the camera arms
 //! through egui's own pointer events - click-and-pick, the travel
 //! threshold, MMB/RMB, wheel, the Face radio and anchor picking. The
-//! snapshot is the churn gate for the per-panel migration steps. M1.4's
+//! snapshot was the churn gate for the per-panel migration steps; since
+//! #255 the pixel goldens ride the release lane (`#[ignore]`, run and
+//! regenerated only at a cut) and `tests/structural.rs` asserts their
+//! intent as text in the default suite. M1.4's
 //! graphical tool editor adds the first floating surface: the flow test
 //! drives the window (Edit opens, drag stages, Apply lands, Delete
 //! ghost-closes) and `tool_editor_snapshot` pins its pixels beside the
@@ -85,9 +88,12 @@ mod unsaved;
 mod post_refusal;
 mod gcode_viewer;
 mod first_setup;
+mod structural;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
+// #371: the tool editor's Body section.
+mod tool_body;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
 
@@ -1704,10 +1710,12 @@ fn headless_run_succeeds() {
 
 /// The churn gate for the migration: one rendered frame of the whole shell,
 /// compared to `tests/snapshots/egui_app.png` (relative to this crate).
-/// Regenerate deliberately with `UPDATE_SNAPSHOTS=1`; a failure writes
-/// `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
+/// Release lane since #255: PRs never change the PNG; it is regenerated
+/// once at a cut with `UPDATE_SNAPSHOTS=1` (with `--ignored`, CWD
+/// crates/ui); a failure writes `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
 /// below use a Linux-only threshold for isolated antialiasing differences.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn egui_shell_snapshot() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1718,8 +1726,8 @@ fn egui_shell_snapshot() {
 /// The pixels are process-global: `theme::current()` is ONE live table
 /// for the whole test binary, and the light golden flips it for its
 /// frames (the sync law is the shipping code, not a test-local poke).
-/// The dark snapshot tests read that same table through their frames,
-/// so all three share this lock - without it a parallel dark frame
+/// The dark snapshot tests (and their structural twins) read that same
+/// table through their frames, so all of them share this lock - without it a parallel dark frame
 /// could catch the light table and fail its own golden, and vice versa.
 static SNAPSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -1735,6 +1743,7 @@ fn snapshot_guard() -> std::sync::MutexGuard<'static, ()> {
 /// UPDATE_SNAPSHOTS=1; the restore at the end leaves the house look
 /// every other frame expects.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn egui_shell_snapshot_light() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1838,6 +1847,7 @@ fn tool_editor_window_edits_live_and_stages_through_commands() {
 /// keep its "window closed by default" law: fields left, banded to-scale
 /// profile right, floating over the dock. Regenerate with UPDATE_SNAPSHOTS=1.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn tool_editor_snapshot() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
