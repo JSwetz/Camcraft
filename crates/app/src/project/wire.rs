@@ -66,13 +66,17 @@ pub fn collect(world: &World) -> ProjectFile {
                     .entity_view(world)
                     .try_get::<&SetupDef>(|d| SetupDto {
                         stock: d.stock.clone(),
-                        wcs: d.wcs.clone(),
+                        wcs: WcsDto::One(d.wcs.clone()),
                         datum_from: d.datum_from.clone(),
                         work_offset: d
                             .work_offset
                             .and_then(|i| crate::schema::WCS_SLOTS.get(i))
                             .map(|w| (*w).to_string()),
                         part_alignment: d.part_alignment.as_ref().map(AlignmentDto::from_location),
+                        machine: d.machine.as_ref().map(SetupMachineDto::from_def),
+                        post: d.post.as_ref().map(SetupPostDto::from_ref),
+                        relative_to: d.relative_to.clone(),
+                        stock_source: d.stock_source.map(|s| s.word().to_string()),
                     })
             } else {
                 None
@@ -164,7 +168,7 @@ pub fn collect(world: &World) -> ProjectFile {
         // the mm/units law again: only a loaded machine pays for
         // saying so, and an absent key is the mute state verbatim.
         machine: {
-            let (path, m) = crate::machine::of(world);
+            let (path, m) = crate::machine::document_of(world);
             m.map(|machine| MachineDto { path, machine })
         },
         // The raw singleton, not the resolved one: a document where the
@@ -186,7 +190,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 },
             })
         },
-        post: match crate::posting::post_of(world) {
+        post: match crate::posting::document_post_of(world) {
             crate::schema::PostRef::Builtin => None,
             crate::schema::PostRef::Named(name) => Some(PostDto::Named(name)),
             crate::schema::PostRef::File(path) => Some(PostDto::File(path)),
@@ -229,13 +233,18 @@ pub fn save(world: &World, path: &Path) -> Result<(), ProjectError> {
 /// Rebuild world content from a project file. Not a command: opening a
 /// project replaces the document and clears the history (M1.2 wires that).
 pub fn load(world: &World, path: &Path) -> Result<(), ProjectError> {
+    load_noted(world, path).map(|_| ())
+}
+
+/// [`load`], returning the load notes ([`open_noted`]).
+pub fn load_noted(world: &World, path: &Path) -> Result<Vec<String>, ProjectError> {
     let text = std::fs::read_to_string(path).inspect_err(|e| {
         tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
     })?;
-    match open(world, &text) {
-        Ok(()) => {
+    match open_noted(world, &text) {
+        Ok(notes) => {
             tracing::info!(file = %crate::logging::file_name(path), bytes = text.len(), "project opened");
-            Ok(())
+            Ok(notes)
         }
         Err(e) => {
             tracing::warn!(file = %crate::logging::file_name(path), "project not opened: {e}");
@@ -245,6 +254,19 @@ pub fn load(world: &World, path: &Path) -> Result<(), ProjectError> {
 }
 
 pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
+    open_noted(world, text).map(|_| ())
+}
+
+/// [`open`], returning the load notes: what a migration changed that the
+/// user should hear about (#342: dropped work offsets no setup posted).
+/// Each note is logged as well.
+pub fn open_noted(world: &World, text: &str) -> Result<Vec<String>, ProjectError> {
     let file: ProjectFile = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
-    check_and_apply(world, file)
+    // #321: the carried-body cache is freed with the document it served.
+    crate::rest::clear_carried_cache();
+    let notes = check_and_apply(world, file)?;
+    for n in &notes {
+        tracing::warn!("project load note: {n}");
+    }
+    Ok(notes)
 }

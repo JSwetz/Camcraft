@@ -37,6 +37,7 @@ mod stamp_rise;
 #[cfg(test)]
 mod stamp_tests;
 pub mod axis;
+mod axis_consensus;
 mod axis_point;
 mod axis_poles;
 mod axis_refine;

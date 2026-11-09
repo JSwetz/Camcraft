@@ -24,7 +24,13 @@
 //! - **The pivot is the parts' centre.** The presets and the numeric
 //!   angles turn the parts about the centre of their bounds, so a flip
 //!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
-//!   takes any rigid transform - the door the face/edge picks (#330) use.
+//!   takes any rigid transform - the door the face/edge picks (#330) use,
+//!   through [`AlignPartToSetup::lay_on_plane`].
+//! - **Linked setups follow (#316).** Every setup placed relative to
+//!   this one (directly or through others, [`crate::setup_relative`])
+//!   keeps its transform to it: the command re-places each of them, with
+//!   its following stock, in the same undo unit - or refuses the whole
+//!   change, naming the setup that cannot follow.
 
 use flecs_ecs::prelude::World;
 
@@ -40,8 +46,34 @@ use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.
 
 type StockState = (StockShape, Location, std::sync::Arc<[Triangle]>);
 
-/// Write (or clear) a setup's part alignment.
-pub struct AlignPartToSetup {
+/// The setup's (held, new) alignment for `alignment`, normalised (the
+/// identity is "as modelled"); refused when nothing would change.
+fn change_of(
+    world: &World,
+    setup: &str,
+    alignment: Option<Location>,
+) -> Result<(Option<Location>, Option<Location>), CommandError> {
+    let entity = model::find_by_name(world, setup).ok_or_else(|| CommandError::NotFound(setup.to_string()))?;
+    let prev = entity
+        .entity_view(world)
+        .try_get::<&SetupDef>(|d| d.part_alignment)
+        .ok_or_else(|| CommandError::Invalid(format!("'{setup}' is not a setup")))?;
+    let next = match alignment {
+        None => None,
+        Some(a) => {
+            let a = check_location(a, "the part alignment")?;
+            let still = a.pos == Point3::ZERO && setup_align::is_identity_rot(a.rot);
+            (!still).then_some(a)
+        }
+    };
+    if next == prev {
+        return Err(CommandError::Invalid(format!("setup '{setup}' already holds the part that way")));
+    }
+    Ok((prev, next))
+}
+
+/// One setup's alignment change, with its following stock.
+struct Step {
     setup: String,
     prev: Option<Location>,
     next: Option<Location>,
@@ -49,30 +81,67 @@ pub struct AlignPartToSetup {
     stock: Option<(String, StockState, StockState)>,
 }
 
+/// Write (or clear) a setup's part alignment.
+pub struct AlignPartToSetup {
+    main: Step,
+    /// #316: the setups linked below this one, re-placed with it (parents
+    /// before children).
+    carried: Vec<Step>,
+}
+
 impl AlignPartToSetup {
     /// Any rigid transform document -> setup frame; `None` clears.
     pub fn new(world: &World, setup: &str, alignment: Option<Location>) -> Result<Self, CommandError> {
-        let entity = model::find_by_name(world, setup)
-            .ok_or_else(|| CommandError::NotFound(setup.to_string()))?;
-        let prev = entity
-            .entity_view(world)
-            .try_get::<&SetupDef>(|d| d.part_alignment)
-            .ok_or_else(|| CommandError::Invalid(format!("'{setup}' is not a setup")))?;
-        let next = match alignment {
-            None => None,
-            Some(a) => {
-                let a = check_location(a, "the part alignment")?;
-                let still = a.pos == Point3::ZERO && setup_align::is_identity_rot(a.rot);
-                (!still).then_some(a)
-            }
-        };
-        if next == prev {
-            return Err(CommandError::Invalid(format!(
-                "setup '{setup}' already holds the part that way"
-            )));
-        }
+        let (prev, next) = change_of(world, setup, alignment)?;
         let stock = following_stock(world, setup, prev, next)?;
-        Ok(AlignPartToSetup { setup: setup.to_string(), prev, next, stock })
+        let mut carried = Vec::new();
+        for (child, c_prev, c_next) in crate::setup_relative::carried(world, setup, prev, next) {
+            let follow = |e: CommandError| {
+                let why = match e {
+                    CommandError::Invalid(m) => m,
+                    other => other.to_string(),
+                };
+                CommandError::Invalid(format!(
+                    "setup '{child}' is placed relative to '{setup}' and must follow the change, but {why}"
+                ))
+            };
+            let c_next = c_next.map(|a| check_location(a, "the carried part alignment")).transpose().map_err(follow)?;
+            let stock = following_stock(world, &child, c_prev, c_next).map_err(follow)?;
+            carried.push(Step { setup: child, prev: c_prev, next: c_next, stock });
+        }
+        Ok(AlignPartToSetup { main: Step { setup: setup.to_string(), prev, next, stock }, carried })
+    }
+
+    /// How many linked setups this change re-places with it (#316).
+    #[must_use]
+    pub fn carried_count(&self) -> usize {
+        self.carried.len()
+    }
+
+    /// Would [`Self::lay_on_plane`] be accepted? The same refusals, by
+    /// name ("already holds the part that way" included), without
+    /// building the command: the Setups page greys Apply out with it.
+    pub fn check_lay(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        lay: crate::pick::PlaneLay,
+    ) -> Result<(), CommandError> {
+        let at = crate::pick::lay_on_plane(world, picks, lay).map_err(CommandError::Invalid)?;
+        change_of(world, setup, Some(at)).map(|_| ())
+    }
+
+    /// Lay the part on a G17 / G18 / G19 plane from picks (#330): one flat
+    /// face or two straight edges, read by [`crate::pick::lay_on_plane`].
+    /// A refused pick is refused here, by name, before anything is written.
+    pub fn lay_on_plane(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        lay: crate::pick::PlaneLay,
+    ) -> Result<Self, CommandError> {
+        let at = crate::pick::lay_on_plane(world, picks, lay).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some(at))
     }
 
     /// One of the Setups page's quick choices.
@@ -93,6 +162,9 @@ impl AlignPartToSetup {
         Self::new(world, setup, setup_align::about_centre(rot, c))
     }
 
+}
+
+impl Step {
     fn write(&self, world: &World, alignment: Option<Location>, stock: Option<&StockState>) {
         if let Some(entity) = model::find_by_name(world, &self.setup) {
             let view = entity.entity_view(world);
@@ -117,11 +189,15 @@ impl AlignPartToSetup {
 
 impl Command for AlignPartToSetup {
     fn apply(&self, world: &World) {
-        self.write(world, self.next, self.stock.as_ref().map(|(_, _, after)| after));
+        for step in std::iter::once(&self.main).chain(&self.carried) {
+            step.write(world, step.next, step.stock.as_ref().map(|(_, _, after)| after));
+        }
     }
 
     fn invert(&self, world: &World) {
-        self.write(world, self.prev, self.stock.as_ref().map(|(_, before, _)| before));
+        for step in self.carried.iter().rev().chain(std::iter::once(&self.main)) {
+            step.write(world, step.prev, step.stock.as_ref().map(|(_, before, _)| before));
+        }
     }
 }
 

@@ -130,7 +130,7 @@ fn sheet_is_deterministic_byte_identical_twice() {
     run(
         &world,
         &mut history,
-        SetWcsOrigin::new(&world, "G54", at(10.0, 0.0, 5.0)),
+        SetWcsOrigin::new(&world, at(10.0, 0.0, 5.0)),
         "place offset",
     ); // lands in Setup2 (active)
     run(
@@ -176,7 +176,7 @@ fn sheet_names_stock_wcs_and_op_depths() {
     run(
         &world,
         &mut history,
-        SetWcsOrigin::new(&world, "G54", at(12.5, -3.0, 4.0)),
+        SetWcsOrigin::new(&world, at(12.5, -3.0, 4.0)),
         "place G54 in Setup2",
     );
     create_face(&world, &mut history, "Face2", 19.5);

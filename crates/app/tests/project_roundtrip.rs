@@ -230,7 +230,7 @@ fn stock_and_wcs_round_trip() {
     };
     history.execute(&world, SetStock::new(&world, boxy.clone(), at(1.0, 2.0, -1.0)).unwrap());
     history
-        .execute(&world, SetWcsOrigin::new(&world, "G54", at(12.5, -3.0, 0.5)).unwrap());
+        .execute(&world, SetWcsOrigin::new(&world, at(12.5, -3.0, 0.5)).unwrap());
     project::save(&world, &path).expect("save");
     let first = std::fs::read_to_string(&path).expect("read");
 
@@ -2425,7 +2425,7 @@ fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     assert_eq!(setup::active(&world).as_deref(), Some("Setup1"));
     let def = setup::def_of(&world, "Setup1").expect("definition");
     assert_eq!(def.stock, "Stock", "materialization points, never copies");
-    assert!(def.wcs.contains(&"G54".to_owned()));
+    assert_eq!(def.wcs, "G54", "#342: the setup's one WCS is the legacy G54");
     assert_eq!(def.datum_from, "");
     project::save(&world, &p).expect("save");
     let first = std::fs::read_to_string(&p).expect("read");
@@ -2467,13 +2467,10 @@ fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     assert_eq!(setup::active(&world).as_deref(), Some("Setup2"));
     assert_eq!(setup::stock_entity_name(&world, Some("Setup2")), "Setup2/Stock");
     assert!(
-        setup::wcs_entity(&world, Some("Setup2"), 0).is_some(),
-        "the placed slot names a real entity"
+        setup::wcs_entity(&world, Some("Setup2")).is_some(),
+        "the posted slot (G54) is the setup's one WCS (#342)"
     );
-    assert!(
-        setup::wcs_entity(&world, Some("Setup2"), 1).is_none(),
-        "G55 names nothing in the file: an unplaced slot, not corrupt"
-    );
+    assert_eq!(setup::wcs_entity_name(&world, Some("Setup2")), "Setup2/G54");
     assert_eq!(
         setup::def_of(&world, "Setup2").expect("def").datum_from,
         "Setup1",

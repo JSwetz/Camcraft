@@ -2,10 +2,10 @@
 //! operation posts at, and the one-file refusal a per-setup pick brings.
 //!
 //! - **The setup governs.** Every operation of a setup posts at the
-//!   setup's program offset (`SetupDef::work_offset`, set by
-//!   `SetSetupWorkOffset`; unpicked = `G54`), measured from that slot's
-//!   placement in the setup - [`crate::setup::wcs_slot`] is the law. A
-//!   height measured from the work offset reads the same slot (#329), so
+//!   setup's work-offset word (`SetupDef::work_offset`, set by
+//!   `SetSetupWorkOffset`; unlabelled = `G54`), measured from the setup's
+//!   one WCS (#342) - [`crate::setup::wcs_slot`] is the word law. A
+//!   height measured from the work offset reads the same WCS (#329), so
 //!   an operation cannot disagree with its setup by construction.
 //! - **One program, one register per word.** A single NC file in which
 //!   two setups post the same word with different placements would run
@@ -37,10 +37,10 @@ fn word(slot: usize) -> &'static str {
     WCS_SLOTS.get(slot).copied().unwrap_or("G54")
 }
 
-/// The placement a setup's slot is measured from (unplaced = the origin,
-/// the law `wcs_context` reads).
-fn placement(world: &World, setup: Option<&str>, slot: usize) -> Location {
-    crate::setup::wcs_entity(world, setup, slot)
+/// The placement a setup's WCS sits at (unplaced = the origin, the law
+/// `wcs_context` reads).
+fn placement(world: &World, setup: Option<&str>) -> Location {
+    crate::setup::wcs_entity(world, setup)
         .and_then(|e| model::transform_of(world, &e))
         .unwrap_or_default()
 }
@@ -72,7 +72,7 @@ pub(super) fn shared_word_problems(world: &World) -> Vec<String> {
         let setup = op.setup.as_deref();
         let slot = wcs_slot(world, setup);
         let name = crate::setup::effective(world, setup).unwrap_or_default();
-        let here = placement(world, setup, slot);
+        let here = placement(world, setup);
         match seen.iter().find(|(s, n, _)| *s == slot && *n != name) {
             Some((_, first, there)) if !same_zero(there, &here) => {
                 let line = format!(
