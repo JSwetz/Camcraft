@@ -363,8 +363,9 @@ function onCycle() {
   // (the stream's synthesized tap feed), no P - PathPilot sizes the
   // bottom dwell itself, and the MX mills tap from the spindle encoder.
   else if (p.CycleType === "TAP") {
-    // A machine that says it cannot rigid-tap (the R8 770M and PCNC 440:
-    // tension/compression holders and thread milling only) refuses the
+    // A machine that says it cannot rigid-tap (the R8 770M, 1100M, PCNC 440
+    // and the Mach3-era PCNC 770 / 1100: tapping heads, tension/compression
+    // holders and thread milling only) refuses the
     // cycle by name rather than posting a G84 its spindle cannot follow.
     if (typeof machine !== "undefined" && machine.rigidTapping === false) {
       if (!tapRefused) tapRefused = true; else return;

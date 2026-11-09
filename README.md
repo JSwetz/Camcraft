@@ -36,7 +36,8 @@ text, assets or post processors were used.
   holes).
 - **Set up** stock, work offsets (G54–G59), fixtures and machines (mill,
   5-axis, lathe, mill-turn, and the Tormach 770MX, 770MX (ML), 770M,
-  1100MX, 1500MX and PCNC 440 mills).
+  1100M, 1100MX, 1500MX, PCNC 440, PCNC 770 (earlier and Series 3) and
+  PCNC 1100 (Series I, II and 3) mills).
 - **2D milling:** face, contour (with G41/G42 compensation), pocket,
   adaptive clearing, slot, trace, engrave, chamfer, circular, bore and
   thread milling.
