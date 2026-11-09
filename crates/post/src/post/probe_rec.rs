@@ -1,10 +1,14 @@
 //! Probing in the intermediate stream (#108): the `TOUCH` record (one
-//! probing move toward a target that stops on contact) and the `FOUND`
-//! record (what the measured trips find, and what the program does with
-//! it). Provenance: NIST RS274NGC (NISTIR 6556) G38.2 probe semantics -
-//! the trip point lands in the probe parameters - and touch-probe
-//! practice (a centre is the mean of opposite touches); our own record
-//! names and text form, specced beside `docs/CNC-INTERMEDIATE.md`.
+//! probing move toward a target that stops on contact), the `GUARD`
+//! record (#174: a positioning feed of a probe path that stops on an
+//! UNEXPECTED contact and alarms) and the `FOUND` record (what the
+//! measured trips find, and what the program does with it).
+//! Provenance: NIST RS274NGC (NISTIR 6556) G38.2 probe semantics - the
+//! trip point lands in the probe parameters - the LinuxCNC G-code
+//! reference's G38.3 (stop on contact, no error without one) and
+//! touch-probe practice (a centre is the mean of opposite touches;
+//! positioning moves are protected); our own record names and text
+//! form, specced beside `docs/CNC-INTERMEDIATE.md`.
 
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -73,6 +77,68 @@ pub(super) fn parse_retreat<'a>(it: &mut impl Iterator<Item = &'a str>) -> Resul
         return Err("a RETREAT feed must be positive".into());
     }
     Ok(RetreatRec { delta, expect, feed })
+}
+
+/// A protected positioning move (#174): a straight feed of a probe
+/// path that is not a touch or its back-off - the descent to a touch's
+/// start, the travel between touches, the rise - posted as a
+/// stop-on-contact move that ALARMS when the stylus trips on the way,
+/// so a part or clamp that is not where the model says stops the
+/// machine instead of breaking the stylus. `to` is the move's end
+/// (world mm), `feed` its rate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GuardRec {
+    pub to: [f64; 3],
+    pub feed: f64,
+}
+
+impl GuardRec {
+    pub fn props(&self) -> BTreeMap<String, Value> {
+        let mut m = BTreeMap::new();
+        m.insert("command".into(), json!("ProbeGuard"));
+        m.insert("X".into(), json!(self.to[0]));
+        m.insert("Y".into(), json!(self.to[1]));
+        m.insert("Z".into(), json!(self.to[2]));
+        m.insert("Feed".into(), json!(self.feed));
+        m
+    }
+}
+
+/// The positioning law of a probe path (#174): every motion of a path
+/// that carries touches, other than the touches, their back-offs and
+/// the rapids, is a protected move. `Ok(None)` for a rapid (the safe
+/// plane's travel stays a rapid); `Err` names a move that cannot be
+/// protected - an arc, or a feed with no rate - so it is refused rather
+/// than posted as a plain feed.
+pub fn guard_of(m: &crate::cl::Move) -> Result<Option<GuardRec>, String> {
+    if m.kind == crate::cl::MoveKind::Rapid {
+        return Ok(None);
+    }
+    if m.arc.is_some() {
+        return Err("probing: an arc in a probe path cannot be a protected (stop-on-contact) move - refused".into());
+    }
+    let feed = m
+        .feed
+        .filter(|f| f.is_finite() && *f > 0.0)
+        .ok_or_else(|| "probing: a probe path positioning feed states no feed rate - refused".to_string())?;
+    Ok(Some(GuardRec { to: [m.to.x, m.to.y, m.to.z], feed }))
+}
+
+pub(super) fn write_guard(g: &GuardRec) -> String {
+    format!("GUARD {} {} {} F {}\n", q(g.to[0]), q(g.to[1]), q(g.to[2]), q(g.feed))
+}
+
+/// `GUARD x y z F feed` (lengths in microns).
+pub(super) fn parse_guard<'a>(it: &mut impl Iterator<Item = &'a str>) -> Result<GuardRec, String> {
+    let to = [um(it.next(), "GUARD X")?, um(it.next(), "GUARD Y")?, um(it.next(), "GUARD Z")?];
+    if it.next() != Some("F") {
+        return Err("GUARD needs a feed (F)".into());
+    }
+    let feed = um(it.next(), "GUARD feed")?;
+    if feed <= 0.0 {
+        return Err("a GUARD feed must be positive".into());
+    }
+    Ok(GuardRec { to, feed })
 }
 
 /// One found axis: the mean of the listed measurements' trips on

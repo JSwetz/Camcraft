@@ -229,6 +229,8 @@ pub enum EntityKind {
     Tool,
     Operation,
     Setup,
+    /// A Pause / Home entry of the operation list (#155).
+    Entry,
 }
 
 /// The file mirror of `StockShape`, kept separate so the domain enum can

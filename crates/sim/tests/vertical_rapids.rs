@@ -60,7 +60,7 @@ fn judge(moves: Vec<Move>) -> Vec<Warning> {
 /// `moves` on a tool of radius `r` whose tip has corner radius
 /// `corner` (`Some(r)` a ball, between a bull, `None` no stated tip).
 fn judge_tip(moves: Vec<Move>, r: f64, corner: Option<f64>) -> Vec<Warning> {
-    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() };
+    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
     let region = rect();
     let tool = ToolGeom {
         radius: r,

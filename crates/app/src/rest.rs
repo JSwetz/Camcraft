@@ -309,7 +309,7 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     // The same holds for a turning kind on a mill-turn: the column grid
     // reads its undercuts the same way, so outside a lathe every turning
     // kind but nose-cut Facing ahead is unknown too.
-    let lathe = crate::machine::kind_of(world) == crate::machine::Kind::Lathe;
+    let lathe = crate::machine::kind_of_setup(world, setup) == crate::machine::Kind::Lathe;
     let facing = |a: &Ahead| a.kind == crate::operation::OpType::Facing && a.nose.is_some();
     let turning = |a: &Ahead| a.kind.info().family() == crate::operation::Family::Turn;
     if let Some(a) = ahead.iter().find(|a| !facing(a) && (lathe || turning(a))) {

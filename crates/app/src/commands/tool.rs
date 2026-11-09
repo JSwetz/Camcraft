@@ -12,7 +12,7 @@ use crate::model;
 use crate::schema::{Location, STOCK_NAME, WCS_SLOTS, ToolBody, ToolDef};
 use crate::tools::Tool;
 
-fn reserved(world: &World, name: &str) -> Option<CommandError> {
+pub(super) fn reserved(world: &World, name: &str) -> Option<CommandError> {
     if name.is_empty() {
         return Some(CommandError::Invalid("tool name must not be empty".into()));
     }

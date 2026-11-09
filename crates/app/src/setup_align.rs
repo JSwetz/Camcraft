@@ -362,7 +362,7 @@ pub fn generation_problem(world: &World, op: &crate::schema::Operation) -> Optio
     let setup = crate::setup::effective(world, op.setup.as_deref())?;
     stored(world, &setup)?;
     let head = format!("setup '{setup}' holds the part turned (part alignment)");
-    if crate::machine::kind_of(world) != crate::machine::Kind::Mill {
+    if crate::machine::kind_of_setup(world, Some(&setup)) != crate::machine::Kind::Mill {
         return Some(format!("{head} - an aligned part is not supported yet on a lathe or mill-turn machine"));
     }
     if !verified_kind(&op.params) {
