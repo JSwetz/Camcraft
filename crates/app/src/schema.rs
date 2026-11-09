@@ -149,8 +149,8 @@ pub struct ToolDef {
 /// (a re-clamp of it: flipped, turned). The relation itself is not
 /// stored - it is `part_alignment` read against the other setup's
 /// ([`crate::setup_relative::transform_between`]); the link only makes
-/// a later change of that setup's alignment carry into this one. `None`
-/// - the default, every file before v56 - links nothing. Written only by
+/// a later change of that setup's alignment carry into this one. `None`,
+/// the default and every file before v56, links nothing. Written only by
 /// `SetSetupRelative` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
