@@ -208,6 +208,7 @@ fn a_machine_with_a_through_spindle_entry_posts_its_code() {
             camcraft_app::machine::Coolant { name: "Flood".into(), m_code: "M8".into() },
             camcraft_app::machine::Coolant { name: "Through-spindle".into(), m_code: "M88".into() },
         ],
+        safe_retract_z: Some(0.0), // #503: the Siemens post asks the machine where "up" is
         ..Default::default()
     };
     let load = camcraft_app::commands::LoadMachine::new(&world, "tsc.mch".into(), Some(mounted));

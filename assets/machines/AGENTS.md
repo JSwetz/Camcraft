@@ -75,7 +75,8 @@ unstated capability into existence.
     Z0 is the top of travel (every shipped Tormach file, `vmc.mch`,
     `tilthead.mch`; the mirror-form default `3axis-vmc.mch` states
     `"safeRetractZ": 0.0`). Absent or null is unstated, and the
-    Tormach post refuses a non-Tormach machine that states none; a
+    Tormach post refuses a non-Tormach machine that states none (the
+    Siemens 840D post, #503, any machine that states none); a
     non-number, or the key on any other axis, refuses the file naming
     the axis. The mirror carries it as `safeRetractZ` (mm).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
