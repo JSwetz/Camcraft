@@ -96,18 +96,18 @@ pub(super) fn refuse_open(facets: &[Triangle]) -> Result<(), GenError> {
     Ok(())
 }
 
-/// Refuse a work whose seam is not turned: `cols` are the off-axis
-/// vertices `(azimuth, station, radius)` of every facet straddling the
-/// wrap's ±π branch. On a revolve those stand on exactly two meridian
-/// columns, one each side of the branch, with one profile. A flat, a
-/// keyway or a cross hole crossing the seam breaks that: its vertices
-/// sit at their own azimuths (a ragged seam), or the columns either side
-/// carry different radii. So does a turned mesh whose diameters were
-/// tessellated with different column counts (#228), and the refusal
-/// names both. Such a seam is refused by name - the cover's
-/// ends would read the metal another lap holds as air (PR #210's review:
-/// cut tips down to the axis).
-pub(super) fn refuse_feature_on_seam(cols: &[(f64, f64, f64)], scale: f64) -> Result<(), GenError> {
+/// Is the seam turned? `cols` are the off-axis vertices `(azimuth,
+/// station, radius)` of every facet straddling the wrap's ±π branch.
+/// On a revolve those stand on exactly two meridian columns, one each
+/// side of the branch, with one profile: `None`. A flat, a keyway or a
+/// cross hole crossing the seam breaks that - its vertices sit at their
+/// own azimuths (a ragged seam), or the columns either side carry
+/// different radii - and so does a turned mesh whose diameters were
+/// tessellated with different column counts (#228): `Some(columns)`,
+/// the number of meridian columns meeting the seam. Such a seam is not
+/// wrapped - the cover's ends would read the metal another lap holds as
+/// air (PR #210's review: cut tips down to the axis).
+pub(super) fn seam_columns(cols: &[(f64, f64, f64)], scale: f64) -> Option<usize> {
     let q = |x: f64| (x * WELD / scale.max(1.0)).round() as i64;
     let mut columns: Vec<(f64, Vec<(i64, i64)>)> = Vec::new();
     for &(th, v, rho) in cols {
@@ -122,18 +122,25 @@ pub(super) fn refuse_feature_on_seam(cols: &[(f64, f64, f64)], scale: f64) -> Re
         prof.sort_unstable();
         prof.dedup();
     }
-    let turned = match columns.as_slice() {
-        [] => true,
-        [(_, a), (_, b)] => a == b,
-        _ => false,
-    };
-    if turned {
-        return Ok(());
+    match columns.as_slice() {
+        [] => None,
+        [(_, a), (_, b)] if a == b => None,
+        _ => Some(columns.len()),
     }
-    Err(GenError::Invalid(format!(
-        "a feature that is not turned (a flat, a keyway, a cross hole) crosses the rotary wrap's seam, or the mesh tessellates its diameters with different column counts ({} meridian columns meet the seam, a turned seam has 2 alike): refused rather than read the seam's metal as air - rotate a feature clear of the seam, or export the model with one column count",
-        columns.len()
-    )))
+}
+
+/// The refusal of a seam that is not turned, `n` columns meeting it;
+/// `everywhere` when no seam angle the wrap could take is turned (issue
+/// #226: a feature all the way round).
+pub(super) fn seam_refusal(n: usize, everywhere: bool) -> GenError {
+    let at = if everywhere {
+        "at every angle the seam could take (a feature all the way round), "
+    } else {
+        ""
+    };
+    GenError::Invalid(format!(
+        "a feature that is not turned (a flat, a keyway, a cross hole) crosses the rotary wrap's seam {at}or the mesh tessellates its diameters with different column counts ({n} meridian columns meet the seam, a turned seam has 2 alike): refused rather than read the seam's metal as air - leave the bar a turned band, or export the model with one column count"
+    ))
 }
 
 /// The curtains closing the developed sheet's seam: `edges` are the

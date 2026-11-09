@@ -18,7 +18,10 @@
 //! gesture tests drive `crate::interact::pick_at` and the camera arms
 //! through egui's own pointer events - click-and-pick, the travel
 //! threshold, MMB/RMB, wheel, the Face radio and anchor picking. The
-//! snapshot is the churn gate for the per-panel migration steps. M1.4's
+//! snapshot was the churn gate for the per-panel migration steps; since
+//! #255 the pixel goldens ride the release lane (`#[ignore]`, run and
+//! regenerated only at a cut) and `tests/structural.rs` asserts their
+//! intent as text in the default suite. M1.4's
 //! graphical tool editor adds the first floating surface: the flow test
 //! drives the window (Edit opens, drag stages, Apply lands, Delete
 //! ghost-closes) and `tool_editor_snapshot` pins its pixels beside the
@@ -81,13 +84,25 @@ mod stock_size;
 mod stock_fit_sides;
 mod layout;
 mod machines_pane;
+mod machines_edit;
 mod unsaved;
+mod post_refusal;
+mod gcode_viewer;
 mod first_setup;
+mod structural;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
+// #155: Pause / Home entries in the operation list.
+mod program_entry;
+// #371: the tool editor's Body section.
+mod tool_body;
+// #93: the tool editor's spun-profile (Profile) section.
+mod tool_profile;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
+// #509: the Fixtures page rows fit the pane.
+mod fixture_rows;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -317,6 +332,26 @@ fn click_toggles_view_state() {
     harness.run();
     assert_eq!(harness.state().state.display, crate::state::DisplayMode::Wireframe);
     assert!(harness.state().state.pending.is_empty(), "a view toggle queues nothing");
+}
+
+/// #434: the Projection radios flip the viewport's projection mode -
+/// view state on the same law as the Solids radios (never a command,
+/// never the undo stack), reached through a real pointer event.
+#[test]
+fn projection_radios_flip_the_viewport_mode() {
+    let mut harness = shell_harness();
+    assert_eq!(
+        harness.state().state.cam.projection,
+        crate::viewport::ProjectionMode::Perspective,
+        "the house default stays perspective"
+    );
+    harness.get_by_label("Ortho").click();
+    harness.run();
+    assert_eq!(harness.state().state.cam.projection, crate::viewport::ProjectionMode::Orthographic);
+    harness.get_by_label("Perspective").click();
+    harness.run();
+    assert_eq!(harness.state().state.cam.projection, crate::viewport::ProjectionMode::Perspective);
+    assert!(harness.state().state.pending.is_empty(), "a mode switch queues nothing");
 }
 
 #[test]
@@ -1682,10 +1717,12 @@ fn headless_run_succeeds() {
 
 /// The churn gate for the migration: one rendered frame of the whole shell,
 /// compared to `tests/snapshots/egui_app.png` (relative to this crate).
-/// Regenerate deliberately with `UPDATE_SNAPSHOTS=1`; a failure writes
-/// `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
+/// Release lane since #255: PRs never change the PNG; it is regenerated
+/// once at a cut with `UPDATE_SNAPSHOTS=1` (with `--ignored`, CWD
+/// crates/ui); a failure writes `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
 /// below use a Linux-only threshold for isolated antialiasing differences.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn egui_shell_snapshot() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1696,8 +1733,8 @@ fn egui_shell_snapshot() {
 /// The pixels are process-global: `theme::current()` is ONE live table
 /// for the whole test binary, and the light golden flips it for its
 /// frames (the sync law is the shipping code, not a test-local poke).
-/// The dark snapshot tests read that same table through their frames,
-/// so all three share this lock - without it a parallel dark frame
+/// The dark snapshot tests (and their structural twins) read that same
+/// table through their frames, so all of them share this lock - without it a parallel dark frame
 /// could catch the light table and fail its own golden, and vice versa.
 static SNAPSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -1713,6 +1750,7 @@ fn snapshot_guard() -> std::sync::MutexGuard<'static, ()> {
 /// UPDATE_SNAPSHOTS=1; the restore at the end leaves the house look
 /// every other frame expects.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn egui_shell_snapshot_light() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1816,6 +1854,7 @@ fn tool_editor_window_edits_live_and_stages_through_commands() {
 /// keep its "window closed by default" law: fields left, banded to-scale
 /// profile right, floating over the dock. Regenerate with UPDATE_SNAPSHOTS=1.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn tool_editor_snapshot() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1929,6 +1968,44 @@ fn file_keys_queue_their_commands() {
         typing.state().pending.is_empty(),
         "Ctrl+O armed a dialog over a focused text field: {:?}",
         typing.state().pending
+    );
+}
+
+/// #434: bare P flips perspective/ortho in place - a viewport-layer
+/// key like F, view state through `actions`, so it arms no command,
+/// and Ctrl+P keeps its post dialog exactly as `file_keys_queue_their_commands`
+/// proves. The typing gate applies to it the same way.
+#[test]
+fn bare_p_flips_projection_without_a_command() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(400.0, 200.0))
+        .build_ui_state(shortcuts_only, State::new());
+    harness.run();
+    let press_p = |h: &mut Harness<'static, State>, mods: Modifiers| {
+        h.input_mut().events.push(Event::ModifiersChanged(mods));
+        h.input_mut().events.push(Event::Key {
+            key: Key::P,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: mods,
+        });
+        h.run();
+    };
+    let mode = |h: &Harness<'static, State>| h.state().cam.projection;
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective);
+    press_p(&mut harness, Modifiers::NONE);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Orthographic, "P to ortho");
+    press_p(&mut harness, Modifiers::NONE);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective, "P back to perspective");
+    assert!(harness.state().pending.is_empty(), "the flip armed a command");
+    // Ctrl+P stays on the post lane: the key splits, the flip stays out.
+    press_p(&mut harness, Modifiers::COMMAND);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective, "Ctrl+P must not flip");
+    assert!(
+        harness.state().pending.iter().any(|c| matches!(c, CommandKind::PostProgramDialog)),
+        "Ctrl+P lost its post: {:?}",
+        harness.state().pending
     );
 }
 
@@ -4351,7 +4428,7 @@ fn stock_eye_hides_the_viewport_stock_without_removing_it_from_the_document() {
     let stock_name = camcraft_app::setup::stock_entity_name(&harness.state().state.world, None);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
     let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock(_))).expect("stock row");
-    let eye = egui::pos2(216.0, 179.0 + (row as f32 + 0.5) * theme::current().row_height);
+    let eye = egui::pos2(216.0, 200.0 + (row as f32 + 0.5) * theme::current().row_height);
     assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
 
     set_pos(&mut harness, eye);
@@ -4544,12 +4621,13 @@ fn dragging_an_operation_row_reorders_within_global_setup() {
     let second = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour2"))
         .expect("second row");
     assert_eq!(second, first + 1);
-    // The browser tree begins at y=179 below its view controls in the
+    // The browser tree begins at y=200 below its view controls (the
+    // projection radios joined them for #434) in the
     // 1280x720 shell. The row indices come from the current flat browser,
     // so the drag follows the rows after setup nesting was removed.
     let row_h = theme::current().row_height;
-    let from = egui::pos2(120.0, 179.0 + (second as f32 + 0.5) * row_h);
-    let to = egui::pos2(120.0, 179.0 + (first as f32 + 0.25) * row_h);
+    let from = egui::pos2(120.0, 200.0 + (second as f32 + 0.5) * row_h);
+    let to = egui::pos2(120.0, 200.0 + (first as f32 + 0.25) * row_h);
     set_pos(&mut harness, from);
     button_at(&mut harness, egui::PointerButton::Primary, from, true);
     set_pos(&mut harness, to);
@@ -4691,14 +4769,14 @@ fn operations_heading_menu_pastes_the_copied_operation() {
         panes::Leaf::SetupOps(_)))
         .expect("Operations heading");
     let row_height = theme::current().row_height;
-    let heading = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let heading = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     set_pos(&mut harness, heading);
     button_at(&mut harness, egui::PointerButton::Secondary, heading, true);
     button_at(&mut harness, egui::PointerButton::Secondary, heading, false);
     assert_eq!(harness.state().state.tree_menu, Some(TreeMenuTarget::Operations));
 
     let paste = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
     set_pos(&mut harness, paste);
     button_at(&mut harness, egui::PointerButton::Primary, paste, true);
     button_at(&mut harness, egui::PointerButton::Primary, paste, false);
@@ -4715,7 +4793,7 @@ fn operation_type_menu_requires_confirmation() {
         panes::Leaf::Op(name) if name == "Contour1"))
         .expect("operation row");
     let row_height = theme::current().row_height;
-    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let operation = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     set_pos(&mut harness, operation);
     button_at(&mut harness, egui::PointerButton::Secondary, operation, true);
     button_at(&mut harness, egui::PointerButton::Secondary, operation, false);
@@ -4723,9 +4801,9 @@ fn operation_type_menu_requires_confirmation() {
         Some(TreeMenuTarget::Operation("Contour1".into())));
 
     // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
-    // (#110), section header, Face.
+    // (#110), add pause / home / optional stop (#155), section header, Face.
     let face = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 12.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);
@@ -4754,14 +4832,14 @@ fn operation_menu_suppresses_and_sets_the_after_action() {
         panes::Leaf::Op(name) if name == "Contour1"))
         .expect("operation row");
     let row_height = theme::current().row_height;
-    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let operation = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     let open_menu = |harness: &mut Harness<'static, ShellUi>| {
         set_pos(harness, operation);
         button_at(harness, egui::PointerButton::Secondary, operation, true);
         button_at(harness, egui::PointerButton::Secondary, operation, false);
     };
     let click_row = |harness: &mut Harness<'static, ShellUi>, k: f32| {
-        let at = egui::pos2(90.0, 179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
+        let at = egui::pos2(90.0, 200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
         set_pos(harness, at);
         button_at(harness, egui::PointerButton::Primary, at, true);
         button_at(harness, egui::PointerButton::Primary, at, false);

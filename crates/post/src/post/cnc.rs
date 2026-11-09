@@ -91,6 +91,11 @@ pub enum Record {
     Found(super::probe_rec::FoundRec),
     /// The incremental back-off after a trip (#108).
     Retreat(super::probe_rec::RetreatRec),
+    /// A protected positioning move of a probe path (#174): feed to the
+    /// point, stop on contact and ALARM if the stylus trips on the way.
+    /// A probing script that cannot voice it is refused by name - a
+    /// plain feed would drive the stylus into an unexpected obstacle.
+    Guard(super::probe_rec::GuardRec),
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -288,6 +293,7 @@ impl Record {
                 t.measure.map_or_else(String::new, |k| format!(" · measure {k}"))
             ),
             Record::Retreat(r) => format!("probe retreat Δ {}", pos(r.delta[0], r.delta[1], r.delta[2])),
+            Record::Guard(g) => format!("probe protected move → {}", pos(g.to[0], g.to[1], g.to[2])),
             Record::Found(f) => match f.set_wcs {
                 Some(w) => format!("probe result · set G{} · tol {:.3} mm", 54 + u32::from(w), f.tol_mm),
                 None => format!("probe result · confirm · tol {:.3} mm", f.tol_mm),
@@ -436,6 +442,7 @@ pub fn serialize(records: &[Record]) -> String {
             Record::Touch(t) => s.push_str(&super::probe_rec::write_touch(t)),
             Record::Found(f) => s.push_str(&super::probe_rec::write_found(f)),
             Record::Retreat(r) => s.push_str(&super::probe_rec::write_retreat(r)),
+            Record::Guard(g) => s.push_str(&super::probe_rec::write_guard(g)),
         }
     }
     s
@@ -948,6 +955,12 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
             "RETREAT" => {
                 let r = super::probe_rec::parse_retreat(&mut it).map_err(fail)?;
                 out.push(Record::Retreat(r));
+                move_idx += 1;
+                in_section = true;
+            }
+            "GUARD" => {
+                let g = super::probe_rec::parse_guard(&mut it).map_err(fail)?;
+                out.push(Record::Guard(g));
                 move_idx += 1;
                 in_section = true;
             }

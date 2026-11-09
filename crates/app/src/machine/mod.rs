@@ -22,7 +22,9 @@
 //! own files add a `"travel": {"min": .., "max": ..}` object to a
 //! linear part. Those numbers are read in PROGRAM coordinates through
 //! the active WCS - the file cannot know a work offset, and guessing a
-//! machine origin would invent the very number the check needs.
+//! machine origin would invent the very number the check needs. So a
+//! stroke L is stated `-L..L` (the origin may sit anywhere along it);
+//! a machine-frame `-500..0` refused every retract (#457).
 //!
 //! M3.3 stage C widened the readable grammar, all of it optional -
 //! files written before stage C parse exactly as they always did:
@@ -53,8 +55,11 @@ pub use camcraft_post::machine::*;
 pub mod library;
 mod sheet;
 pub mod validate;
+// #383: the machine editor - property grid, draft, user folder and save.
+pub mod draft;
+pub mod fields;
+pub mod store;
 
-use flecs_ecs::core::WorldGet;
 use flecs_ecs::prelude::World;
 
 use crate::geometry::Point3;
@@ -98,17 +103,14 @@ pub fn set(world: &World, path: &str, machine: Option<&Machine>) {
 }
 
 /// The mounted machine's kind (the active setup's, #343) - the
-/// per-frame accessor for ribbon gating. Reads the singleton without a
-/// clone unless the active setup owns its machine.
+/// per-frame accessor for ribbon gating and the new-op door (a new op
+/// joins the active setup). An op's own laws read [`kind_of_setup`].
 #[must_use]
 pub fn kind_of(world: &World) -> Kind {
-    if let Some(own) = crate::setup_mount::own_machine(world, crate::setup::active(world).as_deref()) {
-        return kind(own.machine.as_ref());
-    }
-    world
-        .try_get::<&MachineDef>(|d| kind(d.machine.as_ref()))
-        .unwrap_or(Kind::Mill)
+    kind_of_setup(world, crate::setup::active(world).as_deref())
 }
+
+pub use crate::setup_mount::kind_of_setup;
 
 /// What a program asks that the machine cannot give. Located like the
 /// deviation verdict - every line names its op - because a limit
@@ -134,7 +136,13 @@ const REPORT_CAP: usize = 40;
 /// share, so the gate that stage D wires sees one machine judgment
 /// over exactly what would post. Never re-plans: cached moves only.
 pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, String> {
-    let ops = posting::program_ops(world)?;
+    check_ops(world, machine, &posting::program_ops(world)?)
+}
+
+/// [`check_document`] over a slice of the program (#388): the ops one
+/// machine runs, when setups mount different machines.
+pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs::prelude::Entity)]) -> Result<MachineCheck, String> {
+    let ops = program.to_vec();
     let mut out = MachineCheck::default();
 
     // The changer (M3.3 C): a program whose ops draw on more distinct
@@ -160,9 +168,14 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
 
     for (name, e) in &ops {
         let op = model::operation_of(world, e).ok_or_else(|| format!("{name}: lost its operation"))?;
-        let tool = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let tool_entity = model::find_by_name(world, &op.tool)
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        let tool = model::tool_of(world, &tool_entity)
+            .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        // #368: a modelled body is the holder the magazine measures.
+        let tool = crate::tool_body::judged(world, &tool_entity, tool)
+            .map_err(|e| format!("{name}: tool {}: {e}", op.tool))?
+            .0;
         let cache = model::toolpath_of(world, e).ok_or_else(|| format!("{name}: lost its toolpath"))?;
         // Travel numbers in the file are PROGRAM coordinates; the
         // cached moves are world millimeters. This is the post's own

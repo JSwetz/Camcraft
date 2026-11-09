@@ -373,12 +373,19 @@ pub fn set_current(t: &Tokens) {
 }
 
 /// Install a token table into a context: visuals and spacing together,
-/// so no theme can half-apply (Prime Directive, chrome edition).
+/// so no theme can half-apply (Prime Directive, chrome edition). BOTH of
+/// egui's theme slots get the table (#506): egui follows the OS
+/// appearance, and writing only the slot active at startup (dark, before
+/// the first input names the system theme) left a light-mode Mac on
+/// egui's stock light visuals while the painted tree drew this table's
+/// ink on it. The document's theme is the only theme; the OS never picks.
 pub fn apply_to(ctx: &egui::Context, t: &Tokens) {
     let visuals = t.visuals();
-    let base = (*ctx.global_style()).clone();
-    ctx.set_global_style(t.style(&base));
-    ctx.set_visuals(visuals);
+    for slot in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut style = t.style(&ctx.style_of(slot));
+        style.visuals = visuals.clone();
+        ctx.set_style_of(slot, style);
+    }
 }
 
 /// Install the live theme. Called per Context (windowed); the switcher

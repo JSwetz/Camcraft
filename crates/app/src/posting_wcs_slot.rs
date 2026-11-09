@@ -59,6 +59,14 @@ fn same_zero(a: &Location, b: &Location) -> bool {
 /// every word means one zero.
 #[must_use]
 pub(super) fn shared_word_problems(world: &World) -> Vec<String> {
+    shared_word_problems_in(world, None)
+}
+
+/// [`shared_word_problems`] over one file's setups (#388: a mount's
+/// file holds its own setups' registers, another machine's are its own).
+/// `None` is the whole program.
+#[must_use]
+pub(super) fn shared_word_problems_in(world: &World, only: Option<&[String]>) -> Vec<String> {
     // (slot, setup, placement), first use in program order.
     let mut seen: Vec<(usize, String, Location)> = Vec::new();
     let mut out: Vec<String> = Vec::new();
@@ -72,6 +80,9 @@ pub(super) fn shared_word_problems(world: &World) -> Vec<String> {
         let setup = op.setup.as_deref();
         let slot = wcs_slot(world, setup);
         let name = crate::setup::effective(world, setup).unwrap_or_default();
+        if only.is_some_and(|keep| !keep.contains(&name)) {
+            continue;
+        }
         let here = placement(world, setup);
         match seen.iter().find(|(s, n, _)| *s == slot && *n != name) {
             Some((_, first, there)) if !same_zero(there, &here) => {

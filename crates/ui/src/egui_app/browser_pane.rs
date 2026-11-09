@@ -15,6 +15,7 @@ use camcraft_app::{model, setup};
 
 use crate::actions;
 use crate::state::{CommandKind, DisplayMode, SetupPage, State, TreeMenuTarget, UiTarget};
+use crate::viewport::ProjectionMode;
 
 use super::browser_tree::{Leaf, browser_rows};
 use super::icons::IconSet;
@@ -38,6 +39,14 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&Icon
         ui.radio_value(&mut state.display, DisplayMode::ShadedEdges, "Shaded");
         ui.radio_value(&mut state.display, DisplayMode::Wireframe, "Wireframe");
     });
+    // Projection is view state the same way (#434): orthographic keeps
+    // a side view straight - parallel edges, no converging - which is
+    // what CAM eyeballing wants most of the time.
+    ui.horizontal(|ui| {
+        ui.label("Projection");
+        ui.radio_value(&mut state.cam.projection, ProjectionMode::Perspective, "Perspective");
+        ui.radio_value(&mut state.cam.projection, ProjectionMode::Orthographic, "Ortho");
+    });
     ui.separator();
     let (rows, leaves) = browser_rows(state);
     let rect = Rect::from_min_size(
@@ -59,13 +68,22 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&Icon
     }
     // Operation rows offer the operation verbs; a setup's Operations row
     // offers Paste even when it has no operation rows yet (activating
-    // the setup, so the menu anchors on the row that was clicked).
+    // the setup, so the menu anchors on the row that was clicked). Model
+    // rows offer Use / Stop using as fixture, a setup's Fixtures node
+    // Import fixture… (#339 slice 4).
     if let Some(ix) = hit.menu {
         let target = match leaves.get(ix) {
             Some(Leaf::Op(name)) => Some(TreeMenuTarget::Operation(name.clone())),
+            Some(Leaf::Entry(name)) => Some(TreeMenuTarget::Entry(name.clone())),
             Some(Leaf::SetupOps(setup)) => {
                 focus(state, setup);
                 Some(TreeMenuTarget::Operations)
+            }
+            // #339 slice 4: the fixture verbs.
+            Some(Leaf::Model(name)) => Some(TreeMenuTarget::Model { name: name.clone(), row: ix }),
+            Some(Leaf::Page(setup, SetupPage::Fixtures)) => {
+                focus(state, setup);
+                Some(TreeMenuTarget::Fixtures(setup.clone()))
             }
             _ => None,
         };
@@ -146,6 +164,8 @@ pub(super) fn click(state: &mut State, leaf: Leaf) {
             actions::target(state, UiTarget::Operation(n.clone()));
             state.pending.push_back(CommandKind::Select(Some(n)));
         }
+        // #155: selected, so Del deletes it (undoable); no page of its own.
+        Leaf::Entry(n) => state.pending.push_back(CommandKind::Select(Some(n))),
     }
 }
 
@@ -153,7 +173,7 @@ pub(super) fn click(state: &mut State, leaf: Leaf) {
 /// line and the `ReorderOperation` command use the same target row.
 fn drag_ops(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[Leaf], started: Option<usize>) {
     if let Some(ix) = started
-        && let Some(Leaf::Op(name)) = leaves.get(ix)
+        && let Some(Leaf::Op(name) | Leaf::Entry(name)) = leaves.get(ix)
     {
         state.dragging_op = Some(name.clone());
     }
@@ -163,11 +183,11 @@ fn drag_ops(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[
     let (released, pointer) = ui.input(|i| (i.pointer.any_released(), i.pointer.hover_pos()));
     let drop = pointer.filter(|p| rect.contains(*p)).and_then(|p| {
         let ix = ((p.y - rect.top()) / pal.row_height) as usize;
-        let Leaf::Op(target) = leaves.get(ix)? else { return None };
+        let (Leaf::Op(target) | Leaf::Entry(target)) = leaves.get(ix)? else { return None };
+        // #155: entries drag and take drops like operations.
         let setup_of = |name: &str| {
             model::find_by_name(&state.world, name)
-                .and_then(|e| model::operation_of(&state.world, &e))
-                .and_then(|op| setup::effective(&state.world, op.setup.as_deref()))
+                .and_then(|e| camcraft_app::program_entry::effective_setup(&state.world, &e))
         };
         let after = p.y > rect.top() + (ix as f32 + 0.5) * pal.row_height;
         (source != *target && setup_of(&source) == setup_of(target)).then_some((ix, target.clone(), after))

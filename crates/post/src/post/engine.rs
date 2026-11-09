@@ -116,6 +116,9 @@ pub fn run_numbered_with(
         blocks.push(TraceBlock { record: None, label: "header".into(), first: 0, last: head });
     }
     let mut swallowed = 0usize;
+    // #174: the operations already refused for want of onProbeGuard -
+    // one named refusal per operation, not one per positioning move.
+    let mut unguarded: Vec<String> = Vec::new();
 
     for (i, r) in records.iter().enumerate() {
         let before = s.out_len()?;
@@ -328,6 +331,26 @@ pub fn run_numbered_with(
                     s.call("onProbeRetreat", "")?;
                 }
                 pos = (r.expect[0], r.expect[1], r.expect[2]);
+            }
+            Record::Guard(g) => {
+                // A protected positioning move (#174): no PRELUDE
+                // default - a plain feed would drive the stylus into an
+                // unexpected obstacle, so a script without the hook is
+                // refused by name (once per operation).
+                if s.hook_exists("onProbeGuard") {
+                    s.set_properties(&merged(&base, &g.props(), pos))?;
+                    s.call("onProbeGuard", "")?;
+                } else {
+                    let op = op_name(&base);
+                    if !unguarded.contains(&op) {
+                        warnings.push(format!(
+                            "probing: {op}: this post script does not define onProbeGuard - it cannot write \
+                             a protected (stop-on-contact) positioning move, so the probe operation is refused"
+                        ));
+                        unguarded.push(op);
+                    }
+                }
+                pos = (g.to[0], g.to[1], g.to[2]);
             }
             Record::Found(f) => {
                 if !s.hook_exists("onProbeResult") {

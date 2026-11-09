@@ -6,7 +6,7 @@ use flecs_ecs::prelude::World;
 use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
 use crate::model;
-use crate::schema::{FixtureDef, Location, Operation, OperationMeta, StockDef, ToolDef, Toolpath, Wcs};
+use crate::schema::{FixtureDef, Location, Operation, OperationMeta, ProgramEntry, StockDef, ToolDef, Toolpath, Wcs};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 
@@ -22,8 +22,13 @@ pub struct DeleteEntity {
     tool: Option<Tool>,
     /// #221: a deleted tool's number, restored with it on undo.
     tool_number: Option<u32>,
+    /// #368: a deleted tool's modelled body, restored with it on undo.
+    tool_body: Option<crate::schema::ToolBody>,
     operation: Option<Operation>,
     operation_meta: Option<OperationMeta>,
+    /// A Pause / Home entry of the operation list (#155), with its
+    /// position (`operation_meta`).
+    entry: Option<ProgramEntry>,
     /// A model deleted from the tree keeps its fixture marker (M3.2
     /// stage B) through undo too - the marker is part of the entity's
     /// identity, and an undo that quietly demoted a vise to a raw
@@ -50,9 +55,11 @@ impl DeleteEntity {
             wcs: model::is_wcs(world, &entity),
             tool: model::tool_of(world, &entity),
             tool_number: model::tool_number_of(world, &entity),
+            tool_body: crate::tool_body::body_of(world, &entity),
             operation: model::operation_of(world, &entity),
-            operation_meta: model::is_operation(world, &entity)
+            operation_meta: crate::program_entry::is_sequenced(world, &entity)
                 .then(|| model::operation_meta_of(world, &entity)),
+            entry: crate::program_entry::entry_of(world, &entity),
             path: model::toolpath_of(world, &entity),
             fixture: crate::fixture::def_of(world, &entity),
         })
@@ -87,9 +94,13 @@ impl Command for DeleteEntity {
             entity
                 .entity_view(world)
                 .set(ToolDef { tool: tool.clone(), number: self.tool_number });
+            crate::tool_body::set_body(world, &entity, self.tool_body.as_ref());
         }
         if let Some(operation) = &self.operation {
             entity.entity_view(world).set(operation.clone());
+        }
+        if let Some(entry) = &self.entry {
+            entity.entity_view(world).set(entry.clone());
         }
         if let Some(meta) = &self.operation_meta {
             entity.entity_view(world).set(meta.clone());

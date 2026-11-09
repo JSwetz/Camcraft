@@ -27,6 +27,13 @@ pub struct GenJob {
     /// a preview with no entity.
     pub(super) op_name: String,
     pub(super) tool: crate::tools::Tool,
+    /// The tool's modelled body (#368): its envelope, for the fixture
+    /// laws' band stack. `tool` already carries the cylinder enclosing
+    /// it, for every law that reads one; None is no body.
+    pub(super) body: Option<camcraft_tools::holder_profile::HolderProfile>,
+    /// The tool's lathe body (#369): its clearance bands, judged against
+    /// the revolved stock on every move of a turning op; None is none.
+    pub(super) lathe_body: Option<std::sync::Arc<camcraft_tools::lathe_holder::LatheClearance>>,
     /// The op's tool NAME as the component stored it - the error
     /// strings of the tilted kinds quote it verbatim.
     pub(super) tool_name: String,
@@ -74,6 +81,9 @@ pub struct GenJob {
     /// own split (`fixture::workholding_for`), read here so generation
     /// and the gate speak one verdict.
     pub(super) workholding: (Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
+    /// The tagged models' meshes beside their boxes (#339): the mesh
+    /// law acquits what a box flagged and the real steel does not meet.
+    pub(super) fixture_meshes: Vec<crate::fixture::MeshedFixture>,
     /// The rotary axis line a rotary kind turns its part about, in the
     /// world frame; None stands the machine-frame judgement down and the
     /// fixed steel keeps the path-frame verdict (the conservative one).
@@ -122,17 +132,23 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let Some(tool) = model::tool_of(world, &tool_entity) else {
         return Err(GenError::Invalid(format!("'{}' is not a tool", op.tool)));
     };
+    let (tool, body) = crate::tool_body::judged(world, &tool_entity, tool)
+        .map_err(|e| GenError::Invalid(format!("tool '{}': {e}", op.tool)))?;
+    // #369: a lathe body is judged only by the turning family's
+    // revolved-stock law; on any other op no law could read it, so the
+    // op is refused by name rather than cut with it unjudged.
+    let lathe_body = crate::tool_body_lathe::clearance_of(world, &tool_entity);
+    if lathe_body.is_some() && op.params.kind().info().family() != super::Family::Turn {
+        return Err(GenError::Invalid(format!(
+            "tool '{}' carries a lathe-frame body, which only a turning operation judges - clear it or place a spindle body for this op",
+            op.tool
+        )));
+    }
     let setup = op.setup.as_deref();
     // #326: an op this slice has not verified in an aligned setup is
     // refused by name here, at the one door every generation passes -
     // never cut in the unaligned frame.
     if let Some(why) = crate::setup_align::generation_problem(world, op) {
-        return Err(GenError::Invalid(why));
-    }
-    // #343: the mounted machine and post are the active setup's - an op
-    // of a setup mounting other steel is refused by name, never cut
-    // against the wrong machine.
-    if let Some(why) = crate::setup_mount::generation_problem(world, op) {
         return Err(GenError::Invalid(why));
     }
     let material = material_of(world, setup, &op.src)?;
@@ -265,7 +281,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let drills_ahead = if turned { crate::rest::drills_ahead(world, op_name, setup) } else { Vec::new() };
     let turned_ahead = if turned { crate::rest::turned_ahead(world, op_name, setup) } else { Vec::new() };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
-    let machine_kind = crate::machine::kind_of(world);
+    // #388: the op's own setup's machine, active or not.
+    let machine_kind = crate::machine::kind_of_setup(world, setup);
     // The lathe spindle law (issue #62): every kind that turns about the
     // fitted axis - the turning family, and the lathe's axial Drill -
     // must have that axis ON the spindle the post programs (world Z
@@ -275,7 +292,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // The mill-turn's cross drill joins it (issue #67): its standoffs
     // are measured about that same line.
     let (slot, wcs_origin) = crate::posting::wcs_context(world, setup);
-    let spindle_note = if super::spindle_law::turns(world, &op.params) {
+    let spindle_note = if super::spindle_law::turns(world, setup, &op.params) {
         super::spindle_law::check(&material.facets, wcs_origin, slot)?
     } else {
         None
@@ -283,8 +300,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);
+    let fixture_meshes = crate::fixture::meshes_for(world, setup);
     let rotary_axis = crate::fixture::rotary_axis_of(world, op);
-    let mounted = crate::machine::of(world).1;
+    let mounted = crate::machine::of_setup(world, setup).1;
     let spindle = mounted
         .as_ref()
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
@@ -297,6 +315,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     Ok(GenJob {
         op_name: op_name.to_owned(),
         tool,
+        body,
+        lathe_body,
         tool_name: op.tool.clone(),
         params: op.params.clone(),
         src: op.src.clone(),
@@ -320,6 +340,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         spindle,
         fixtures,
         workholding,
+        fixture_meshes,
         rotary_axis,
         part_solid,
         area,
