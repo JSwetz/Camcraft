@@ -658,6 +658,8 @@ pub(crate) fn shell_layout(
     // #157: the Debug info window - same window law (closed on a fresh
     // State, opened from the status strip's bug button).
     super::debug_info::window(ui.ctx(), state);
+    // #339 slice 6: the fixture library dialogs (None on a fresh State).
+    super::fixture_library_dialog::window(ui.ctx(), state);
     // #107: the unsaved-changes prompt, last so it sits over everything.
     unsaved_prompt::window(ui.ctx(), state);
 }

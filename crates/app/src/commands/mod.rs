@@ -9,6 +9,8 @@ pub mod delete_entity;
 pub mod fixture;
 pub mod import_fixture;
 pub mod import_model;
+// #339 slice 6: a fixture library entry placed into a setup.
+pub mod insert_fixture;
 pub mod load_machine;
 pub mod move_model;
 pub mod operation;
@@ -53,6 +55,7 @@ pub use fixture::{
 };
 pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
+pub use insert_fixture::InsertFixture;
 pub use load_machine::LoadMachine;
 pub use move_model::MoveModel;
 pub use operation::{
