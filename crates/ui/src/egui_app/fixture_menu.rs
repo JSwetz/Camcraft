@@ -1,0 +1,117 @@
+//! The browser's fixture menu (#339 slice 4): a right-click on a model
+//! row offers "Use as fixture" (the active setup's) or "Stop using as
+//! fixture"; on a setup's Fixtures node, "Import fixture…". Every row
+//! queues the very command the setup's Fixtures page queues
+//! (`TagFixture`, `UntagFixture`, `ImportFixtureDialog`) - one undo unit
+//! each, never a world poke. Hand-drawn like the operation menu
+//! (`tree_menu`): an Area at Foreground order; any other primary press
+//! closes it.
+//! Provenance: our own menu over our own commands; no HSMWorks material
+//! consulted.
+
+use egui::{Rect, Sense, Ui, Vec2};
+
+use camcraft_app::{model, setup};
+
+use crate::state::{CommandKind, SetupPage, State, TreeMenuTarget};
+
+use super::browser_tree::Leaf;
+use super::panes::{DROP_GAP, DROP_W};
+use super::theme::Tokens;
+
+/// The menu's rows: a header (no command), then the verbs. Empty when
+/// the target no longer stands (the menu then closes).
+pub(crate) fn menu_rows(state: &State, target: &TreeMenuTarget) -> Vec<(String, Option<CommandKind>)> {
+    let w = &state.world;
+    match target {
+        TreeMenuTarget::Model { name, .. } => {
+            let Some(e) = model::find_by_name(w, name).filter(|e| model::is_model(w, e)) else {
+                return Vec::new();
+            };
+            let verb = if model::is_fixture(w, &e) {
+                ("Stop using as fixture".to_owned(), CommandKind::UntagFixture(name.clone()))
+            } else {
+                // Workholding of the ACTIVE setup: the context every
+                // setup editor works in (a click on a setup's node
+                // activates it first).
+                let setup = setup::active(w);
+                let label = match &setup {
+                    Some(s) => format!("Use as fixture ({s})"),
+                    None => "Use as fixture".to_owned(),
+                };
+                (label, CommandKind::TagFixture { name: name.clone(), setup })
+            };
+            vec![("Fixture".to_owned(), None), (verb.0, Some(verb.1))]
+        }
+        TreeMenuTarget::Fixtures(_) => {
+            vec![("Fixtures".to_owned(), None), ("Import fixture…".to_owned(), Some(CommandKind::ImportFixtureDialog))]
+        }
+        TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => Vec::new(),
+    }
+}
+
+/// The row the menu hangs under.
+fn anchor_row(target: &TreeMenuTarget, leaves: &[Leaf]) -> Option<usize> {
+    match target {
+        TreeMenuTarget::Model { name, row } => {
+            (leaves.get(*row) == Some(&Leaf::Model(name.clone()))).then_some(*row).or_else(|| {
+                leaves.iter().position(|l| *l == Leaf::Model(name.clone()))
+            })
+        }
+        TreeMenuTarget::Fixtures(s) => leaves.iter().position(|l| *l == Leaf::Page(s.clone(), SetupPage::Fixtures)),
+        TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => None,
+    }
+}
+
+/// Draw the menu for a model or Fixtures target; a click queues its
+/// command and closes the menu.
+pub(super) fn fixture_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[Leaf], target: &TreeMenuTarget) {
+    let lines = menu_rows(state, target);
+    let Some(ix) = anchor_row(target, leaves).filter(|_| !lines.is_empty()) else {
+        state.tree_menu = None;
+        return;
+    };
+    let anchor = egui::Pos2::new(rect.left(), rect.top() + (ix + 1) as f32 * pal.row_height + DROP_GAP);
+    let panel = Rect::from_min_size(anchor, Vec2::new(DROP_W, lines.len() as f32 * pal.row_height));
+    let mut chosen: Option<usize> = None;
+    egui::Area::new(ui.id().with(("fixture-menu", ix)))
+        .fixed_pos(anchor)
+        .order(egui::Order::Foreground)
+        .movable(false)
+        .show(ui.ctx(), |ui| {
+            let p = ui.painter();
+            p.rect_filled(panel, pal.radius_menu, pal.ink);
+            p.rect_stroke(panel, pal.radius_menu, egui::Stroke::new(1.0, pal.border), egui::StrokeKind::Outside);
+            for (k, (label, cmd)) in lines.iter().enumerate() {
+                let r = Rect::from_min_size(
+                    egui::Pos2::new(anchor.x, anchor.y + k as f32 * pal.row_height),
+                    Vec2::new(DROP_W, pal.row_height),
+                );
+                let resp = cmd.as_ref().map(|_| ui.interact(r, ui.id().with(("fixture-menu-row", k)), Sense::click()));
+                if resp.as_ref().is_some_and(egui::Response::hovered) {
+                    p.rect_filled(r, 0.0, pal.field_hover);
+                }
+                p.text(
+                    r.left_center() + Vec2::new(8.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    egui::FontId::proportional(pal.font_row),
+                    if cmd.is_some() { pal.text } else { pal.text_dim },
+                );
+                if resp.is_some_and(|r| r.clicked()) {
+                    chosen = Some(k);
+                }
+            }
+        });
+    if let Some(k) = chosen {
+        if let Some((_, Some(cmd))) = lines.into_iter().nth(k) {
+            state.pending.push_back(cmd);
+        }
+        state.tree_menu = None;
+    } else if ui.input(|i| {
+        i.pointer.button_pressed(egui::PointerButton::Primary)
+            && i.pointer.hover_pos().is_none_or(|pos| !panel.contains(pos))
+    }) {
+        state.tree_menu = None;
+    }
+}

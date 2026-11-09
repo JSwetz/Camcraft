@@ -212,6 +212,36 @@ function toolNote() {  // just before the tool change it describes
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("; " + nm);
+  var z = safeZ();
+  if (z !== null && z !== 0) note("SAFE RETRACT G53 Z" + fu(z) + " - STATED BY THE MACHINE");
+}
+
+// #503 (#495's rule): where "straight up" is, in machine coordinates.
+// G53 Z0 is the top of Z travel only where the builder put the machine
+// zero there; the family's public documentation leaves the reference
+// point and machine zero to the machine builder's machine data, so the
+// post cannot assume it. The machine file states the height (its Z
+// part's `safe_retract`, `machine.safeRetractZ`, mm - this dialect
+// writes mm); a document with no machine keeps today's Z0; any machine
+// stating none is refused by name and no retract is guessed. Judged once.
+var safeZDone = false;
+var safeZValue = null;     // null = refused, no retract is written
+function safeZ() {
+  if (safeZDone) return safeZValue;
+  safeZDone = true;
+  var m = typeof machine !== "undefined" ? machine : null;
+  var stated = m ? m.safeRetractZ : null;
+  if (has(stated)) {
+    safeZValue = Number(stated);
+    return safeZValue;
+  }
+  var nm = (m && (m.name || m.model)) || "";
+  if (nm === "") {
+    safeZValue = 0;
+  } else {
+    msg("machine " + nm + " does not state its safe Z retract - this post lifts Z with G53 for a home move and at the end, and where machine Z0 sits is the machine builder's choice on this control; state the Z axis's safe_retract (machine coordinates) in the machine file");
+  }
+  return safeZValue;
 }
 
 // Cutter radius compensation in the control (#39; DIN 66025 / ISO 6983
@@ -311,7 +341,9 @@ function afterOp() {
   if (ask === "optional-stop") { block(["M1"]); return; }
   if (ask === "stop") { block(["M0"]); return; }
   if (ask === "home") {
-    block(["G0", "G53", "Z0"]);   // machine coordinates, Z first (onClose's law)
+    var z = safeZ();            // refused (named once): no Z lift, so no XY move either
+    if (z === null) return;
+    block(["G0", "G53", "Z" + fu(z)]);   // machine coordinates, Z first (onClose's law)
     block(["G0", "G53", "X0", "Y0"]);
     return;
   }
@@ -399,9 +431,11 @@ function onCycle() {
 }
 
 // ------------------------------------------------------------ footer
-// Homing rides machine coordinates (G53), not a stored home point.
+// Homing rides machine coordinates (G53), not a stored home point; the
+// height is the machine's stated safe Z (#503, safeZ).
 function onClose() {
   endPreamble();
-  block(["G53", "Z0"]);
+  var z = safeZ();
+  if (z !== null) block(["G53", "Z" + fu(z)]);
   block(["M2"]);
 }

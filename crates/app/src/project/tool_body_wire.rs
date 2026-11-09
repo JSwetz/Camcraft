@@ -16,11 +16,15 @@
 //! it skips the unknown key (serde's default) and judges the whole body,
 //! plate and all - an over-report that blocks the post, never one that
 //! passes a rub.
+//!
+//! A drawn spun holder (#93) also writes its outline under `spun`, which
+//! is re-drawn on load (a spindle-frame body; never beside `lathe`).
 
 use serde::{Deserialize, Serialize};
 
 use super::{dto_to_facets, facets_to_dto};
 use crate::schema::ToolBody;
+use camcraft_tools::spun::{SpunPoint, SpunProfile};
 use crate::tool_body::BodyFrame;
 use camcraft_tools::lathe_holder::LathePlacement;
 use camcraft_tools::lathe_insert_zone::InsertZone;
@@ -42,6 +46,15 @@ pub struct ToolBodyDto {
     /// Placed facets, tool frame (milling: tip at the origin, axis +Z;
     /// lathe: tip at the origin, +x radial, +z along the spindle).
     pub facets: Vec<[[f64; 3]; 3]>,
+    /// #93, additive (no version step): the drawn outline of a spun
+    /// holder profile, `[z, r, arc]` per point. When present it is the
+    /// truth - the body is re-drawn from it and the facets (its revolve,
+    /// written too) are not read. A reader without it judges those
+    /// facets, whose ring vertices sit on the conservative outline, so
+    /// its envelope is never smaller than the drawn solid - dropping the
+    /// key can only over-report, never under-read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spun: Option<Vec<[f64; 3]>>,
 }
 
 /// The turning-frame placement on file (#369).
@@ -63,10 +76,17 @@ impl ToolBodyDto {
     #[must_use]
     pub fn from_body(b: &ToolBody) -> Self {
         let facets = facets_to_dto(&b.facets);
+        let spun = b.spun.as_ref().map(|s| s.points().iter().map(|p| [p.z, p.r, p.arc]).collect());
         match &b.frame {
-            BodyFrame::Spindle { axis, offset, .. } => {
-                Self { source: b.source.clone(), axis: Some(*axis), offset: Some(*offset), lathe: None, insert_zone: None, facets }
-            }
+            BodyFrame::Spindle { axis, offset, .. } => Self {
+                source: b.source.clone(),
+                axis: Some(*axis),
+                offset: Some(*offset),
+                lathe: None,
+                insert_zone: None,
+                facets,
+                spun,
+            },
             BodyFrame::Lathe { place, zone, .. } => Self {
                 source: b.source.clone(),
                 axis: None,
@@ -74,6 +94,7 @@ impl ToolBodyDto {
                 lathe: Some(LathePlacementDto { radial: place.radial, along: place.along, tip: place.tip }),
                 insert_zone: zone.map(|z| InsertZoneDto { lo: z.lo, hi: z.hi }),
                 facets,
+                spun: None,
             },
         }
     }
@@ -81,6 +102,14 @@ impl ToolBodyDto {
     /// The body, its envelope or clearance re-derived; a refusal names
     /// the tool.
     pub fn to_body(&self, tool: &str) -> Result<ToolBody, String> {
+        if let Some(pts) = &self.spun {
+            if self.lathe.is_some() || self.insert_zone.is_some() {
+                return Err(format!("tool '{tool}': a drawn holder profile is a spindle body, not a lathe one"));
+            }
+            let points = pts.iter().map(|p| SpunPoint { z: p[0], r: p[1], arc: p[2] }).collect();
+            let spun = SpunProfile::new(points).map_err(|e| format!("tool '{tool}': holder profile: {e}"))?;
+            return Ok(crate::tool_body::build_spun(spun));
+        }
         let facets = dto_to_facets(self.facets.clone());
         let zone = self.insert_zone.map(|z| InsertZone { lo: z.lo, hi: z.hi });
         let built = match (self.axis, self.offset, self.lathe) {

@@ -884,6 +884,10 @@ pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>
                 }
             });
         });
+        // #339 slice 4: how the gate judges this steel, and why a box.
+        if let Some(m) = state.fixture_mesh_state(&name) {
+            ui.label(format!("    Collision: {}", m.detail()));
+        }
         // Whether the steel turns with the part (M13.8 (2)): a chuck
         // rides the rotary, a tailstock or a table stands still and is
         // judged in the machine frame. The box edits a copy - the flag
@@ -1497,7 +1501,8 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                 });
                 ui.vertical(|ui| {
                     ui.set_width(260.0);
-                    super::tool_body_page::body_section(ui, state, exists, u);
+                    // #93: Body / Profile tabs for a milling tool.
+                    super::tool_profile_page::third_column(ui, state, exists, u);
                 });
             });
             ui.separator();

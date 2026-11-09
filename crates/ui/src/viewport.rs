@@ -92,7 +92,11 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     let spec = pow(max(abs(dot(n, halfv)), 0.0), 24.0) * 0.35 * key;
     let base = vec3<f32>(0.66, 0.70, 0.76) * light + vec3<f32>(spec);
     let hot = vec3<f32>(0.98, 0.72, 0.20) * light + vec3<f32>(spec);
-    return vec4<f32>(mix(base, hot, in.sel), 1.0);
+    // #339 slice 4: a fixture the selected op strikes wears the gouge
+    // colour (class STRUCK_CLASS; plain models carry class 0).
+    let struck = step(3.5, in.cls);
+    let hit = u.gouge.xyz * light + vec3<f32>(spec);
+    return vec4<f32>(mix(mix(base, hot, in.sel), hit, struck * 0.85), 1.0);
 }
 
 // Facet edges: dark over the shaded pass, warm when the part is selected.
@@ -177,6 +181,11 @@ const OVERLAY_STRIDE: u64 = 24;
 /// drawn blended after the models; region-fill parts after those (see
 /// `set_document`'s models → stock → fill partition). A fill part is pure
 /// translucent overlay: it never contributes welded wire.
+/// The class a model part's vertices carry when it is a fixture the
+/// selected op strikes (#339 slice 4): `fs_main` tints it in the gouge
+/// colour. Above every stock class (0..=3), which only `fs_stock` reads.
+pub const STRUCK_CLASS: f32 = 4.0;
+
 pub struct GpuPart {
     pub verts: Vec<[f32; 3]>,
     pub selected: bool,

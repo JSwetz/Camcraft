@@ -249,7 +249,7 @@ const PLANE_TOL: f64 = 1e-6;
 /// when the rotary alone cannot stand the pose upright (the pose out
 /// of the plane, a non-horizontal or degenerate axis): the sample's
 /// machine frame is unknown.
-fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
+pub(super) fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
     let d = unit3(ax.dir)?;
     if d[2].abs() > PLANE_TOL || dot3(a, d).abs() > PLANE_TOL {
         return None;
@@ -260,7 +260,7 @@ fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
 }
 
 /// `t` folded into (-pi, pi].
-fn wrap(t: f64) -> f64 {
+pub(super) fn wrap(t: f64) -> f64 {
     use std::f64::consts::{PI, TAU};
     let w = t.rem_euclid(TAU);
     if w > PI { w - TAU } else { w }
@@ -268,7 +268,7 @@ fn wrap(t: f64) -> f64 {
 
 /// Distance of `p` from the axis line; a degenerate axis reads as
 /// unbounded, which the capsule test fails closed on.
-fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
+pub(super) fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
     let Some(d) = unit3(ax.dir) else { return f64::INFINITY };
     let w = [p.x - ax.origin.x, p.y - ax.origin.y, p.z - ax.origin.z];
     let c = cross3(w, d);
@@ -276,7 +276,7 @@ fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
 }
 
 /// `p` turned by `t` about the axis line (Rodrigues' formula).
-fn turn_about(ax: &RotaryAxis, p: Point3, t: f64) -> Point3 {
+pub(super) fn turn_about(ax: &RotaryAxis, p: Point3, t: f64) -> Point3 {
     let Some(d) = unit3(ax.dir) else { return Point3::new(f64::NAN, f64::NAN, f64::NAN) };
     let w = [p.x - ax.origin.x, p.y - ax.origin.y, p.z - ax.origin.z];
     let (s, c) = t.sin_cos();

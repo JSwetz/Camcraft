@@ -81,6 +81,9 @@ pub struct GenJob {
     /// own split (`fixture::workholding_for`), read here so generation
     /// and the gate speak one verdict.
     pub(super) workholding: (Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
+    /// The tagged models' meshes beside their boxes (#339): the mesh
+    /// law acquits what a box flagged and the real steel does not meet.
+    pub(super) fixture_meshes: Vec<crate::fixture::MeshedFixture>,
     /// The rotary axis line a rotary kind turns its part about, in the
     /// world frame; None stands the machine-frame judgement down and the
     /// fixed steel keeps the path-frame verdict (the conservative one).
@@ -297,6 +300,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);
+    let fixture_meshes = crate::fixture::meshes_for(world, setup);
     let rotary_axis = crate::fixture::rotary_axis_of(world, op);
     let mounted = crate::machine::of_setup(world, setup).1;
     let spindle = mounted
@@ -336,6 +340,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         spindle,
         fixtures,
         workholding,
+        fixture_meshes,
         rotary_axis,
         part_solid,
         area,

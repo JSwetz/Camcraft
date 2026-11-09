@@ -7,12 +7,15 @@
 pub mod cutting_data;
 pub mod delete_entity;
 pub mod fixture;
+pub mod import_fixture;
 pub mod import_model;
 pub mod load_machine;
 pub mod move_model;
 pub mod operation;
 pub mod post;
 pub mod post_options;
+// #155: Pause / Home entries of the operation list.
+pub mod program_entry;
 // M13.11: mesh repair (weld + fill holes) as one undo unit over UpdateModel.
 pub mod repair_model;
 // Issue #143: ribbon pins are saved with the project, so they are a command.
@@ -52,6 +55,7 @@ pub use delete_entity::DeleteEntity;
 pub use fixture::{
     AddFixtureModel, DeleteFixture, MoveFixture, SetFixtureFixed, TagFixture, UntagFixture,
 };
+pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;
 pub use move_model::MoveModel;
@@ -62,6 +66,7 @@ pub use operation::{
 };
 pub use post::SelectPost;
 pub use post_options::SetPostOptions;
+pub use program_entry::{AddProgramEntry, EditProgramEntry};
 pub use repair_model::RepairModel;
 pub use ribbon_pins::SetRibbonPins;
 pub use select_entity::SelectEntity;
