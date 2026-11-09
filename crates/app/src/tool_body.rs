@@ -29,6 +29,7 @@ use flecs_ecs::prelude::{Entity, World};
 
 use camcraft_tools::holder_profile::{HolderProfile, HolderStack, MAX_BODY_HEIGHT};
 use camcraft_tools::lathe_holder::{LatheClearance, LathePlacement};
+use camcraft_tools::lathe_insert_zone::InsertZone;
 
 use crate::geometry::{Point3, Triangle};
 use crate::schema::ToolBody;
@@ -43,8 +44,9 @@ pub enum BodyFrame {
     /// envelope.
     Spindle { axis: [f64; 3], offset: f64, profile: HolderProfile },
     /// #369: a lathe-held body - its placement in the turning tool
-    /// frame and its clearance bands along the spindle.
-    Lathe { place: LathePlacement, clearance: Arc<LatheClearance> },
+    /// frame, its optional insert zone (#396: the insert plate the
+    /// judge leaves out), and its clearance bands along the spindle.
+    Lathe { place: LathePlacement, zone: Option<InsertZone>, clearance: Arc<LatheClearance> },
 }
 
 /// The tool kinds a lathe holds: they take a lathe-frame body only
@@ -114,7 +116,7 @@ pub fn build(source: &str, axis: [f64; 3], offset: f64, placed: Vec<Triangle>) -
 /// stand it.
 pub fn fits(tool: &Tool, body: &ToolBody) -> Result<(), String> {
     let profile = match &body.frame {
-        BodyFrame::Lathe { .. } => return crate::tool_body_lathe::fits(tool),
+        BodyFrame::Lathe { zone, .. } => return crate::tool_body_lathe::fits(tool, zone.as_ref()),
         BodyFrame::Spindle { profile, .. } => profile,
     };
     if LATHE_HELD.contains(&tool.kind) {

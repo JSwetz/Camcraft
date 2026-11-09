@@ -36,6 +36,7 @@
 //! The pair is the box hull, not the body: it can only over-report.
 
 use crate::holder_profile::{area2, clip, FINE_BAND, MAX_BODY_HEIGHT, MAX_FINE_BANDS};
+use crate::lathe_insert_zone::{InsertZone, MAX_INSERT_REACH};
 
 type Tri = [[f64; 3]; 3];
 
@@ -74,6 +75,11 @@ pub enum LatheBodyError {
     Flat,
     TooLarge,
     TipAway,
+    /// #396: the insert zone is no finite box about the tip within one
+    /// insert (the app names the finer reason first).
+    ZoneInvalid,
+    /// #396: nothing of the body stands outside its insert zone.
+    ZoneHoldsAll,
 }
 
 impl core::fmt::Display for LatheBodyError {
@@ -88,6 +94,8 @@ impl core::fmt::Display for LatheBodyError {
             Self::Flat => "the lathe body has no length along the spindle - check the directions",
             Self::TooLarge => "the lathe body reaches farther than 2000 mm from its tip",
             Self::TipAway => "the tip stands more than 50.8 mm from the lathe body - a holder carries its insert; check the tip point",
+            Self::ZoneInvalid => "the insert zone must be a finite box holding the tip, within 25.4 mm of it",
+            Self::ZoneHoldsAll => "the insert zone holds the whole lathe body - the zone is the insert plate, never the holder",
         })
     }
 }
@@ -181,6 +189,17 @@ impl LatheClearance {
     /// length along the spindle, a body past the size cap, a tip far
     /// from the body.
     pub fn of(tris: &[Tri]) -> Result<Self, LatheBodyError> {
+        Self::of_zoned(tris, None)
+    }
+
+    /// As [`Self::of`], leaving out whatever of the body lies inside
+    /// the insert zone `zone` (#396) - every check above still reads the
+    /// whole body. Refuses a zone that is no finite box about the tip
+    /// within [`MAX_INSERT_REACH`], or one holding the whole body.
+    pub fn of_zoned(tris: &[Tri], zone: Option<&InsertZone>) -> Result<Self, LatheBodyError> {
+        if zone.is_some_and(|z| z.check([MAX_INSERT_REACH; 3]).is_err()) {
+            return Err(LatheBodyError::ZoneInvalid);
+        }
         if tris.is_empty() {
             return Err(LatheBodyError::Empty);
         }
@@ -218,27 +237,16 @@ impl LatheClearance {
         let edge = |k: usize| if k >= n { z1 } else { z0 + step * k as f64 };
         let mut bands = vec![LatheBand::EMPTY; n];
         for t in tris {
-            let tz0 = t[0][2].min(t[1][2]).min(t[2][2]);
-            let tz1 = t[0][2].max(t[1][2]).max(t[2][2]);
-            let (k0, k1) = (index(tz0, z0, step, n), index(tz1, z0, step, n));
-            for (k, b) in bands.iter_mut().enumerate().take(k1 + 1).skip(k0) {
-                let poly = clip(&clip(t, edge(k), true), edge(k + 1), false);
-                if poly.is_empty() {
-                    continue;
-                }
-                let (mut neg, mut pos) = (false, false);
-                for p in &poly {
-                    b.x_lo = b.x_lo.min(p[0]);
-                    b.x_hi = b.x_hi.max(p[0]);
-                    b.y_hi = b.y_hi.max(p[1].abs());
-                    b.y_lo = b.y_lo.min(p[1].abs());
-                    neg |= p[1] <= 0.0;
-                    pos |= p[1] >= 0.0;
-                }
-                if neg && pos {
-                    b.y_lo = 0.0; // the clip straddles the tool's plane
-                }
+            let pieces = match zone {
+                None => vec![t.to_vec()],
+                Some(z) => z.outside(t),
+            };
+            for poly in &pieces {
+                band_poly(poly, &mut bands, z0, step, &edge);
             }
+        }
+        if zone.is_some() && !bands.iter().any(LatheBand::occupied) {
+            return Err(LatheBodyError::ZoneHoldsAll);
         }
         for b in bands.iter_mut().filter(|b| b.occupied()) {
             *b = LatheBand { x_lo: b.x_lo - PAD, x_hi: b.x_hi + PAD, y_lo: (b.y_lo - PAD).max(0.0), y_hi: b.y_hi + PAD };
@@ -323,6 +331,32 @@ impl LatheClearance {
     /// Every number a law reads off the description, for a stamp.
     pub fn words(&self) -> impl Iterator<Item = f64> + '_ {
         [self.z0, self.step].into_iter().chain(self.bands.iter().flat_map(|b| [b.x_lo, b.x_hi, b.y_lo, b.y_hi]))
+    }
+}
+
+/// Clip polygon `poly` into every fine band it spans and widen each
+/// band's spans by what the clip holds.
+fn band_poly(poly: &[[f64; 3]], bands: &mut [LatheBand], z0: f64, step: f64, edge: &impl Fn(usize) -> f64) {
+    let n = bands.len();
+    let (tz0, tz1) = poly.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p[2]), h.max(p[2])));
+    let (k0, k1) = (index(tz0, z0, step, n), index(tz1, z0, step, n));
+    for (k, b) in bands.iter_mut().enumerate().take(k1 + 1).skip(k0) {
+        let clipped = clip(&clip(poly, edge(k), true), edge(k + 1), false);
+        if clipped.is_empty() {
+            continue;
+        }
+        let (mut neg, mut pos) = (false, false);
+        for p in &clipped {
+            b.x_lo = b.x_lo.min(p[0]);
+            b.x_hi = b.x_hi.max(p[0]);
+            b.y_hi = b.y_hi.max(p[1].abs());
+            b.y_lo = b.y_lo.min(p[1].abs());
+            neg |= p[1] <= 0.0;
+            pos |= p[1] >= 0.0;
+        }
+        if neg && pos {
+            b.y_lo = 0.0; // the clip straddles the tool's plane
+        }
     }
 }
 

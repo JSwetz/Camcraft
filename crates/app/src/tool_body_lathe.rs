@@ -16,12 +16,19 @@
 //!   that is no body (empty, non-finite, degenerate, flat along the
 //!   spindle, too large, its tip far from it) -
 //!   `camcraft_tools::lathe_holder`.
+//! - **An insert zone holds one insert, never the holder** (#396): a box
+//!   about the tip the judge leaves out, reaching no farther along any
+//!   axis than the tool's own record allows an insert to - its body size
+//!   (`diameter`), a blade's half width along the spindle, and 25.4 mm
+//!   (the largest ISO turning insert) at most - and never the whole
+//!   body. Refused by name at the command, at `ChangeTool` and on load.
 
 use std::sync::Arc;
 
 use flecs_ecs::prelude::{Entity, World};
 
 use camcraft_tools::lathe_holder::{LatheClearance, LathePlacement};
+use camcraft_tools::lathe_insert_zone::{InsertZone, MAX_INSERT_REACH};
 
 use crate::geometry::{Point3, Triangle};
 use crate::schema::ToolBody;
@@ -40,22 +47,40 @@ pub fn place(model: &[Triangle], place: &LathePlacement) -> Result<Vec<Triangle>
 }
 
 /// A lathe body built from facets already placed in the turning tool
-/// frame: its clearance bands derived, refused by name when the mesh is
-/// no lathe body.
-pub fn build(source: &str, place: LathePlacement, placed: Vec<Triangle>) -> Result<ToolBody, String> {
+/// frame: its clearance bands derived (less its insert zone, #396),
+/// refused by name when the mesh is no lathe body or the zone no zone.
+pub fn build(source: &str, place: LathePlacement, zone: Option<InsertZone>, placed: Vec<Triangle>) -> Result<ToolBody, String> {
     place.basis().map_err(|e| e.to_string())?;
+    if let Some(z) = &zone {
+        z.check([MAX_INSERT_REACH; 3]).map_err(|e| e.to_string())?;
+    }
     let tris: Vec<[[f64; 3]; 3]> = placed.iter().map(tri).collect();
-    let clearance = LatheClearance::of(&tris).map_err(|e| e.to_string())?;
-    Ok(ToolBody { source: source.to_owned(), facets: Arc::from(placed), frame: BodyFrame::Lathe { place, clearance: Arc::new(clearance) } })
+    let clearance = LatheClearance::of_zoned(&tris, zone.as_ref()).map_err(|e| e.to_string())?;
+    Ok(ToolBody { source: source.to_owned(), facets: Arc::from(placed), frame: BodyFrame::Lathe { place, zone, clearance: Arc::new(clearance) } })
 }
 
-/// Can `tool` carry a lathe body? Only a lathe steel can.
-pub fn fits(tool: &Tool) -> Result<(), String> {
-    if LATHE_HELD.contains(&tool.kind) || tool.kind == ToolKind::Bore {
-        Ok(())
-    } else {
-        Err(format!("a {} is no lathe steel - a lathe-frame body needs a turning, grooving, threading or form insert or a boring bar", tool.kind))
+/// Can `tool` carry a lathe body (with insert zone `zone`)? Only a
+/// lathe steel can, and only with a zone one of its inserts could fill.
+pub fn fits(tool: &Tool, zone: Option<&InsertZone>) -> Result<(), String> {
+    if !(LATHE_HELD.contains(&tool.kind) || tool.kind == ToolKind::Bore) {
+        return Err(format!("a {} is no lathe steel - a lathe-frame body needs a turning, grooving, threading or form insert or a boring bar", tool.kind));
     }
+    zone.map_or(Ok(()), |z| z.check(zone_cap(tool)).map_err(|e| e.to_string()))
+}
+
+/// How far from the tip, per axis (x radial, y normal, z along the
+/// spindle), an insert of `tool` can reach: its body size, which no
+/// insert clamped on it outgrows, and along the spindle a grooving or
+/// form blade's half width (the tip is the band centre and the blade is
+/// the band). A thread insert's laydown plate is wider than its V, so
+/// it takes the body size. `InsertZone::check` holds each to 25.4 mm.
+fn zone_cap(tool: &Tool) -> [f64; 3] {
+    let body = if tool.diameter.is_finite() { tool.diameter.max(0.0) } else { 0.0 };
+    let z = match tool.kind {
+        ToolKind::Groove | ToolKind::Form => body.min(tool.width.max(0.0) * 0.5),
+        _ => body,
+    };
+    [body, body, z]
 }
 
 /// The clearance bands of the tool entity's lathe body, if it has one.

@@ -25,8 +25,11 @@
 //!   band, the thread's V, the form crown) swept from the move's start to
 //!   the instant: whatever the cut model says the insert removes is air
 //!   to the body, so the holder over the insert's flank never rubs the
-//!   chip the insert is cutting. Nothing else is excluded - a body part
-//!   ahead of the edge in uncut stock, or anywhere in the part, rubs.
+//!   chip the insert is cutting. Beyond it, only the body's own insert
+//!   zone (#396, a box about the tip one insert could fill) is left out,
+//!   and that already in its clearance bands. Nothing else is excluded -
+//!   a body part ahead of the edge in uncut stock, or anywhere in the
+//!   part, rubs.
 //! - **One finding per move**, blocking the post, naming the move and
 //!   the clearance shortfall: the radial depth the body reaches into the
 //!   material (the part's when it touches the part, else the stock's).
