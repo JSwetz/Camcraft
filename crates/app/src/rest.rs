@@ -56,11 +56,13 @@
 
 mod across;
 mod ahead;
+mod carried_cache;
 mod pilots;
 
 pub use pilots::{drills_ahead, turned_ahead, DrillAhead, TurnedAhead};
 
-pub use across::{REST_CARRY_REFUSAL, carried_digest, carried_stock_block, carried_stock_body};
+pub use across::{REST_CARRY_REFUSAL, carried_digest, carried_stock_block, carried_stock_body, entered_body};
+pub use carried_cache::{CAP as CARRIED_CACHE_CAP, clear as clear_carried_cache, computes as carried_body_computes};
 use across::{carried_grid, chain_of};
 use ahead::{ahead_of, digest_of, Ahead};
 use crate::cl::Move;
