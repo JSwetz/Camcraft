@@ -1,8 +1,9 @@
-//! The ridge rest law's reach (M13.8): which surface points a finish pass FLANKS, and which of those a ball can touch at all.
+//! The ridge rest law's reach (M13.8, #212): how far a finish pass FLANKS a surface point, and which flanked points a ball can touch at all.
 //!
-//! The law it serves (`scan.rs`): a model point flanked by the
-//! pass - centre-path feet on opposite sides of it in its tangent
-//! plane, within one ball diameter - stands between two passes, so
+//! The law it serves (`scan.rs`, read in `ridge_scan`): a model point
+//! flanked by the pass - the feet of two passes on opposite sides of
+//! it in its tangent plane, within one ball diameter - stands between
+//! two passes, so
 //! whatever stands outside every ball there is scallop the pass's own
 //! spacing left. The former predicate ("within `r + tol + floor` of
 //! two chords") could never report above tolerance: a point inside
@@ -23,7 +24,9 @@
 //! never the spacing's cusp. The slope-aware ladder's first crown ring
 //! on the hill made the scan read exactly that nub as scallop (0.127 →
 //! 0.189 on hill project); `closed_ring_ids` names each closed iso-Z
-//! ring in the stream so `Flank` refuses a pair of feet from one ring.
+//! ring in the stream so the flank counts it as one pass. #212 made
+//! the same law hold for every pass, closed or not, and set the reach
+//! to the diameter (`ridge_scan::flank`).
 //!
 //! Provenance: the cusp between adjacent ball-end passes is the
 //! scallop-height geometry of machining handbooks; the accessibility
@@ -43,27 +46,23 @@ fn dot(a: V3, b: V3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// The flank reach: the band plus three tolerances, so a flanked
-/// point reads at most `4·tol` past the ball. Two passes farther apart
-/// than that around a point leave a gap, not a cusp - a missing pass,
-/// another law's word (never this one's silence: the band still
-/// covers everything nearer). A full ball diameter was tried and read
-/// the cone apex and the box corner as scallop - unreached by any
-/// spacing, other laws' ground.
+/// The flank reach (#212): one ball diameter - never under the M13.8
+/// window, the band plus `3·tol`. Past `s = 2r` two passes leave uncut
+/// ground, not a cusp (the generator refuses such a spacing by name,
+/// #37 `finishing3d::params::scallop_ceiling`), so a cusp's two feet
+/// stand within `r·sqrt(2)` of it on flat ground and within `2r`
+/// wherever the balls still meet: on flat ground the law reads every
+/// spacing up to the ceiling (s = 5.9 on an r3 ball reads its 1.23 mm
+/// floor point exactly).
 ///
-/// Validity range (#37): on flat ground the law reads a cusp only to
-/// `s ≈ 2·sqrt(reach² − r²)` (2.9 on an r3 ball at tol 0.1, a reading
-/// of `4·tol`); a wider spacing is NOT read here and no other scan law
-/// claims it. The generator closes the nonsensical half - a stated
-/// spacing at or past the ball diameter is refused by name
-/// (`finishing3d::params::scallop_ceiling`) - while widening this
-/// window to `2r` was measured on 2026-11-08 and convicts the cone
-/// apex (1.68 mm), the box walls (0.42) and the dome waterline's crown
-/// (1.10): one-pass ground the distinct-rings rule does not excuse.
-/// It grows only behind a crown/corner exclusion (owed, RECOMMENDED
-/// "#37").
-pub(super) fn reach(band: f64, tol: f64) -> f64 {
-    band + 3.0 * tol
+/// History: M13.8 held the window to `band + 3·tol` (a cusp only to
+/// `4·tol` past the ball, s ≈ 2.9 here) because a full diameter read
+/// the cone apex (1.68 mm), the box walls (0.42) and the dome
+/// waterline's crown (1.10) as scallop. Those were fans of chord feet
+/// from passes the point stands beside, not between; `flank` reads
+/// only the nearest feet, one per pass, and they stay rest's ground.
+pub(super) fn reach(r: f64, band: f64, tol: f64) -> f64 {
+    (2.0 * r).max(band + 3.0 * tol)
 }
 
 /// The height field's upward normal at a column, by central
@@ -164,68 +163,6 @@ pub(super) fn closed_ring_ids(moves: &[Move]) -> Vec<u32> {
     ids
 }
 
-/// The tangent-plane directions from one surface point to the feet
-/// within reach; flanked once two of them stand more than 120 degrees
-/// apart (a cusp's two feet are opposite, a pass's edge has all its
-/// feet on one side) AND come from distinct passes: two feet of one
-/// closed ring (`closed_ring_ids`) surround the ring's inside, they
-/// never flank it.
-pub(super) struct Flank {
-    n: V3,
-    dirs: Vec<(V3, u32)>,
-    flanked: bool,
-}
-
-impl Flank {
-    // Room for one direction per ring in reach: a crown column sees
-    // every ring of the ladder above the reach line, each its own.
-    const MAX_DIRS: usize = 64;
-
-    pub(super) fn new(n: V3) -> Self {
-        Flank {
-            n,
-            dirs: Vec::new(),
-            flanked: false,
-        }
-    }
-
-    /// A foot `f` of the surface point `q`, from the pass `ring` (0
-    /// for a move on no closed ring: every such foot is its own pass).
-    pub(super) fn add(&mut self, q: Point3, f: Point3, ring: u32) {
-        if self.flanked {
-            return;
-        }
-        let v = [f.x - q.x, f.y - q.y, f.z - q.z];
-        let k = dot(v, self.n);
-        let t = [v[0] - k * self.n[0], v[1] - k * self.n[1], v[2] - k * self.n[2]];
-        let l = dot(t, t).sqrt();
-        if !(l.is_finite() && l > 1e-9) {
-            return; // a foot straight up the normal says no side
-        }
-        let u = [t[0] / l, t[1] / l, t[2] / l];
-        let mut dup = false;
-        for (d, p) in &self.dirs {
-            let same_ring = ring != 0 && *p == ring;
-            let c = dot(*d, u);
-            if c < -0.5 && !same_ring {
-                self.flanked = true;
-                return;
-            }
-            // A direction is only redundant within its own pass: the
-            // same side seen from another ring is the other ring's
-            // word, and it must stay on the record for ITS opposite.
-            dup |= c > 0.95 && *p == ring;
-        }
-        if !dup && self.dirs.len() < Self::MAX_DIRS {
-            self.dirs.push((u, ring));
-        }
-    }
-
-    pub(super) fn flanked(&self) -> bool {
-        self.flanked
-    }
-}
-
 /// The ball-accessibility reader: the facets binned by XY bounds, so a
 /// tangent ball asks only the facets within its own reach.
 pub(super) struct Access<'a> {
@@ -314,6 +251,25 @@ impl<'a> Access<'a> {
             }
         }
         true
+    }
+
+    /// Whether a ball centred at `c` stands within `band` of the model:
+    /// the pass there has a contact (#212). A cusp lies between two
+    /// passes' contact paths; a centre whose ball is clear of the part
+    /// by more than the band rides air or skims stock above it, and
+    /// what stands under it is the ladder's leftover, not its spacing.
+    pub(super) fn touches(&self, c: Point3, band: f64) -> bool {
+        let (i0, i1, j0, j1) = self.span(c.x - band, c.x + band, c.y - band, c.y + band);
+        for j in j0..=j1 {
+            for k in i0..=i1 {
+                for &fi in self.bins.get(k + j * self.bx).into_iter().flatten() {
+                    if self.facets.get(fi).is_some_and(|t| dist_pt_tri(c, t) <= band) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
