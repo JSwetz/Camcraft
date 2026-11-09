@@ -1364,7 +1364,7 @@ pub fn ribbon(
     } else if badge_rect.width() >= 145.0 {
         Some(build_info::toolbar_lines(true))
     } else if badge_rect.width() >= 50.0 {
-        Some((format!("v{}", build_info::VERSION), String::new()))
+        Some((build_info::toolbar_version(), String::new()))
     } else {
         None
     };
