@@ -23,8 +23,23 @@
 //!   carry exactly (side-on, or off the quarter turns) and a lathe or
 //!   mill-turn machine refuse by name, naming both setups. Lathe,
 //!   rotary and posed programs are refused before the walk, as before.
+//! - **One machine (#404).** A carry into a setup whose machine (its own
+//!   or the document's, #343) differs from the setup before it refuses
+//!   by name ([`CARRY_MACHINE_REFUSAL`]) in [`entry`], so the rest
+//!   reading (#318) refuses it too. The program walk refuses every setup
+//!   change onto another machine, the clip included: the clip keeps
+//!   what the earlier setup left standing. (A rest chain that meets a
+//!   clip starts from the setup's own block and reads nothing across, so
+//!   it does not refuse.) The machine kind gate reads the two setups'
+//!   machine, never the active setup's.
 
 use crate::stock_sim::{Body, Dexel, LatticeTurn, Planned, SimOp, simulate, stock_grid};
+
+/// The refusal for a program that moves the stock between setups on
+/// different machines (#404). The program sim judges one machine's
+/// program, the post writes one (#343's one-mount law), so the material
+/// is never handed across a machine change on a guess.
+pub const CARRY_MACHINE_REFUSAL: &str = "the setups are on different machines - the program sim carries the stock only between setups on one machine; simulate each machine's setups on their own";
 
 /// How the program enters a setup from the setup before it.
 pub(crate) enum Entry {
@@ -42,6 +57,34 @@ fn matrix_of(rot: [f64; 4]) -> [[f64; 3]; 3] {
     [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]]
 }
 
+fn carry_head(from: &str, to: &str) -> String {
+    format!("carrying the machined stock from setup '{from}' into setup '{to}'")
+}
+
+/// The machine both setups mount (#343: each its own, else the
+/// document's), or [`CARRY_MACHINE_REFUSAL`] naming both setups and both
+/// machines when they differ (#404).
+///
+/// # Errors
+/// The two setups mount different machines.
+pub(crate) fn one_machine(
+    world: &flecs_ecs::prelude::World,
+    from: &str,
+    to: &str,
+) -> Result<(String, Option<crate::machine::Machine>), String> {
+    use crate::setup_mount::{machine_label, machine_of};
+    let (m_from, m_to) = (machine_of(world, Some(from)), machine_of(world, Some(to)));
+    if m_from != m_to {
+        return Err(format!(
+            "{}: {CARRY_MACHINE_REFUSAL} ('{from}' on {}, '{to}' on {})",
+            carry_head(from, to),
+            machine_label(&m_from),
+            machine_label(&m_to),
+        ));
+    }
+    Ok(m_to)
+}
+
 /// Decide how the program enters setup `to` from setup `from`.
 ///
 /// # Errors
@@ -55,8 +98,11 @@ pub(crate) fn entry(world: &flecs_ecs::prelude::World, from: Option<&str>, to: O
     if !linked && setup_relative::same(setup_align::stored(world, from), setup_align::stored(world, to)) {
         return Ok(Entry::Clip);
     }
-    let head = format!("carrying the machined stock from setup '{from}' into setup '{to}'");
-    if crate::machine::kind_of(world) != crate::machine::Kind::Mill {
+    let head = carry_head(from, to);
+    // #404: the machine is the two setups' own (#343), never the active
+    // setup's - the body never crosses a machine change.
+    let m_to = one_machine(world, from, to)?;
+    if crate::machine::kind(m_to.1.as_ref()) != crate::machine::Kind::Mill {
         return Err(format!("{head}: not supported yet on a lathe or mill-turn machine"));
     }
     let t = setup_relative::transform_between(world, from, to).map_err(|e| format!("{head}: {e}"))?;
@@ -126,6 +172,13 @@ pub(crate) fn walk(
         let eff = crate::setup::effective(world, p.setup.as_deref());
         if eff != frame {
             spanned = true;
+            // #404: the program sim judges one machine's program - a
+            // setup change onto another machine refuses here, whether the
+            // entry would carry or clip (the clip keeps what the earlier
+            // setup left standing, so it hands material across too).
+            if let (Some(from), Some(to)) = (frame.as_deref(), eff.as_deref()) {
+                one_machine(world, from, to)?;
+            }
             match entry(world, frame.as_deref(), eff.as_deref())? {
                 Entry::Clip => clip_to_setup_stock(held.dex_mut(), world, eff.as_deref(), min_r)?,
                 Entry::Carry(turn) => {
