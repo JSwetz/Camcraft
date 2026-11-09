@@ -82,6 +82,7 @@ mod stock_fit_sides;
 mod layout;
 mod machines_pane;
 mod unsaved;
+mod gcode_viewer;
 mod first_setup;
 mod one_wcs;
 // #343: the per-setup browser tree.
