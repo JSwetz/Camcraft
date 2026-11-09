@@ -104,7 +104,7 @@ fn descents_per_level(t: &Toolpath, region: &Region, d: f64) -> Vec<(f64, usize,
         }
     }
     let count = |dex: &mut Dexel, a: usize, b: usize| {
-        let piece = Toolpath { moves: t.moves[a..b].to_vec(), cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() };
+        let piece = Toolpath { moves: t.moves[a..b].to_vec(), cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
         measure(&piece, dex, &spec).descents
     };
     let mut out = Vec::new();

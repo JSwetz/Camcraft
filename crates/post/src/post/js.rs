@@ -31,10 +31,14 @@ var currentPosition = { X: 0, Y: 0, Z: 0 };
 // writes an O-word reads it at onOpen.
 var programNumber = 1;
 var postOptions = {};
-var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm", spindleRanges: [], rigidTapping: true };
+var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm", spindleRanges: [], rigidTapping: true, safeRetractZ: null, model: "" };
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
 function write(s) { if (s !== undefined) LINE += String(s); }
+// Lines written so far, a pending partial line included (#504): a
+// script marks where a block ended and later asks whether anything
+// followed it.
+function linesWritten() { _flushLine(); return OUT.length; }
 function writeBlock() {
   _flushLine();
   var parts = [];
@@ -135,6 +139,7 @@ pub const HOOKS: &[&str] = &[
     "onProbe",
     "onProbeMove",
     "onProbeRetreat",
+    "onProbeGuard",
     "onProbeResult",
     "onComment",
     "onClose",

@@ -55,6 +55,11 @@ pub use camcraft_post::machine::*;
 pub mod library;
 mod sheet;
 pub mod validate;
+// #383: the machine editor - property grid, draft, user folder and save.
+pub mod draft;
+pub mod fields;
+pub mod store;
+
 use flecs_ecs::prelude::World;
 
 use crate::geometry::Point3;

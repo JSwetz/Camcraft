@@ -22,7 +22,7 @@
 //! on the face alone. Prime Directive: refused before cut, never
 //! approximated.
 
-use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::cl::{EdgeBreak, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Loop, Point2};
 use crate::geometry::Point3;
 
@@ -133,9 +133,23 @@ pub fn chamfer(region: &crate::geo2d::Region, p: &ChamferParams) -> Result<Toolp
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
-    let path = b.finish();
+    let mut path = b.finish();
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
+    // The break this ride was asked to cut (#303): each picked loop at
+    // the top plane, the face's depth and slope from the two authored
+    // numbers - never read back off the moves, so the sim judges the
+    // ride against the promise.
+    let slope = p.angle_deg.to_radians().tan();
+    path.breaks = passes
+        .iter()
+        .map(|pass| EdgeBreak {
+            edge: pass.iter().map(|q| Point3::new(q.x, q.y, p.top_z)).collect(),
+            depth: p.top_z - z,
+            slope,
+        })
+        .filter(EdgeBreak::is_sane)
+        .collect();
     Ok(path)
 }

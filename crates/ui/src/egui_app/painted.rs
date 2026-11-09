@@ -188,6 +188,24 @@ pub struct TreeHit {
     pub radio: Option<usize>,
 }
 
+/// A tree row's (label, suffix) ink (#506); the row's icon takes the
+/// label ink and its eye the suffix ink (#524). The label is body text; the
+/// suffix and a hidden row step down to the dim tier - never the faint
+/// (disabled) one, which reads ~3:1 on the light strip. A selected row is
+/// all body text: the dim tier does not clear the selection fill. Every
+/// ink here clears `contrast::BODY` on the ground it is painted on,
+/// pinned by tree_ink_tests.
+#[must_use]
+pub fn row_inks(pal: &Tokens, hidden: bool, selected: bool) -> (Color32, Color32) {
+    if selected {
+        (pal.text, pal.text)
+    } else if hidden {
+        (pal.text_dim, pal.text_dim)
+    } else {
+        (pal.text, pal.text_dim)
+    }
+}
+
 /// Paint the rows and collect this frame's clicks. Input first (real
 /// `ui.interact` responses), then the ink - so hover state and painted
 /// background cannot disagree within a frame.
@@ -246,14 +264,17 @@ pub fn tree(
         }
         // PNG first (browser.rs: the tree icon rides the row, dimmed to
         // 0.55 when hidden), the painted glyph as the no-GPU twin.
+        // The glyphs are white masks: tinted with the row's own inks
+        // (#524), as the ribbon tints its icons, never a white wash
+        // that vanishes on a light panel.
+        let (icon_ink, eye_ink) = row_inks(pal, row.hidden, row.selected);
         let tex = icons.and_then(|s| row.icon.map(|i| s.texture(i))).flatten();
         if let Some(tex) = tex {
-            let dim = if row.hidden { 140 } else { 255 };
             painter.image(
                 tex.id(),
                 Rect::from_center_size(Pos2::new(gx, rr.center().y), Vec2::splat(TREE_INK)),
                 UV_FULL,
-                Color32::from_white_alpha(dim),
+                icon_ink,
             );
         }
         let mut shapes = Vec::new();
@@ -276,7 +297,7 @@ pub fn tree(
                         id,
                         er.shrink(2.0),
                         UV_FULL,
-                        Color32::from_white_alpha(if row.hidden { 140 } else { 217 }),
+                        eye_ink,
                     );
                 }
                 None => super::tree_glyphs::eye_glyph(&mut shapes, er, row.hidden, pal),
@@ -286,8 +307,7 @@ pub fn tree(
         // The column model: one galley, label + suffix, truncated into the
         // text column - everything right of it belongs to the eye, never
         // to overflowing ink (divergence 1's fix).
-        let ink = if row.hidden { pal.text_faint } else { pal.text };
-        let suffix_ink = if row.hidden { pal.text_faint } else { pal.text_dim };
+        let (ink, suffix_ink) = row_inks(pal, row.hidden, row.selected);
         let reserve = if has_eye(row.kind) { EYE_RESERVE } else { 6.0 };
         let max_w = (rr.right() - reserve - (gx + 12.0)).max(0.0);
         let mut job = LayoutJob {

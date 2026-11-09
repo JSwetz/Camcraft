@@ -417,9 +417,11 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
         .iter()
         .filter_map(|r| match r {
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
-            // Probing (#108): each touch and retreat stands for one move.
+            // Probing (#108): each touch, retreat and protected move (#174)
+            // stands for one move.
             cnc::Record::Touch(t) => Some(t.expect),
             cnc::Record::Retreat(t) => Some(t.expect),
+            cnc::Record::Guard(g) => Some(g.to),
             _ => None,
         })
         .collect();
@@ -432,6 +434,7 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
             cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
             cnc::Record::Touch(t) => Some(t.expect),
             cnc::Record::Retreat(t) => Some(t.expect),
+            cnc::Record::Guard(g) => Some(g.to),
             cnc::Record::Cycle(c) => moves.get(c.first_move).copied(),
             _ => None,
         };
@@ -608,60 +611,35 @@ pub struct FixtureFindings {
 pub fn fixture_findings(world: &World) -> Result<FixtureFindings, String> {
     let mut out = FixtureFindings::default();
     let ops = program_ops(world)?;
-    let spindle_of = |setup: Option<&str>| crate::machine::of_setup(world, setup)
-        .1
-        .and_then(|m| m.spindle_d.zip(m.spindle_len))
-        .map(|(d, l)| (d * 0.5, l));
+    let mut mesh_cache: std::collections::HashMap<Option<String>, Vec<crate::fixture::MeshedFixture>> =
+        std::collections::HashMap::new();
     for (name, e) in ops {
         let Some(op) = model::operation_of(world, &e) else {
             continue;
         };
-        let spindle = spindle_of(op.setup.as_deref()); // #388: its own machine's
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
-        let Some((tool_entity, tool)) = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t).map(|d| (t, d)))
-        else {
-            continue;
-        };
-        // #368: the body's enclosing cylinder and band stack; a body
-        // that no longer fits its tool is itself the problem, by name.
-        let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
-            Ok(v) => v,
-            Err(e) => {
-                out.unjudged.push(format!("{name}: tool {}: {e}", op.tool));
-                continue;
-            }
-        };
-        // `boxes_for` already folds in the machine-derived table, so an
-        // empty list means no steel this op could strike at all (the
-        // spindle band is tested against that list, never on its own).
         // Split by whether the steel turns with the part (M13.8 (2)):
         // fixed boxes are judged in the machine frame where the op's
         // rotary axis is known, in the path frame otherwise.
         let (turning, fixed) = crate::fixture::workholding_for(world, op.setup.as_deref());
-        if turning.is_empty() && fixed.is_empty() {
-            continue;
+        // #339: the tagged models' meshes, indexed once per setup and
+        // shared by every op in it.
+        let meshes = mesh_cache
+            .entry(crate::setup::effective(world, op.setup.as_deref()))
+            .or_insert_with(|| crate::fixture::meshes_for(world, op.setup.as_deref()));
+        // The one per-op law, shared with the viewport's struck-fixture
+        // view (#339 slice 4) so the two can never disagree. Its `Err`
+        // is #368's tool body that no longer fits its tool: unjudged,
+        // by name, never read as clear.
+        match crate::fixture_struck::op_hits(world, &op, &cache.path, &turning, &fixed, meshes) {
+            Ok(hits) => out.hits.extend(hits.into_iter().map(|hit| (name.clone(), hit))),
+            Err(why) => out.unjudged.push(format!("{name}: {why}")),
         }
-        let wh = crate::verify::Workholding {
-            turning: &turning,
-            fixed: &fixed,
-            axis: crate::fixture::rotary_axis_of(world, &op),
-        };
-        let geom = tool.geom();
-        let holder = crate::tool_body::stack(&geom, body.as_ref());
-        let mut hits = crate::verify::bands_vs_workholding_held(
-            &cache.path,
-            &geom,
-            &holder,
-            &wh,
-            spindle,
-            operation::GOUGE_TOL,
-        );
-        // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::rapids_vs_workholding_held(&cache.path, &geom, &holder, &wh, spindle));
-        out.hits.extend(hits.into_iter().map(|hit| (name.clone(), hit)));
+    }
+    for meshes in mesh_cache.values() {
+        crate::fixture::log_mesh_refusals(meshes);
     }
     Ok(out)
 }
@@ -696,7 +674,7 @@ pub(crate) fn join_streams(streams: Vec<(String, Vec<cnc::Record>)>) -> Vec<cnc:
         // contour in place of its centre moves.
         moved += recs
             .iter()
-            .filter(|r| matches!(r, cnc::Record::Move(_) | cnc::Record::Touch(_) | cnc::Record::Retreat(_)))
+            .filter(|r| matches!(r, cnc::Record::Move(_) | cnc::Record::Touch(_) | cnc::Record::Retreat(_) | cnc::Record::Guard(_)))
             .count();
         records.extend(recs);
     }
@@ -719,6 +697,8 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
     }
 
     let skip_stops = post_options(world).skip_stops;
+    // #155: Pause / Home entries fold into the gap they stand in.
+    let afters = crate::program_entry::posted_afters(world, &ops, skip_stops)?;
     let mut streams = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
@@ -799,8 +779,8 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             probe_tol,
             coolant: op.coolant,
             // "Skip pauses and homes" (#110) mutes every after-action
-            // at post; the ops keep their choices.
-            after: if skip_stops { operation::AfterOperation::None } else { op.after },
+            // at post; the ops keep their choices. Entries ride it (#155).
+            after: afters.get(name).copied().unwrap_or_default(),
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

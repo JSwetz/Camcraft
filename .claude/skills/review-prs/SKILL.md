@@ -108,6 +108,12 @@ After posting the review, read `gh pr view <N> --json mergeable`
 - blocking review -> add `needs-rework`, remove `merge-ready` and `needs-maintainer`; also add `conflicts` if it conflicts;
 - "Not built - needs a maintainer look" with no blockers -> add `needs-maintainer`, remove `merge-ready` and `needs-rework`; also add `conflicts` if it conflicts. With blockers it is `needs-rework` as above, and the comment still names the owner's decision.
 
+A PR that changes `crates/ui/tests/snapshots/*.png` is a blocking review
+(`needs-rework`): the pixel goldens are release-lane and are regenerated
+only at the cut (AGENTS.md "Pixel snapshots are release-lane", #255). The
+fix is to drop the PNG changes and update the structural assertions
+instead.
+
 A red or orange verdict also turns the PR back into a draft
 (`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it
 ready again for a fresh review (AGENTS.md "Every PR opens as a draft").
@@ -148,6 +154,9 @@ For each line `<N> <login> <time>`:
   `<time>`: skip silently. A withdrawn claim's old comment is never
   mirrored again (without this the Withdraw pass and this one would flip
   the label every run);
+- **paused issue** (labelled `P?` - AGENTS.md "`P?` is paused"): do not
+  mirror; reply once (only if no later comment mentions `@<login>`)
+  `This issue is paused by the maintainer (P?) - it isn't open for work yet; the claim isn't recorded. It will be once the maintainer sets a priority.`;
 - **closed issue**, or **already mirrored** (`claimed` set and `<login>`
   assigned, or `claimed` set and a "Claim recorded for @<login>" reply
   exists): skip silently;

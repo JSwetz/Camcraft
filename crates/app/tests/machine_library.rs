@@ -153,6 +153,15 @@ fn malformed_codes_refuse_by_name() {
             serde_json::json!({ "c_axis_on": "M19", "spindle_on": "M3" });
     });
     one_refusal(&t, "live_tool", "states 2 of the 4 words");
+    // A hand-written file with a bare M is flagged in the catalogue too
+    // (the same validator), coolant and live-tool word alike.
+    let t = mill(|v| *at(v, COOLANTS) = serde_json::json!([{ "name": "Flood", "mCode": "M" }]));
+    one_refusal(&t, "coolant Flood", "no number after M");
+    let t = mill(|v| {
+        at(v, "/kinematics/default/parts/0/parts/1/tool_station")["live_tool"] =
+            serde_json::json!({ "c_axis_on": "M", "c_axis_off": "M155", "spindle_on": "M133", "spindle_off": "M135" });
+    });
+    one_refusal(&t, "live_tool.c_axis_on", "no number after M");
 }
 
 #[test]
@@ -239,12 +248,12 @@ fn a_user_file_lists_by_its_model_and_an_unreadable_one_by_name() {
 #[test]
 fn the_catalogue_adds_the_documents_machine_file() {
     let world = camcraft_app::world::new_world();
-    assert_eq!(library::enumerate(&world).len(), posting::MACHINES.len(), "a built-in mount adds nothing");
+    assert_eq!(library::enumerate_with(&world, None).len(), posting::MACHINES.len(), "a built-in mount adds nothing");
     let p = std::env::temp_dir().join(format!("camcraft_machine_library_doc_{}.mch", std::process::id()));
     std::fs::write(&p, mill(|_| {})).expect("write");
     let m = camcraft_app::machine::parse_mch(&mill(|_| {})).expect("parse");
     camcraft_app::machine::set(&world, &p.display().to_string(), Some(&m));
-    let list = library::enumerate(&world);
+    let list = library::enumerate_with(&world, None);
     assert_eq!(list.len(), posting::MACHINES.len() + 1);
     assert_eq!(list.last().map(|e| e.source.clone()), Some(MachineSource::File(p.clone())));
     let _ = std::fs::remove_file(&p);

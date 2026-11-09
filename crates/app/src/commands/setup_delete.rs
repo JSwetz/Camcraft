@@ -33,8 +33,9 @@ impl DeleteSetup {
             .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a setup")))?;
         // Refusal: an operation that would orphan its own program
         // position. `belongs` is the single predicate the order law uses.
-        for (op_name, op_e) in setup::operation_order(world) {
-            let declared = model::operation_of(world, &op_e).and_then(|o| o.setup);
+        // #155: a Pause / Home entry of its list holds it the same way.
+        for (op_name, op_e) in crate::program_entry::sequence(world) {
+            let declared = crate::program_entry::declared_setup(world, &op_e);
             if setup::belongs(world, declared.as_deref(), name) {
                 return Err(CommandError::Invalid(format!(
                     "'{op_name}' machines in '{name}' - move or delete it first"
