@@ -92,12 +92,21 @@ we can find em"):
 | `merge-ready` | green | review clean AND merges cleanly with main - the owner can merge now |
 | `needs-rework` | red | the review found blocking items |
 | `conflicts` | orange | conflicts with main - needs a branch refresh (`git merge origin/main`) |
+| `needs-maintainer` | yellow | reviewed, no blockers, but the owner must decide first: a new dependency, or a `build.rs` / scripts / `.github` change the reviewer reads and does not build ("Not built - needs a maintainer look") |
+
+`needs-maintainer` (user, 2026-11-09: "that needs-maintainer needs to
+into the skill right?") gives the "Not built - needs a maintainer look"
+verdict a label. Without it such a PR carried none and looked unreviewed
+on the PR list. The owner removes it after deciding: on a yes it becomes
+`merge-ready`, or is built and reviewed in full first; on a no it is
+closed or gets `needs-rework`.
 
 After posting the review, read `gh pr view <N> --json mergeable`
 (re-read once if it says `UNKNOWN`):
-- clean review + `MERGEABLE` -> add `merge-ready`, remove `needs-rework` and `conflicts`;
-- clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` (never green while it conflicts);
-- blocking review -> add `needs-rework`, remove `merge-ready`; also add `conflicts` if it conflicts.
+- clean review + `MERGEABLE` -> add `merge-ready`, remove `needs-rework`, `conflicts` and `needs-maintainer`;
+- clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` and `needs-maintainer` (never green while it conflicts);
+- blocking review -> add `needs-rework`, remove `merge-ready` and `needs-maintainer`; also add `conflicts` if it conflicts;
+- "Not built - needs a maintainer look" with no blockers -> add `needs-maintainer`, remove `merge-ready` and `needs-rework`; also add `conflicts` if it conflicts. With blockers it is `needs-rework` as above, and the comment still names the owner's decision.
 
 A red or orange verdict also turns the PR back into a draft
 (`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it

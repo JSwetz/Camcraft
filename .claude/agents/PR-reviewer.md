@@ -85,7 +85,9 @@ merge.
 6. **Post the review** (comment only) with this shape, plain and specific,
    first line `<!-- pr-reviewer: <headRefOid> -->`:
    - one-line verdict: "Ready for the maintainer to merge" / "Needs changes
-     before merge" / "Not built - needs a maintainer look";
+     before merge" / "Not built - needs a maintainer look" (the last, with
+     no blockers, gets the yellow `needs-maintainer` label - see the
+     review-prs skill, step 2b);
    - What looks good (short bullets);
    - Local results merged with main (build, each suite with pass counts,
      clippy) - exact failure text in a code block;

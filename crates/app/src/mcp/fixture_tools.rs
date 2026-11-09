@@ -97,8 +97,9 @@ fn get_fixture_findings(env: &mut Env, _a: &Map<String, Value>) -> Result<Value,
         "machine": crate::machine::of(w).1.map(|m| m.model),
     });
     match crate::posting::fixture_findings(w) {
-        Ok(hits) => {
-            let findings: Vec<Value> = hits
+        Ok(found) => {
+            let findings: Vec<Value> = found
+                .hits
                 .iter()
                 .map(|(key, hit)| {
                     let label = model::find_by_name(w, key).map_or_else(|| key.clone(), |e| model::operation_label(w, key, &e));
@@ -111,8 +112,10 @@ fn get_fixture_findings(env: &mut Env, _a: &Map<String, Value>) -> Result<Value,
                 })
                 .collect();
             out["judged"] = json!(true);
-            out["ok"] = json!(findings.is_empty());
+            out["ok"] = json!(findings.is_empty() && found.unjudged.is_empty());
             out["findings"] = Value::Array(findings);
+            // #368: an op the walk could not judge is a problem, by name.
+            out["unjudged"] = json!(found.unjudged);
         }
         // No verdict over stale paths: said, never read as "clear".
         Err(reason) => {

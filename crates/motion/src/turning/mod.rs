@@ -49,7 +49,7 @@ pub use blade::{
 };
 pub use bore::{bar_spans, bore, centred_nose, BoreParams};
 pub use contour::{
-    chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
+    chamfer, chamfer_in, multi_pass, multi_pass_in, taper, taper_in, ChamferParams, MultiPassParams, TaperParams,
 };
 pub use face::{facing, FacingParams};
 pub use form::{form, form_in, form_warnings, FormParams};

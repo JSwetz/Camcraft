@@ -7,6 +7,7 @@
 pub mod align;
 pub mod face;
 pub mod plane;
+pub mod winding;
 
 pub use align::{Alignment, align_321};
 pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};

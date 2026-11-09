@@ -176,6 +176,7 @@ pub(super) fn finding(op: &str, w: &Warning) -> Value {
         Warning::Crossing { moves } => ("crossing", moves[0]),
         Warning::Gouge { at } => ("gouge", *at),
         Warning::ShankHit { at, .. } => ("shank_hit", *at),
+        Warning::HolderHit { at, .. } => ("holder_hit", *at),
         Warning::SweepHit { at, .. } => ("sweep_hit", *at),
         Warning::RapidInStock { at } => ("rapid_in_stock", *at),
         Warning::FixtureHit { at, .. } => ("fixture_hit", *at),
