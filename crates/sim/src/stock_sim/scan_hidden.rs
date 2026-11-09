@@ -29,7 +29,7 @@
 //!   `OverBudget` - a stated refusal, never a hang and never a zero.
 
 use super::dexel::fy0;
-use super::scan::dist_pt_seg3;
+use super::scan_arc::{seg_dist, ScanArc};
 use super::scan_near::SegGrid;
 
 use crate::geo2d::Point2;
@@ -83,6 +83,7 @@ type Span = Option<(usize, usize, usize, usize)>;
 struct Frame<'a> {
     facets: &'a [Triangle],
     segs: &'a [(Point3, Point3)],
+    arcs: &'a [Option<ScanArc>],
     grid: Option<SegGrid<'a>>,
     part: &'a [f64],
     x0: f64,
@@ -134,6 +135,7 @@ impl Frame<'_> {
 pub(super) fn hidden_rest(
     facets: &[Triangle],
     segs: &[(Point3, Point3)],
+    arcs: &[Option<ScanArc>],
     part: &[f64],
     (x0, y0, cell): (f64, f64, f64),
     nx: usize,
@@ -149,8 +151,8 @@ pub(super) fn hidden_rest(
     if part.len() < cells {
         return Err(HiddenRest::OverBudget { cells, claims: 0 }); // no ground to judge on
     }
-    let grid = SegGrid::new(segs, r.max(cell * 4.0));
-    let f = Frame { facets, segs, grid, part, x0, y0, cell, nx, ny, r, floor };
+    let grid = SegGrid::new(segs, arcs, r.max(cell * 4.0));
+    let f = Frame { facets, segs, arcs, grid, part, x0, y0, cell, nx, ny, r, floor };
     let spans: Vec<Span> = facets.iter().map(|t| f.span(t)).collect();
     let mut work = 0usize;
     if cells <= budget.cells {
@@ -302,7 +304,8 @@ fn judge_rows(
                         *work = work.saturating_add(f.segs.len());
                         f.segs
                             .iter()
-                            .map(|(sa, sb)| dist_pt_seg3(cx, cy, hi, *sa, *sb))
+                            .enumerate()
+                            .map(|(i, s)| seg_dist(Point3::new(cx, cy, hi), s, f.arcs.get(i).and_then(Option::as_ref)))
                             .fold(f64::INFINITY, f64::min)
                     }
                 };
