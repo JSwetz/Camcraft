@@ -264,7 +264,7 @@ function startPreamble() {
     block(["G43", "H" + ni(tNo)]);
     toolWait = false;
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#523) states no spindle
     block([beltNote(sRpm)]);
     block(["S" + ni(sRpm), "M3"]);
     spindleWait = false;
