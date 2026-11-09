@@ -103,10 +103,10 @@ closed or gets `needs-rework`.
 
 After posting the review, read `gh pr view <N> --json mergeable`
 (re-read once if it says `UNKNOWN`):
-- clean review + `MERGEABLE` -> add `merge-ready`, remove `needs-rework` and `conflicts`;
-- clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` (never green while it conflicts);
-- blocking review -> add `needs-rework`, remove `merge-ready`; also add `conflicts` if it conflicts;
-- "Not built - needs a maintainer look" with no blockers -> add `needs-maintainer`, remove `merge-ready`; also add `conflicts` if it conflicts. With blockers it is `needs-rework` as above, and the comment still names the owner's decision.
+- clean review + `MERGEABLE` -> add `merge-ready`, remove `needs-rework`, `conflicts` and `needs-maintainer`;
+- clean review + `CONFLICTING` -> add `conflicts`, remove `merge-ready` and `needs-maintainer` (never green while it conflicts);
+- blocking review -> add `needs-rework`, remove `merge-ready` and `needs-maintainer`; also add `conflicts` if it conflicts;
+- "Not built - needs a maintainer look" with no blockers -> add `needs-maintainer`, remove `merge-ready` and `needs-rework`; also add `conflicts` if it conflicts. With blockers it is `needs-rework` as above, and the comment still names the owner's decision.
 
 A red or orange verdict also turns the PR back into a draft
 (`gh pr ready <N> --undo`): the author fixes it there, pushes, and flags it
