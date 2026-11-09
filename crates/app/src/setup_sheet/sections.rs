@@ -64,26 +64,40 @@ pub(super) fn render_stock(world: &World, ctx: Option<&str>, out: &mut String) {
 }
 
 pub(super) fn render_wcs(world: &World, ctx: Option<&str>, out: &mut String) {
-    out.push_str("WCS OFFSETS\n");
-    let mut any = false;
-    for (slot, word) in WCS_SLOTS.iter().enumerate() {
-        if let Some(entity) = setup::wcs_entity(world, ctx, slot) {
-            any = true;
-            let pos = model::transform_of(world, &entity)
-                .unwrap_or_default()
-                .pos;
+    // #342: one WCS per setup, labelled with the word the post writes.
+    let label = setup::wcs_label(world, ctx);
+    out.push_str("WCS\n");
+    match setup::wcs_entity(world, ctx) {
+        Some(entity) => {
+            let loc = model::transform_of(world, &entity).unwrap_or_default();
+            let pos = loc.pos;
             let entity_name = model::name_of(world, &entity).unwrap_or_default();
             out.push_str(&format!(
-                "  {word}  X {}  Y {}  Z {}   (entity {entity_name})\n",
+                "  {label}  X {}  Y {}  Z {}   (entity {entity_name})\n",
                 mm(pos.x),
                 mm(pos.y),
                 mm(pos.z)
             ));
+            // #327: the rotation the translation line cannot show.
+            match crate::posting::offset_frame(&loc) {
+                crate::posting::OffsetFrame::Square => {}
+                crate::posting::OffsetFrame::Rotated { deg, axis } => out.push_str(&format!(
+                    "       rotated {deg:.3} deg about {axis} - the post refuses a rotated offset\n"
+                )),
+                crate::posting::OffsetFrame::NonFinite => out.push_str(
+                    "       placement is not finite - the post refuses this offset\n",
+                ),
+            }
         }
+        None => out.push_str(&format!("  {label}  (not placed - at the origin)\n")),
     }
-    if !any {
-        out.push_str("  (none placed)\n");
-    }
+    // #196, #329: the one word the setup's program runs in: the setup's
+    // label, G54 when unset.
+    let slot = setup::wcs_slot(world, ctx);
+    out.push_str(&format!(
+        "  program offset: {}\n",
+        WCS_SLOTS.get(slot).copied().unwrap_or("G54")
+    ));
     out.push('\n');
 }
 
@@ -95,6 +109,15 @@ pub(super) fn render_datum(world: &World, ctx: Option<&str>, out: &mut String) {
         out.push_str("DATUM\n");
         out.push_str(&format!(
             "  transferred from '{from}' - its stock and placed offsets were cloned\n\n"
+        ));
+    }
+    // #326: the operator must clamp the part the way the program assumes.
+    // As modelled prints nothing (identity is absence - sheets unchanged).
+    if let Some(a) = setup::effective(world, ctx).and_then(|s| crate::setup_align::stored(world, &s)) {
+        out.push_str("PART ALIGNMENT\n");
+        out.push_str(&format!(
+            "  {} - clamp the part this way up; stock, offsets and fixtures above are in this frame\n\n",
+            crate::setup_align::describe(Some(a))
         ));
     }
 }

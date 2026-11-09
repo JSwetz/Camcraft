@@ -6,6 +6,7 @@
 //! is the shell, `interact` and `state` the shared law underneath it.
 
 pub mod actions;
+mod build_info;
 pub mod boundary_draft;
 pub mod boundary_viz;
 pub mod boundary_summary;
@@ -15,6 +16,7 @@ pub mod feedback;
 pub mod interact;
 pub mod machined;
 pub mod operations;
+pub mod plane_pick;
 pub mod state;
 pub mod theme_dir;
 pub mod trace;
@@ -34,6 +36,8 @@ mod machined_tests;
 mod play_bench_tests;
 #[cfg(test)]
 mod vertex_pick_tests;
+#[cfg(test)]
+mod setup_chip_tests;
 
 /// Entry point used by `main.rs`; returns the process exit code. The egui
 /// shell is the shell: `--headless` runs its no-window proof, anything else

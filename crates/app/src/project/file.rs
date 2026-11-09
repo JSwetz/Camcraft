@@ -40,7 +40,29 @@ use super::*;
 /// before (the arrival law).
 /// v50: operation labels and within-setup order become persisted. An old
 /// reader must refuse the file rather than silently post in name order.
-pub const PROJECT_VERSION: u32 = 50;
+/// v51 (#196): a setup may carry its picked program offset
+/// (`work_offset`, a G-word). Absent reads as the inferred law every v50
+/// file posted with; an old reader must refuse the file rather than
+/// silently post a picked G55 setup at G54.
+/// v52 (#329): a work-offset height names no slot of its own - it reads
+/// its setup's. Older files' per-height slots move onto their setup when
+/// the setup agreed and refuse by name when not (`wcs_migrate`); an old
+/// reader must refuse a v52 file rather than read `{"work_offset": {}}`.
+/// v53 (#326): a setup may hold the part turned (`part_alignment`, a
+/// rigid transform document -> setup frame). Absent reads as "as
+/// modelled", so every v52 file loads unchanged; an old reader must
+/// refuse a v53 file rather than machine a flipped setup unflipped.
+/// v54 (#342): one WCS per setup - a setup names one WCS entity
+/// (`"wcs": "<name>"`), and `work_offset` is only the word the post
+/// writes for it. Each older setup keeps the origin of the slot it
+/// posted; slots no setup posted are dropped with a load note
+/// (`wcs_one`). An old reader must refuse a v54 file rather than read a
+/// string where it expects a slot list.
+/// v55 (#343): a setup may own its machine and post (`SetupDto::machine`
+/// / `SetupDto::post`); absent follows the document's, so a v54 file
+/// steps up unchanged. An old reader must refuse a v55 file rather than
+/// post every setup on the document's machine.
+pub const PROJECT_VERSION: u32 = 55;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -50,6 +72,15 @@ pub enum ProjectError {
     UnsupportedVersion(u32),
     #[error("malformed project file: {0}")]
     Corrupt(String),
+    /// #329: an older file whose operations measured from different work
+    /// offsets inside one setup - opening it would re-point a zero.
+    #[error(
+        "work offsets disagree - since project v52 a setup's work offset is program zero for \
+         every operation in it, and opening this file would silently re-point an operation. \
+         Make each setup's operations measure from one offset (in the release that wrote the \
+         file), then reopen:\n{0}"
+    )]
+    WorkOffsetConflict(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,6 +151,14 @@ pub struct ProjectFile {
     /// a check could read; an unknown word refuses the file by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// "Skip pauses and homes" at post (#110), additive (no version
+    /// step): an absent key is off - what every older document posted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_stops: bool,
+    /// "One file per operation" at post (#111), additive like
+    /// `skip_stops`: an absent key is one combined program.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_op_files: bool,
     pub entities: Vec<EntityDto>,
 }
 

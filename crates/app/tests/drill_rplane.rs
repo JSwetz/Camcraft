@@ -136,7 +136,7 @@ fn params(cycle: CycleChoice) -> OpParams {
 }
 
 fn op_with(tool: &str, p: OpParams) -> Operation {
-    Operation { tool: tool.into(), src: SrcRef::Entity("block".into()), params: p, stamp: None, setup: None, area: Default::default(), coolant: Default::default() }
+    Operation { tool: tool.into(), src: SrcRef::Entity("block".into()), params: p, stamp: None, setup: None, area: Default::default(), coolant: Default::default(), after: Default::default(), suppressed: false }
 }
 
 fn raw_op(p: OpParams) -> Operation {

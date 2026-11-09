@@ -24,7 +24,7 @@ const BAR_H: f64 = 30.0;
 const NOSE: f64 = 1.0;
 
 fn feed(from: Point3, to: Point3) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(200.0), arc: None, axis: None }
+    Move { rotary: None, kind: MoveKind::Feed, from, to, feed: Some(200.0), arc: None, axis: None }
 }
 
 /// The bar: diameter 20, standing 0..30 on the lathe axis +Z.

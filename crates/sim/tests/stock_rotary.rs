@@ -65,6 +65,7 @@ fn tip(deg: f64) -> Point3 {
 /// chords station to station, each stamped with its own radial pose.
 fn program() -> Vec<Move> {
     let mut out = vec![Move {
+        rotary: None,
         kind: MoveKind::Rapid,
         from: tip(-SPAN_DEG),
         to: tip(-SPAN_DEG),
@@ -75,7 +76,7 @@ fn program() -> Vec<Move> {
     let n = ((2.0 * SPAN_DEG) / STEP_DEG).round() as usize;
     for k in 0..n {
         let (a, b) = (-SPAN_DEG + k as f64 * STEP_DEG, -SPAN_DEG + (k + 1) as f64 * STEP_DEG);
-        out.push(Move { kind: MoveKind::Feed, from: tip(a), to: tip(b), feed: Some(300.0), arc: None, axis: Some(radial(b)) });
+        out.push(Move { rotary: None, kind: MoveKind::Feed, from: tip(a), to: tip(b), feed: Some(300.0), arc: None, axis: Some(radial(b)) });
     }
     out
 }

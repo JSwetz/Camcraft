@@ -14,7 +14,7 @@ use camcraft_sim::geometry::Point3;
 use camcraft_sim::stock_sim::{first_posed, simulate, Backend, Dexel, SimOp, Stock, FIELD_BAND, POSED_REFUSAL};
 
 fn mv(kind: MoveKind, from: Point3, to: Point3, axis: Option<[f64; 3]>) -> Move {
-    Move { kind, from, to, feed: Some(500.0), arc: None, axis }
+    Move { rotary: None, kind, from, to, feed: Some(500.0), arc: None, axis }
 }
 
 /// A 2 mm-radius flat tool lying along +X (tip toward -X), its tip

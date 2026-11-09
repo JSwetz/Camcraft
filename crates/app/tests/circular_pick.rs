@@ -147,7 +147,7 @@ fn floor_face(world: &World, z: f64) -> FeatureSel {
 }
 
 fn op(src: SrcRef, params: OpParams) -> Operation {
-    Operation { tool: TOOL.into(), src, params, stamp: None, setup: None, area: Default::default(), coolant: Default::default() }
+    Operation { tool: TOOL.into(), src, params, stamp: None, setup: None, area: Default::default(), coolant: Default::default(), after: Default::default(), suppressed: false }
 }
 
 fn generated(world: &World, history: &mut History, name: &str, src: SrcRef, params: OpParams) -> Toolpath {

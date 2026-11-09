@@ -64,10 +64,19 @@ fn lathe() -> Machine {
 /// The stage-B flanged bar (r6, neck r3.5 over Z 2) in a round bar of
 /// `diameter` from Z -16 to 16, roughed by R1.
 fn rough_in_bar(diameter: f64) -> (World, Vec<Warning>, Vec<camcraft_app::cl::Move>) {
+    rough_in(diameter, PART_TOP)
+}
+
+/// The part's free end (Z): the bar of [`rough_in_bar`] ends here too.
+const PART_TOP: f64 = 16.0;
+
+/// [`rough_in_bar`] in a bar that runs from Z -16 to `bar_top`: past
+/// the part's free end when `bar_top` > [`PART_TOP`] (#229).
+fn rough_in(diameter: f64, bar_top: f64) -> (World, Vec<Warning>, Vec<camcraft_app::cl::Move>) {
     let world = camcraft_app::world::new_world();
     let mut history = History::default();
     let at = Location { pos: Point3::new(0.0, 0.0, -16.0), ..Location::default() };
-    let cmd = SetStock::new(&world, StockShape::Cylinder { diameter, height: 32.0 }, at);
+    let cmd = SetStock::new(&world, StockShape::Cylinder { diameter, height: bar_top + 16.0 }, at);
     history.execute(&world, cmd.expect("bar stock"));
     history.execute(&world, LoadMachine::new(&world, "lathe.mch".into(), Some(lathe())).expect("lathe"));
     let name = "TN-1600-0R8";
@@ -132,6 +141,19 @@ fn the_same_approach_beside_a_bar_the_parts_size_is_clean() {
     let (world, warns, _) = rough_in_bar(12.0);
     assert!(!warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. })), "{warns:?}");
     let out = tmp_nc("snug");
+    let posted = posting::post_setup(&world, &out);
+    let _ = std::fs::remove_file(&out);
+    assert!(posted.is_ok(), "{posted:?}");
+}
+
+/// #229: a bar longer than the part. Each rough pass ends at the part's
+/// free end, inside the bar's uncut end; the move out of the cut there
+/// must not be a rapid through that stock, and the job posts.
+#[test]
+fn a_rough_in_a_bar_longer_than_the_part_posts_clean() {
+    let (world, warns, _) = rough_in(20.0, PART_TOP + 8.0);
+    assert!(!warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. })), "{warns:?}");
+    let out = tmp_nc("long");
     let posted = posting::post_setup(&world, &out);
     let _ = std::fs::remove_file(&out);
     assert!(posted.is_ok(), "{posted:?}");

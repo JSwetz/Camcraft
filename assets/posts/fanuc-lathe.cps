@@ -15,6 +15,8 @@ extension = "nc";
 setCodePage = "utf-8";
 capabilities = 2; // reference contract: integer feature mask (bit 2 = turning)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
+liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine refuses them for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -58,6 +60,23 @@ coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-
 //    such cycle.
 //  - M03 always: the stream carries no spindle sense, and a left-hand
 //    tool would need the insert library to say so first.
+//  - C-axis live tooling (issue #33): a section carrying PARAM LiveTool
+//    is cut by a radial live tool with the spindle positioned as C.
+//    The stream's X Y Z stay the tip in the PART frame and C is the
+//    stated angle Rz(C) that turns that tip onto the station (+X half-
+//    plane): the post rotates the tip by C, refuses it if it does not
+//    land there (C and XY disagree), and writes X = 2r, Z, C. The
+//    engage / release / live-spindle words are the machine's own
+//    (tool_station.live_tool) - builder-specific, never guessed: absent,
+//    the section is refused by name. Feed per minute (G98) in the
+//    section, G99 restored after; F is scaled so the control's
+//    composite rate - X radius and Z in mm, C in degrees counted as mm,
+//    the rotary feed law of Fanuc-style controls - moves the tip at the
+//    planned mm/min along the part-frame chord. A rapid is a G01 at the
+//    machine's stated maximum feed, never a G00: a G00 with C runs each
+//    axis on its own and follows no verified path. Arcs and cycles in a
+//    C section are refused; the first move must be a rapid (C stands
+//    there before X and Z move).
 
 // ---------------------------------------------------------------- state
 var wcsWord = "G54";
@@ -70,6 +89,7 @@ var inCycle = false;       // a cycle group is open; its chain is suppressed
 var sectionOpen = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (world -> program)
 var clampDone = false;     // G50 once per program
@@ -77,6 +97,12 @@ var inThread = false;      // a G76 cycle stands for the passes being skipped
 var threadSeen = false;    // inside a THREAD record's span (cycle or not)
 var refused = {};          // each refusal counted once per program, by name
 var EPS = 0.0005;          // half a micron: the stream's own lattice
+var liveAsk = false;       // the section's PARAM LiveTool (issue #33)
+var liveOk = false;        // the C section engaged (codes stated, C on the machine)
+var liveCodes = null;      // the machine's live_tool words for the open section
+var lastC = null;          // the C a C section last commanded
+var lastR = 0, lastZ = 0;  // ... and the station radius / Z it stood at
+var C_TOL = 0.005;         // mm a C-turned tip may stand off the station (lattice + milli-degree words)
 
 // ------------------------------------------------------------ helpers
 function has(v) { return v !== null && v !== undefined && isFinite(v); }
@@ -182,10 +208,68 @@ function coolantFor(ask) {
 }
 
 // -------------------------------------------------------------- header
+// The program's O-word (#111): O0001 for the whole job, and one file
+// per operation counts up (the engine's programNumber); a host that
+// publishes none posts O0001.
+function oWord() {
+  var n = typeof programNumber !== "undefined" ? Math.round(Number(programNumber) || 1) : 1;
+  var t = String(Math.max(1, Math.min(n, 9999)));
+  while (t.length < 4) t = "0" + t;
+  return "O" + t;
+}
+
+// ------------------------------------------------------------ comments
+// Program commentary (#257): the setup, the operation and the tool, for
+// the operator reading the program - never a word the control moves on.
+// The stream's PARAMs OperationName / OperationKind / SetupName /
+// ToolDiameter / ToolKind / ToolCornerRadius and the TOOL record's name
+// feed it; a stream without them (a legacy .cl) writes none. User text
+// is cleaned for this dialect: a parenthesis would end the comment
+// early, % is the tape's end mark and ; opens a comment on some
+// controls, so all three become spaces; printable ASCII only, capped at
+// 40 characters.
+var setupName = "", setupSaid = "", opName = "", opKind = "";
+var toolName = "", toolKind = "", toolDia = 0, toolCr = 0;
+function clean(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  t = t.replace(/[()%;]/g, " ").replace(/[^\x20-\x7E]/g, "?").replace(/\s+/g, " ").trim();
+  return t.length > 40 ? t.substring(0, 40).trim() : t;
+}
+function joinDash(parts) {  // the non-empty parts, " - " between
+  var a = [];
+  for (var i = 0; i < parts.length; i++) if (parts[i]) a.push(parts[i]);
+  return a.join(" - ");
+}
+function note(s) { block(["(" + s + ")"]); }
+function commentParam(name, value) {
+  if (name === "SetupName") setupName = clean(value);
+  else if (name === "OperationName") opName = clean(value);
+  else if (name === "OperationKind") opKind = clean(value).toUpperCase();
+  else if (name === "ToolKind") toolKind = clean(value).toUpperCase();
+  else if (name === "ToolDiameter" && has(value)) toolDia = Number(value);
+  else if (name === "ToolCornerRadius" && has(value)) toolCr = Number(value);
+}
+function opNotes() {  // at the section's preamble: the setup once, the op each time
+  if (setupName && setupName !== setupSaid) { note("SETUP: " + setupName); setupSaid = setupName; }
+  if (opName) note("OPERATION: " + joinDash([opName, opKind, wcsWord]));
+  opName = ""; opKind = "";
+}
+// A lathe blade's library diameter is no size the operator measures:
+// its note names the kind alone (rotating tools keep their D).
+var BLADE_KINDS = ["TURNING INSERT", "GROOVING BLADE", "THREADING INSERT", "FORM GAUGE", "BORING BAR"];
+function toolNote() {  // just before the tool change it describes
+  var desc = [];
+  if (toolKind) desc.push(toolKind);
+  if (toolDia > 0 && BLADE_KINDS.indexOf(toolKind) < 0) desc.push("D" + fu(toolDia));
+  if (toolCr > 0) desc.push("R" + fu(toolCr));
+  note(joinDash(["T" + pad2(tNo) + pad2(tNo) + (toolName ? " " + toolName : ""), desc.join(" ")]));
+  toolKind = ""; toolCr = 0;
+}
+
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block(["O0001", "(" + nm + ")"]);
+  block([oWord(), "(" + nm + ")"]);
   block(["G21", "G18", "G40", "G80", "G99"]);   // mm, ZX plane, no nose comp, feed/rev
 }
 
@@ -198,8 +282,11 @@ function onRadiusCompensation() {
 }
 
 function onParameter(name, value) {
+  commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
+  if (name === "LiveTool") { liveAsk = true; return; }
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
   else if (name === "OriginY" && has(value)) orgY = Number(value);
@@ -216,6 +303,7 @@ function onSpindleSpeed() {
 }
 
 function onToolChange(number, name) {
+  toolName = clean(name);
   tNo = number;
   toolWait = true;
 }
@@ -225,8 +313,10 @@ function onToolChange(number, name) {
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
+  opNotes();
   block([wcsWord]);
   if (toolWait) {
+    toolNote();
     block(["T" + pad2(tNo) + pad2(tNo)]);     // T0101: station 1, offset 1
     toolWait = false;
   }
@@ -234,13 +324,33 @@ function startPreamble() {
     block(["G50", "S" + ff(machine.spindleMax)]);
     clampDone = true;
   }
-  if (spindleWait) {
+  if (liveAsk) {
+    liveStart();
+  } else if (spindleWait) {
     if (sCss > 0) block(["G96", "S" + ff(sCss), "M03"]);
     else block(["G97", "S" + ff(sRpm), "M03"]);
     spindleWait = false;
   }
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
+}
+
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M01"]); return; }
+  if (ask === "stop") { block(["M00"]); return; }
+  if (ask === "home") {
+    block(["G28", "U0"]);         // X clear of the part first, then Z
+    block(["G28", "W0"]);
+    return;
+  }
+  msg(coolantWho() + "unknown after-operation ask " + ask);
 }
 
 function endPreamble() {
@@ -251,7 +361,88 @@ function endPreamble() {
   if (coolant) block(["M9"]);
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
+  if (liveAsk) {
+    if (liveOk) {
+      block([liveCodes.spindleOff]);
+      block([liveCodes.cAxisOff]);
+      block(["G99"]);
+    }
+    liveAsk = false; liveOk = false; liveCodes = null; lastC = null;
+    spindleWait = false;
+    return;
+  }
   block(["M05"]);
+  afterOp();
+}
+
+// --------------------------------------------- C-axis live tooling (#33)
+// Engage the section: the machine's words, or a refusal by name.
+function liveStart() {
+  spindleWait = false;
+  var m = (typeof machine !== "undefined") ? machine : {};
+  var lt = m.liveTool;
+  var ok = lt && lt.cAxisOn && lt.cAxisOff && lt.spindleOn && lt.spindleOff;
+  if (!ok) {
+    refuse(coolantWho() + "C-axis live-tool work, but the machine states no live_tool words (c_axis_on, c_axis_off, spindle_on, spindle_off) in its tool station - builder-specific codes are never guessed");
+    return;
+  }
+  var rs = m.rotaries || [];
+  var hasC = false;
+  for (var i = 0; i < rs.length; i++) if (String(rs[i].name || "").toUpperCase() === "C") hasC = true;
+  if (rs.length > 0 && !hasC) {
+    refuse(coolantWho() + "C-axis live-tool work, but the machine states no C axis among its rotaries");
+    return;
+  }
+  if (!(sRpm > 0)) { refuse(coolantWho() + "C-axis live-tool work needs a live-tool speed - none stated"); return; }
+  liveCodes = lt; liveOk = true; lastC = null;
+  block(["G98"]);                               // feed per minute: no turning spindle to count revolutions
+  block([lt.cAxisOn]);
+  block([lt.spindleOn, "S" + ff(sRpm)]);
+}
+function trim0(s) {
+  if (s.indexOf(".") >= 0) s = s.replace(/0+$/, "").replace(/[.]$/, "");
+  return s === "-0" ? "0" : s;
+}
+function fc(v) { return trim0(Number(v).toFixed(3)); }  // degrees, three decimals
+function fm(v) { return trim0(Number(v).toFixed(1)); }  // mm/min, one decimal
+// One straight move of a C section: the tip turned by C onto the station.
+function liveMove(p, rapid) {
+  if (!liveOk) return;
+  if ((has(p.A) && Math.abs(p.A) > 1e-6) || (has(p.B) && Math.abs(p.B) > 1e-6)) {
+    refuse("A/B words in a C-axis section - the live tool's station is fixed");
+    return;
+  }
+  if (!has(p.C)) { refuse("a move without a C word in a C-axis section - the spindle angle is unstated"); return; }
+  var c = Number(p.C) * Math.PI / 180;
+  var dx = p.X - orgX, dy = p.Y - orgY;
+  var xr = dx * Math.cos(c) - dy * Math.sin(c);
+  var yr = dx * Math.sin(c) + dy * Math.cos(c);
+  if (Math.abs(yr) > C_TOL || xr < -C_TOL) {
+    refuse("C move whose tip does not turn onto the live-tool station (C and X Y disagree) - refused, never projected");
+    return;
+  }
+  var r = Math.max(xr, 0);
+  if (lastC === null) {
+    if (!rapid) { refuse("a C-axis section that opens with a cut - the first move must position C"); return; }
+    block(["G00", "C" + fc(p.C)]);
+    block(["G00", xWord(r), zWord(p.Z)]);
+  } else {
+    // The control's composite rate counts C degrees as mm; the planned
+    // rate is along the part-frame chord. Scale F by their ratio.
+    var dc = Number(p.C) - lastC, dr = r - lastR, dz = p.Z - lastZ;
+    var lcmd = Math.sqrt(dr * dr + dz * dz + dc * dc);
+    var sx = p.X - p.StartX, sy = p.Y - p.StartY, sz = p.Z - p.StartZ;
+    var ltrue = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (lcmd <= EPS && ltrue <= EPS) return;   // nothing moves
+    var f = rapid ? Number(machine.feedRateMax) : Number(p.FeedRate);
+    if (!(f > 0)) {
+      refuse(rapid ? "a C-axis rapid needs the machine's maximum feed - a G00 with C follows no verified path" : "a C-axis cut with no feed");
+      return;
+    }
+    if (!(ltrue > EPS)) { refuse("a C move that turns the part with the tip on the spindle line"); return; }
+    block(["G01", xWord(r), zWord(p.Z), "C" + fc(p.C), "F" + fm(f * lcmd / ltrue)]);
+  }
+  lastC = Number(p.C); lastR = r; lastZ = p.Z;
 }
 
 function onSection() { startPreamble(); }
@@ -266,6 +457,7 @@ function onComment(s) { writeComment(s); }
 function onRapid() {
   startPreamble();
   var p = properties;
+  if (liveAsk) { liveMove(p, true); return; }
   if (posed(p) || inCycle || inThread) return;
   var r = radiusOf(p.X, p.Y, "rapid");
   if (r === null) return;
@@ -274,6 +466,7 @@ function onRapid() {
 function onLinear() {
   startPreamble();
   var p = properties;
+  if (liveAsk) { liveMove(p, false); return; }
   if (posed(p) || inCycle || inThread) return;
   var r = radiusOf(p.X, p.Y, "feed move");
   if (r === null) return;
@@ -324,6 +517,7 @@ function threadHalfTurn(p) {
 function onCircular() {
   startPreamble();
   var p = properties;
+  if (liveAsk) { refuse("an arc in a C-axis section - only straight moves ride a C turn"); return; }
   if (posed(p) || inCycle || inThread) return;
   if (p.CircularPlane === "XZ" || p.CircularPlane === "YZ") meridianArc(p);
   else threadHalfTurn(p);
@@ -388,6 +582,7 @@ function onThreadCycleEnd() { inThread = false; threadSeen = false; }
 function onCycle() {
   startPreamble();
   var p = properties;
+  if (liveAsk) { refuse("a drilling cycle in a C-axis section - not supported"); return; }
   var r = radiusOf(p.X, p.Y, "cycle");
   if (r === null) return;
   if (Math.abs(r) > EPS) { refuse("drilling cycle off the spindle axis - a 2-axis lathe drills on centre only"); return; }

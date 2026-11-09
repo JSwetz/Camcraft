@@ -208,7 +208,7 @@ fn wavy_slab_faces_to_a_measured_program() {
     assert_eq!(m.moves, 41, "path moves");
     close("cut_mm", m.cut_mm, 1342.0, TOL_MM);
     close("minutes", m.minutes, 1.4676666666666667, TOL_MIN);
-    assert_eq!(m.posted_lines, 54, "line count is exact");
+    assert_eq!(m.posted_lines, 56, "line count is exact (the operation and tool comments of #257 included)");
 }
 
 #[test]
@@ -226,5 +226,5 @@ fn cube_stl_faces_to_a_measured_program() {
     assert_eq!(m.moves, 3, "path moves");
     close("cut_mm", m.cut_mm, 12.0, TOL_MM);
     close("minutes", m.minutes, 0.35933333333333334, TOL_MIN);
-    assert_eq!(m.posted_lines, 16, "line count is exact");
+    assert_eq!(m.posted_lines, 18, "line count is exact (the operation and tool comments of #257 included)");
 }

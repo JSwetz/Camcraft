@@ -10,11 +10,17 @@
 //! to quaternion conversion is Shepperd's method (J. Guidance and Control,
 //! 1978). Our own code, no vendor material.
 
-use flecs_ecs::prelude::World;
+use flecs_ecs::prelude::{Entity, World};
 
 use crate::geometry::{Point3, feature, quat_rotate_point, quat_to_euler, transform_point};
 use crate::model;
 use crate::operation::{FeatureSel, GeoSel};
+use crate::schema::Location;
+
+/// Which frame a datum reader places the picked geometry in: the active
+/// setup's view (`setup_align::view_pose`, the 3-2-1) or the document's
+/// own placement (`model::transform_of`, the #330 part alignment).
+pub(super) type PoseOf = fn(&World, &Entity) -> Option<Location>;
 
 use super::face::face_origin;
 
@@ -58,7 +64,7 @@ pub fn align_321(world: &World, picks: &[GeoSel]) -> Result<Alignment, String> {
     for g in picks {
         match g.feature {
             FeatureSel::Face(_) => {
-                if let Some(p) = flat_face(world, g)? {
+                if let Some(p) = flat_face(world, g, crate::setup_align::view_pose)? {
                     if plane.replace(p).is_some() {
                         return Err("pick only one flat face - it sets the Z axis".into());
                     }
@@ -68,7 +74,7 @@ pub fn align_321(world: &World, picks: &[GeoSel]) -> Result<Alignment, String> {
             }
             FeatureSel::Patch(_) => set_origin(&mut origin, curved_center(world, g)?)?,
             FeatureSel::Chain(_) => {
-                if edge.replace(straight_edge(world, g)?).is_some() {
+                if edge.replace(straight_edge(world, g, crate::setup_align::view_pose, "for X")?).is_some() {
                     return Err("pick only one edge - it sets the X axis".into());
                 }
             }
@@ -128,7 +134,15 @@ fn set_origin(slot: &mut Option<[f64; 3]>, p: [f64; 3]) -> Result<(), String> {
 /// A planar face's (centroid, outward unit normal) in world, or `None`
 /// when the face is not planar. Outward is the facets' winding (the mesh's
 /// own outside), not the feature's winding-free normal.
-fn flat_face(world: &World, g: &GeoSel) -> Result<Option<Plane>, String> {
+fn flat_face(world: &World, g: &GeoSel, pose: PoseOf) -> Result<Option<Plane>, String> {
+    let Some(n) = outward_normal(world, g, pose)? else { return Ok(None) };
+    let c = face_origin(world, &g.entity, g.feature).map_err(|why| why.to_owned())?;
+    Ok(Some((c.centroid, n)))
+}
+
+/// A planar face's outward unit normal, placed by `pose`; `None` when the
+/// face is not planar (or the pick is not a face).
+pub(super) fn outward_normal(world: &World, g: &GeoSel, pose: PoseOf) -> Result<Option<[f64; 3]>, String> {
     let FeatureSel::Face(fid) = g.feature else { return Ok(None) };
     let e = model::find_by_name(world, &g.entity).ok_or_else(|| gone(g))?;
     let features = model::features_of(world, &e).ok_or_else(|| gone(g))?;
@@ -150,15 +164,14 @@ fn flat_face(world: &World, g: &GeoSel) -> Result<Option<Plane>, String> {
     if wind.x * n[0] + wind.y * n[1] + wind.z * n[2] < 0.0 {
         n = scale(n, -1.0);
     }
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    let loc = pose(world, &e).unwrap_or_default(); // #326: the caller's frame
     let wn = quat_rotate_point(loc.rot, Point3::new(n[0], n[1], n[2]));
     let wn = [wn.x, wn.y, wn.z];
     let l = norm(wn);
     if !(l.is_finite() && l > 0.0) {
         return Err(format!("{} of '{}' has no usable plane - re-pick it", g.feature, g.entity));
     }
-    let c = face_origin(world, &g.entity, g.feature).map_err(|why| why.to_owned())?;
-    Ok(Some((c.centroid, scale(wn, 1.0 / l))))
+    Ok(Some(scale(wn, 1.0 / l)))
 }
 
 /// A curved face's centre (a full bore: its axis at mid-height).
@@ -174,21 +187,27 @@ fn vertex(world: &World, g: &GeoSel) -> Result<[f64; 3], String> {
     let features = model::features_of(world, &e).ok_or_else(|| gone(g))?;
     let vi = feature::resolve_vertex(&features, id).ok_or_else(|| gone(g))?;
     let v = features.verts.get(vi as usize).ok_or_else(|| gone(g))?;
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    let loc = crate::setup_align::view_pose(world, &e).unwrap_or_default(); // #326
     let w = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
     Ok([w.x, w.y, w.z])
 }
 
-/// A straight open edge's (start, end) in world, walk order.
-fn straight_edge(world: &World, g: &GeoSel) -> Result<([f64; 3], [f64; 3]), String> {
+/// A straight open edge's (start, end) placed by `pose`, walk order.
+/// `role` ends each refusal ("for X": what the edge is picked for).
+pub(super) fn straight_edge(
+    world: &World,
+    g: &GeoSel,
+    pose: PoseOf,
+    role: &str,
+) -> Result<([f64; 3], [f64; 3]), String> {
     let FeatureSel::Chain(cid) = g.feature else { return Err(gone(g)) };
     let e = model::find_by_name(world, &g.entity).ok_or_else(|| gone(g))?;
     let features = model::features_of(world, &e).ok_or_else(|| gone(g))?;
     let c = feature::resolve_chain(&features, cid).ok_or_else(|| gone(g))?;
     if c.closed {
-        return Err(format!("{} of '{}' is a closed loop - pick one straight edge for X", g.feature, g.entity));
+        return Err(format!("{} of '{}' is a closed loop - pick one straight edge {role}", g.feature, g.entity));
     }
-    let loc = model::transform_of(world, &e).unwrap_or_default();
+    let loc = pose(world, &e).unwrap_or_default(); // #326: the caller's frame
     let pts: Vec<[f64; 3]> = feature::chain_points(&features, &c)
         .iter()
         .map(|p| {
@@ -209,20 +228,20 @@ fn straight_edge(world: &World, g: &GeoSel) -> Result<([f64; 3], [f64; 3]), Stri
     for p in &pts {
         let v = sub(*p, a);
         if norm(sub(v, scale(u, dot(v, u)))) > tol {
-            return Err(format!("{} of '{}' is not straight - pick a straight edge for X", g.feature, g.entity));
+            return Err(format!("{} of '{}' is not straight - pick a straight edge {role}", g.feature, g.entity));
         }
     }
     Ok((a, b))
 }
 
-fn gone(g: &GeoSel) -> String {
+pub(super) fn gone(g: &GeoSel) -> String {
     format!("{} of '{}' is no longer in the model - re-pick it", g.feature, g.entity)
 }
 
 /// Unit quaternion `[x, y, z, w]` whose rotation takes the world axes onto
 /// the columns `x, y, z` (Shepperd's method). `None` for a non-finite or
 /// degenerate matrix.
-fn quat_from_axes(x: [f64; 3], y: [f64; 3], z: [f64; 3]) -> Option<[f64; 4]> {
+pub(super) fn quat_from_axes(x: [f64; 3], y: [f64; 3], z: [f64; 3]) -> Option<[f64; 4]> {
     // m[row][col], columns are the frame's axes.
     let m = [[x[0], y[0], z[0]], [x[1], y[1], z[1]], [x[2], y[2], z[2]]];
     let tr = m[0][0] + m[1][1] + m[2][2];
@@ -242,18 +261,18 @@ fn quat_from_axes(x: [f64; 3], y: [f64; 3], z: [f64; 3]) -> Option<[f64; 4]> {
     crate::geometry::normalize_quat(q)
 }
 
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(super) fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
-fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
+pub(super) fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
     [a[0] * s, a[1] * s, a[2] * s]
 }
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+pub(super) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(super) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
-fn norm(a: [f64; 3]) -> f64 {
+pub(super) fn norm(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
 }

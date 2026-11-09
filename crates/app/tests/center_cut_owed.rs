@@ -41,7 +41,7 @@ fn world_with(base: &str) -> (World, History) {
 }
 
 fn op(tool: &str, params: OpParams) -> Operation {
-    Operation { tool: tool.into(), src: SrcRef::Stock, params, stamp: None, setup: None, area: Default::default(), coolant: Default::default() }
+    Operation { tool: tool.into(), src: SrcRef::Stock, params, stamp: None, setup: None, area: Default::default(), coolant: Default::default(), after: Default::default(), suppressed: false }
 }
 
 #[test]

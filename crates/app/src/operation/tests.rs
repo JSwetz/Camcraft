@@ -114,18 +114,9 @@ fn params_sanity_gates() {
     };
     assert!(up.is_sane());
     assert!(!depth_sane(&world, None, None, &up));
-    // An out-of-range slot is structural: there is no seventh offset.
-    let ghost = OpParams::Trace { tilt: None,
-        clearance_z: Height::fixed(5.0),
-        retract_z: None,
-        top_z: Height::fixed(5.0),
-        bottom_z: Height::of(HeightReference::WorkOffset(6), 0.0),
-        stepdown: 1.0,
-        feed: 500.0,
-        plunge_feed: 100.0,
-        climb: true,
-    };
-    assert!(!ghost.is_sane(), "work-offset references must name a real slot");
+    // #329: a work-offset height names no slot, so it cannot name a
+    // seventh one - the out-of-range case moved to the setup's pick
+    // (`SetSetupWorkOffset` refuses slot 6) and the loader.
 }
 
 #[test]

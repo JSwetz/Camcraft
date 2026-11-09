@@ -27,7 +27,7 @@ fn cylinder(r: f64, z0: f64, z1: f64) -> Vec<Triangle> {
 }
 
 fn mv(kind: MoveKind, from: Point3, to: Point3) -> crate::cl::Move {
-    crate::cl::Move { kind, from, to, feed: (kind != MoveKind::Rapid).then_some(100.0), arc: None, axis: None }
+    crate::cl::Move { rotary: None, kind, from, to, feed: (kind != MoveKind::Rapid).then_some(100.0), arc: None, axis: None }
 }
 
 /// The axial rapids of `moves` the meridian law convicts, a 12 mm

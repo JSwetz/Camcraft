@@ -26,6 +26,8 @@ pub use area::{
 /// The coolant choice is the stream's own type (#112): one enum from the
 /// op field to the post's `PARAM Coolant`, no mapping to drift.
 pub use camcraft_post::post::CoolantMode;
+/// The after-operation action is the stream's own type too (#110).
+pub use camcraft_post::post::AfterOperation;
 pub use height::{Height, HeightReference};
 pub use params::{OpParams, Tilt};
 pub use sel::{FeatureSel, GenStamp, GeoSel, OpStatus, OpType, SrcRef, WCS_SLOTS};

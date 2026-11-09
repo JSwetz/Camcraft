@@ -230,7 +230,7 @@ fn stock_and_wcs_round_trip() {
     };
     history.execute(&world, SetStock::new(&world, boxy.clone(), at(1.0, 2.0, -1.0)).unwrap());
     history
-        .execute(&world, SetWcsOrigin::new(&world, "G54", at(12.5, -3.0, 0.5)).unwrap());
+        .execute(&world, SetWcsOrigin::new(&world, at(12.5, -3.0, 0.5)).unwrap());
     project::save(&world, &path).expect("save");
     let first = std::fs::read_to_string(&path).expect("read");
 
@@ -2351,6 +2351,33 @@ fn v19_file_steps_to_v20_and_the_rev_counter_round_trips() {
 }
 
 #[test]
+fn stock_set_twice_keeps_its_rev_across_save_load_save() {
+    // #340: SetStock lands facets and moves the geometry counter like any
+    // landing; the loader re-lands the stock mesh, so without the Model
+    // arm's pin a twice-set stock saved "rev": 2, loaded as 1 and the
+    // re-save differed from the file it was opened from.
+    let world = new_world();
+    let mut history = History::default();
+    for dz in [10.0, 12.0] {
+        history.execute(
+            &world,
+            SetStock::new(&world, StockShape::Box { dx: 40.0, dy: 30.0, dz }, Location::default())
+                .expect("box stock"),
+        );
+    }
+    let p = tmp_path("stockrev");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    assert!(first.contains("\"rev\": 2"), "a twice-set stock saves its count: {first}");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "save -> load -> save of a stock is byte-identical");
+}
+
+#[test]
 fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     // v20 -> v21 (M3.2 A): setups. No v20 file can carry a setup row (the
     // kind tag did not exist), an operation membership, or an active-setup
@@ -2398,7 +2425,7 @@ fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     assert_eq!(setup::active(&world).as_deref(), Some("Setup1"));
     let def = setup::def_of(&world, "Setup1").expect("definition");
     assert_eq!(def.stock, "Stock", "materialization points, never copies");
-    assert!(def.wcs.contains(&"G54".to_owned()));
+    assert_eq!(def.wcs, "G54", "#342: the setup's one WCS is the legacy G54");
     assert_eq!(def.datum_from, "");
     project::save(&world, &p).expect("save");
     let first = std::fs::read_to_string(&p).expect("read");
@@ -2440,13 +2467,10 @@ fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     assert_eq!(setup::active(&world).as_deref(), Some("Setup2"));
     assert_eq!(setup::stock_entity_name(&world, Some("Setup2")), "Setup2/Stock");
     assert!(
-        setup::wcs_entity(&world, Some("Setup2"), 0).is_some(),
-        "the placed slot names a real entity"
+        setup::wcs_entity(&world, Some("Setup2")).is_some(),
+        "the posted slot (G54) is the setup's one WCS (#342)"
     );
-    assert!(
-        setup::wcs_entity(&world, Some("Setup2"), 1).is_none(),
-        "G55 names nothing in the file: an unplaced slot, not corrupt"
-    );
+    assert_eq!(setup::wcs_entity_name(&world, Some("Setup2")), "Setup2/G54");
     assert_eq!(
         setup::def_of(&world, "Setup2").expect("def").datum_from,
         "Setup1",

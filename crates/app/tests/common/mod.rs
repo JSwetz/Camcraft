@@ -166,6 +166,11 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
                 (dc * 1000.0).round() as i64
             ));
         }
+        // The stated spindle C (issue #33): absent on every golden but
+        // a C-axis live-tool cut, so the dumps stay byte-identical.
+        if let Some(c) = m.rotary {
+            s.push_str(&format!(" SC{}", (c * 1000.0).round() as i64));
+        }
         s.push('\n');
     }
     for c in &t.cycles {
