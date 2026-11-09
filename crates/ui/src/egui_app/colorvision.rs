@@ -27,7 +27,6 @@ use camcraft_app::schema::ColorVision;
 use egui::{Color32, Ui};
 
 use super::{contrast, cvd, theme::Tokens};
-use crate::state::{CommandKind, State};
 
 /// The separation floor every must-distinguish pair keeps under its
 /// mode, in CIEDE2000 units. 20 is well past "obviously different"
@@ -365,25 +364,3 @@ pub fn text_gate(mode: ColorVision, tokens: &Tokens) -> Option<String> {
     None
 }
 
-/// The picker beside the theme switcher: a combo of the four modes,
-/// read live off the world like the theme row above it; a pick queues
-/// the command, never writes the singleton.
-pub(crate) fn picker(ui: &mut Ui, state: &mut State) {
-    let current = color_vision_of(&state.world);
-    ui.horizontal(|ui| {
-        ui.label("Colour vision");
-        let mut pick: Option<ColorVision> = None;
-        egui::ComboBox::from_id_salt("color_vision_switcher")
-            .selected_text(current.label())
-            .show_ui(ui, |ui| {
-                for mode in ColorVision::ALL {
-                    if ui.selectable_label(mode == current, mode.label()).clicked() && mode != current {
-                        pick = Some(mode);
-                    }
-                }
-            });
-        if let Some(mode) = pick {
-            state.pending.push_back(CommandKind::SelectColorVision(mode));
-        }
-    });
-}
