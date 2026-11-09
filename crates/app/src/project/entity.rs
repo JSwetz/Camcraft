@@ -117,6 +117,10 @@ pub struct PathDto {
     /// cache no longer matches: see `to_cache`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<super::touch_dto::ProbeTouchDto>,
+    /// The declared edge breaks (#303, `crate::cl::EdgeBreak`): the
+    /// same additive law - absent is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<super::break_dto::EdgeBreakDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -474,6 +478,7 @@ impl PathDto {
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
             threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
             probes: t.path.probes.iter().map(super::touch_dto::ProbeTouchDto::from_touch).collect(),
+            breaks: t.path.breaks.iter().map(super::break_dto::EdgeBreakDto::from_break).collect(),
         }
     }
 
@@ -497,6 +502,7 @@ impl PathDto {
             .collect();
         path.probes = super::touch_dto::load(&self.probes, &path.moves);
         path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
+        path.breaks = super::break_dto::load(&self.breaks);
         ToolpathCache::new(path, self.warnings.clone())
     }
 }
