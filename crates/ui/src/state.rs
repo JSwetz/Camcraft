@@ -110,6 +110,10 @@ pub enum CommandKind {
         path: String,
         machine: Box<camcraft_app::machine::Machine>,
     },
+    /// The Machines pane's "Use for this setup" (#384): mount a
+    /// catalogue machine through `LoadMachine::from_catalogue`, which
+    /// re-reads and re-validates it - a refused file never mounts.
+    UseCatalogueMachine(camcraft_app::machine::library::MachineSource),
     /// The post script (M3.3 A): the built-in arm ships, the dialog arm
     /// picks a user `.cps` through the file-pick law, and the path arm
     /// is what the headless tests run. Selection is a command like
@@ -2492,6 +2496,19 @@ impl State {
                     // silent wrong answer with the work thrown away.
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("machine edit refused: {err}"))
+                    }
+                }
+            }
+            CommandKind::UseCatalogueMachine(source) => {
+                match LoadMachine::from_catalogue(&self.world, &source) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.machine_editor = None;
+                        self.status = format!("machine: {}", source.mount_path());
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("machine not assigned: {err}"))
                     }
                 }
             }

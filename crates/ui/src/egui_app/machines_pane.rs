@@ -10,8 +10,11 @@
 //! what they answer - it reads no file itself.
 //!
 //! View state only: which row is selected and the cached catalogue are
-//! ephemeral like the dock (never a command, never saved). The pane
-//! edits nothing and assigns nothing in this slice.
+//! ephemeral like the dock (never a command, never saved). The one
+//! document change the pane makes is "Use for this setup" (#384): it
+//! only queues `CommandKind::UseCatalogueMachine`, which lands as the
+//! undoable `LoadMachine`; a refused or already-mounted machine leaves
+//! the button disabled with the reason beside it.
 
 use egui::{Label, RichText, ScrollArea, Ui};
 
@@ -20,7 +23,7 @@ use camcraft_app::machine::library::{self, MachineEntry};
 use super::colorvision::text_inks;
 use super::layout::{group_open, prop_grid};
 use super::theme::Tokens;
-use crate::state::State;
+use crate::state::{CommandKind, State};
 
 /// The pane's view state.
 #[derive(Default)]
@@ -71,9 +74,20 @@ fn refresh(state: &mut State) {
     }
 }
 
+/// The pane's assign button label (a test finds it by these words).
+pub(crate) const USE_FOR_SETUP: &str = "Use for this setup";
+
 pub(crate) fn draw(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     refresh(state);
     let inks = text_inks(ui, &state.world);
+    // Why the selected machine can't be assigned (read before the pane
+    // borrow below takes `state`).
+    let block = state
+        .machines_pane
+        .selected
+        .and_then(|i| state.machines_pane.list.as_ref().and_then(|l| l.get(i)))
+        .map(|e| e.assign_block(&state.world));
+    let mut assign = None;
     let p = &mut state.machines_pane;
     let Some(list) = p.list.as_ref() else { return };
     let mut reread = false;
@@ -122,6 +136,19 @@ pub(crate) fn draw(ui: &mut Ui, state: &mut State, pal: &Tokens) {
         for r in &e.refusals {
             ui.add(Label::new(RichText::new(r.to_string()).color(inks.error)).wrap());
         }
+        let why = block.clone().flatten();
+        let r = ui.add_enabled(why.is_none(), egui::Button::new(USE_FOR_SETUP));
+        match &why {
+            None => {
+                if r.on_hover_text("Make this the setup's machine (Ctrl+Z undoes it)").clicked() {
+                    assign = Some(e.source.clone());
+                }
+            }
+            Some(why) => {
+                r.on_disabled_hover_text(format!("Cannot assign: {why}"));
+                ui.add(Label::new(RichText::new(format!("Cannot assign: {why}")).color(pal.text_dim)).wrap());
+            }
+        }
         ui.add_space(4.0);
         for g in &e.groups {
             group_open(ui, &g.title, None, true, |ui| {
@@ -137,5 +164,8 @@ pub(crate) fn draw(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     });
     if reread {
         p.list = None;
+    }
+    if let Some(source) = assign {
+        state.pending.push_back(CommandKind::UseCatalogueMachine(source));
     }
 }

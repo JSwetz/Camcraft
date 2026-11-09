@@ -8,8 +8,9 @@
 //! library or its layout was consulted.
 //!
 //! Reading only. Nothing here writes a file or touches the document:
-//! assigning a machine stays the `LoadMachine` command's job, and the
-//! catalogue is rebuilt on demand (the pane caches it), never stored.
+//! assigning a machine stays the `LoadMachine` command's job
+//! (`LoadMachine::from_catalogue`, issue #384), and the catalogue is
+//! rebuilt on demand (the pane caches it), never stored.
 
 use std::path::{Path, PathBuf};
 
@@ -37,6 +38,17 @@ impl MachineSource {
     pub fn label(&self) -> String {
         match self {
             MachineSource::Builtin(_) => "built-in".to_owned(),
+            MachineSource::File(p) => p.display().to_string(),
+        }
+    }
+
+    /// The path the document records when this machine is mounted -
+    /// the same string `machine::of` answers afterwards, so "is this
+    /// the setup's machine?" is one comparison.
+    #[must_use]
+    pub fn mount_path(&self) -> String {
+        match self {
+            MachineSource::Builtin(n) => posting::builtin_path(n),
             MachineSource::File(p) => p.display().to_string(),
         }
     }
@@ -71,6 +83,25 @@ impl MachineEntry {
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.refusals.is_empty()
+    }
+
+    /// Why this entry cannot be made the setup's machine right now, in
+    /// words for the pane's disabled button (issue #384); `None` = it
+    /// can. A refused file names its first refusal; the machine already
+    /// mounted names that (assigning it again would be a no-op command).
+    #[must_use]
+    pub fn assign_block(&self, world: &World) -> Option<String> {
+        if let Some(first) = self.refusals.first() {
+            let more = match self.refusals.len() {
+                1 => String::new(),
+                n => format!(" (and {} more)", n - 1),
+            };
+            return Some(format!("fails validation - {first}{more}"));
+        }
+        if super::of(world).0 == self.source.mount_path() {
+            return Some("it is already this setup's machine".to_owned());
+        }
+        None
     }
 
     /// Build an entry from a file's text. Never panics: a file that
