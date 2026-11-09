@@ -27,6 +27,7 @@ pub fn moves_named(w: &Warning) -> [Option<usize>; 2] {
         | Warning::SweepHit { at, .. }
         | Warning::RapidInStock { at }
         | Warning::FixtureHit { at, .. }
+        | Warning::HolderHit { at, .. }
         | Warning::NonFinite { at }
         | Warning::Envelope { at, .. }
         | Warning::Scallop { at, .. } => [Some(*at), None],
@@ -88,6 +89,8 @@ mod tests {
         assert_eq!(first_move(&Warning::ShankHit { at: 84, part: true }), Some(84));
         assert_eq!(first_move(&Warning::RapidInStock { at: 2 }), Some(2));
         assert_eq!(first_move(&Warning::FixtureHit { at: 5, fixture_part: FixturePart::Holder }), Some(5));
+        // #460: a lathe holder rubbing the stock names its move too.
+        assert_eq!(moves_named(&Warning::HolderHit { at: 11, part: true, short_mm: 0.4 }), [Some(11), None]);
         assert_eq!(first_move(&Warning::Envelope { at: 7, gouge_mm: 0.1, rest_mm: 0.0 }), Some(7));
         assert_eq!(moves_named(&Warning::RestUnjudged { at: 0, cells: 1, claims: 1 }), [None, None]);
     }
