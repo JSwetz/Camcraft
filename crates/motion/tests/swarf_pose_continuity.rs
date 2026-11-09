@@ -164,11 +164,16 @@ fn air_links(path: &Toolpath) -> usize {
 /// the full band 93 / 145: half the tube read unruled (the curvature fit
 /// reached across the cap's crease), every raster end turned the lying
 /// tool upright and back, and the rim column's dip kept the hold from
-/// qualifying. The two-pass ladder may need two more air links at coarse
-/// raster ends on Linux; both are guarded turns in air, not cutting turns.
-/// The full flank and turn checks below still apply to every move.
-const LINKS_DEBUG: (usize, usize) = (34, 53);
-const LINKS_FULL: (usize, usize) = (55, 86);
+/// qualifying. #17 took them to 34 / 51 and 55 / 84 (main had crept to
+/// 34 / 53 and 55 / 86 by #48). #48: each raster line's exit rise is a
+/// rapid holding the lying pose where its flank is proved in air, so a
+/// raster end no longer turns upright and back - 23 / 34 and 44 / 67 on
+/// macOS. #446: the two-pass ladder may need two more air links at coarse
+/// raster ends on Linux; both are guarded turns in air, not cutting turns,
+/// so the advanced pins carry that allowance (+2). The full flank and turn
+/// checks below still apply to every move. Any other rise fails.
+const LINKS_DEBUG: (usize, usize) = (23, 36);
+const LINKS_FULL: (usize, usize) = (44, 69);
 
 fn assert_continuous(name: &str, path: &Toolpath, max_links: usize) {
     let (max, at, over90, flips, lying_max) = turn_ladder(path);
@@ -326,4 +331,32 @@ fn ruled_poses_ride_both_ends_of_the_ruling_and_never_down() {
         }
     }
     assert!(plus >= 8 && minus >= 8, "the ruling's ends: {plus} +X, {minus} -X");
+}
+
+/// #48: a raster line leaves the blade on a RAPID up Z under the pose
+/// it cut with - never an upright feed (the turn that linked every
+/// raster end) and never a posed feed in air (the verifier's
+/// posed-contact law reads that as a cut standing off the part). On
+/// the debug blade every line ends that way: a rapid straight up Z
+/// out of a lying cut, holding the lying pose, with no feed rising
+/// straight up Z anywhere after the program first leans.
+#[test]
+fn every_raster_exit_rise_is_a_rapid_holding_the_lying_pose() {
+    let facets = blade();
+    let path = swarf5d(&facets, &params(1.0), &control()).expect("swarf on the blade");
+    let mut held: Option<[f64; 3]> = None;
+    let mut rises = 0usize;
+    for (i, m) in path.moves.iter().enumerate() {
+        let vertical_up = (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= 1e-9 && m.to.z > m.from.z + 1e-9;
+        let leaning = held.is_some_and(|a| a[2] < 0.999_999);
+        if vertical_up && leaning {
+            assert_eq!(m.kind, MoveKind::Rapid, "move {i}: an exit rise off a lean is a {:?}", m.kind);
+        }
+        if vertical_up && m.kind == MoveKind::Rapid && held.is_some_and(lying) {
+            assert_eq!(m.axis, held, "move {i}: the rise turned the pose");
+            rises += 1;
+        }
+        held = m.axis.or(held);
+    }
+    assert!(rises >= 10, "only {rises} raster exits rose under the lying pose");
 }

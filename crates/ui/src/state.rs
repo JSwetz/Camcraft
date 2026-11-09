@@ -1038,6 +1038,9 @@ pub struct PostView {
 pub enum Panel {
     Browser,
     Properties,
+    /// The Machines pane (#287): closed by default, opened from the View
+    /// door beside the properties pane.
+    Machines,
 }
 
 /// A dock-layout ask from the View door, applied by the shell on the
@@ -1059,6 +1062,7 @@ pub enum LayoutRequest {
 pub struct PanelsOpen {
     pub browser: bool,
     pub properties: bool,
+    pub machines: bool,
 }
 
 impl PanelsOpen {
@@ -1067,6 +1071,7 @@ impl PanelsOpen {
         match p {
             Panel::Browser => self.browser,
             Panel::Properties => self.properties,
+            Panel::Machines => self.machines,
         }
     }
 }
@@ -1158,6 +1163,11 @@ pub struct State {
     /// M1.7d G-code viewer: None after any document switch or refused
     /// post, `Some` while a posted program is being reviewed.
     pub post_view: Option<PostView>,
+    /// #265: the last post's refusal, `Some` from a refused post until
+    /// the user closes its window, a later post succeeds, or the
+    /// document is switched. The status line says it too, but the next
+    /// click or command writes over that line; this keeps the reason.
+    pub post_refusal: Option<crate::egui_app::post_refusal::PostRefusal>,
     /// #157: the Debug info window is open. View state - never a
     /// command, never saved.
     pub debug_info_open: bool,
@@ -1303,6 +1313,10 @@ pub struct State {
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
     /// which is the command, which is the undo.
     pub machine_editor: Option<crate::egui_app::machine_editor::MachineEditor>,
+    /// The Machines pane's view state (#287): the cached catalogue and
+    /// the selected row. Ephemeral like the dock itself - browsing a
+    /// machine is not a command; assigning one will be.
+    pub machines_pane: crate::egui_app::machines_pane::MachinesPane,
     /// M6.1 C's resolution furniture (never a command, never saved -
     /// the camera's law): the parse cache for `File` themes, the
     /// discovered theme files behind the switcher's rows, and the last
@@ -1467,6 +1481,7 @@ impl State {
             display: DisplayMode::default(),
             sim: None,
             post_view: None,
+            post_refusal: None,
             program_sim: None,
             field_view: None,
             field_play: None,
@@ -1477,7 +1492,7 @@ impl State {
             ribbon_mode_open: false,
             ribbon_view_open: false,
             ribbon_theme_open: false,
-            panels_open: PanelsOpen { browser: true, properties: true },
+            panels_open: PanelsOpen { browser: true, properties: true, machines: false },
             layout_request: None,
             tree_menu: None,
             retype_confirm: None,
@@ -1517,6 +1532,7 @@ impl State {
             tool_editor: None,
             tool_body_ui: ToolBodyUi::default(),
             machine_editor: None,
+            machines_pane: Default::default(),
             theme_cache: theme_files::Cache::new(),
             // One walk per window, at construction: the switcher's file
             // rows are furniture, not live filesystem polling (the
@@ -1824,60 +1840,13 @@ impl State {
             return;
         };
         let draft = name == self.op_ui.name;
-        let mut params = if draft {
-            self.op_ui.params.clone()
-        } else {
-            op.params.clone()
-        };
-        // The hole-list family (M2.4 C): the drill, the boring ride
-        // and the thread mill all store the same `holes` shape, so
-        // recognition fills whichever list the operation has. The
-        // radial half is the drill's alone - it is the only variant
-        // with a cross list to put them in, and a turned machine's
-        // radial holes on a plain mill's op stay the empty list.
-        let is_drill = matches!(params, OpParams::Drill { .. });
-        let holes: &mut Vec<_> = match &mut params {
-            OpParams::Drill { holes, .. }
-            | OpParams::Bore { holes, .. }
-            | OpParams::Thread { holes, .. } => holes,
-            _ => {
-                self.refuse(
-                    ErrorScope::Operation,
-                    format!("'{name}' is not a drilling operation"),
-                );
-                return;
-            }
-        };
-        // A document whose machine holds a turret gets the radial
-        // reading beside the mill's (M5.2 F2): the same mesh, its
-        // other half - walls whose axis runs AT the spindle. A plain
-        // mill asks nothing of the mesh's sides; its cross list stays
-        // the empty one it was (an op typed at a machine that cannot
-        // plunge it is the generator's refusal, not this click's).
-        let radial = if !is_drill || machine::kind_of(&self.world) == machine::Kind::Mill {
-            Ok(Vec::new())
-        } else {
-            operation::cross_holes_of(&self.world, op.setup.as_deref(), &op.src)
-        };
-        match (
-            operation::holes_of(&self.world, op.setup.as_deref(), &op.src),
-            radial,
-        ) {
-            (Err(err), _) | (_, Err(err)) => self.refuse(ErrorScope::Operation, err.to_string()),
-            (Ok(z), Ok(x)) if z.is_empty() && x.is_empty() => self.refuse(
-                ErrorScope::Operation,
-                if is_drill {
-                    "no drilled holes found in the source model - Z or radial".to_string()
-                } else {
-                    "no Z-axis holes found in the source model - this ride reads only those"
-                        .to_string()
-                },
-            ),
-            (Ok(z), Ok(x)) => {
-                *holes = z;
-                if let OpParams::Drill { cross, .. } = &mut params {
-                    *cross = x;
-                }
+        let current = if draft { &self.op_ui.params } else { &op.params };
+        // The rule (which list, the turret's radial half, the refusals)
+        // lives in the app, shared with the MCP `detect_holes` tool
+        // (#312), so a click and an agent store the same holes.
+        match operation::detect_holes(&self.world, name, current, op.setup.as_deref(), &op.src) {
+            Err(why) => self.refuse(ErrorScope::Operation, why),
+            Ok(params) => {
                 if draft {
                     self.op_ui.params = params.clone();
                 }
@@ -2388,6 +2357,7 @@ impl State {
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
+                self.post_refusal = None;
                 self.program_sim = None;
                 self.field_view = None;
                 self.field_play = None;
@@ -3622,6 +3592,7 @@ impl State {
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
+        self.post_refusal = None; // nor its refused post
         self.program_sim = None; // and neither is its stock verdict
         self.field_view = None; // nor its traced stock
         self.field_play = None; // nor its playback
@@ -3677,6 +3648,9 @@ impl State {
     fn post_program_path(&mut self, path: PathBuf) {
         match posting::post_setup(&self.world, &path) {
             Ok(posted) => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
                 self.status = format!(
                     "posted {} op(s), {} lines to {}",
                     posted.ops,
@@ -3704,8 +3678,18 @@ impl State {
                 });
             }
             // A refused post leaves any previous program (file and viewer)
-            // exactly as it was - the gate writes nothing on refusal.
-            Err(err) => self.status = format!("post refused: {err}"),
+            // exactly as it was - the gate writes nothing on refusal. The
+            // reason also goes to its own window (#265), because the
+            // status line is overwritten by the next click or command.
+            Err(err) => {
+                let reason = err.to_string();
+                self.status = format!("post refused: {reason}");
+                self.post_refusal = Some(crate::egui_app::post_refusal::PostRefusal {
+                    path,
+                    reason,
+                    doc_version: self.doc_version,
+                });
+            }
         }
     }
 
@@ -3854,13 +3838,16 @@ pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     dialog.set_file_name(filename).save_file()
 }
 
-fn post_program_dialog() -> Option<PathBuf> {
+/// The Post dialog, opened where `crate::post_file::post_target` says
+/// (#258: the last post's folder and name, else the project's).
+fn post_program_dialog(target: &crate::post_file::PostTarget) -> Option<PathBuf> {
     // The extension law lives with the script (fanuc.cps's `extension`
     // is "nc"); the dialog just offers it.
-    rfd::FileDialog::new()
-        .add_filter("NC Program", &["nc"])
-        .set_file_name("program.nc")
-        .save_file()
+    let mut dialog = rfd::FileDialog::new().add_filter("NC Program", &["nc"]);
+    if let Some(dir) = &target.dir {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.set_file_name(&target.file_name).save_file()
 }
 
 fn save_stl_dialog() -> Option<PathBuf> {

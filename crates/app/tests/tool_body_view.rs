@@ -59,8 +59,8 @@ fn the_six_presets_name_themselves_and_scaled_axes_still_match() {
 fn the_preview_is_the_placement_the_command_lands() {
     let mesh = prism(20.0, 0.0, 30.0, 16);
     let body = view::preview(&mesh, [0.0, 0.0, 1.0], 50.0).expect("a collar previews");
-    assert!((body.profile.bottom() - 50.0).abs() < 1e-6, "origin 50 above the tip puts the foot there");
-    assert!((body.profile.top() - 80.0).abs() < 1e-6);
+    assert!((body.profile().expect("a spindle body").bottom() - 50.0).abs() < 1e-6, "origin 50 above the tip puts the foot there");
+    assert!((body.profile().expect("a spindle body").top() - 80.0).abs() < 1e-6);
     // The command placing the same spec stores the same facets.
     let world = new_world();
     let mut history = History::default();
@@ -91,7 +91,7 @@ fn a_tip_pick_takes_the_hit_facets_nearest_corner_and_zeroes_it() {
     let off = view::tip_offset_at(low.hit, [0.0, 0.0, 1.0]).expect("finite");
     assert!((off + 10.0).abs() < 1e-9, "the bottom at z 10 is the tip: offset -10, got {off}");
     let body = view::preview(&mesh, [0.0, 0.0, 1.0], off).expect("placed");
-    assert!(body.profile.bottom().abs() < 1e-6, "the picked point lands on the tip");
+    assert!(body.profile().expect("a spindle body").bottom().abs() < 1e-6, "the picked point lands on the tip");
     assert!(view::pick(&mesh, [100.0, 100.0, 100.0], [0.0, 0.0, -1.0]).is_none(), "a miss is None");
     assert!(view::tip_offset_at([1.0, 2.0, 3.0], [0.0, 0.0, 0.0]).is_none());
 }

@@ -50,8 +50,8 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
-    Shape, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Layout, Pos2, RichText, ScrollArea,
+    Sense, Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
@@ -1253,10 +1253,23 @@ fn gcode_listing(
                 {
                     rt = rt.weak();
                 }
-                // add_sized pins every row to exactly row_h, so the
-                // cursor arithmetic above stays exact over a long
-                // program instead of drifting a row.
-                let resp = ui.add_sized([width, row_h], Label::new(rt).selectable(false));
+                // Every row is a left-to-right box exactly `width` by
+                // `row_h`, so the text starts at the left edge (#256:
+                // `add_sized` centred it) and the cursor arithmetic
+                // above stays exact over a long program instead of
+                // drifting a row. `truncate` keeps a line wider than
+                // the window on its one row (egui shows the whole line
+                // on hover) rather than wrapping it onto a second.
+                let resp = ui
+                    .allocate_ui_with_layout(
+                        Vec2::new(width, row_h),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_size(Vec2::new(width, row_h));
+                            ui.add(Label::new(rt).selectable(false).truncate())
+                        },
+                    )
+                    .inner;
                 if jump.get() == Some(i) {
                     resp.scroll_to_me(Some(Align::Center));
                     jump.set(None);

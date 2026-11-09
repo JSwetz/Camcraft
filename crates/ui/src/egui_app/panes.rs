@@ -419,7 +419,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Deviate => {
             "Judge the program's stock against the model (deviation map)".into()
         }
-        Cmd::View => "Show or hide the browser and properties panes, or reset the layout".into(),
+        Cmd::View => "Show or hide the browser, properties and machines panes, or reset the layout".into(),
         Cmd::Theme => "Pick the document's theme and colour-vision mode (undoable)".into(),
     }
 }

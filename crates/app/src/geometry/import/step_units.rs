@@ -65,7 +65,7 @@ pub(super) fn mm_per_unit(section: &DataSection) -> Result<Option<f64>, String> 
 /// Every entity's records by id: a simple instance is one record, a
 /// complex one (`#72 = ( CONVERSION_BASED_UNIT(..) LENGTH_UNIT() .. )`)
 /// is its list.
-fn by_id(section: &DataSection) -> HashMap<u64, Vec<&Record>> {
+pub(super) fn by_id(section: &DataSection) -> HashMap<u64, Vec<&Record>> {
     section
         .entities
         .iter()
@@ -77,7 +77,7 @@ fn by_id(section: &DataSection) -> HashMap<u64, Vec<&Record>> {
 }
 
 /// A record's arguments: the parser wraps them in one list.
-fn args(r: &Record) -> &[Parameter] {
+pub(super) fn args(r: &Record) -> &[Parameter] {
     match &r.parameter {
         Parameter::List(a) => a,
         _ => &[],
@@ -146,7 +146,7 @@ fn si_mm(id: u64, a: &[Parameter]) -> Result<f64, String> {
 }
 
 /// A measure value: a bare real, or one typed as `LENGTH_MEASURE(..)`.
-fn real(p: &Parameter) -> Option<f64> {
+pub(super) fn real(p: &Parameter) -> Option<f64> {
     match p {
         Parameter::Real(x) => Some(*x),
         Parameter::Integer(i) => Some(*i as f64),

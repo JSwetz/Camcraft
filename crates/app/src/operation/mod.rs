@@ -83,6 +83,7 @@ pub(crate) use stamp_stock::write_setup_stock;
 mod material;
 pub use material::*;
 mod material_region;
+pub(crate) use material_region::selection_drives_region;
 mod circle_fit;
 pub use circle_fit::{CIRCLE_FIT_TOL, circle_of_region, circular_fit_of};
 mod material_source;
@@ -91,6 +92,10 @@ pub use footprint::machined_footprint;
 mod probe;
 // #108: the Probe operation's generation and protected-move law.
 pub mod probe_op;
+// #171: the Probe op seeded from one picked face, edge, vertex or round wall.
+mod probe_pick;
+mod probe_pick_round;
+pub use probe_pick::{PROBE_AXIS_TOL_DEG, ProbeSeed, probe_account, probe_from_picks, probe_seed, seeded_params};
 pub(crate) use probe::*;
 mod selection;
 pub use selection::*;
@@ -141,6 +146,8 @@ mod top_stock;
 pub use top_stock::TOP_STOCK_WARNING;
 mod turning_credit;
 mod turning_feeds;
+mod turning_holder;
+mod turning_holder_scene;
 mod turning_outline;
 mod turning_rapids;
 mod turning_stock;
