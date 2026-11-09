@@ -25,9 +25,7 @@ fn reserved(world: &World, name: &str) -> Option<CommandError> {
         || crate::setup::is_furniture_shape(name)
         || crate::setup::names(world).iter().any(|s| {
                 crate::setup::stock_entity_name(world, Some(s)) == name
-                    || (0..WCS_SLOTS.len()).any(|i| {
-                        crate::setup::wcs_entity_name(world, Some(s), i).is_some_and(|n| n == name)
-                    })
+                    || crate::setup::wcs_entity_name(world, Some(s)) == name
             });
     if taken {
         return Some(CommandError::Invalid(format!(

@@ -54,7 +54,7 @@ fn part_with_g54_on_top() -> World {
     };
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", top).expect("G54 on the part top"),
+        SetWcsOrigin::new(&world, top).expect("G54 on the part top"),
     );
     world
 }

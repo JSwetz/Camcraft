@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectError> {
+pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Vec<String>, ProjectError> {
     // Migration hook: step UP one version at a time, each migration exact,
     // before any entity touches the world. Anything newer than this build
     // remains refused. The chain must run its steps sequentially - a v1
@@ -485,7 +485,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the inferred per-operation law they posted with (#196).
         file.version = 51;
     }
-    if (51..=54).contains(&file.version) {
+    if (51..=PROJECT_VERSION).contains(&file.version) {
         // v51 -> v52 (#329): a work-offset height stops naming its own
         // slot - the setup's is program zero. Agreeing setups take the
         // slot, disagreeing ones refuse by name; a v52+ file is checked
@@ -498,10 +498,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // is "as modelled" - what every v52 file machined.
         file.version = 53;
     }
-    if file.version == 53 {
-        // v53 -> v54 (#368): a tool may carry a modelled body. Absent
-        // is the holder cylinder - what every v53 tool judged.
-        file.version = 54;
+    let mut notes = Vec::new();
+    if (53..=PROJECT_VERSION).contains(&file.version) {
+        // v53 -> v54 (#342): one WCS per setup - each setup keeps the
+        // origin of the slot it posts, slots no setup posts are dropped
+        // with a note; a v54+ file is checked one-WCS (`wcs_one`).
+        // v54 -> v55 (#368): a tool may carry a modelled body. Absent
+        // is the holder cylinder - what every v54 tool judged - so the
+        // rung needs no rewrite.
+        notes = super::wcs_one::settle(&mut file, from)?;
+        file.version = PROJECT_VERSION;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
@@ -748,7 +754,13 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                 };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
-                    wcs: sdto.wcs,
+                    // `wcs_one` left exactly one name on every setup.
+                    wcs: match sdto.wcs {
+                        WcsDto::One(w) => w,
+                        WcsDto::Slots(_) => {
+                            return Err(corrupt(format!("setup '{}' still lists work offset slots", dto.name)));
+                        }
+                    },
                     datum_from: sdto.datum_from,
                     work_offset,
                     part_alignment,
@@ -766,5 +778,5 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             });
         }
     }
-    Ok(())
+    Ok(notes)
 }

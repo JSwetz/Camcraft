@@ -110,6 +110,17 @@ fn run(
                 Ok(t) => t,
                 Err(e) => return die(format!("cannot read {path}: {e}")),
             };
+            // #373 until #374: a file-form machine stating an inverted
+            // axis (or a garbled direction) refuses by name - never
+            // standard-sign code for it.
+            match camcraft_post::machine::parse_mch(&text) {
+                Ok(m) => {
+                    if let Some(why) = m.inverted_post_refusal() {
+                        return die(why);
+                    }
+                }
+                Err(e) => return die(format!("{path}: {e}")),
+            }
             match post::machine::from_json(&text) {
                 Ok(v) => v,
                 Err(e) => return die(format!("cannot parse {path}: {e}")),
