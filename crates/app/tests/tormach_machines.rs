@@ -7,8 +7,9 @@
 //! figures are each machine's Tormach operator's manual, § "Machine
 //! Specifications" and § "Performance Expectations" (UM10587 770MX MF,
 //! UM10864 770MX ML, UM10539 770M, UM10586 1100MX, UM10811 1500MX,
-//! UM10372 PCNC 440); the Mach3-era R8 mills' from § 9.4 / 9.1
-//! "Specifications" (32426 Rev C1-1 PCNC 770 Series 3, 30625 Rev C4-1
+//! UM10372 PCNC 440, UM10540 0626A 1100M); the Mach3-era R8 mills' from § 9.4 / 9.1
+//! "Specifications" (31725 Rev B1-4 PCNC 770, 32426 Rev C1-1 PCNC 770
+//! Series 3, 30625 Rev C4-1
 //! PCNC 1100 Series I, 31138 Rev B1-4 PCNC 1100 Series II, UM10087 1013A
 //! PCNC 1100 Series 3).
 //! Gate map (M4.4): covers post::machine (spindle ranges, rigid tapping),
@@ -58,7 +59,7 @@ struct Spec {
     rigid: bool,
 }
 
-const SPECS: [Spec; 10] = [
+const SPECS: [Spec; 12] = [
     Spec {
         name: "Tormach 770MX",
         travel_in: [14.0, 7.5, 13.25],
@@ -113,8 +114,30 @@ const SPECS: [Spec; 10] = [
         ranges: &[(300.0, 4500.0), (650.0, 10000.0)],
         rigid: false,
     },
+    // The PathPilot-era R8 1100M: 70-7500 rpm on two belts, 2 hp (1.5 kW)
+    // as the manual's own rating, tension/compression tapping only.
+    Spec {
+        name: "Tormach 1100M",
+        travel_in: [18.0, 11.0, 16.25],
+        rpm: (70.0, 7500.0),
+        kw: 1.5,
+        ipm: (110.0, 90.0),
+        ranges: &[(70.0, 2000.0), (250.0, 7500.0)],
+        rigid: false,
+    },
     // The Mach3-era R8 mills: rated (not peak) motor power, the stated
     // rapid traverse as the feed ceiling, tapping heads only.
+    // The PCNC 770 before Series 3 (31725 Rev B1-4): the Series 3's
+    // figures except a 130 IPM X/Y rapid.
+    Spec {
+        name: "Tormach PCNC 770",
+        travel_in: [14.0, 7.5, 13.25],
+        rpm: (175.0, 10200.0),
+        kw: 0.75,
+        ipm: (130.0, 100.0),
+        ranges: &[(175.0, 3250.0), (525.0, 10200.0)],
+        rigid: false,
+    },
     Spec {
         name: "Tormach PCNC 770 (Series 3)",
         travel_in: [14.0, 7.5, 13.25],
@@ -283,6 +306,30 @@ fn the_belt_note_follows_the_machines_own_ranges() {
         note("Tormach PCNC 770 (Series 3)", 10100).as_deref(),
         Some("(SPINDLE 10100 RPM NEEDS THE HIGH BELT RANGE)")
     );
+    // The 1100M's high belt stops at 7500 rpm and its low one at 2000,
+    // the 1100MX's low range but not its 10000 rpm top.
+    assert_eq!(
+        note("Tormach 1100M", 2500).as_deref(),
+        Some("(SPINDLE 2500 RPM NEEDS THE HIGH BELT RANGE)")
+    );
+    assert_eq!(
+        note("Tormach 1100M", 100).as_deref(),
+        Some("(SPINDLE 100 RPM NEEDS THE LOW BELT RANGE)")
+    );
+    assert_eq!(
+        note("Tormach 1100M", 1500),
+        None,
+        "both 1100M ranges serve 1500"
+    );
+    // The earlier PCNC 770 has the Series 3's belts.
+    assert_eq!(
+        note("Tormach PCNC 770", 10100).as_deref(),
+        Some("(SPINDLE 10100 RPM NEEDS THE HIGH BELT RANGE)")
+    );
+    assert_eq!(
+        note("Tormach PCNC 770", 200).as_deref(),
+        Some("(SPINDLE 200 RPM NEEDS THE LOW BELT RANGE)")
+    );
     assert_eq!(note("Tormach 1500MX", 8000), None, "one range: no belt");
     assert_eq!(note("Tormach 770MX (ML)", 300), None, "one range: no belt");
 }
@@ -294,7 +341,7 @@ fn tap_on(name: &str) -> engine::PostOutput {
     engine::run(&cps, &mirrored(name), &stream).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
-/// The R8 mills (770M, PCNC 440, the Mach3-era PCNC 770 and 1100s) cannot
+/// The R8 mills (770M, 1100M, PCNC 440, the Mach3-era PCNC 770 and 1100s) cannot
 /// rigid-tap: a tap is refused by name, once, and no G84 reaches the
 /// program. The MX mills post it.
 #[test]
@@ -302,6 +349,8 @@ fn a_rigid_tap_is_refused_on_a_machine_that_cannot_rigid_tap() {
     for name in [
         "Tormach 770M",
         "Tormach PCNC 440",
+        "Tormach 1100M",
+        "Tormach PCNC 770",
         "Tormach PCNC 770 (Series 3)",
         "Tormach PCNC 1100 (Series I)",
         "Tormach PCNC 1100 (Series II)",

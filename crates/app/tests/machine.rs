@@ -733,6 +733,8 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         ("Tormach 1100MX", Kind::Mill),
         ("Tormach 1500MX", Kind::Mill),
         ("Tormach PCNC 440", Kind::Mill),
+        ("Tormach 1100M", Kind::Mill),
+        ("Tormach PCNC 770", Kind::Mill),
         ("Tormach PCNC 770 (Series 3)", Kind::Mill),
         ("Tormach PCNC 1100 (Series I)", Kind::Mill),
         ("Tormach PCNC 1100 (Series II)", Kind::Mill),
