@@ -17,9 +17,10 @@ use crate::geometry::{Point3, Triangle};
 /// Rest is distance truth at RIDGES: a
 /// model surface point that stands within the pass's promise band
 /// (`r + tol + floor` of at least two chords the center path ran
-/// over) or that the pass FLANKS (centre-path feet on opposite sides
-/// of it within one ball diameter, a ball able to touch it - M13.8,
-/// `ridge`), and how far outside every ball it stood. Two band
+/// over) or that the pass FLANKS (the nearest feet of two passes on
+/// opposite sides of it within one ball diameter, a ball able to touch
+/// it - M13.8, #212, `ridge_scan`), and how far outside every ball it
+/// stood. Two band
 /// contacts is exactly what "this op rolled a stepdown ladder over
 /// you" promises, so what stands outside both is scallop left on the
 /// pass's own word; the band alone caps that word at `tol` (a point
@@ -52,9 +53,9 @@ pub struct EnvelopeReport {
     /// only; the ridge predicate above is untouched by it.
     pub rest_mm: f64,
     /// Worst distance the model surface stood outside every ball at a
-    /// point the pass FLANKED (M13.8 B / M13.9, `ridge`): centre-path
-    /// feet on opposite sides within the flank reach, a tangent ball
-    /// able to touch it, no band contact. The spacing's own scallop -
+    /// point the pass FLANKED (M13.8 B / M13.9 / #212, `ridge_scan`):
+    /// the nearest feet of two passes on opposite sides within one
+    /// ball diameter, a tangent ball able to touch it, no band contact. The spacing's own scallop -
     /// a quality reading, kept apart from `rest_mm` (which `Envelope`
     /// convicts on) so it can be reported without blocking. 0.0 when
     /// no flanked point stood outside the band.
@@ -203,7 +204,7 @@ fn envelope_scan_lift(
     }
     // Rest: the distance truth at ridges - surface points the center
     // path passed by twice inside the promise band, or FLANKED within
-    // one ball diameter (M13.8, `ridge`). The band is what the
+    // one ball diameter (M13.8, #212, `ridge_scan`). The band is what the
     // stepdown law swore, so a point outside every ball there is this
     // path's own failure, while a once-grazed or never-touched point
     // is another op's job (the law above). The band alone could never
@@ -213,92 +214,19 @@ fn envelope_scan_lift(
     // between two passes, and what stands outside every ball there is
     // the spacing's own scallop - unless no ball could touch the point
     // at all (a crease narrower than the ball), which is excused.
-    let band = r + tol + floor;
-    let reach = super::ridge::reach(band, tol);
-    // The flank window is the reach itself: both feet of a flanked
-    // column stand within it, which caps what the law can read at
-    // `4·tol` past the ball and asks the lattice to hold a column
-    // within reach of BOTH passes. A closed ring's own inside - the
-    // cone's apex, the hill's crown under a ring smaller than the
-    // reach - is one pass's graze, not a cusp: the feet must come
-    // from two distinct passes (`ridge::closed_ring_ids`, M13.9).
-    // The `4·tol` ceiling and the far foot's lattice slack stay the
-    // named owed item (#37: the validity range is in `ridge::reach`).
-    let window = reach;
-    // A far segment's 3D distance cannot stand inside the window, so
-    // its XY window rejects it before the distance is paid. A
-    // column's dmin only feeds a report when a segment proved near,
-    // and those are never the skipped ones - the filter is exact, not
-    // an approximation.
-    let boxes: Vec<(f64, f64, f64, f64)> = segs
-        .iter()
-        .map(|(a, b)| (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y)))
-        .collect();
-    let mut flanked: Vec<(f64, Point3, [f64; 3])> = Vec::new();
-    for iy in 0..ny {
-        for ix in 0..nx {
-            let t = part[ix + iy * nx];
-            if !t.is_finite() {
-                continue; // no model surface at this column
-            }
-            let q = Point2::new(x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
-            let q3 = Point3::new(q.x, q.y, t);
-            let n = super::ridge::column_normal(&part, nx, ny, ix, iy, cell);
-            let mut flank = super::ridge::Flank::new(n);
-            let (mut dmin, mut near) = (f64::INFINITY, 0u8);
-            for (((a, b), (x0, x1, y0, y1)), ring) in segs.iter().zip(&boxes).zip(&rings) {
-                if q.x < x0 - window
-                    || q.x > x1 + window
-                    || q.y < y0 - window
-                    || q.y > y1 + window
-                {
-                    continue;
-                }
-                let d = dist_pt_seg3(q.x, q.y, t, *a, *b);
-                if d <= band {
-                    near = near.saturating_add(1);
-                }
-                if d <= window {
-                    flank.add(q3, super::ridge::foot(q3, *a, *b), *ring);
-                }
-                if d < dmin {
-                    dmin = d;
-                }
-            }
-            let rest = dmin - r - floor;
-            if near < 2 {
-                if dmin > band && dmin <= reach && flank.flanked() {
-                    flanked.push((rest, q3, n)); // judged below, worst first
-                }
-                continue; // one graze or none: no promise kept or broken here
-            }
-            if rest > rep.rest_mm {
-                rep.rest_mm = rest;
-                if rest > worst {
-                    worst = rest;
-                    rep.at = q;
-                }
-            }
-        }
+    let lat = super::ridge_scan::Lattice { part: &part, x0, y0, cell, nx, ny };
+    let ridge = super::ridge_scan::ridge_rest(facets, &segs, &rings, &lat, (r, tol, floor));
+    rep.rest_mm = ridge.rest_mm;
+    if let Some(at) = ridge.rest_at
+        && ridge.rest_mm > worst
+    {
+        rep.at = at;
     }
-    // The flanked points over the band, worst first: the first one a
-    // tangent ball can reach is the ridge verdict; the unreachable
-    // ones before it are creases, excused by name in `ridge`.
-    if !flanked.is_empty() {
-        flanked.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let access = super::ridge::Access::new(facets, r);
-        if let Some((rest, q3, _)) = flanked
-            .iter()
-            .find(|(_, q3, n)| access.reachable(*q3, *n, r, tol))
-            && *rest > rep.scallop_mm
-        {
-            // Its own reading, never `rest_mm` (M13.9): scallop over
-            // tolerance is a quality defect, reported beside the
-            // envelope verdict, not folded into what blocks the post.
-            rep.scallop_mm = *rest;
-            rep.scallop_at = Point2::new(q3.x, q3.y);
-        }
-    }
+    // Its own reading, never `rest_mm` (M13.9): scallop over
+    // tolerance is a quality defect, reported beside the envelope
+    // verdict, not folded into what blocks the post.
+    rep.scallop_mm = ridge.scallop_mm;
+    rep.scallop_at = ridge.scallop_at;
     // Solid truth behind the height field (M2.2d): material tops the
     // visible surface OCCLUDES - a ceiling's shadow over a floor -
     // judged by this same distance law. The union lives in the FIELD:

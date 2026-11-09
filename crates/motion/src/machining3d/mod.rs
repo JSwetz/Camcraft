@@ -117,6 +117,6 @@ pub use entry::{
     pocket3d_with_rest_prev,
 };
 pub use feed::{engagement_on, optimize_feed, FFO_FLOOR};
-pub use hsm::{REST_RINGS, SHELL_RINGS};
+pub use hsm::{NARROW_HELIX, REST_RINGS, SHELL_RINGS};
 pub use params::{engagement_step, Entry3D, Pocket3DParams};
 pub use rest::material_above;

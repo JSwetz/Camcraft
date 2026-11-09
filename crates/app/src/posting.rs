@@ -132,6 +132,13 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach 1100MX", include_str!("../../../assets/machines/tormach-1100mx.mch")),
     ("Tormach 1500MX", include_str!("../../../assets/machines/tormach-1500mx.mch")),
     ("Tormach PCNC 440", include_str!("../../../assets/machines/tormach-pcnc440.mch")),
+    ("Tormach 1100M", include_str!("../../../assets/machines/tormach-1100m.mch")),
+    // #170: the Mach3-era R8 mills, each from its own operator's manual.
+    ("Tormach PCNC 770", include_str!("../../../assets/machines/tormach-pcnc770.mch")),
+    ("Tormach PCNC 770 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc770-s3.mch")),
+    ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
+    ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
+    ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
@@ -597,10 +604,19 @@ fn fixture_problems(world: &World) -> Vec<String> {
         let Some(cache) = model::toolpath_of(world, &e) else {
             continue;
         };
-        let Some(tool) = model::find_by_name(world, &op.tool)
-            .and_then(|t| model::tool_of(world, &t))
+        let Some((tool_entity, tool)) = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t).map(|d| (t, d)))
         else {
             continue;
+        };
+        // #368: the body's enclosing cylinder and band stack; a body
+        // that no longer fits its tool is itself the problem, by name.
+        let (tool, body) = match crate::tool_body::judged(world, &tool_entity, tool) {
+            Ok(v) => v,
+            Err(e) => {
+                out.push(format!("{name}: tool {}: {e}", op.tool));
+                continue;
+            }
         };
         // `boxes_for` already folds in the machine-derived table, so an
         // empty list means no steel this op could strike at all (the
@@ -618,15 +634,17 @@ fn fixture_problems(world: &World) -> Vec<String> {
             axis: crate::fixture::rotary_axis_of(world, &op),
         };
         let geom = tool.geom();
-        let mut hits = crate::verify::bands_vs_workholding(
+        let holder = crate::tool_body::stack(&geom, body.as_ref());
+        let mut hits = crate::verify::bands_vs_workholding_held(
             &cache.path,
             &geom,
+            &holder,
             &wh,
             spindle,
             operation::GOUGE_TOL,
         );
         // The spindle housing rides posed rapids too (M13.8 (1)).
-        hits.extend(crate::verify::rapids_vs_workholding(&cache.path, &geom, &wh, spindle));
+        hits.extend(crate::verify::rapids_vs_workholding_held(&cache.path, &geom, &holder, &wh, spindle));
         for hit in hits {
             out.push(format!("{name}: {hit}"));
         }

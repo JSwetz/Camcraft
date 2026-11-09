@@ -419,7 +419,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Deviate => {
             "Judge the program's stock against the model (deviation map)".into()
         }
-        Cmd::View => "Show or hide the browser and properties panes, or reset the layout".into(),
+        Cmd::View => "Show or hide the browser, properties and machines panes, or reset the layout".into(),
         Cmd::Theme => "Pick the document's theme and colour-vision mode (undoable)".into(),
     }
 }
@@ -1364,7 +1364,7 @@ pub fn ribbon(
     } else if badge_rect.width() >= 145.0 {
         Some(build_info::toolbar_lines(true))
     } else if badge_rect.width() >= 50.0 {
-        Some((format!("v{}", build_info::VERSION), String::new()))
+        Some((build_info::toolbar_version(), String::new()))
     } else {
         None
     };

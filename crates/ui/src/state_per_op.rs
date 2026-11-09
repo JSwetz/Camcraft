@@ -72,11 +72,18 @@ impl State {
     /// The post's front door: a folder when the Output is one file per
     /// operation, the program file otherwise.
     pub(super) fn post_program_dialog(&mut self) {
+        // #258: both pickers open where this document last posted, else
+        // beside the saved project (`post_file::for_document`).
+        let target = crate::post_file::for_document(self);
         if posting::post_options(&self.world).per_op {
-            if let Some(dir) = rfd::FileDialog::new().set_title("Post one file per operation into").pick_folder() {
+            let mut picker = rfd::FileDialog::new().set_title("Post one file per operation into");
+            if let Some(dir) = &target.dir {
+                picker = picker.set_directory(dir);
+            }
+            if let Some(dir) = picker.pick_folder() {
                 self.post_program_folder(dir);
             }
-        } else if let Some(path) = super::post_program_dialog() {
+        } else if let Some(path) = super::post_program_dialog(&target) {
             self.post_program_path(path);
         }
     }
