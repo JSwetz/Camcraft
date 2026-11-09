@@ -115,7 +115,7 @@ fn a_refused_file_is_not_written_and_each_refusal_sits_on_its_field() {
     assert_eq!(on("X travel min"), ["X travel: min 400 must be below max 150"]);
     assert_eq!(on("X travel max"), on("X travel min"), "a travel refusal is on both ends");
     assert!(on("Spindle max speed").iter().any(|r| r.starts_with("spindle max_speed: 0 must be a number above 0")));
-    assert_eq!(on("Coolant Flood code"), [r#"coolant Flood: code "flood please" is not an M word like M8"#]);
+    assert_eq!(on("Coolant Flood code"), [r#"coolant Flood: code "flood please" is not an M word like M8 (it must start with M)"#]);
     assert!(on("Y travel min").is_empty());
     assert!(fields::unplaced(&g, &refusals).is_empty(), "every refusal has a field");
     match m.save() {
@@ -306,4 +306,79 @@ fn a_field_pointer_through_a_non_object_is_refused_not_a_panic() {
     // Removing under an absent parent is a no-op, not a creation.
     assert!(fields::set(&mut v, "/absent/key", FieldKind::Number, "").is_ok());
     assert!(v.get("absent").is_none());
+}
+
+/// The M-code words the editor takes: `M` and a whole number 0..=9999,
+/// leading zeros allowed. Anything else - a bare `M`, a letter after
+/// it, a lowercase `m`, a number past M9999 - is refused on its field
+/// and blocks the save (GUI-test finding on PR #478).
+const GOOD_M: [&str; 6] = ["M7", "M08", "M155", "M0", "M9999", "M0008"];
+const BAD_M: [&str; 8] = ["M", "MX", "M10000", "m8", "8", "M8.5", "M-1", "M8 M7"];
+
+/// The refusals on one field after typing `code` into it.
+fn refusals_on(m: &mut MachineDraft, label: &str, code: &str) -> Vec<String> {
+    edit(m, label, code);
+    let r = m.refusals();
+    field(&m.groups(), label).refusals(&r).iter().map(|r| r.to_string()).collect()
+}
+
+#[test]
+fn a_coolant_code_must_be_a_well_formed_m_word() {
+    let d = dir("mcode_coolant");
+    let mut m = MachineDraft::blank(Kind::Mill);
+    m.add_coolant("Mist").expect("adds");
+    for label in ["Coolant Flood code", "Coolant Mist code"] {
+        for good in GOOD_M {
+            assert_eq!(refusals_on(&mut m, label, good), Vec::<String>::new(), "{label} {good}");
+            assert!(m.refusals().is_empty(), "{good}: {:?}", m.refusals());
+        }
+        for bad in BAD_M {
+            let on = refusals_on(&mut m, label, bad);
+            assert_eq!(on.len(), 1, "{label} {bad:?} is refused on its field: {on:?}");
+            assert!(on[0].contains("M word"), "{on:?}");
+            assert!(matches!(m.save_as(Some(&d), "bad", false), Err(SaveError::Refused(_))), "{bad:?} saved");
+            assert!(!d.join("bad.mch").exists());
+        }
+        // Empty stays legal: the code is unstated.
+        assert_eq!(refusals_on(&mut m, label, ""), Vec::<String>::new());
+    }
+    assert_eq!(refusals_on(&mut m, "Coolant Flood code", "M"), [r#"coolant Flood: code "M" is not an M word like M8 (no number after M)"#]);
+    assert!(refusals_on(&mut m, "Coolant Flood code", "M10000")[0].contains("above M9999"));
+    assert!(refusals_on(&mut m, "Coolant Flood code", "m8")[0].contains("uppercase M"));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_live_tool_code_must_be_a_well_formed_m_word() {
+    let d = dir("mcode_live");
+    let words = ["Live tool C on", "Live tool C off", "Live tool spindle on", "Live tool spindle off"];
+    let mut m = MachineDraft::blank(Kind::MillTurn);
+    for (l, c) in words.iter().zip(["M154", "M155", "M133", "M135"]) {
+        edit(&mut m, l, c);
+    }
+    assert!(m.refusals().is_empty(), "{:?}", m.refusals());
+    for label in words {
+        for good in GOOD_M {
+            assert_eq!(refusals_on(&mut m, label, good), Vec::<String>::new(), "{label} {good}");
+        }
+        for bad in BAD_M {
+            let on = refusals_on(&mut m, label, bad);
+            assert_eq!(on.len(), 1, "{label} {bad:?} is refused on its field: {on:?}");
+            assert!(on[0].contains("M word"), "{on:?}");
+            // Only on its own field, not on the other three words.
+            let r = m.refusals();
+            let g = m.groups();
+            for other in words.iter().filter(|w| **w != label) {
+                assert!(field(&g, other).refusals(&r).is_empty(), "{bad:?} on {label} leaks onto {other}");
+            }
+            assert!(matches!(m.save_as(Some(&d), "bad", false), Err(SaveError::Refused(_))), "{bad:?} saved");
+            assert!(!d.join("bad.mch").exists());
+        }
+        edit(&mut m, label, "M100");
+    }
+    assert_eq!(
+        refusals_on(&mut m, "Live tool C on", "M"),
+        [r#"live_tool.c_axis_on: code "M" is not an M word like M8 (no number after M)"#]
+    );
+    let _ = std::fs::remove_dir_all(&d);
 }

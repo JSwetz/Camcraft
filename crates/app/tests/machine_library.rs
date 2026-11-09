@@ -153,6 +153,15 @@ fn malformed_codes_refuse_by_name() {
             serde_json::json!({ "c_axis_on": "M19", "spindle_on": "M3" });
     });
     one_refusal(&t, "live_tool", "states 2 of the 4 words");
+    // A hand-written file with a bare M is flagged in the catalogue too
+    // (the same validator), coolant and live-tool word alike.
+    let t = mill(|v| *at(v, COOLANTS) = serde_json::json!([{ "name": "Flood", "mCode": "M" }]));
+    one_refusal(&t, "coolant Flood", "no number after M");
+    let t = mill(|v| {
+        at(v, "/kinematics/default/parts/0/parts/1/tool_station")["live_tool"] =
+            serde_json::json!({ "c_axis_on": "M", "c_axis_off": "M155", "spindle_on": "M133", "spindle_off": "M135" });
+    });
+    one_refusal(&t, "live_tool.c_axis_on", "no number after M");
 }
 
 #[test]

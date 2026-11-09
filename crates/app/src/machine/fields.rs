@@ -230,7 +230,7 @@ pub fn groups(raw: &Value) -> Vec<FieldGroup> {
             ("Live tool spindle on", "spindle_on"),
             ("Live tool spindle off", "spindle_off"),
         ] {
-            g.add(s(label), format!("tool_station.live_tool.{k}"), format!("{h}/tool_station/live_tool/{k}"), T, &[s("live_tool")]);
+            g.add(s(label), format!("tool_station.live_tool.{k}"), format!("{h}/tool_station/live_tool/{k}"), T, &[s("live_tool"), format!("live_tool.{k}")]);
         }
     }
     out.push(g.group);
