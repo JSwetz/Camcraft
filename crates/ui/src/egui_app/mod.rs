@@ -58,6 +58,7 @@ mod pages;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).
 mod setup_pages;
+mod setup_post_page;
 // #326: the Setups page's part-alignment control.
 mod setup_align_pick;
 pub(crate) use setup_align_pick::align_text;

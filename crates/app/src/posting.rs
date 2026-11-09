@@ -183,11 +183,12 @@ pub fn post_set(world: &World, next: &PostRef) {
     world.set(next.clone());
 }
 
-/// The document's post options (issue #34), from the `PostOptions`
-/// singleton; the default when none was ever set.
+/// The post options the program posts with (issue #34): the active
+/// setup's (#389 - its own, else the document's `PostOptions`
+/// singleton, [`crate::setup_post_options::document`]).
 #[must_use]
 pub fn post_options(world: &World) -> PostOptions {
-    world.try_get::<&PostOptions>(|p| *p).unwrap_or_default()
+    crate::setup_post_options::in_force(world)
 }
 
 /// Write the options singleton. For `SetPostOptions` and the project
@@ -679,7 +680,6 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
         return Err(msg);
     }
 
-    let skip_stops = post_options(world).skip_stops;
     let mut streams = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
@@ -761,7 +761,12 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             coolant: op.coolant,
             // "Skip pauses and homes" (#110) mutes every after-action
             // at post; the ops keep their choices.
-            after: if skip_stops { operation::AfterOperation::None } else { op.after },
+            // #389: each op reads its own setup's switch.
+            after: if crate::setup_post_options::of(world, op.setup.as_deref()).skip_stops {
+                operation::AfterOperation::None
+            } else {
+                op.after
+            },
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

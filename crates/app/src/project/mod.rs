@@ -139,5 +139,8 @@ mod wcs_one;
 // #343: a setup's own machine and post (v55).
 mod mount_dto;
 pub use mount_dto::{SetupMachineDto, SetupPostDto};
+// #389: a setup's own post options (additive).
+mod setup_options_dto;
+pub use setup_options_dto::SetupPostOptionsDto;
 // #316: setup links (v56), checked before any world write.
 mod setup_links;

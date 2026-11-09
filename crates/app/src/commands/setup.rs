@@ -125,6 +125,7 @@ impl CreateSetup {
                 post: None,
                 relative_to: None,
                 stock_source: None,
+                post_options: None,
             }
         } else {
             SetupDef {
@@ -148,6 +149,8 @@ impl CreateSetup {
                 relative_to: None,
                 // #320: a new setup takes the default stock source.
                 stock_source: None,
+                // #389: the post's options ride the post (#343's transfer).
+                post_options: datum_from.and_then(|f| setup::def_of(world, f)).and_then(|d| d.post_options),
             }
         };
         let mut stock = None;

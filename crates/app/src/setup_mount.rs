@@ -152,5 +152,7 @@ pub fn program_problems(world: &World) -> Vec<String> {
         }
         seen.push(here);
     }
+    // #389: the program-level post options ride the same law.
+    out.extend(crate::setup_post_options::program_problems(world));
     out
 }
