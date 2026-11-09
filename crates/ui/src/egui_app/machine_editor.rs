@@ -16,7 +16,7 @@
 //! `None` checks nothing and a zero is not a ceiling.
 
 use egui::{ComboBox, DragValue, TextEdit, Ui, Window};
-use camcraft_app::machine::{self, Coolant, Kind, Machine};
+use camcraft_app::machine::{self, AxisDirection, Coolant, Kind, Machine};
 use camcraft_app::units::Unit;
 
 use super::pages;
@@ -174,6 +174,9 @@ fn draw_axes(ui: &mut Ui, u: Unit, m: &mut Machine) {
             }
             ui.label("res");
             opt(ui, |ui, v| pages::num(ui, u, v), &mut a.resolution);
+            if !a.rotary {
+                draw_direction(ui, i, a);
+            }
             if ui.button("✖").clicked() {
                 remove = Some(i);
             }
@@ -187,6 +190,43 @@ fn draw_axes(ui: &mut Ui, u: Unit, m: &mut Machine) {
             name: "U".to_owned(),
             ..Default::default()
         });
+    }
+}
+
+/// The per-axis direction (#373) as a plain choice: which way the
+/// tool moves against the work for a + command. The words read the
+/// ISO 841 program frame (X+ right, Y+ away from the operator, Z+ up);
+/// the other word states a machine whose slide moves the other way.
+/// A draft edit like every field - Apply's command is the undo step.
+fn draw_direction(ui: &mut Ui, i: usize, a: &mut machine::AxisLimits) {
+    let (std_word, inv_word) = direction_words(&a.name);
+    ui.label(format!("{}+ moves", a.name.trim()));
+    let shown = if a.direction.is_standard() { std_word } else { inv_word };
+    ComboBox::from_id_salt(("axis-direction", i))
+        .selected_text(shown)
+        .width(70.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut a.direction, AxisDirection::Standard, std_word);
+            ui.selectable_value(&mut a.direction, AxisDirection::Inverted, inv_word);
+        });
+    if !a.direction.is_standard() {
+        // #374: the post mirrors an inverted X / Y; anything else refuses.
+        let note = if matches!(a.name.trim(), "X" | "Y") {
+            "(posted mirrored: Fanuc / Haas posts only)"
+        } else {
+            "(posting refused for this axis)"
+        };
+        ui.label(note);
+    }
+}
+
+/// The two words of an axis's direction choice: standard first.
+fn direction_words(name: &str) -> (&'static str, &'static str) {
+    match name.trim().to_ascii_uppercase().as_str() {
+        "X" => ("right", "left"),
+        "Y" => ("away", "toward you"),
+        "Z" => ("up", "down"),
+        _ => ("standard", "reversed"),
     }
 }
 

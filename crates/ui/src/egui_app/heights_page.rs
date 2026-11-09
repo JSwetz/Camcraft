@@ -106,7 +106,7 @@ fn height_tag_is_bottom(tag: &str) -> bool {
 
 /// Where the read-only work-offset row points the user (#329).
 pub(crate) const SETUP_OFFSET_HINT: &str =
-    "program zero is the setup's: change the work offset on the Setups page";
+    "program zero is the setup's WCS: its work offset word is set on the Setups page";
 
 /// The read-only work-offset row's text: the setup's resolved word, and
 /// where it is set.
@@ -116,8 +116,8 @@ pub(crate) fn setup_offset_text(world: &flecs_ecs::prelude::World, setup: Option
         .copied()
         .unwrap_or("G54");
     match camcraft_app::setup::effective(world, setup) {
-        Some(s) => format!("{word}  (from setup {s})"),
-        None => word.to_owned(),
+        Some(s) => format!("WCS ({word})  (from setup {s})"),
+        None => format!("WCS ({word})"),
     }
 }
 

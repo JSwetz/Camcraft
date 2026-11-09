@@ -1,6 +1,7 @@
-//! `SetSetupWorkOffset` (#196): pick the program offset (`G54`..`G59`)
-//! a setup posts at - and every work-offset height of its operations
-//! measures from (#329) - or clear the pick back to the `G54` default.
+//! `SetSetupWorkOffset` (#196, #342): label a setup's one WCS with the
+//! `G54`..`G59` word the post writes for it, or clear the label back to
+//! the `G54` default. Only the word changes - the setup's WCS origin, and
+//! every height measured from it, stay where they are.
 //!
 //! Provenance: our own design; RS-274 / ISO 6983 work-offset selection
 //! (one of six controller zero registers per clamping) is general
@@ -15,7 +16,7 @@ use crate::commands::{Command, CommandError};
 use crate::model;
 use crate::schema::{SetupDef, WCS_SLOTS};
 
-/// Write a setup's picked work-offset slot. `None` clears the pick.
+/// Write a setup's work-offset word. `None` clears the label.
 pub struct SetSetupWorkOffset {
     setup: String,
     prev: Option<usize>,

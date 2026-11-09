@@ -23,6 +23,19 @@ pub const VERSION: u64 = 1;
 /// The extension the file dialogs offer.
 pub const EXTENSION: &str = "camtools";
 
+/// The path an export writes: the chosen one, with `.camtools` added
+/// when the name has no extension. A save panel only suggests the
+/// extension - macOS keeps a typed name without it for a file type it
+/// does not know - and a suffix-less library is easy to lose and is
+/// hidden by the import dialog's filter. A name that already carries
+/// an extension (`.camtools`, or a deliberate `.json`) is kept as typed.
+pub fn with_library_extension(path: &std::path::Path) -> std::path::PathBuf {
+    match path.extension() {
+        Some(_) => path.to_path_buf(),
+        None => path.with_extension(EXTENSION),
+    }
+}
+
 /// One named tool of a library file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LibraryTool {

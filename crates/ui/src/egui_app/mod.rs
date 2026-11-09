@@ -53,8 +53,11 @@ mod approach_page;
 mod lead_page;
 mod op_tabs;
 mod painted;
+mod tree_glyphs;
 mod pages;
 mod setup_wcs_pick;
+// #343: a setup's own node pages (settings, machine, post, fixtures, tools).
+mod setup_pages;
 // #326: the Setups page's part-alignment control.
 mod setup_align_pick;
 pub(crate) use setup_align_pick::align_text;
@@ -81,6 +84,10 @@ mod turning_page;
 // #107: Save / Don't Save / Cancel over unsaved changes.
 mod unsaved_prompt;
 mod panes;
+// #343: the browser tree, split from panes (rows / pane / operation menu).
+mod browser_tree;
+mod browser_pane;
+mod tree_menu;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
 // (state.rs) installs the live table, the format tests read the

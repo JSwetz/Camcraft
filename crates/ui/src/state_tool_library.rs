@@ -22,7 +22,7 @@ impl State {
         else {
             return;
         };
-        self.export_tool_library_to(&path);
+        self.export_tool_library_to(&tool_library::with_library_extension(&path));
     }
 
     /// "Import library…": pick a file, then import it.
