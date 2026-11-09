@@ -101,6 +101,8 @@ mod tool_body;
 mod tool_profile;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
+// #509: the Fixtures page rows fit the pane.
+mod fixture_rows;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
