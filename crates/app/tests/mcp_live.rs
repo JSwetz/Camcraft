@@ -197,3 +197,59 @@ fn the_bridge_copies_stdio_to_a_live_session_and_back() {
     assert!(text.contains("\"id\":7") && text.contains("\"result\""), "{text}");
     assert!(camcraft_app::mcp::bridge("127.0.0.1:1", std::io::empty(), std::io::sink()).is_err(), "no server: a clean error");
 }
+
+/// #474 review: loopback is no trust boundary - a web page in the user's
+/// browser can POST to 127.0.0.1. Its HTTP request line closes the
+/// connection, so the JSON-RPC body it carries never reaches the app;
+/// a real client on the next connection is served as before.
+#[test]
+fn a_browser_post_never_reaches_the_app() {
+    let inbox = Inbox::listen(0, Box::new(|| {})).expect("listen on loopback");
+    let addr = inbox.addr().expect("bound address");
+    let body = call(9, "save_project", json!({ "path": "/tmp/camcraft-drive-by.ccam" }));
+    let post = format!(
+        "POST / HTTP/1.1\r\nHost: {addr}\r\nOrigin: http://evil.example\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}\n",
+        body.len() + 1
+    );
+    let mut s = TcpStream::connect(addr).expect("connect");
+    // A regression must fail, never hang: without the JSON-only rule the
+    // page's body would sit unanswered in the app's inbox.
+    s.set_read_timeout(Some(Duration::from_secs(3))).expect("timeout");
+    s.write_all(post.as_bytes()).expect("write");
+    let mut r = BufReader::new(s);
+    let mut line = String::new();
+    r.read_line(&mut line).expect("a refusal, not silence - the page's request reached the app");
+    assert!(line.contains("-32600") && line.contains("not a JSON-RPC message"), "{line}");
+    let mut rest = String::new();
+    let n = r.read_line(&mut rest).unwrap_or(0);
+    assert_eq!(n, 0, "the connection is closed after the refusal, not reading on: {rest:?}");
+    // Nothing of the page's request was handed to the app.
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < deadline {
+        assert!(inbox.next().is_none(), "a browser line reached the app");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // A JSON-RPC client is still served on the next connection.
+    let s = TcpStream::connect(addr).expect("reconnect");
+    let mut w = s.try_clone().expect("clone");
+    let mut r = BufReader::new(s);
+    let ping = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+    writeln!(w, "{ping}").expect("send");
+    let world = new_world();
+    let mut history = History::default();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let req = loop {
+        if let Some(req) = inbox.next() {
+            break req;
+        }
+        assert!(Instant::now() < deadline, "the JSON client was not served");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(req.line().trim(), ping);
+    let a = answer_live(&world, &mut history, None, req.line());
+    req.answer(a.reply);
+    let mut line = String::new();
+    r.read_line(&mut line).expect("answer");
+    assert!(line.contains("\"id\":1"), "{line}");
+}

@@ -12,8 +12,17 @@
 //! a time; a dropped client, a closed channel or an unreadable line is
 //! logged and the listener goes on (or ends with the app), never a panic.
 //! Dropping the [`Inbox`] stops and joins the thread.
+//!
+//! **Only JSON-RPC speaks** (review of #474): loopback is not a trust
+//! boundary - any web page in the user's browser can POST to
+//! 127.0.0.1. Every non-blank line must open a JSON object or array;
+//! anything else (an HTTP request line, a header) closes the
+//! connection before a single line of it reaches the app, so a page can
+//! never smuggle a JSON-RPC body past its own HTTP headers. Reads are
+//! bounded to [`MAX_LINE`] as they happen, and writes time out, so a
+//! client can neither grow memory nor stall the listener.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -28,6 +37,20 @@ const POLL: Duration = Duration::from_millis(50);
 /// A line longer than this is refused and its client dropped - a client
 /// that never sends a newline must not grow the app's memory forever.
 const MAX_LINE: usize = 16 * 1024 * 1024;
+
+/// How long a write to a client may block before the client is dropped -
+/// a client that stops reading must not hold the listener.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Whether a wire line may be handed to the app: JSON-RPC is always an
+/// object or a batch array. An HTTP request line or header is neither.
+#[must_use]
+pub(crate) fn is_json_rpc_line(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .find(|b| !b.is_ascii_whitespace())
+        .is_none_or(|b| *b == b'{' || *b == b'[')
+}
 
 /// The waker the listener calls after queueing a request, so an idle
 /// GUI loop draws (and drains) a frame. Any thread may call it.
@@ -179,6 +202,7 @@ fn serve_client(stream: TcpStream, tx: &Sender<Request>, stop: &AtomicBool, wake
     // (BSD does); reads wait, but only a POLL at a time.
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(POLL))?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::new(stream);
     let mut buf = Vec::new();
@@ -186,7 +210,9 @@ fn serve_client(stream: TcpStream, tx: &Sender<Request>, stop: &AtomicBool, wake
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
-        match reader.read_until(b'\n', &mut buf) {
+        // Bounded as it reads: never more than one byte past the cap.
+        let room = (MAX_LINE + 1).saturating_sub(buf.len()) as u64;
+        match Read::by_ref(&mut reader).take(room).read_until(b'\n', &mut buf) {
             Ok(0) => {
                 // End of input: a last unterminated line still counts,
                 // as it does on stdio.
@@ -221,8 +247,15 @@ fn serve_client(stream: TcpStream, tx: &Sender<Request>, stop: &AtomicBool, wake
 }
 
 /// Hand one line to the owning thread and write its answer. `Ok(false)`
-/// when the session cannot go on (the app is stopping or gone).
+/// when the session cannot go on (the app is stopping or gone, or the
+/// client is not speaking JSON-RPC).
 fn forward(bytes: &[u8], tx: &Sender<Request>, writer: &mut TcpStream, stop: &AtomicBool, wake: &Wake) -> std::io::Result<bool> {
+    if !is_json_rpc_line(bytes) {
+        tracing::warn!("mcp: a client sent a line that is not JSON-RPC (an HTTP request?) - connection closed");
+        let refusal = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"not a JSON-RPC message - the connection is closed"}}"#;
+        let _ = writeln!(writer, "{refusal}").and_then(|()| writer.flush());
+        return Ok(false);
+    }
     let line = String::from_utf8_lossy(bytes).into_owned();
     if line.trim().is_empty() {
         return Ok(true);

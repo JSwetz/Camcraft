@@ -50,3 +50,5 @@
   clean, so the app may still ask to save - the safe side.
 - **Cost to change later:** the transport is one file (`mcp/listen.rs`);
   an HTTP front end or a menu toggle would build the same `Inbox`.
+
+**Security fix from review (live MCP listener):** loopback is not a trust boundary, since any web page in the user's browser can POST to 127.0.0.1. Every non-blank wire line must now open a JSON object or array; anything else (an HTTP request line or header) gets a -32600 refusal and the connection is closed before a single line reaches the app. So a page cannot smuggle a JSON-RPC body (`save_project`, `post`, `export_tool_library` with its own paths) past its HTTP headers. Reads are bounded to the 16 MiB cap as they happen, and writes time out after 5 s, so a client can neither grow memory nor stall the listener. A per-session token was considered and dropped for now: the JSON-only rule already closes the browser route, and a token would complicate `camcraft-cli mcp --connect`. It can be added if a non-browser local attacker matters.
