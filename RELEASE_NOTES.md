@@ -4,9 +4,10 @@ BREAKING: the project file format moved from v57 to v58 (PR #381: a tool can
 carry a modelled holder body). Files saved by 0.15.0 or earlier open here and
 are migrated when saved, but a v58 file saved by 0.16.0 is refused by older
 builds (save a copy first if you still need 0.15.0). Two post behaviours also
-tighten and can refuse a program that used to post: the Tormach and Siemens
-840D posts now retract to the machine file's `safe_retract` and refuse a
-machine that states none (#495, #503), and a probing post script must declare
+tighten and can refuse a program that used to post: the Tormach posts now
+retract to the machine file's `safe_retract` and refuse a non-Tormach machine
+that states none, the Siemens 840D post refuses any machine that states none
+(#495, #503), and a probing post script must declare
 `onProbeGuard` or the Probe op is refused by name (#174). The built-in VMC,
 tilt-head, Lathe and Mill-turn machines now state their strokes in program
 coordinates (#457, #493), so programs they used to refuse now post.
@@ -90,8 +91,6 @@ seelesturm, austin62jake and tbrasselle for their contributions.
   is aligned differently.
 - **#523**: posts start the spindle (S0 M3) on a probe tool.
 - **#74**: GPU selection can fail on hybrid Intel/NVIDIA laptops.
-- Pixel snapshot goldens are release-lane tests (#359); the reference-OS
-  goldens are regenerated at the cut.
 
 ---
 # CamCraft 0.15.0 (clean-room implementation)
