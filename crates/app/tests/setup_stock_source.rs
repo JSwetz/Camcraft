@@ -186,7 +186,10 @@ fn a_refused_carry_and_the_first_setup_cannot_be_picked() {
     // Its own stock is a new block, so the program simulates again.
     let op = CreateOperation::new(&world, "Face2", TOOL, SrcRef::Entity("part".into()), face(16.0)).expect("create");
     h.execute(&world, op);
-    h.execute(&world, GenerateOperation::new(&world, "Face2").expect("generate"));
+    // Unpicked, the carry is refused by generation (#318's rest chain)
+    // and by the program sim (#317), both by name.
+    let err = GenerateOperation::new(&world, "Face2").err().expect("refused").to_string();
+    assert!(err.contains(CARRY_TURN_REFUSAL), "{err}");
     assert!(simulate_document(&world).is_err(), "unpicked: the #317 carry, refused");
     pick(&world, &mut h, StockSource::Own);
     regen(&world, &mut h);

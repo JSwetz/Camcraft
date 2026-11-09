@@ -71,15 +71,13 @@ fn render_source(world: &World, ctx: Option<&str>, out: &mut String) {
     use crate::setup_stock::{self, StockSource};
     let Some(name) = setup::effective(world, ctx) else { return };
     let Some(words) = setup_stock::describe(world, &name) else { return };
-    out.push_str(&format!("  source   {words}
-"));
+    out.push_str(&format!("  source   {words}\n"));
     if setup_stock::effective(world, &name) != Some(StockSource::FromPrevious) {
         return;
     }
     match setup_stock::incoming(world, &name) {
         Ok(i) => out.push_str(&format!(
-            "  incoming min ({}, {}, {})  max ({}, {}, {})  volume {} mm3 - the block below is not cut from
-",
+            "  incoming min ({}, {}, {})  max ({}, {}, {})  volume {} mm3 - the block below is not cut from\n",
             mm(i.min[0]),
             mm(i.min[1]),
             mm(i.min[2]),
@@ -88,8 +86,7 @@ fn render_source(world: &World, ctx: Option<&str>, out: &mut String) {
             mm(i.max[2]),
             mm(i.volume),
         )),
-        Err(why) => out.push_str(&format!("  incoming not known: {why}
-")),
+        Err(why) => out.push_str(&format!("  incoming not known: {why}\n")),
     }
 }
 

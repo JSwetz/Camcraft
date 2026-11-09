@@ -62,3 +62,13 @@ it has some. "Previous setup" on the page is the previous by setup order.
 **Project v57:** `"stock_source": "own" | "from_previous"`, absent when
 never picked; an unknown word is a corrupt file. Not breaking: every v56
 file loads and simulates unchanged.
+
+**Rest across setups (#318, merged meanwhile) follows the pick.**
+`rest::across::chain_of` reads the same `carry::entry`, so "What <setup>
+leaves behind" extends the rest chain and "Its own stock" breaks it - a
+new block (different hold) exactly like the clip (same hold): the rest
+starts from the setup's own block. Considered and dropped: extending the
+chain through a new block (rest would assume setup-1 cuts gone from a
+blank that never had them - gouge-class). This settles the "fresh block
+or same part, not stated until #320" open point in
+`docs/decisions/318-rest-across-setups.md`.
