@@ -92,6 +92,8 @@ mod structural;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
+// #371: the tool editor's Body section.
+mod tool_body;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
 
