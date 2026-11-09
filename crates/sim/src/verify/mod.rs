@@ -152,6 +152,7 @@ pub use crate::tools::ToolGeom;
 
 
 mod air;
+mod arc_bulge;
 mod contact;
 mod crossing;
 mod cut_index;
@@ -173,6 +174,7 @@ mod rotary_geom;
 mod section;
 mod solid;
 mod solid_index;
+mod stack_span;
 mod sweep;
 mod swept;
 mod types;

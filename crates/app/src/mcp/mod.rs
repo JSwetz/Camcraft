@@ -19,10 +19,12 @@ mod area;
 mod bridge;
 mod edit;
 mod features;
+mod fixture_tools;
 mod job;
 mod listen;
 mod live;
 mod pick;
+mod setup_tools;
 mod tools;
 
 // #183: the same tool table served live from inside the GUI, over a

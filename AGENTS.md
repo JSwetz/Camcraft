@@ -436,6 +436,20 @@ not ride the split away: `#[test]` count before and after must match, and
 the ignored set keeps its golden asserts. UI snapshot binaries resolve their
 goldens from `crates/ui` - run them with that CWD.
 
+**Pixel snapshots are release-lane** (#255). The UI's PNG goldens
+(`crates/ui/tests/snapshots/*.png`) are `#[ignore]`d out of quick and
+batch and run only in the release tier's ui snapshot lane (debug,
+`--ignored snapshot`, CWD `crates/ui`). A PR never changes a snapshot
+PNG - not to "refresh" a conflict, not to accept a new render - and a
+`UPDATE_SNAPSHOTS=1` refresh on merge is no longer a habit: the goldens
+are regenerated once at the minor/major cut, in one commit on the release
+branch, after a human look at the `.diff.png`. What a snapshot guards is
+asserted in the default suite by its structural twin
+(`crates/ui/src/egui_app/tests/structural.rs`): AccessKit labels, roles,
+enabled/disabled state and window presence, plus the painted strips' text
+and coarse placement - text-only, so it holds on every OS and merges like
+code. A UI change updates those assertions, not the PNGs.
+
 `VisualRunner` is auto-enabled: windows show, run fast, and stay open if closed
 early; hidden runs cap at 30s; auto-close after 10s when no test is pending; on
 crash or timeout, the window is left open.

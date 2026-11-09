@@ -210,6 +210,7 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             classes: Vec::new(),
         })
         .collect();
+    parts.extend(sim_body_part(state));
     if !state.active_stock_hidden() {
         match (&state.program_sim, crate::machined::mesh(state)) {
             // The machined stock's extracted mesh (M13.1 owed) takes the
@@ -286,6 +287,33 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
         parts.push(GpuPart { verts, selected: false, stock: false, fill: true, classes: Vec::new() });
     }
     parts
+}
+
+/// #371: the running tool's assembly at the playhead - cutter and shank
+/// revolved from its numbers, then its modelled body, or without one the
+/// holder cylinder from its own numbers (what the collision laws judge),
+/// posed by the frame's tip and axis, world space. Only while the
+/// transport is up and its timeline is this document's (`cached_script`
+/// refreshes it before the next frame), any playhead including 0 and the
+/// end, playing or paused, the op fresh or stale (display reads the
+/// cached path). Lathe insert kinds yield nothing (marker only).
+pub(crate) fn sim_tool_tris(state: &State) -> Option<Vec<camcraft_app::geometry::Triangle>> {
+    let sim = state.sim?;
+    let (version, sc) = state.sim_script_cache.as_ref()?;
+    if *version != state.doc_version || sc.is_empty() {
+        return None;
+    }
+    let f = sc.at(sim.t);
+    let op = sc.ops.get(f.op?)?;
+    let tris = camcraft_app::tool_body_view::assembly_for_operation(&state.world, op)?;
+    Some(camcraft_app::tool_body_view::posed(&tris, [f.pos.x, f.pos.y, f.pos.z], f.axis))
+}
+
+/// [`sim_tool_tris`] as a model part (depth-tested, shaded).
+fn sim_body_part(state: &State) -> Option<GpuPart> {
+    let tris = sim_tool_tris(state)?;
+    let verts = tris.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect();
+    Some(GpuPart { verts, selected: false, stock: false, fill: false, classes: Vec::new() })
 }
 
 // -------------------------------------------------------------- overlay

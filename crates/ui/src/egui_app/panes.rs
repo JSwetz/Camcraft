@@ -117,6 +117,11 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     if f && !typing && !cmd && !modifiers.alt {
         actions::frame_all(state);
     }
+    if p && !typing && !cmd && !modifiers.alt {
+        // #434: bare P flips perspective/ortho - a viewport-layer key
+        // like F (Ctrl+P is the post lane above).
+        actions::toggle_projection(state);
+    }
 }
 
 // -------------------------------------------------------------------- ribbon
