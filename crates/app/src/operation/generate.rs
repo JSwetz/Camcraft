@@ -3077,8 +3077,8 @@ fn rotary_letter_gate(
 /// spindle band is never tested on its own. A fixed box loses a hit only
 /// where the machine frame proves the move clear; the turning boxes keep
 /// the path-frame verdict untouched. #339: `meshes` (the tagged models'
-/// closed meshes, empty for a lathe's tool) then acquit the upright
-/// moves a box flagged and its real steel does not meet
+/// closed meshes, empty for a lathe's tool) then acquit the moves
+/// (upright, posed or turned) a box flagged and its real steel does not meet
 /// (`verify::mesh_refined` - the mesh never adds a hit).
 #[allow(clippy::too_many_arguments)] // the gate's inputs + the meshes
 fn workholding_warnings(
