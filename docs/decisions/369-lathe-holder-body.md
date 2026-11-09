@@ -130,9 +130,9 @@
   path notes, and every turning, lathe, golden, project and undo suite
   stayed green with it, so it was kept.
 - **Project file: no version bump.** A lathe body is written as `lathe:
-  {radial, along, tip}` with `axis` and `offset` absent. A v55 reader
+  {radial, along, tip}` with `axis` and `offset` absent. A v56 reader
   that predates #369 then refuses the file (missing field `axis`)
-  rather than reading lathe-placed facets as a spindle body. v55 itself
+  rather than reading lathe-placed facets as a spindle body. v56 itself
   is unreleased (#381). A spindle body's bytes are unchanged. The
   clearance bands are re-derived on load and never written.
 - **Stamp:** a lathe body adds `lathe-body` and its clearance numbers to
