@@ -675,13 +675,10 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
 
     // The T../H.. law (#221): a tool's own number when it has one, else
     // its 1-based position among the named tools in document order - and
-    // two tools of one program posting the same number refuse by name.
+    // two tools of one machine posting the same number refuse by name.
     let tool_numbers = crate::tool_numbers::numbers(world);
-    let used: Vec<String> = ops
-        .iter()
-        .filter_map(|(_, e)| model::operation_of(world, e).map(|op| op.tool))
-        .collect();
-    if let Some(msg) = crate::tool_numbers::clash(world, &used) {
+    // Judged per machine (#438): two machines are two tool tables.
+    if let Some(msg) = crate::tool_numbers::clash_per_machine(world, &ops) {
         return Err(msg);
     }
 
