@@ -261,3 +261,44 @@ fn the_simulated_tool_reaches_from_its_tip_into_the_body_on_the_users_document()
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+#[test]
+fn the_preview_zoom_clamps_and_fit_resets_it() {
+    use crate::state::{ZOOM_MAX, ZOOM_MIN, clamp_zoom};
+    assert_eq!(clamp_zoom(0.0, 1.0), 1.0);
+    assert_eq!(clamp_zoom(0.0, 100.0), ZOOM_MAX, "wheel in forever stops at the cap");
+    assert_eq!(clamp_zoom(0.0, -100.0), ZOOM_MIN, "and out");
+    assert_eq!(clamp_zoom(0.5, f32::NAN), 0.5, "non-finite input leaves it");
+    let mut harness = editor();
+    let path = temp_stl("zoom");
+    prism_stl(&path, 15.0, 0.0, 30.0, 24);
+    harness.state_mut().state.import_tool_body_from(&path);
+    harness.run();
+    // A wheel notch over the preview (just under the pick row) zooms in.
+    let row = harness.get_by_label("Pick tip").rect();
+    let over = egui::pos2(row.min.x + 100.0, row.max.y + 100.0);
+    harness.hover_at(over);
+    harness.run();
+    harness.input_mut().events.push(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, 3.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(6);
+    let z = harness.state().state.tool_body_ui.zoom;
+    assert!(z > 0.0, "the wheel zooms in (zoom {z})");
+    assert!(harness.state().state.pending.is_empty(), "zoom is view state, never a command");
+    {
+        let st = &mut harness.state_mut().state;
+        st.zoom_body_preview(50.0, [3.0, -2.0]);
+        assert_eq!(st.tool_body_ui.zoom, ZOOM_MAX);
+        st.zoom_body_preview(-50.0, [3.0, -2.0]);
+        assert_eq!(st.tool_body_ui.zoom, ZOOM_MIN);
+        st.tool_body_ui.yaw = 1.0;
+    }
+    harness.get_by_label("Fit").click();
+    harness.run();
+    let d = &harness.state().state.tool_body_ui;
+    assert_eq!((d.zoom, d.pan, d.yaw, d.pitch), (0.0, [0.0; 2], 0.0, 0.0), "Fit restores the default view");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

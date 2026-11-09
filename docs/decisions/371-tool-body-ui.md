@@ -60,19 +60,23 @@
   draws an axis marker only), so "unchanged cylinders" means unchanged:
   no body, no new geometry. Dropped: drawing the cylinder assembly for
   body-less tools (a separate display feature).
-- **Hands-on fix: the simulation draws the whole tool when it has a
-  body.** The first cut drew the body alone. On a real document it sat
-  a shank length (55 mm for the catalog end mill) above the tip with
-  nothing below it, off the top of a part-framed view, and the user saw
-  no difference. Now, while simulating, a tool with a body is drawn
-  whole: cutter and shank revolved from `Tool::profile` up to the shank
-  top (carried up to the body's foot if it stands clear, the same gap
-  the fixture laws fill with shank), then the body. Frame takes the
-  posed assembly in while the transport is up. Not done: auto-framing
-  on Simulate (it would shrink the part to fit a tall holder for every
-  run); drawing cutter/shank for tools without a body (no-body scenes
-  stay unchanged); a static tool marker outside playback (none exists
-  to put a body on).
+- **Hands-on follow-up: the simulation draws the whole tool when it
+  has a body.** The first cut drew the body alone; on the user's
+  document the collar floated a shank length (55 mm) above the axis
+  marker. Now a tool with a body is drawn whole while simulating:
+  cutter and shank revolved from `Tool::profile` up to the shank top
+  (carried up to the body's foot if it stands clear - the same gap the
+  fixture laws fill with shank), then the body, all posed by the same
+  function into the same part. Tools without a body draw exactly as
+  before (marker only). Briefly Frame also took the posed tool in;
+  that was reverted on the user's word (the view behaviour stays as
+  it was - zoom out to see a tall holder). Not done: auto-framing on
+  Simulate; a static tool marker outside playback (none exists).
+- **Preview zoom (user request):** wheel or pinch (Ctrl+wheel) over the
+  3D body preview zooms about the cursor (log2 zoom clamped to
+  [-2, 5], i.e. 1/4x to 32x of the fit view; the pan keeps the point
+  under the cursor fixed). Double-click or the Fit button resets orbit,
+  zoom and pan. View state only, never a command.
 - **File read is synchronous** on the UI thread (`tool_body_view::load`,
   the model importer). A holder file is small next to a part; the
   worker-thread import path is wired to `ImportModel` and would need a

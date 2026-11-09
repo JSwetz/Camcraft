@@ -48,6 +48,12 @@ pub struct ToolBodyUi {
     /// The preview's orbit, radians off its default view.
     pub yaw: f32,
     pub pitch: f32,
+    /// The preview's zoom, log2 of the magnification over the fit view
+    /// (0 = fit), clamped to [`ZOOM_MIN`, `ZOOM_MAX`].
+    pub zoom: f32,
+    /// The view centre's shift off the fit centre, view units (right,
+    /// up): what keeps the point under the cursor fixed while zooming.
+    pub pan: [f64; 2],
     /// The world body the draft last mirrored (identity, not value):
     /// a change there (Apply, Undo, Redo, Open) re-mirrors.
     seen: Option<Arc<[Triangle]>>,
@@ -56,6 +62,20 @@ pub struct ToolBodyUi {
 }
 
 type PreviewKey = (usize, [u64; 4]);
+
+/// The preview zoom's bounds, log2: a quarter of the fit view out to
+/// 32x in - far enough to pick a corner on a fine holder, never so far
+/// a wheel spin loses the body.
+pub const ZOOM_MIN: f32 = -2.0;
+pub const ZOOM_MAX: f32 = 5.0;
+
+/// The zoom law: `z` moved by `by` (log2), clamped; non-finite input
+/// leaves it where it was.
+#[must_use]
+pub fn clamp_zoom(z: f32, by: f32) -> f32 {
+    let next = z + by;
+    if next.is_finite() { next.clamp(ZOOM_MIN, ZOOM_MAX) } else { z.clamp(ZOOM_MIN, ZOOM_MAX) }
+}
 
 /// A body as Apply body states it, for the command queue. Debug prints
 /// the facet count, never the mesh.
@@ -181,6 +201,26 @@ impl State {
             },
         }
         self.tool_body_ui.pick = BodyPickMode::Off;
+    }
+
+    /// Zoom the body preview by `by` (log2) about `about` - the cursor's
+    /// offset from the view centre in view units (right, up) at the
+    /// current zoom - so the point under it stays put. View state only.
+    pub(crate) fn zoom_body_preview(&mut self, by: f32, about: [f64; 2]) {
+        let d = &mut self.tool_body_ui;
+        let next = clamp_zoom(d.zoom, by);
+        let k = f64::from(next - d.zoom).exp2();
+        if k.is_finite() && k > 0.0 && about.iter().all(|v| v.is_finite()) {
+            d.pan[0] += about[0] * (1.0 - 1.0 / k);
+            d.pan[1] += about[1] * (1.0 - 1.0 / k);
+        }
+        d.zoom = next;
+    }
+
+    /// Fit: the default view again - orbit, zoom and pan reset.
+    pub(crate) fn fit_body_preview(&mut self) {
+        let d = &mut self.tool_body_ui;
+        (d.yaw, d.pitch, d.zoom, d.pan) = (0.0, 0.0, 0.0, [0.0; 2]);
     }
 
     /// "Apply body": queue the one `SetToolBody` for the draft.

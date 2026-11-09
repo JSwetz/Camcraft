@@ -43,7 +43,7 @@ mod tool_library_io;
 mod setup_mount;
 #[path = "state_tool_body.rs"]
 mod tool_body_ui;
-pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi};
+pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};

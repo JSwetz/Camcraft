@@ -95,6 +95,9 @@ pub(super) fn body_section(ui: &mut Ui, state: &mut State, exists: bool, u: Unit
         {
             state.tool_body_ui.pick = if pick == BodyPickMode::Axis { BodyPickMode::Off } else { BodyPickMode::Axis };
         }
+        if ui.button("Fit").on_hover_text("reset the preview's orbit and zoom (or double-click it)").clicked() {
+            state.fit_body_preview();
+        }
     });
     preview_3d(ui, state);
     let note = match state.tool_body_preview() {
@@ -138,7 +141,8 @@ struct View {
 }
 
 impl View {
-    fn new(tris: &[Triangle], rect: Rect, yaw: f32, pitch: f32) -> Option<Self> {
+    fn new(tris: &[Triangle], rect: Rect, d: &crate::state::ToolBodyUi) -> Option<Self> {
+        let (yaw, pitch) = (d.yaw, d.pitch);
         let mut lo = [f64::INFINITY; 3];
         let mut hi = [f64::NEG_INFINITY; 3];
         for t in tris {
@@ -165,7 +169,10 @@ impl View {
         let f = [-(p.cos() * y.cos()), -(p.cos() * y.sin()), -p.sin()];
         let r = norm([f[1], -f[0], 0.0]).unwrap_or([1.0, 0.0, 0.0]);
         let up = cross(r, f);
-        let s = f64::from(rect.width().min(rect.height())) * 0.45 / reach;
+        let zoom = f64::from(crate::state::clamp_zoom(d.zoom, 0.0)).exp2();
+        let s = f64::from(rect.width().min(rect.height())) * 0.45 / reach * zoom;
+        let pan = if d.pan.iter().all(|v| v.is_finite()) { d.pan } else { [0.0; 2] };
+        let c = [0, 1, 2].map(|i| c[i] + r[i] * pan[0] + up[i] * pan[1]);
         Some(Self { c, s, r, up, f, mid: rect.center(), reach })
     }
 
@@ -179,6 +186,11 @@ impl View {
 
     fn depth(&self, q: [f64; 3]) -> f64 {
         dot([q[0] - self.c[0], q[1] - self.c[1], q[2] - self.c[2]], self.f)
+    }
+
+    /// Screen point `at` as view units (right, up) off the view centre.
+    fn offset(&self, at: Pos2) -> [f64; 2] {
+        [f64::from(at.x - self.mid.x) / self.s, -f64::from(at.y - self.mid.y) / self.s]
     }
 
     /// The ray under screen point `at`: from in front of the body, into it.
@@ -195,7 +207,7 @@ fn preview_3d(ui: &mut Ui, state: &mut State) {
     let rect = resp.rect;
     painter.rect_filled(rect, 4.0, Color32::from_rgb(24, 26, 31));
     let d = &state.tool_body_ui;
-    let Some(view) = View::new(&d.facets, rect, d.yaw, d.pitch) else {
+    let Some(view) = View::new(&d.facets, rect, d) else {
         return;
     };
     // Painter's algorithm: far facets first, shaded by how squarely
@@ -240,6 +252,19 @@ fn preview_3d(ui: &mut Ui, state: &mut State) {
             egui::FontId::proportional(10.0),
             Color32::from_rgb(240, 200, 120),
         );
+    }
+    // Zoom: the wheel or a pinch (Ctrl+wheel too) while hovered, about
+    // the cursor; a double-click fits. View state only.
+    if resp.hovered() {
+        let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+        let by = scroll * 0.004 + pinch.max(1e-3).log2();
+        if by.abs() > 1e-6 {
+            let about = resp.hover_pos().map_or([0.0; 2], |p| view.offset(p));
+            state.zoom_body_preview(by, about);
+        }
+    }
+    if resp.double_clicked() {
+        state.fit_body_preview();
     }
     if resp.dragged() && mode == BodyPickMode::Off {
         let dv = resp.drag_delta();
