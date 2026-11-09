@@ -1055,8 +1055,29 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         ui.heading("Tool library");
         ui.label("Pick a tool in the browser, or open the editor to create one.");
     }
-    if ui.button("New tool…").clicked() {
+    // Wrapped: the pane is narrow, and a clipped button is a hidden one.
+    let (new, export, import) = ui
+        .horizontal_wrapped(|ui| {
+            let new = ui.button("New tool…").clicked();
+            let export = ui
+                .button("Export library…")
+                .on_hover_text("write the document's tools to a CamCraft tool library file")
+                .clicked();
+            let import = ui
+                .button("Import library…")
+                .on_hover_text("add the tools of a CamCraft tool library file (one undo step; taken names are never overwritten)")
+                .clicked();
+            (new, export, import)
+        })
+        .inner;
+    if new {
         actions::open_tool_editor(state, "");
+    }
+    if export {
+        state.export_tool_library_dialog();
+    }
+    if import {
+        state.import_tool_library_dialog();
     }
     if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
         ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
