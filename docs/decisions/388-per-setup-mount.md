@@ -94,6 +94,22 @@ a job moves from a mill to a lathe: two programs, two controls.
 `setup_mount::program_mounts` and the per-file post in
 `posting_mounts.rs`; a per-setup split would change only the grouping key.
 
+**Merged with #404 / #470 (2026-11-09).**
+- `stock_sim::carry::carry_turn`: main's #404 refuses a carry between
+  setups on different machines (`CARRY_MACHINE_CHANGE_REFUSAL`, via
+  `one_machine`, which reads each setup's own machine), then gates the
+  kind of that one shared machine. That subsumes this PR's "both ends
+  must be mills" (one machine, one kind) and is stricter: a carry between
+  two DIFFERENT mills, which this PR let through, now refuses. Kept the
+  stricter refusal (material never crosses a machine change); a new block
+  on another machine is still judged (#404's review fix).
+- #470's MCP readers of the machine table moved onto the per-setup
+  reader: `get_fixture_findings`' workholding view reads each setup's own
+  table (`fixture::table_box(w, setup)`), and `set_setup_machine` reports
+  the table of the machine it just named - the setup's own or the
+  document's (`fixture::table_of`, split out of `table_box`) - never the
+  active setup's.
+
 ## #438: the tool-number clash is judged per machine
 
 - **Chosen:** the #221 clash law (`tool_numbers::clash_per_machine`) groups

@@ -98,7 +98,14 @@ pub fn tagged(world: &World, declared: Option<&str>) -> Vec<(String, Entity)> {
 /// an inactive setup's ops are checked against their own machine's.
 #[must_use]
 pub fn table_box(world: &World, declared: Option<&str>) -> Option<FixtureBox> {
-    let m = machine::of_setup(world, declared).1?;
+    table_of(&machine::of_setup(world, declared).1?)
+}
+
+/// [`table_box`] of one machine, read straight off its axes - for a
+/// caller that already holds the machine (the MCP machine tools name
+/// the document's own, which no setup context resolves to).
+#[must_use]
+pub fn table_of(m: &machine::Machine) -> Option<FixtureBox> {
     let span = |n: &str| {
         m.axes
             .iter()
