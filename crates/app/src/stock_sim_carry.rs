@@ -28,6 +28,13 @@
 
 use crate::stock_sim::{Body, Deviation, Dexel, LatticeTurn, Planned, SimOp, simulate, stock_grid};
 
+/// The refusal for a carry on a lathe or mill-turn machine (#321 decided:
+/// the part flip / sub-spindle hand-off is not implemented - the column
+/// lattice carries milled bodies only, and a turned body lives in the
+/// meridian field). Every reader of the carry - the program sim, the rest
+/// and judged stock of generation, and so the post - says this by name.
+pub const CARRY_MACHINE_REFUSAL: &str = "a part flip or sub-spindle hand-off is not supported yet on a lathe or mill-turn machine";
+
 /// How the program enters a setup from the setup before it.
 pub(crate) enum Entry {
     /// Its own stock in the same hold: the conservative clip to the new
@@ -57,7 +64,7 @@ fn matrix_of(rot: [f64; 4]) -> [[f64; 3]; 3] {
 pub(crate) fn carry_turn(world: &flecs_ecs::prelude::World, from: &str, to: &str) -> Result<LatticeTurn, String> {
     let head = format!("carrying the machined stock from setup '{from}' into setup '{to}'");
     if crate::machine::kind_of(world) != crate::machine::Kind::Mill {
-        return Err(format!("{head}: not supported yet on a lathe or mill-turn machine"));
+        return Err(format!("{head}: {CARRY_MACHINE_REFUSAL}"));
     }
     let t = crate::setup_relative::transform_between(world, from, to).map_err(|e| format!("{head}: {e}"))?;
     LatticeTurn::from_matrix(matrix_of(t.rot), [t.pos.x, t.pos.y, t.pos.z]).map_err(|e| format!("{head}: {e}"))
