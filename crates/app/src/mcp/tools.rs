@@ -50,7 +50,7 @@ const TOOLS: &[Tool] = &[
 
 /// Every row: this table, then the setup furniture's (#181).
 fn all() -> impl Iterator<Item = &'static Tool> {
-    TOOLS.iter().chain(super::setup_tools::TOOLS).chain(super::fixture_tools::TOOLS)
+    TOOLS.iter().chain(super::setup_tools::TOOLS).chain(super::fixture_tools::TOOLS).chain(super::align_tools::TOOLS)
 }
 
 /// The `tools/list` rows.

@@ -25,7 +25,8 @@
 //!   angles turn the parts about the centre of their bounds, so a flip
 //!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
 //!   takes any rigid transform - the door the face/edge picks (#330) use,
-//!   through [`AlignPartToSetup::lay_on_plane`].
+//!   through [`AlignPartToSetup::lay_on_plane`], and the in-plane axis
+//!   picks (#557), through [`AlignPartToSetup::turn_in_plane`].
 //! - **Linked setups follow (#316).** Every setup placed relative to
 //!   this one (directly or through others, [`crate::setup_relative`])
 //!   keeps its transform to it: the command re-places each of them, with
@@ -141,6 +142,22 @@ impl AlignPartToSetup {
         lay: crate::pick::PlaneLay,
     ) -> Result<Self, CommandError> {
         let at = crate::pick::lay_on_plane(world, picks, lay).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some(at))
+    }
+
+    /// Would [`Self::turn_in_plane`] be accepted? The same refusals, by
+    /// name, without building the command (the Setups page's Apply).
+    pub fn check_turn(world: &World, setup: &str, axes: &crate::pick::InPlaneAxes) -> Result<(), CommandError> {
+        let at = crate::pick::turn_in_plane(world, setup, axes).map_err(CommandError::Invalid)?;
+        change_of(world, setup, Some(at)).map(|_| ())
+    }
+
+    /// Turn the part in the work plane from picks (#557): a straight edge
+    /// or two points for +Y and/or +X, read by
+    /// [`crate::pick::turn_in_plane`] in the setup's current frame and
+    /// composed onto its alignment. Refused by name before any write.
+    pub fn turn_in_plane(world: &World, setup: &str, axes: &crate::pick::InPlaneAxes) -> Result<Self, CommandError> {
+        let at = crate::pick::turn_in_plane(world, setup, axes).map_err(CommandError::Invalid)?;
         Self::new(world, setup, Some(at))
     }
 

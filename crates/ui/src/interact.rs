@@ -157,6 +157,10 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity, feature: sel };
+    if crate::axis_pick::collecting(state) {
+        crate::axis_pick::take(state, pick); // #557: refuses a face by name
+        return;
+    }
     if state.plane_pick.is_some() {
         crate::plane_pick::take(state, pick); // #330: the Setups page's draft
         return;
@@ -204,7 +208,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     };
     let sel = if mods.alt {
         feature::singleton_chain_id(&features, edge).map(FeatureSel::Chain)
-    } else if state.boundary_pick.is_some() || state.plane_pick.is_some() {
+    } else if state.boundary_pick.is_some() || state.plane_pick.is_some() || crate::axis_pick::collecting(state) {
         // A boundary (and a #330 lay-on-a-plane pick) takes ONE edge per click (M11.5 UX): the run - one
         // straight stretch or one arc - never the whole tangent loop a
         // filleted rim chains into.
@@ -233,6 +237,10 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         facet,
         feature: Some(sel),
     });
+    if crate::axis_pick::collecting(state) {
+        crate::axis_pick::take(state, GeoSel { entity, feature: sel }); // #557
+        return;
+    }
     if state.plane_pick.is_some() {
         crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #330
         return;
@@ -290,7 +298,7 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
         && let Some((entity, edge)) = edge_nearest(state, p, PICK_EDGE_PX)
         && let Some(found) = model::find_by_name(&state.world, &entity)
         && let Some(features) = model::features_of(&state.world, &found)
-        && let Some(c) = if state.boundary_pick.is_some() {
+        && let Some(c) = if state.boundary_pick.is_some() || crate::axis_pick::collecting(state) {
             // The run a boundary click takes, not the tangent loop.
             feature::run_containing(&features, edge)
         } else {
@@ -1647,6 +1655,11 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     // draft picks are the ones drawn.
     if let Some(draft) = &state.plane_pick {
         return feature_lines(state, &draft.picks);
+    }
+    // #557: the axes-in-the-plane draft's picks, while it collects.
+    if let Some(d) = state.axis_pick.as_ref().filter(|d| d.picking.is_some()) {
+        let picks: Vec<GeoSel> = [&d.axes.y, &d.axes.x].into_iter().flatten().flat_map(|p| p.picks.clone()).collect();
+        return feature_lines(state, &picks);
     }
     if state.op_ui.name.is_empty() || state.hidden_paths.contains(&state.op_ui.name) {
         return Vec::new(); // nothing open: nothing picked to pin down

@@ -24,6 +24,7 @@ pub struct PlanePick {
 /// Start (or restart) collecting picks for `setup`: Edge mode, so a click
 /// near an edge takes the edge and one on a face takes the face.
 pub fn arm(state: &mut State, setup: &str) {
+    crate::axis_pick::disarm(state); // #557: one draft collects at a time
     state.plane_pick = Some(PlanePick { setup: setup.to_owned(), picks: Vec::new() });
     state.geo_pick = GeoPick::Edge;
     state.status = format!("{setup}: pick a flat face, or two straight edges, to lay on the plane");

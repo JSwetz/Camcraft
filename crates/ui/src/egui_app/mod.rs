@@ -74,6 +74,7 @@ mod setup_align_pick;
 pub(crate) use setup_align_pick::align_text;
 // #330: the Setups page's lay-on-a-plane row.
 mod setup_plane_pick;
+mod setup_axis_pick;
 // #316: the setup page's "relative to the previous setup" control.
 mod setup_relative_pick;
 // The operation dialog, split out of `pages` with the property grid
@@ -164,6 +165,8 @@ mod setup_stock_pick;
 mod setup_stock_tests;
 #[cfg(test)]
 mod setup_plane_tests;
+#[cfg(test)]
+mod setup_axis_tests;
 #[cfg(test)]
 mod ball_corner_tests;
 #[cfg(test)]

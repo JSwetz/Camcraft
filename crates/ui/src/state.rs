@@ -332,6 +332,13 @@ pub enum CommandKind {
         picks: Vec<camcraft_app::operation::GeoSel>,
         lay: camcraft_app::pick::PlaneLay,
     },
+    /// Turn the part in a setup's work plane (#557): a straight edge or
+    /// two points for +Y and/or +X, read by the app. Undoable
+    /// (`AlignPartToSetup`). Never touches the work offset.
+    TurnPartInPlane {
+        setup: String,
+        axes: camcraft_app::pick::InPlaneAxes,
+    },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
     /// Ok-or-Stale from the two setups' placements.
@@ -1313,6 +1320,9 @@ pub struct State {
     /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
     /// Face/Edge picks into it ahead of the boundary and the selection.
     pub plane_pick: Option<crate::plane_pick::PlanePick>,
+    /// The Setups page's axes-in-the-plane draft (#557); while it is
+    /// collecting, Edge/Vertex picks land in it ahead of everything else.
+    pub axis_pick: Option<crate::axis_pick::AxisDraft>,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1502,6 +1512,7 @@ impl State {
             geo_pick: GeoPick::Model,
             boundary_pick: None,
             plane_pick: None,
+            axis_pick: None,
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
@@ -3067,6 +3078,22 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("part not laid on the plane: {err}"));
+                    }
+                }
+            }
+            CommandKind::TurnPartInPlane { setup, axes } => {
+                match AlignPartToSetup::turn_in_plane(&self.world, &setup, &axes) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.axis_pick = None;
+                        self.status = format!(
+                            "{setup} part turned in the plane: {}",
+                            crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("part not turned in the plane: {err}"));
                     }
                 }
             }

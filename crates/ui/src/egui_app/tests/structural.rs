@@ -230,3 +230,31 @@ fn tool_editor_structure() {
         "Apply sits at the window's foot"
     );
 }
+
+/// #557: a setup's own page carries the part-alignment rows in the
+/// properties leaf - the plane row and the axes-in-the-plane rows, each
+/// saying which pick it takes, with nothing armed and Apply hidden until
+/// an axis is picked.
+#[test]
+fn setup_page_alignment_rows_structure() {
+    let _g = snapshot_guard();
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(1280.0, 720.0))
+        .build_ui_state(frame, ShellUi::blank());
+    {
+        let st = &mut h.state_mut().state;
+        st.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        st.drain_actions();
+        crate::actions::target(st, UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Settings));
+    }
+    h.run_steps(3);
+    let plane = h.query_by_label_contains("Lay on a plane").expect("the plane row shows").rect();
+    let axes = h.query_by_label_contains("Axes in the plane - pick an edge or two points").expect("the axes rows show");
+    assert!(plane.min.y < axes.rect().min.y, "the axes rows follow the plane row");
+    for label in ["+Y by Edge", "+Y by Two points", "Pick +Y edge", "Flip +Y", "+X by Edge", "+X by Two points", "Pick +X edge", "Flip +X"] {
+        assert!(h.query_by_label(label).is_some(), "the axes rows must show {label:?}");
+        assert!(!disabled(&h, label), "{label:?} is live");
+    }
+    assert!(h.query_by_label("Apply axes").is_none(), "Apply waits for an axis pick");
+    assert!(h.state().state.axis_pick.is_none(), "nothing is armed by drawing the page");
+}
