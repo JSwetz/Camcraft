@@ -52,6 +52,9 @@
 //!   trusted to be right, or wrong. Columns that answer no verdict
 //!   (air in the stock, or air in the model) carry NaN, never a zero
 //!   dressed up as a clean bill of health.
+//! - **A gouge is judged with `tol` sideways too** (#299, `wall_slack`):
+//!   against the lowest part top within `tol` of the column centre, so
+//!   a centre microns inside a finished wall is not charged the wall.
 
 
 
@@ -67,6 +70,7 @@ mod deviate;
 mod display;
 mod dual;
 mod field;
+mod field_arc;
 mod field_batch;
 mod field_blade;
 mod field_bull;
@@ -88,9 +92,11 @@ pub mod preview;
 mod ridge;
 mod ridge_scan;
 mod scan;
+mod scan_arc;
 mod scan_hidden;
 mod scan_near;
 mod tiles;
+mod wall_slack;
 
 pub use backend::{Backend, Stock, FIELD_BAND, FIELD_VERDICT_EPS, LATHE_COLUMN_REFUSAL};
 pub use carry::{Body, LatticeTurn, CARRY_TURN_REFUSAL};

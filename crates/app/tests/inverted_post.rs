@@ -181,8 +181,13 @@ fn probing_refuses_by_name() {
         feed: 100.0,
         measure: Some(0),
     });
-    let e = refused("fanuc", &["X"], &with(vec![t]));
-    assert!(e.contains("operation Op1: probing is not supported for an inverted axis"), "{e}");
+    // #392 lifted it for Fanuc (probeAxisInversion = true, pinned by
+    // inverted_probe); Haas translates the motion but not its probing.
+    let e = refused("haas", &["X"], &with(vec![t]));
+    assert!(
+        e.contains("operation Op1: probing with a post script that does not declare probeAxisInversion = true"),
+        "{e}"
+    );
 }
 
 #[test]
