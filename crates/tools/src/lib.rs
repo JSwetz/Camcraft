@@ -15,4 +15,6 @@ pub mod cutting;
 pub mod holder_profile;
 // #369: a lathe-held body as the revolved-stock law reads it.
 pub mod lathe_holder;
+// #396: the insert plate a lathe body's judge leaves out.
+pub mod lathe_insert_zone;
 pub mod tools;

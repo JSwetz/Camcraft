@@ -1,6 +1,7 @@
 //! SetToolBody (#368): attach, replace or clear a tool's modelled body
 //! as one undoable command - a milling body along the spindle axis, or
-//! (#369) a lathe body in the turning tool frame. The mesh is read, placed and judged at
+//! (#369) a lathe body in the turning tool frame, with (#396) its
+//! optional insert zone. The mesh is read, placed and judged at
 //! construction (AGENTS.md: malformed input never enters the history);
 //! `apply`/`invert` only land the snapshot. Our own command model, the
 //! snapshot-and-restore inverse every sibling uses.
@@ -15,6 +16,7 @@ use crate::model;
 use crate::schema::ToolBody;
 use crate::tool_body;
 use camcraft_tools::lathe_holder::LathePlacement;
+use camcraft_tools::lathe_insert_zone::InsertZone;
 
 /// A body as the caller states it: model-frame facets, where they came
 /// from, and the numeric placement (`tool_body::place`).
@@ -36,6 +38,9 @@ pub struct LatheBodySpec {
     pub source: String,
     pub facets: Vec<Triangle>,
     pub place: LathePlacement,
+    /// #396: the insert plate the mesh models, a box in the turning
+    /// tool frame the holder judge leaves out; `None` judges it all.
+    pub zone: Option<InsertZone>,
 }
 
 /// Set (`Some`) or clear (`None`) a tool's body.
@@ -86,9 +91,9 @@ impl SetToolBody {
         let next = match spec {
             None => None,
             Some(s) => {
-                crate::tool_body_lathe::fits(&tool).map_err(invalid)?;
+                crate::tool_body_lathe::fits(&tool, s.zone.as_ref()).map_err(invalid)?;
                 let placed = crate::tool_body_lathe::place(&s.facets, &s.place).map_err(invalid)?;
-                let body = crate::tool_body_lathe::build(&s.source, s.place, placed).map_err(invalid)?;
+                let body = crate::tool_body_lathe::build(&s.source, s.place, s.zone, placed).map_err(invalid)?;
                 tool_body::fits(&tool, &body).map_err(invalid)?;
                 Some(body)
             }
@@ -101,7 +106,30 @@ impl SetToolBody {
     pub fn lathe_from_file(world: &World, name: &str, path: &Path, place: LathePlacement) -> Result<Self, CommandError> {
         let mesh = crate::geometry::import::load_model(path)?;
         let source = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
-        Self::lathe(world, name, Some(LatheBodySpec { source, facets: mesh.facets.to_vec(), place }))
+        Self::lathe(world, name, Some(LatheBodySpec { source, facets: mesh.facets.to_vec(), place, zone: None }))
+    }
+
+    /// Set (`Some`) or clear (`None`) the insert zone (#396) of tool
+    /// `name`'s lathe body, keeping its mesh and placement. Refused by
+    /// name: no such tool, no lathe body on it, a zone its inserts
+    /// could not fill or that holds the whole body.
+    pub fn insert_zone(world: &World, name: &str, zone: Option<InsertZone>) -> Result<Self, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let tool = model::tool_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a tool")))?;
+        let invalid = |e: String| CommandError::Invalid(format!("tool '{name}': {e}"));
+        let prev = tool_body::body_of(world, &entity);
+        let Some((source, place, facets)) = prev.as_ref().and_then(|b| match b.frame {
+            tool_body::BodyFrame::Lathe { place, .. } => Some((b.source.clone(), place, b.facets.to_vec())),
+            tool_body::BodyFrame::Spindle { .. } => None,
+        }) else {
+            return Err(invalid("it carries no lathe body - an insert zone is part of one".to_owned()));
+        };
+        crate::tool_body_lathe::fits(&tool, zone.as_ref()).map_err(invalid)?;
+        let body = crate::tool_body_lathe::build(&source, place, zone, facets).map_err(invalid)?;
+        Ok(SetToolBody { name: name.to_string(), prev, next: Some(body) })
     }
 }
 

@@ -45,7 +45,7 @@ fn cuboid(lo: [f64; 3], hi: [f64; 3]) -> Vec<Triangle> {
 const AS_MODELLED: LathePlacement = LathePlacement { radial: [1.0, 0.0, 0.0], along: [0.0, 0.0, 1.0], tip: [0.0, 0.0, 0.0] };
 
 fn body(source: &str, facets: Vec<Triangle>) -> LatheBodySpec {
-    LatheBodySpec { source: source.into(), facets, place: AS_MODELLED }
+    LatheBodySpec { source: source.into(), facets, place: AS_MODELLED, zone: None }
 }
 
 /// An OD holder shank standing radially out from the tip: x 2..40,
@@ -298,7 +298,7 @@ fn degenerate_lathe_bodies_and_wrong_tools_refuse_by_name() {
         })
         .collect();
     let place = LathePlacement { radial: [0.0, -1.0, 0.0], along: [1.0, 0.0, 0.0], tip: [5.0, 5.0, 5.0] };
-    history.execute(&world, SetToolBody::lathe(&world, INSERT, Some(LatheBodySpec { source: "turned.step".into(), facets: turned, place })).expect("placed"));
+    history.execute(&world, SetToolBody::lathe(&world, INSERT, Some(LatheBodySpec { source: "turned.step".into(), facets: turned, place, zone: None })).expect("placed"));
     let a = tool_body::body_of(&world, &model::find_by_name(&world, INSERT).expect("tool")).expect("landed");
     history.execute(&world, SetToolBody::lathe(&world, INSERT, Some(od_holder(8.0))).expect("as modelled"));
     let b = tool_body::body_of(&world, &model::find_by_name(&world, INSERT).expect("tool")).expect("landed");

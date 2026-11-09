@@ -140,3 +140,53 @@ fn degenerate_placements_and_meshes_refuse_by_name() {
         assert!(e.to_string().contains("lathe body") || e.to_string().contains("tip"), "{e}");
     }
 }
+
+#[test]
+fn an_insert_zone_leaves_out_only_what_lies_inside_it() {
+    // #396: the random soup again, with a zone about the tip. Every
+    // facet point outside the zone still lies within its band's radii;
+    // a point inside may be left out, never one outside.
+    use crate::lathe_insert_zone::InsertZone;
+    let zone = InsertZone { lo: [-3.0, -4.0, -2.0], hi: [8.0, 2.0, 6.0] };
+    let inside = |p: &[f64]| (0..3).all(|k| p[k] > zone.lo[k] && p[k] < zone.hi[k]);
+    let mut g = Lcg(0x396);
+    let mut tris = Vec::new();
+    for _ in 0..60 {
+        let mut p = || [g.next() * 60.0 - 20.0, g.next() * 30.0 - 15.0, g.next() * 40.0 - 10.0];
+        tris.push([p(), p(), p()]);
+    }
+    let c = LatheClearance::of_zoned(&tris, Some(&zone)).expect("a sane soup");
+    let mut checked = 0;
+    for _ in 0..20_000 {
+        let t = &tris[(g.next() * tris.len() as f64) as usize % tris.len()];
+        let (mut a, mut b) = (g.next(), g.next());
+        if a + b > 1.0 {
+            (a, b) = (1.0 - a, 1.0 - b);
+        }
+        let p: Vec<f64> = (0..3).map(|k| t[0][k] + (t[1][k] - t[0][k]) * a + (t[2][k] - t[0][k]) * b).collect();
+        if inside(&p) {
+            continue;
+        }
+        checked += 1;
+        let x_tip = g.next() * 80.0 - 40.0;
+        let r = (x_tip + p[0]).hypot(p[1]);
+        let reach = c.over(p[2], p[2]).expect("a point outside the zone has a band");
+        let (lo, hi) = reach.radii(x_tip);
+        assert!(lo <= r + 1e-9 && r <= hi + 1e-9, "point {p:?} tip {x_tip}: r {r} outside [{lo}, {hi}]");
+    }
+    assert!(checked > 10_000, "{checked}");
+    // A plate under the tip and a shank above: the zone over the plate
+    // lifts the floor near the tip to the shank's, and the shank's own
+    // bands are untouched.
+    let mut body = cuboid([-0.8, -4.0, -0.8], [6.0, 0.0, 6.0]);
+    body.extend(cuboid([2.0, -6.0, 0.5], [40.0, 6.0, 10.0]));
+    let plain = LatheClearance::of(&body).expect("a body");
+    let zoned = LatheClearance::of_zoned(&body, Some(&InsertZone { lo: [-1.0, -5.0, -1.0], hi: [1.0, 1.0, 6.5] })).expect("a body");
+    assert!(plain.over(1.0, 1.0).expect("plate").x_lo < -0.79);
+    assert!(zoned.over(1.0, 1.0).expect("shank").x_lo > 0.99, "{:?}", zoned.over(1.0, 1.0));
+    assert_eq!(plain.over(8.0, 9.0), zoned.over(8.0, 9.0));
+    // Nothing outside: refused by name; a zone off the tip: refused.
+    let plate = cuboid([-0.8, -4.0, -0.8], [6.0, 0.0, 6.0]);
+    assert_eq!(LatheClearance::of_zoned(&plate, Some(&InsertZone { lo: [-1.0, -5.0, -1.0], hi: [7.0, 1.0, 7.0] })).err(), Some(LatheBodyError::ZoneHoldsAll));
+    assert_eq!(LatheClearance::of_zoned(&plate, Some(&InsertZone { lo: [1.0, -5.0, -1.0], hi: [7.0, 1.0, 7.0] })).err(), Some(LatheBodyError::ZoneInvalid));
+}
