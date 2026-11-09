@@ -85,7 +85,7 @@ fn profile_section(ui: &mut Ui, state: &mut State, exists: bool, u: Unit) {
         Ok(s) => {
             let top = s.points().last().map_or(0.0, |p| p.z);
             let foot = s.points().first().map_or(0.0, |p| p.z);
-            let wide = s.outline().iter().fold(0.0f64, |a, q| a.max(q.1));
+            let wide = s.max_radius();
             ui.label(format!(
                 "holder Ø {} × {} {}, gauge {} {}",
                 units::len(2.0 * wide, u, 1),

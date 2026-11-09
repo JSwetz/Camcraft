@@ -122,3 +122,35 @@ fn an_envelope_redraws_as_a_profile() {
     let again = SpunProfile::from_bands(&s.bands()).expect("bands redraw");
     assert_eq!(again.bands(), s.bands());
 }
+
+/// Every outline point sits inside a band touching its height.
+fn bands_cover_the_outline(s: &SpunProfile) {
+    let bands = s.bands();
+    for (z, r) in s.outline() {
+        let held = bands.iter().any(|b| b.above - 1e-9 <= z && z <= b.above + b.len + 1e-9 && r <= b.r + 1e-9);
+        assert!(held, "outline point (z {z}, r {r}) is outside every band: {bands:?}");
+    }
+    let wide = bands.iter().fold(0.0f64, |m, b| m.max(b.r));
+    assert!((wide - s.max_radius()).abs() < 1e-9, "the envelope's widest band {wide} is the outline's {}", s.max_radius());
+}
+
+#[test]
+fn a_zero_height_spike_stays_in_the_envelope() {
+    // At the top: out to r 35 and back to the axis at z 90 (the
+    // hands-on finding - the summary said Ø70, the envelope Ø50).
+    let top = SpunProfile::new(vec![p(55.0, 0.0), p(55.0, 25.0), p(90.0, 25.0), p(90.0, 35.0), p(90.0, 0.0)]).expect("valid");
+    bands_cover_the_outline(&top);
+    assert_eq!(top.bands(), vec![HolderBand { above: 55.0, len: 35.0, r: 35.0 }]);
+    assert!(top.holder_profile().bands().iter().any(|b| b.r >= 35.0));
+    // At the foot: out to r 30 at z 40 before stepping in to r 12.
+    let foot = SpunProfile::new(vec![p(40.0, 0.0), p(40.0, 30.0), p(40.0, 12.0), p(60.0, 12.0), p(60.0, 0.0)]).expect("valid");
+    bands_cover_the_outline(&foot);
+    // Mid-body: a flange drawn out and back at one height.
+    let mut mid = stepped();
+    mid.insert(3, p(60.0, 28.0));
+    let mid = SpunProfile::new(mid).expect("valid");
+    bands_cover_the_outline(&mid);
+    // A plain step still reads exactly (no band grows past its own).
+    bands_cover_the_outline(&SpunProfile::new(stepped()).expect("valid"));
+    assert_eq!(SpunProfile::new(stepped()).expect("valid").bands()[0].r, 12.0);
+}

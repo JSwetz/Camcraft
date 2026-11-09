@@ -164,6 +164,22 @@ fn the_parametric_profile_changes_nothing() {
     assert!(tool_body::body_of(&world, &tool_entity(&world)).is_none());
 }
 
+/// A flange drawn out to r 35 and straight back to the axis at the top
+/// (no height of its own) is judged at r 35: the envelope the laws read
+/// is never smaller than the drawn outline (#475 hands-on finding).
+#[test]
+fn a_flat_top_flange_is_judged_at_its_full_radius() {
+    let (world, mut history) = face_world();
+    let z0 = shank_top();
+    let pts = vec![pt(z0, 0.0), pt(z0, 25.0), pt(z0 + 35.0, 25.0), pt(z0 + 35.0, 35.0), pt(z0 + 35.0, 0.0)];
+    history.execute(&world, SetToolBody::spun(&world, TOOL, Some(pts)).expect("a sane profile"));
+    let (judged, body) = tool_body::judged(&world, &tool_entity(&world), catalog_tool(TOOL)).expect("judged");
+    let body = body.expect("a spindle-frame body");
+    assert!(judged.holder_d >= 70.0 - 1e-9, "the judged holder is Ø{} - the drawn flange is Ø70", judged.holder_d);
+    let wide = tool_body::stack(&catalog_tool(TOOL).geom(), Some(&body)).bands.iter().fold(0.0f64, |m, b| m.max(b.r));
+    assert!(wide >= 35.0 - 1e-9, "the swept stack reaches r {wide} - the drawn flange is r 35");
+}
+
 #[test]
 fn undo_and_redo_walk_the_drawn_profile() {
     let (world, mut history) = face_world();

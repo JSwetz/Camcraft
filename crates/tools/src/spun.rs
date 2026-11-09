@@ -11,7 +11,8 @@
 //! axis) by its circumscribed tangent polygon, a concave one by chords
 //! on the arc - so the bands read off the flattened outline are never
 //! smaller than the drawn solid. A stepped (straight-segment) profile
-//! reads exactly: one band per climbing segment at its larger end.
+//! reads exactly: one band per climbing segment at its larger end, a
+//! zero-height spike folded into the band it touches.
 
 use crate::holder_profile::{HolderBand, HolderProfile, MAX_BODY_HEIGHT, MAX_BODY_RADIUS};
 use crate::tools::{Tool, ToolKind};
@@ -231,15 +232,44 @@ impl SpunProfile {
     }
 
     /// The contiguous bands the stack laws sweep: one per climbing
-    /// segment of the outline at its larger radius (flat steps carry no
-    /// length - the bands either side hold both radii at that height).
+    /// segment of the outline at its larger radius. A flat (zero-height)
+    /// step carries no length of its own, so its larger radius is folded
+    /// into a band touching its height when none already reaches it - a
+    /// plain step is held by the bands either side, but a flange drawn
+    /// out and back at one z (at the top, the foot or mid-body) would
+    /// otherwise fall out of the envelope. Never smaller than the
+    /// outline: every outline radius is inside a band at its height.
     #[must_use]
     pub fn bands(&self) -> Vec<HolderBand> {
-        self.outline()
+        let out = self.outline();
+        let mut bands: Vec<HolderBand> = out
             .windows(2)
             .filter(|w| w[1].0 > w[0].0)
             .map(|w| HolderBand { above: w[0].0, len: w[1].0 - w[0].0, r: w[0].1.max(w[1].1) })
-            .collect()
+            .collect();
+        for w in out.windows(2).filter(|w| w[1].0 <= w[0].0) {
+            let (z, r) = (w[0].0.max(w[1].0), w[0].1.max(w[1].1));
+            let touches = |b: &HolderBand| b.above - EPS <= z && z <= b.above + b.len + EPS;
+            if bands.iter().any(|b| touches(b) && b.r >= r) {
+                continue;
+            }
+            // The band ending at z (below the step) first, else the one
+            // starting there; `Flat` validation means one always exists.
+            let below = bands.iter().position(|b| (b.above + b.len - z).abs() <= EPS);
+            let pick = below.or_else(|| bands.iter().position(touches));
+            if let Some(b) = pick.and_then(|i| bands.get_mut(i)) {
+                b.r = b.r.max(r);
+            }
+        }
+        bands
+    }
+
+    /// The largest radius on the outline - what the editor's summary
+    /// reports as the body's diameter, and what the bands never fall
+    /// under.
+    #[must_use]
+    pub fn max_radius(&self) -> f64 {
+        self.outline().iter().fold(0.0, |m, q| m.max(q.1))
     }
 
     /// The body envelope the judging laws read (`HolderProfile`): these
