@@ -609,14 +609,22 @@ fn gizmo_len(state: &State) -> f64 {
 /// has the axes hidden: two gizmos around a moved G5x read as clutter, and
 /// the world axes are context furniture, not setup. The triads stay: they
 /// are the work offsets themselves.
-fn gizmos(state: &State) -> Vec<Gizmo> {
+pub(crate) fn gizmos(state: &State) -> Vec<Gizmo> {
     let mut out: Vec<Gizmo> = Vec::new();
     for (name, entity) in model::named_entities(&state.world) {
         if state.hidden_offsets.contains(&name) || !model::is_wcs(&state.world, &entity) {
             continue;
         }
-        let Some(loc) = model::transform_of(&state.world, &entity) else {
+        let Some(stored) = model::transform_of(&state.world, &entity) else {
             continue;
+        };
+        // #558: another setup's WCS is a point on the part in ITS setup's
+        // frame; the viewport shows the active setup's, so it rides the
+        // part's transform between the two. A refused transform hides
+        // the triad - never drawn at a place that is not on the part.
+        let loc = match camcraft_app::setup_relative::wcs_view_pose(&state.world, &name, stored) {
+            Ok(mapped) => mapped.unwrap_or(stored),
+            Err(_) => continue, // app logs why (setup_relative::wcs_view_pose)
         };
         out.push(Gizmo {
             pos: [loc.pos.x, loc.pos.y, loc.pos.z],
