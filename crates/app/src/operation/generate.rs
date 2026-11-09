@@ -60,6 +60,7 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let GenJob {
         tool,
+        body,
         tool_name,
         params,
         src,
@@ -2518,6 +2519,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // unstated-limit law means a file that names no spindle body adds
     // no band, exactly as it adds no feed or travel check.
     let geom = tool.geom();
+    // #368: what the fixture laws sweep above the shank.
+    let holder = crate::tool_body::stack(&geom, body.as_ref());
     let fixture_boxes = fixtures;
     let stl = match &params {
         OpParams::Face { .. }
@@ -2827,7 +2830,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // ...and a boring bar's head and shank on its FEEDS (#146),
             // against the same revolved material at each instant.
             super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
-            warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
+            warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
             // - a grooved part is undercut BY DESIGN, material
@@ -3019,7 +3022,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             }
             warns.extend(workholding_warnings(
                 &path_world,
-                &geom,
+                (&geom, &holder),
                 &fixture_boxes,
                 &workholding,
                 rotary_axis,
@@ -3058,7 +3061,7 @@ fn rotary_letter_gate(
 /// the path-frame verdict untouched.
 fn workholding_warnings(
     path: &Toolpath,
-    geom: &crate::tools::ToolGeom,
+    (geom, holder): (&crate::tools::ToolGeom, &camcraft_tools::holder_profile::HolderStack),
     all: &[crate::fixture::FixtureBox],
     (turning, fixed): &(Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
     axis: Option<verify::RotaryAxis>,
@@ -3068,8 +3071,8 @@ fn workholding_warnings(
         return Vec::new();
     }
     let wh = verify::Workholding { turning, fixed, axis };
-    let mut warns = verify::bands_vs_workholding(path, geom, &wh, spindle, GOUGE_TOL);
-    warns.extend(verify::rapids_vs_workholding(path, geom, &wh, spindle));
+    let mut warns = verify::bands_vs_workholding_held(path, geom, holder, &wh, spindle, GOUGE_TOL);
+    warns.extend(verify::rapids_vs_workholding_held(path, geom, holder, &wh, spindle));
     warns
 }
 
