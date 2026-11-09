@@ -1,8 +1,9 @@
 //! The Heights tab's height editor (M1.5.4's From / Offset law, regrouped
 //! for the user's 2026-11-06 review: "a flat stack ... no grouping and
 //! ragged alignment"): each height is its own titled group - "Clearance
-//! Z", "Top Z", ... - holding the From reference, the Work-offset slot
-//! when the reference is one, and the Offset with the resolved Z as a
+//! Z", "Top Z", ... - holding the From reference, the setup's work
+//! offset (read-only, #329: program zero is the setup's, picked on the
+//! Setups page) when the reference is one, and the Offset with the resolved Z as a
 //! dimmed suffix, all on the shared property grid. Plus the two height
 //! relationship notes (retract vs clearance, the corner), which stay
 //! visible: they are consequences, not help.
@@ -103,6 +104,23 @@ fn height_tag_is_bottom(tag: &str) -> bool {
     [".bottom", ".cut", ".face", ".plane"].iter().any(|s| tag.ends_with(s))
 }
 
+/// Where the read-only work-offset row points the user (#329).
+pub(crate) const SETUP_OFFSET_HINT: &str =
+    "program zero is the setup's WCS: its work offset word is set on the Setups page";
+
+/// The read-only work-offset row's text: the setup's resolved word, and
+/// where it is set.
+pub(crate) fn setup_offset_text(world: &flecs_ecs::prelude::World, setup: Option<&str>) -> String {
+    let word = WCS_SLOTS
+        .get(camcraft_app::setup::wcs_slot(world, setup))
+        .copied()
+        .unwrap_or("G54");
+    match camcraft_app::setup::effective(world, setup) {
+        Some(s) => format!("WCS ({word})  (from setup {s})"),
+        None => format!("WCS ({word})"),
+    }
+}
+
 fn height_rows(ui: &mut Ui, world: &flecs_ecs::prelude::World, setup: Option<&str>, h: &mut Height, bottom: bool) {
     let u = units::of(world);
     let src = op_src(ui);
@@ -116,7 +134,7 @@ fn height_rows(ui: &mut Ui, world: &flecs_ecs::prelude::World, setup: Option<&st
             2 => HeightReference::BottomOfStock,
             3 => HeightReference::TopOfModel,
             4 => HeightReference::BottomOfModel,
-            5 => HeightReference::WorkOffset(h.reference.wcs_slot().min(WCS_SLOTS.len() - 1)),
+            5 => HeightReference::WorkOffset,
             _ => HeightReference::selection_for(bottom),
         };
         // The selection IS the plane (user hand test 2026-11-06): a floor
@@ -127,10 +145,12 @@ fn height_rows(ui: &mut Ui, world: &flecs_ecs::prelude::World, setup: Option<&st
             h.offset = 0.0;
         }
     }
-    if matches!(h.reference, HeightReference::WorkOffset(_)) {
-        let mut slot = h.reference.wcs_slot().min(WCS_SLOTS.len() - 1);
-        prop_row(ui, "WCS", |ui| combo(ui, "h_wcs", &mut slot, &WCS_SLOTS));
-        h.reference = HeightReference::WorkOffset(slot.min(WCS_SLOTS.len() - 1));
+    if matches!(h.reference, HeightReference::WorkOffset) {
+        // #329: no slot choice here - the setup's offset, read-only.
+        prop_row(ui, "Work offset", |ui| {
+            ui.add(Label::new(setup_offset_text(world, setup)).selectable(false))
+                .on_hover_text(SETUP_OFFSET_HINT);
+        });
     }
     // Both strings are operations.rs's law (the retired imgui height row
     // said the same words); the page only lays them out - the resolved Z

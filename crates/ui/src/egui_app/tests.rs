@@ -82,6 +82,10 @@ mod stock_fit_sides;
 mod layout;
 mod unsaved;
 mod post_refusal;
+mod first_setup;
+mod one_wcs;
+// #343: the per-setup browser tree.
+mod setup_tree;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -1624,7 +1628,7 @@ fn anchor_click_queues_setwcs() {
 #[test]
 fn origin_page_shows_the_anchor_grid_and_arms_pick_mode() {
     let mut harness = shell_harness();
-    harness.state_mut().state.ui_target = UiTarget::WcsSlot(0);
+    harness.state_mut().state.ui_target = UiTarget::Wcs;
     harness.run();
     // The draft default highlight is center (anchor_xy 4), so that cell
     // already reads bracketed - imgui's law, pinned here too.
@@ -2551,6 +2555,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Save, "Save the project\tCtrl+S"),
         (Cmd::SaveAs, "Save the project under a new name\tCtrl+Shift+S"),
         (Cmd::Post, "Post NC program (validation gate), then review it\tCtrl+P"),
+        (Cmd::Setups, "Setups: create, activate and delete the document's setups"),
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),
@@ -4342,7 +4347,7 @@ fn stock_eye_hides_the_viewport_stock_without_removing_it_from_the_document() {
     harness.run_steps(2);
     let stock_name = camcraft_app::setup::stock_entity_name(&harness.state().state.world, None);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
-    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock)).expect("stock row");
+    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock(_))).expect("stock row");
     let eye = egui::pos2(216.0, 179.0 + (row as f32 + 0.5) * theme::current().row_height);
     assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
 
@@ -4458,18 +4463,20 @@ fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
 }
 
 #[test]
-fn setup_navigation_is_conditional_and_operations_keep_a_flat_browser() {
+fn setup_navigation_is_always_reachable_and_operations_keep_a_flat_browser() {
     let plan = panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]);
     let setup_group = plan.iter().find(|group| group.title == "Setup").expect("setup group");
     assert_eq!(
         setup_group.cells.as_slice(),
-        &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
-        "the Setup toolbar matches its original cells"
+        &[Cmd::Setups, Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
+        "the Setup toolbar opens on the Setups door (#322)"
     );
 
+    // #322: a fresh document shows the manager too - its page is where
+    // the first setup is created.
     let blank = State::new();
     let (rows, leaves) = panes::browser_rows(&blank);
-    assert!(!leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
+    assert!(leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
     assert!(!rows.iter().any(|row| row.label == "Global Setup"));
     assert!(rows.iter().any(|row| row.label == "Operations"));
 
@@ -4491,7 +4498,7 @@ fn setup_navigation_is_conditional_and_operations_keep_a_flat_browser() {
     let op = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour1"))
         .expect("stable operation key in browser");
     assert_eq!(rows[op].label, "Finish contour");
-    assert_eq!(rows[op].depth, 1, "operation sits directly beneath Operations");
+    assert_eq!(rows[op].depth, 2, "operation sits beneath its setup's Operations (#343)");
     assert!(!rows.iter().any(|row| row.label == "Global Setup"));
 
     let source = model::find_by_name(&seeded.state.world, "Contour1").expect("seed op");
@@ -4631,7 +4638,7 @@ fn close_property_editors_keep_stock_offsets_models_and_tools() {
     let mut harness = shell_harness();
     let targets = [
         UiTarget::Stock,
-        UiTarget::WcsSlot(0),
+        UiTarget::Wcs,
         UiTarget::Model("Block".into()),
         UiTarget::Tool("EM-0600-4FL".into()),
     ];
@@ -4678,7 +4685,7 @@ fn operations_heading_menu_pastes_the_copied_operation() {
     harness.run_steps(2);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
     let row = leaves.iter().position(|leaf| matches!(leaf,
-        panes::Leaf::Parent(panes::BrowserSection::Operations)))
+        panes::Leaf::SetupOps(_)))
         .expect("Operations heading");
     let row_height = theme::current().row_height;
     let heading = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
@@ -4712,9 +4719,10 @@ fn operation_type_menu_requires_confirmation() {
     assert_eq!(harness.state().state.tree_menu,
         Some(TreeMenuTarget::Operation("Contour1".into())));
 
-    // Operation, Rename, Copy, Paste, Clear, Delete, section header, Face.
+    // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
+    // (#110), section header, Face.
     let face = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 7.5 * row_height);
+        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 9.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);
@@ -4730,6 +4738,47 @@ fn operation_type_menu_requires_confirmation() {
     let entity = model::find_by_name(&harness.state().state.world, "Contour1").unwrap();
     assert_eq!(model::operation_of(&harness.state().state.world, &entity).unwrap().params.kind(),
         camcraft_app::operation::OpType::Face);
+}
+
+/// #110: the op menu's Suppress row and an after-action row each queue
+/// their one undoable command.
+#[test]
+fn operation_menu_suppresses_and_sets_the_after_action() {
+    let mut harness = shell_harness();
+    harness.run_steps(2);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let row = leaves.iter().position(|leaf| matches!(leaf,
+        panes::Leaf::Op(name) if name == "Contour1"))
+        .expect("operation row");
+    let row_height = theme::current().row_height;
+    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let open_menu = |harness: &mut Harness<'static, ShellUi>| {
+        set_pos(harness, operation);
+        button_at(harness, egui::PointerButton::Secondary, operation, true);
+        button_at(harness, egui::PointerButton::Secondary, operation, false);
+    };
+    let click_row = |harness: &mut Harness<'static, ShellUi>, k: f32| {
+        let at = egui::pos2(90.0, 179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
+        set_pos(harness, at);
+        button_at(harness, egui::PointerButton::Primary, at, true);
+        button_at(harness, egui::PointerButton::Primary, at, false);
+        harness.run_steps(2);
+    };
+    let op = |harness: &Harness<'static, ShellUi>| {
+        let world = &harness.state().state.world;
+        model::find_by_name(world, "Contour1").and_then(|e| model::operation_of(world, &e)).expect("op")
+    };
+    // Operation, Rename, Copy, Paste, Clear, Delete, then Suppress.
+    open_menu(&mut harness);
+    click_row(&mut harness, 6.5);
+    assert!(op(&harness).suppressed, "the Suppress row suppresses");
+    // ... then the After row, which steps Continue -> Optional -> Program stop.
+    open_menu(&mut harness);
+    click_row(&mut harness, 7.5);
+    assert_eq!(op(&harness).after, camcraft_app::operation::AfterOperation::OptionalStop);
+    open_menu(&mut harness);
+    click_row(&mut harness, 7.5);
+    assert_eq!(op(&harness).after, camcraft_app::operation::AfterOperation::ProgramStop);
 }
 
 #[test]

@@ -294,7 +294,7 @@ fn a_work_offset_reference_survives_apply_undo_and_the_draft() {
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
-        cut_z: Height::of(HeightReference::WorkOffset(0), 0.0),
+        cut_z: Height::of(HeightReference::WorkOffset, 0.0),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -313,7 +313,7 @@ fn a_work_offset_reference_survives_apply_undo_and_the_draft() {
     };
     assert_eq!(
         cut,
-        Height::of(HeightReference::WorkOffset(0), 0.0),
+        Height::of(HeightReference::WorkOffset, 0.0),
         "the reference is stored, not a resolved number",
     );
 
@@ -338,7 +338,7 @@ fn a_work_offset_reference_survives_apply_undo_and_the_draft() {
         OpParams::Face { cut_z, .. } => *cut_z,
         _ => panic!("still a Face"),
     };
-    assert_eq!(cut, Height::of(HeightReference::WorkOffset(0), 0.0), "the draft reads the reference");
+    assert_eq!(cut, Height::of(HeightReference::WorkOffset, 0.0), "the draft reads the reference");
 }
 
 #[test]

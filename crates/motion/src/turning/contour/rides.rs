@@ -240,7 +240,7 @@ pub fn multi_pass(facets: &[Triangle], p: &MultiPassParams) -> Result<Toolpath, 
         + p.tolerance;
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
     for cl in &blocks {
-        prof::ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed);
+        prof::ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed, prof::Exit::Rapid);
     }
     b.push(
         MoveKind::Rapid,

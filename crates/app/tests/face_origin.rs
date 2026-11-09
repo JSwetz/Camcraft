@@ -95,10 +95,10 @@ fn origin_at_face_round_trips_through_undo() {
         [p.x, p.y, p.z]
     };
     let place = |p: [f64; 3]| Location { pos: Point3::new(p[0], p[1], p[2]), rot: IDENTITY_Q };
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", place([1.0, 2.0, 3.0])).expect("first"));
+    history.execute(&world, SetWcsOrigin::new(&world, place([1.0, 2.0, 3.0])).expect("first"));
 
     let top = face_origin(&world, "block", FeatureSel::Face(face_along(&world, [10.0, 10.0, 10.0]))).expect("top");
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", place(top.centroid)).expect("centroid"));
+    history.execute(&world, SetWcsOrigin::new(&world, place(top.centroid)).expect("centroid"));
     assert!(near(at(&world), [10.0, 10.0, 10.0]));
     assert!(history.undo(&world), "the snap is undoable");
     assert!(near(at(&world), [1.0, 2.0, 3.0]), "undo restores the previous origin");
@@ -108,6 +108,6 @@ fn origin_at_face_round_trips_through_undo() {
     // Z only: the current XY at the plane height.
     let z = top.plane_z.expect("flat");
     history.undo(&world);
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", place([1.0, 2.0, z])).expect("z only"));
+    history.execute(&world, SetWcsOrigin::new(&world, place([1.0, 2.0, z])).expect("z only"));
     assert!(near(at(&world), [1.0, 2.0, 10.0]));
 }

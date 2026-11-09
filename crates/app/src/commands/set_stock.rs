@@ -75,8 +75,10 @@ impl SetStock {
                         CommandError::Invalid(format!("'{source}' has no geometry for stock"))
                     })?;
                 if location == Location::default() {
-                    // Copy the source's placement too: same facets, same spot.
-                    location = model::transform_of(world, &entity).unwrap_or_default();
+                    // Copy the source's placement too: same facets, same spot -
+                    // the spot the setup holds it at (#326's part alignment).
+                    location = crate::setup_align::pose_in(world, &entity, active.as_deref())
+                        .unwrap_or_default();
                 }
                 tris
             }

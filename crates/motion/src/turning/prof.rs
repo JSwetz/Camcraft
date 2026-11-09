@@ -128,8 +128,31 @@ pub(crate) fn setup(
     Ok((f, pts, prof, (s_lo, s_hi)))
 }
 
+/// How a ride leaves its cut at the window's top (#229).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Exit {
+    /// Nothing stands past the pass end: a rapid out to the clear radius.
+    Rapid,
+    /// The bar runs on past the pass end, so the move out cuts through
+    /// its uncut end: at the plunge feed, the ride's radial lead.
+    Feed,
+}
+
+impl Exit {
+    /// The exit for a ride ending at station `s_end` inside `stock`.
+    fn inside(stock: Option<StockEnv>, s_end: f64) -> Exit {
+        if StockEnv::runs_past(stock, s_end) {
+            Exit::Feed
+        } else {
+            Exit::Rapid
+        }
+    }
+}
+
 /// One rung's walk: plunge in radially at the window's bottom,
-/// ride the offset ascending, slide off radially at the top.
+/// ride the offset ascending, slide off radially at the top - by
+/// rapid, or at the plunge feed where the bar runs on past the top
+/// ([`Exit`], #229).
 /// `pub(crate)` from M5.2 E: multi-pass turning chains blocks of
 /// these rides onto one builder.
 pub(crate) fn ride(
@@ -139,6 +162,7 @@ pub(crate) fn ride(
     rho_clear: f64,
     feed: f64,
     plunge_feed: f64,
+    exit: Exit,
 ) {
     let p = |q: &(f64, f64)| f.point(q.1, q.0);
     b.push(MoveKind::Rapid, f.point(rho_clear, cl[0].0), None);
@@ -146,7 +170,11 @@ pub(crate) fn ride(
     for q in &cl[1..] {
         b.push(MoveKind::Feed, p(q), Some(feed));
     }
-    b.push(MoveKind::Rapid, f.point(rho_clear, cl[cl.len() - 1].0), None);
+    let out = f.point(rho_clear, cl[cl.len() - 1].0);
+    match exit {
+        Exit::Rapid => b.push(MoveKind::Rapid, out, None),
+        Exit::Feed => b.push(MoveKind::Feed, out, Some(plunge_feed)),
+    }
 }
 
 /// The finished ride: one pass of the nose along the profile,
@@ -156,7 +184,8 @@ pub fn profile_finish(facets: &[Triangle], p: &ProfileFinishParams) -> Result<To
 }
 
 /// [`profile_finish`] inside a setup stock (#130): the approach and
-/// retract stand clear of the bar's OD, not only the part's.
+/// retract stand clear of the bar's OD, not only the part's, and a bar
+/// running on past the window's top is left at feed (#229).
 pub fn profile_finish_in(
     facets: &[Triangle],
     p: &ProfileFinishParams,
@@ -177,7 +206,7 @@ pub fn profile_finish_in(
     let rho_clear = cl.iter().map(|q| q.1).fold(0.0f64, f64::max) + p.tolerance;
     let rho_clear = StockEnv::rapid_radius(stock, prof.r_max, rho_clear, p.nose_radius);
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
-    ride(&mut b, &f, &cl, rho_clear, p.feed, p.plunge_feed);
+    ride(&mut b, &f, &cl, rho_clear, p.feed, p.plunge_feed, Exit::inside(stock, s_hi));
     b.push(
         MoveKind::Rapid,
         f.point(rho_clear, f.station_of(p.clearance_z)),
@@ -196,7 +225,9 @@ pub fn profile_rough(facets: &[Triangle], p: &ProfileRoughParams) -> Result<Tool
 /// [`profile_rough`] inside a setup stock (#130): the ladder starts at
 /// the bar's OD - the outermost rung's nose reaches the bar's skin -
 /// and steps down to the part plus the leave; a rung riding wholly
-/// outside the bar is air and is dropped; every rapid clears the OD.
+/// outside the bar is air and is dropped; every rapid clears the OD,
+/// and where the bar runs on past the window's top each rung leaves
+/// its cut at feed instead (#229).
 pub fn profile_rough_in(
     facets: &[Triangle],
     p: &ProfileRoughParams,
@@ -276,9 +307,10 @@ pub fn profile_rough_in(
     };
     let rho_clear = outer.iter().map(|q| q.1).fold(0.0f64, f64::max) + p.tolerance;
     let rho_clear = StockEnv::rapid_radius(stock, prof.r_max, rho_clear, p.nose_radius);
+    let exit = Exit::inside(stock, s_hi);
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));
     for cl in &cl_by_rung {
-        ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed);
+        ride(&mut b, &f, cl, rho_clear, p.feed, p.plunge_feed, exit);
     }
     b.push(
         MoveKind::Rapid,

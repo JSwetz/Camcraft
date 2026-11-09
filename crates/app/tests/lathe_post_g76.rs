@@ -126,7 +126,7 @@ fn thread_world() -> (World, History) {
 }
 
 fn g76() -> PostOptions {
-    PostOptions { threading: ThreadingOutput::G76Cycle }
+    PostOptions { threading: ThreadingOutput::G76Cycle, ..PostOptions::default() }
 }
 
 /// A stream through the lathe script with the given options, gate-free;

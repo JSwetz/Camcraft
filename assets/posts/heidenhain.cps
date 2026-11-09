@@ -20,6 +20,7 @@ extension = "I";
 setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
+afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -32,6 +33,7 @@ var toolWait = false;
 var tNo = 0;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
+var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
 var modalWait = false;  // G40 G90 rides the section's first motion block
@@ -141,6 +143,53 @@ function coolantFor(ask) {
   return "";
 }
 
+// ------------------------------------------------------------ comments
+// Program commentary (#257): the setup, the operation and the tool, for
+// the operator reading the program - never a word the control moves on.
+// The stream's PARAMs OperationName / OperationKind / SetupName /
+// ToolDiameter / ToolKind / ToolCornerRadius and the TOOL record's name
+// feed it; a stream without them (a legacy .cl) writes none. User text
+// is cleaned for this dialect: the block ends at * and the comment
+// opens at ;, so neither (nor %, parentheses) survives in the text; a
+// comment is a numbered block of its own, `N.. ; text*`, as the TNC
+// numbers every block; the work offset is left out, since this dialect
+// posts the active preset, not a G54 word; printable ASCII only, capped
+// at 40 characters.
+var setupName = "", setupSaid = "", opName = "", opKind = "";
+var toolName = "", toolKind = "", toolDia = 0, toolCr = 0;
+function clean(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  t = t.replace(/[()%;*]/g, " ").replace(/[^\x20-\x7E]/g, "?").replace(/\s+/g, " ").trim();
+  return t.length > 40 ? t.substring(0, 40).trim() : t;
+}
+function joinDash(parts) {  // the non-empty parts, " - " between
+  var a = [];
+  for (var i = 0; i < parts.length; i++) if (parts[i]) a.push(parts[i]);
+  return a.join(" - ");
+}
+function note(s) { block(["; " + s]); }
+function commentParam(name, value) {
+  if (name === "SetupName") setupName = clean(value);
+  else if (name === "OperationName") opName = clean(value);
+  else if (name === "OperationKind") opKind = clean(value).toUpperCase();
+  else if (name === "ToolKind") toolKind = clean(value).toUpperCase();
+  else if (name === "ToolDiameter" && has(value)) toolDia = Number(value);
+  else if (name === "ToolCornerRadius" && has(value)) toolCr = Number(value);
+}
+function opNotes() {  // at the section's preamble: the setup once, the op each time
+  if (setupName && setupName !== setupSaid) { note("SETUP: " + setupName); setupSaid = setupName; }
+  if (opName) note("OPERATION: " + joinDash([opName, opKind]));
+  opName = ""; opKind = "";
+}
+function toolNote() {  // just before the tool change it describes
+  var desc = [];
+  if (toolKind) desc.push(toolKind);
+  if (toolDia > 0) desc.push("D" + fu(toolDia));
+  if (toolCr > 0) desc.push("R" + fu(toolCr));
+  note(joinDash(["T" + ni(tNo) + (toolName ? " " + toolName : ""), desc.join(" ")]));
+  toolKind = ""; toolCr = 0;
+}
+
 // -------------------------------------------------------------- header
 // #50: "The first block of a program is identified by %, the program
 // name and the active unit of measure" (p. 130): `%NAME G71 *`, G71 =
@@ -175,8 +224,10 @@ function onRadiusCompensation() {
 // (preset selection is cycle G247, whose parameters this post was
 // not specced from), never posted as a word the TNC reads otherwise.
 function onParameter(name, value) {
+  commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
+  if (name === "AfterOperation") { afterAsk = String(value || ""); return; }
   if (name === "WorkOffset" && value) {
     wcsWord = String(value);
     if (wcsWord !== "G54") {
@@ -197,6 +248,7 @@ function onSpindleSpeed() {
 }
 
 function onToolChange(number, name) {
+  toolName = clean(name);
   tNo = number;
   toolWait = true;
 }
@@ -212,8 +264,10 @@ function onToolChange(number, name) {
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
+  opNotes();
   modalWait = true;
   if (toolWait) {
+    toolNote();
     block(["T" + ni(tNo), "G17", spindleWait ? "S" + ff(sRpm) : ""]);
     toolWait = false;
   } else if (spindleWait) {
@@ -227,6 +281,26 @@ function startPreamble() {
   if (coolant) block([coolant]);
 }
 
+// The op's after-action (#110), written once its spindle has stopped:
+// the stream says nothing to carry on, or PARAM AfterOperation
+// optional-stop / stop / home. The ask resets here, so the next
+// section states its own.
+function afterOp() {
+  var ask = afterAsk;
+  afterAsk = "";
+  if (!ask) return;
+  if (ask === "optional-stop") { block(["M1"]); return; }
+  if (ask === "stop") { block(["M0"]); return; }
+  if (ask === "home") {
+    // #50: this dialect has no home move it can trust - G53 is a
+    // datum-table shift and M91 rides a builder-set datum - so a
+    // trip home is refused by name, never guessed.
+    msg(coolantWho() + "the Heidenhain post cannot go home after an operation (no machine-referenced home it can trust) - choose a stop instead");
+    return;
+  }
+  msg(coolantWho() + "unknown after-operation ask " + ask);
+}
+
 function endPreamble() {
   if (!sectionOpen) return;
   sectionOpen = false;
@@ -235,6 +309,7 @@ function endPreamble() {
   coolant = "";
   coolantAsk = "flood";      // the next section states its own ask
   block(["M5"]);
+  afterOp();
 }
 
 function onSection() { startPreamble(); }

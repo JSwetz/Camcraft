@@ -55,7 +55,16 @@ mod approach_page;
 mod lead_page;
 mod op_tabs;
 mod painted;
+mod tree_glyphs;
 mod pages;
+mod setup_wcs_pick;
+// #343: a setup's own node pages (settings, machine, post, fixtures, tools).
+mod setup_pages;
+// #326: the Setups page's part-alignment control.
+mod setup_align_pick;
+pub(crate) use setup_align_pick::align_text;
+// #330: the Setups page's lay-on-a-plane row.
+mod setup_plane_pick;
 // The operation dialog, split out of `pages` with the property grid
 // (user review 2026-11-06): the frame, the Geometry pick block, the
 // params dispatcher and its kind-family pages, the shared widgets.
@@ -77,6 +86,10 @@ mod turning_page;
 // #107: Save / Don't Save / Cancel over unsaved changes.
 mod unsaved_prompt;
 mod panes;
+// #343: the browser tree, split from panes (rows / pane / operation menu).
+mod browser_tree;
+mod browser_pane;
+mod tree_menu;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
 // (state.rs) installs the live table, the format tests read the
@@ -105,6 +118,8 @@ mod dialog_tests;
 #[cfg(test)]
 mod coolant_tests;
 #[cfg(test)]
+mod after_op_tests;
+#[cfg(test)]
 mod colorvision_tests;
 #[cfg(test)]
 mod pin_tests;
@@ -116,6 +131,12 @@ mod debug_info_tests;
 mod fresh_op_tests;
 #[cfg(test)]
 mod tool_number_tests;
+#[cfg(test)]
+mod setup_wcs_tests;
+#[cfg(test)]
+mod setup_align_tests;
+#[cfg(test)]
+mod setup_plane_tests;
 #[cfg(test)]
 mod ball_corner_tests;
 #[cfg(test)]
