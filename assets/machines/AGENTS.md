@@ -54,14 +54,19 @@ unstated capability into existence.
     coordinates, absolute world, not joint-local (the checker's
     traverse bands and collision sweep read these directly). Linear:
     mm (unit-scaled); rotary: DEGREES, never unit-scaled. Must be
-    finite with `max > min` or the field is dropped.
+    finite with `max > min` or the field is dropped. The file cannot
+    know the work offset, so a linear slide of stroke L is written
+    `-L..L` - the FULL stroke each way, never the machine-frame band
+    (`-500..0` for a 500 mm column refuses every retract above the
+    work origin, #457; the Tormach files follow the same rule).
   - linear only: `direction` `1` | `-1` (#373) - which way the slide
     moves for a + command; absent or null is `1`, and anything else
     refuses the file NAMING the axis. The program frame stays standard
     (ISO 841); the stated `travel` is the machine's own stroke, so an
     inverted axis is judged as `-v` against it. The post (#374) writes
     an inverted X / Y mirrored (sign, I/J/K, G2/G3, G41/G42) through a
-    script that declares `axisInversion = true`; an inverted Z or any
+    script that declares `axisInversion = true` (probing too only when it
+    also declares `probeAxisInversion = true`, #392); an inverted Z or any
     other letter refuses posting by name. A rotary part's numeric `-1` refuses (a reversed
     rotary is not supported).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
