@@ -1199,6 +1199,9 @@ pub struct State {
     /// The View door's open flag: the same dropdown law as
     /// `ribbon_mode_open` (one door open at a time, a frame fact).
     pub ribbon_view_open: bool,
+    /// The Theme door's open flag (#441): the same dropdown law as
+    /// `ribbon_view_open` - a frame fact, one door open at a time.
+    pub ribbon_theme_open: bool,
     /// The dock's closable panels as of this frame (see [`PanelsOpen`]).
     pub panels_open: PanelsOpen,
     /// The View door's pending dock ask (see [`LayoutRequest`]).
@@ -1467,6 +1470,7 @@ impl State {
             ribbon_more: None,
             ribbon_mode_open: false,
             ribbon_view_open: false,
+            ribbon_theme_open: false,
             panels_open: PanelsOpen { browser: true, properties: true },
             layout_request: None,
             tree_menu: None,
