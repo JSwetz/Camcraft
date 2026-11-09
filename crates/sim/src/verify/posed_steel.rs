@@ -23,7 +23,9 @@
 //! tip's travel plus reach times the interval's proven swing, which
 //! bounds EVERY pose inside the interval, not only its two ends - so
 //! the capsules ENCLOSE the swept volume continuously: an over-report
-//! of a graze, never a hidden crash between two samples. A capsule
+//! of a graze, never a hidden crash between two samples. On an arc the
+//! tip's travel also takes the chord's bulge ([`super::arc_bulge`]):
+//! the true tip stands off its chord by up to the sagitta (#491). A capsule
 //! encloses its cylinder (its caps reach one radius past each end),
 //! the same err-toward-HIT direction. The segment-box distance is
 //! exact: the distance to a convex box along a segment is convex in
@@ -45,6 +47,7 @@ use crate::geometry::Point3;
 use crate::tools::ToolGeom;
 use camcraft_tools::holder_profile::HolderStack;
 
+use super::arc_bulge::Bulge;
 use super::midpose;
 use super::rotary::RotaryAxis;
 use super::types::FixturePart;
@@ -147,9 +150,13 @@ pub(super) fn sweep(
             out[i] = stack.first().map_or(Verdict::Clear, |e| hit(e.0));
             continue;
         }
+        // An arc's true tip strays off its chords by up to the bulge
+        // (#491): every capsule of the move grows by it (zero on a
+        // straight move, which keeps its reading).
+        let bulge = if m.arc.is_some() { Bulge::of(m, m.segments3(tol).len()).deviation() } else { 0.0 };
         let mut struck = Verdict::Clear;
         'walk: for iv in midpose::intervals(m, a, b, reach, tol) {
-            let travel = dist(iv.pm, iv.p0).max(dist(iv.pm, iv.p1));
+            let travel = dist(iv.pm, iv.p0).max(dist(iv.pm, iv.p1)) + bulge;
             // The machine frame: the turn standing `am` upright, and
             // the most the rotary turns off it within the interval -
             // the end poses' turns, and never under the proven swing
@@ -242,7 +249,7 @@ const PLANE_TOL: f64 = 1e-6;
 /// when the rotary alone cannot stand the pose upright (the pose out
 /// of the plane, a non-horizontal or degenerate axis): the sample's
 /// machine frame is unknown.
-fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
+pub(super) fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
     let d = unit3(ax.dir)?;
     if d[2].abs() > PLANE_TOL || dot3(a, d).abs() > PLANE_TOL {
         return None;
@@ -253,7 +260,7 @@ fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
 }
 
 /// `t` folded into (-pi, pi].
-fn wrap(t: f64) -> f64 {
+pub(super) fn wrap(t: f64) -> f64 {
     use std::f64::consts::{PI, TAU};
     let w = t.rem_euclid(TAU);
     if w > PI { w - TAU } else { w }
@@ -261,7 +268,7 @@ fn wrap(t: f64) -> f64 {
 
 /// Distance of `p` from the axis line; a degenerate axis reads as
 /// unbounded, which the capsule test fails closed on.
-fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
+pub(super) fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
     let Some(d) = unit3(ax.dir) else { return f64::INFINITY };
     let w = [p.x - ax.origin.x, p.y - ax.origin.y, p.z - ax.origin.z];
     let c = cross3(w, d);
@@ -269,7 +276,7 @@ fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
 }
 
 /// `p` turned by `t` about the axis line (Rodrigues' formula).
-fn turn_about(ax: &RotaryAxis, p: Point3, t: f64) -> Point3 {
+pub(super) fn turn_about(ax: &RotaryAxis, p: Point3, t: f64) -> Point3 {
     let Some(d) = unit3(ax.dir) else { return Point3::new(f64::NAN, f64::NAN, f64::NAN) };
     let w = [p.x - ax.origin.x, p.y - ax.origin.y, p.z - ax.origin.z];
     let (s, c) = t.sin_cos();

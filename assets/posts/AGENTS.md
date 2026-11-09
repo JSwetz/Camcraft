@@ -19,7 +19,7 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`, `coolantModes`, `liveTooling`, `afterModes`, `axisInversion`. All but the last four are
+`capabilities`, `coolantModes`, `liveTooling`, `afterModes`, `axisInversion`, `probeAxisInversion`. All but the last five are
 text the engine reads none of; `liveTooling = true` (issue #33) says the
 script voices a `PARAM LiveTool` section - C-axis live-tool work, the
 stream's X Y Z the part-frame tip and C the stated spindle angle - and
@@ -36,7 +36,12 @@ output on the engine's mirrored stream (an inverted X / Y: negated
 coordinates, centres and origin, CW/CCW reversed in a plane holding one
 inverted axis, the comp side swapped) is verified by goldens and the
 controller-interpretation test - without it a machine with an inverted
-axis is refused by name. Fanuc and Haas set it. The file-viewer's about box reads
+axis is refused by name. Fanuc and Haas set it. `probeAxisInversion =
+true` (#392) says the script's probing blocks on that mirrored stream
+(negated touch target and trip, back-off delta, found expected values)
+are verified by the macro-B interpreter on a simulated inverted machine
+(`crates/app/tests/inverted_probe.rs`) - without it probing on an
+inverted axis is refused by name. Only Fanuc sets it. The file-viewer's about box reads
 the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
@@ -90,6 +95,13 @@ write (the gate), so the released program never carries one.
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.
+- **Up is the machine's word.** A retract in machine coordinates
+  (`G53 G0 Z..`) reads `machine.safeRetractZ` (#495); machine Z0 is the
+  top of travel only by convention (Tormach's), and a machine homed
+  with Z0 at the bottom would rapid down into the part. Unstated and
+  not a known-convention machine is a `message()` refusal by name
+  (`sinumerik.cps`, #503: no name is a known convention there - only
+  "no machine at all" keeps the old `G53 Z0`).
 - **Refuse, never lie.** A record you cannot honor in this dialect
   gets a counted `message()` naming why (Fanuc's `tilt()` returns null
   after one refusal per program — a per-line refusal is noise, a

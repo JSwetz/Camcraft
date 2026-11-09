@@ -1,9 +1,10 @@
 //! A fixture's real triangle mesh as collision truth (#339): the
 //! narrow phase behind the world-AABB fixture laws. A vise is two jaws
 //! with a gap; its box is one block - every path through the gap was a
-//! false crash. This module answers, for one tool band swept along one
-//! tip segment, "does it come within a margin of the steel, or stand
-//! inside it?" against the mesh itself.
+//! false crash. This module answers, for one tool band - upright, or
+//! posed along any axis (slice 3) - swept along one tip segment, "does
+//! it come within a margin of the steel, or stand inside it?" against
+//! the mesh itself.
 //!
 //! Provenance: our own design on published methods - GJK separation
 //! ([`gjk`]), an axis-aligned BVH ([`bvh`]), ray-crossing point-in-solid
@@ -162,8 +163,39 @@ impl FixtureMesh {
     /// Non-finite input is a hit.
     #[must_use]
     pub fn band_meets(&self, p0: Point3, p1: Point3, lo: f64, hi: f64, r: f64, margin: f64) -> bool {
-        let band = SweptBand { p0: v(p0), p1: v(p1), lo: lo.min(hi), hi: hi.max(lo), r: r.max(0.0) };
+        self.band_meets_along(p0, p1, gjk::UP, lo, hi, r, margin)
+    }
+
+    /// [`Self::band_meets`] with the band standing along `axis` (tip
+    /// toward shank; normalized here) instead of +Z: a posed band, its
+    /// pose held along the segment (#339 slice 3). A zero or non-finite
+    /// axis, like any non-finite input, is a hit.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)] // segment, axis, band, margin
+    pub fn band_meets_along(
+        &self,
+        p0: Point3,
+        p1: Point3,
+        axis: [f64; 3],
+        lo: f64,
+        hi: f64,
+        r: f64,
+        margin: f64,
+    ) -> bool {
         if !(p0.is_finite() && p1.is_finite() && lo.is_finite() && hi.is_finite() && r.is_finite()) {
+            return true;
+        }
+        let a = if axis == gjk::UP {
+            gjk::UP
+        } else {
+            let l = gjk::dot(axis, axis).sqrt();
+            if !(l.is_finite() && l > 1e-12) {
+                return true;
+            }
+            gjk::scale(axis, 1.0 / l)
+        };
+        let band = SweptBand { p0: v(p0), p1: v(p1), a, lo: lo.min(hi), hi: hi.max(lo), r: r.max(0.0) };
+        if !margin.is_finite() {
             return true;
         }
         let margin = margin.max(0.0) + self.pad;

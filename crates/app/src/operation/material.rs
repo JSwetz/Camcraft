@@ -151,7 +151,8 @@ pub fn detect_holes(
         _ => return Err(format!("'{name}' is not a drilling operation")),
     };
     let axial = holes_of(world, setup, src).map_err(|e| e.to_string())?;
-    let radial = if !is_drill || crate::machine::kind_of(world) == crate::machine::Kind::Mill {
+    // #388: the op's own setup's machine, not the active one.
+    let radial = if !is_drill || crate::machine::kind_of_setup(world, setup) == crate::machine::Kind::Mill {
         Vec::new()
     } else {
         cross_holes_of(world, setup, src).map_err(|e| e.to_string())?

@@ -165,6 +165,14 @@ pub struct Machine {
     /// rather than guess a builder-specific M word.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_tool: Option<LiveToolCodes>,
+    /// The Z a post retracts to in MACHINE coordinates (`G53 G0 Z..`)
+    /// before a tool change and at program end (#495), mm: the Z axis
+    /// part's `safe_retract`. A stated 0 is a statement (machine Z0 is
+    /// the top of travel, Tormach's convention), so this is the one
+    /// number where zero is not "unstated". `None` = unstated, and a
+    /// post that needs it refuses rather than guess where up is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_retract_z: Option<f64>,
 }
 
 /// The words a control needs around C-axis live-tool work (issue

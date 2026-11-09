@@ -15,11 +15,14 @@
 //! only ever survive where the box already hit. Where nothing is
 //! acquitted the report is the box laws' own, byte for byte.
 //!
-//! Judged by the mesh: upright moves (held and stated pose both
+//! Judged by the mesh here: upright moves (held and stated pose both
 //! upright - the frames agree, and the stack is the vertical column
-//! the box laws read), the spindle's C angle at zero, straight or XY
-//! arcs. Posed or C-turned moves, XZ/YZ arcs, a box two fixtures share,
-//! an open or refused mesh: the box verdict stands.
+//! the box laws read), the spindle's C angle at zero, straight or arcs
+//! in any plane (XZ/YZ chorded in their own plane with the XY arcs'
+//! pad, slice 3). Posed and C-turned moves are read by
+//! [`super::mesh_posed`] (slice 3), in the frame each steel set is
+//! judged in. A box two fixtures share, an open or refused mesh, and
+//! whatever [`super::mesh_posed`] cannot place: the box verdict stands.
 //!
 //! Proven clear means, for every band of the stack (shank, holder, the
 //! spindle housing when stated, flute - the box laws' order), along
@@ -48,6 +51,8 @@ use crate::geometry::Point3;
 use crate::tools::ToolGeom;
 use camcraft_tools::holder_profile::HolderStack;
 
+use super::mesh_posed;
+use super::rotary::RotaryAxis;
 use super::types::{FixturePart, Warning};
 use super::workholding::Workholding;
 
@@ -99,7 +104,7 @@ const ARC_PAD: f64 = 1e-3;
 
 /// One move's mesh reading.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Read {
+pub(super) enum Read {
     Clear,
     Hit(FixturePart),
     /// Not the mesh's to judge: the box verdict stands.
@@ -168,7 +173,7 @@ pub fn mesh_refined(
             }
         }
     }
-    let upright = upright_moves(path);
+    let poses = move_poses(path);
     for (fixed, b, f) in &meshed {
         let one = slice::from_ref(b);
         let sub = if *fixed {
@@ -183,8 +188,8 @@ pub fn mesh_refined(
             else {
                 continue;
             };
-            let read = match (&mesh, upright.get(at).copied().unwrap_or(false)) {
-                (Ok(mesh), true) => judge_move(mesh, m, steel, rapids),
+            let read = match (&mesh, poses.get(at)) {
+                (Ok(mesh), Some(pose)) => judge(mesh, m, pose, steel, rapids, *fixed, wh.axis.as_ref()),
                 _ => Read::Unjudged,
             };
             match read {
@@ -205,55 +210,104 @@ pub fn mesh_refined(
         .collect()
 }
 
-/// Per move: is the pose upright from start to end, with the spindle's
-/// C angle at zero throughout? Both are modal (a move stating none keeps
-/// the one held coming in) - the posed sweep's own reading. A turned C
-/// means the part frame is not the machine frame for steel that stays
-/// put: not the mesh's to read.
-fn upright_moves(path: &Toolpath) -> Vec<bool> {
-    let up = |a: Option<[f64; 3]>| a.is_none_or(|a| is_vertical(&a));
-    let flat = |c: Option<f64>| c.is_none_or(|c| c == 0.0);
+/// One move's pose and spindle C by the modal rule (the posed sweep's
+/// reading: a move stating none keeps the one held coming in), plus
+/// the C the PREVIOUS move stated when it ends where this one starts -
+/// the only C a turning move is known to start from.
+#[derive(Clone, Copy, Debug)]
+struct MovePose {
+    from: Option<[f64; 3]>,
+    to: Option<[f64; 3]>,
+    from_c: Option<f64>,
+    to_c: Option<f64>,
+    prev_c: Option<f64>,
+}
+
+fn move_poses(path: &Toolpath) -> Vec<MovePose> {
     let mut held: Option<[f64; 3]> = path.moves.first().and_then(|m| m.axis);
     let mut held_c: Option<f64> = path.moves.first().and_then(|m| m.rotary);
+    let mut prev: Option<&Move> = None;
     path.moves
         .iter()
         .map(|m| {
             let (from, from_c) = (held, held_c);
             held = m.axis.or(held);
             held_c = m.rotary.or(held_c);
-            up(from) && up(held) && flat(from_c) && flat(held_c)
+            let prev_c = prev.filter(|p| p.to == m.from).and_then(|p| p.rotary);
+            prev = Some(m);
+            MovePose { from, to: held, from_c, to_c: held_c, prev_c }
         })
         .collect()
 }
 
-/// The move's tip path as straight chords, each with how far the real
-/// path can stray from it. None: not the mesh's to read (a vertical-
-/// plane arc, an arc whose radius is not a number).
-fn chords(m: &Move, chord_tol: f64) -> Option<Vec<(Point3, Point3, f64)>> {
-    match m.arc {
-        None => Some(vec![(m.from, m.to, 0.0)]),
-        Some(arc) if arc.plane.is_xy() => {
-            let c = arc.center;
-            let rad = (m.from.x - c.x).hypot(m.from.y - c.y).max((m.to.x - c.x).hypot(m.to.y - c.y));
-            if !rad.is_finite() {
-                return None;
-            }
-            let segs = m.segments3(chord_tol);
-            if segs.is_empty() {
-                return None;
-            }
-            Some(
-                segs.into_iter()
-                    .map(|(p, q)| {
-                        let half = 0.5 * (q.x - p.x).hypot(q.y - p.y);
-                        let sag = rad - (rad * rad - half * half).max(0.0).sqrt();
-                        (p, q, sag.max(0.0).hypot(q.z - p.z) + ARC_PAD)
-                    })
-                    .collect(),
-            )
+/// Which reading a move gets (#339 slices 1 and 3): upright with C at
+/// zero - the upright band law here, in the path frame; posed - the
+/// posed law, in the machine frame for fixed steel under a rotary
+/// axis; C turned or held off zero - the spindle-C law, fixed steel
+/// unjudged under a rotary axis too (two turns, no one frame).
+#[allow(clippy::too_many_arguments)] // the move, its pose, the steel and its frame
+fn judge(
+    mesh: &FixtureMesh,
+    m: &Move,
+    pose: &MovePose,
+    steel: &MeshSteel<'_>,
+    rapids: bool,
+    fixed: bool,
+    axis: Option<&RotaryAxis>,
+) -> Read {
+    let flat = |c: Option<f64>| c.is_none_or(|c| c == 0.0);
+    if !(flat(pose.from_c) && flat(pose.to_c)) {
+        if fixed && axis.is_some() {
+            return Read::Unjudged;
         }
-        Some(_) => None,
+        return mesh_posed::judge_c(mesh, m, (pose.prev_c, pose.to), steel, rapids, fixed);
     }
+    let up = |a: Option<[f64; 3]>| a.is_none_or(|a| is_vertical(&a));
+    if up(pose.from) && up(pose.to) {
+        return judge_move(mesh, m, steel, rapids);
+    }
+    mesh_posed::judge_posed(mesh, m, (pose.from, pose.to), steel, rapids, if fixed { axis } else { None })
+}
+
+/// A struck band's report, named the way law (d2) names it since #424:
+/// its own part, except the flute on a rapid, which reads as
+/// [`FixturePart::Rapid`] (a band above the flute keeps its part).
+/// Shared by the upright, posed and spindle-C readings.
+pub(super) fn label(p: FixturePart, rapids: bool) -> Read {
+    Read::Hit(if rapids && p == FixturePart::Flute { FixturePart::Rapid } else { p })
+}
+
+/// The move's tip path as straight chords, each with how far the real
+/// path can stray from it: the sagitta in the arc's own plane (XY, XZ
+/// or YZ - [`crate::cl::ArcPlane::uvw`]) over the normal coordinate's
+/// run, plus [`ARC_PAD`]. None: not the mesh's to read (an arc whose
+/// radius is not a number, no chords).
+pub(super) fn chords(m: &Move, chord_tol: f64) -> Option<Vec<(Point3, Point3, f64)>> {
+    let Some(arc) = m.arc else { return Some(vec![(m.from, m.to, 0.0)]) };
+    let pl = arc.plane;
+    let (cu, cv) = pl.center_uv(arc.center);
+    let rad_of = |p: Point3| {
+        let (u, v, _) = pl.uvw(p);
+        (u - cu).hypot(v - cv)
+    };
+    let rad = rad_of(m.from).max(rad_of(m.to));
+    if !rad.is_finite() {
+        return None;
+    }
+    let segs = m.segments3(chord_tol);
+    if segs.is_empty() {
+        return None;
+    }
+    Some(
+        segs.into_iter()
+            .map(|(p, q)| {
+                let ((pu, pv, pw), (qu, qv, qw)) = (pl.uvw(p), pl.uvw(q));
+                let half = 0.5 * (qu - pu).hypot(qv - pv);
+                let sag = rad - (rad * rad - half * half).max(0.0).sqrt();
+                (p, q, sag.max(0.0).hypot(qw - pw) + ARC_PAD)
+            })
+            .collect(),
+    )
 }
 
 /// One upright move against one closed mesh: the first band struck
@@ -266,17 +320,17 @@ fn judge_move(mesh: &FixtureMesh, m: &Move, steel: &MeshSteel<'_>, rapids: bool)
     }
     let tol = if steel.chord_tol.is_finite() && steel.chord_tol > 0.0 { steel.chord_tol } else { 0.01 };
     let Some(segs) = chords(m, tol) else { return Read::Unjudged };
-    let label = |p: FixturePart| Read::Hit(if rapids && p == FixturePart::Flute { FixturePart::Rapid } else { p });
+    let hit = |p: FixturePart| label(p, rapids);
     for b in steel.stack {
         if !(b.lo.is_finite() && b.hi.is_finite() && b.r.is_finite()) {
-            return label(b.part); // a band that is not a number is not proven clear
+            return hit(b.part); // a band that is not a number is not proven clear
         }
         if b.hi - b.lo <= 0.0 {
             continue; // no length, no steel
         }
         for &(p, q, pad) in &segs {
             if mesh.band_meets(p, q, b.lo, b.hi, b.r, FIXTURE_HIT_TOL + pad) {
-                return label(b.part);
+                return hit(b.part);
             }
         }
     }
@@ -286,7 +340,7 @@ fn judge_move(mesh: &FixtureMesh, m: &Move, steel: &MeshSteel<'_>, rapids: bool)
     for b in steel.stack.iter().filter(|b| b.hi - b.lo > 0.0) {
         let mid = 0.5 * (b.lo + b.hi);
         if mesh.contains(Point3::new(start.x, start.y, start.z + mid)) {
-            return label(b.part);
+            return hit(b.part);
         }
     }
     Read::Clear

@@ -10,6 +10,7 @@
 //! Reading only. Nothing here writes a file or touches the document:
 //! assigning a machine stays the `LoadMachine` command's job, and the
 //! catalogue is rebuilt on demand (the pane caches it), never stored.
+//! Writing a machine file is `draft` / `store`'s job (#383).
 
 use std::path::{Path, PathBuf};
 
@@ -145,17 +146,44 @@ pub fn scan_dir(dir: &Path) -> Vec<MachineEntry> {
     paths.iter().map(|p| MachineEntry::from_file(p)).collect()
 }
 
-/// The catalogue for this document: the shipped library, then the
-/// user's own machine file - the `.mch` the document has mounted from
-/// disk (Setup pane, "Load other"), read fresh from that path. There is
-/// no user machine folder yet (docs/decisions/287-machines-pane.md);
-/// [`scan_dir`] is the seam a later slice points at one.
+/// A catalogue entry's file text: a built-in's shipped text, a file's
+/// text read fresh from disk. The editor copies and opens from this.
+pub fn text_of(source: &MachineSource) -> Result<String, String> {
+    match source {
+        MachineSource::Builtin(name) => posting::MACHINES
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, t)| (*t).to_owned())
+            .ok_or_else(|| format!("no built-in machine named {name}")),
+        MachineSource::File(p) => {
+            std::fs::read_to_string(p).map_err(|e| format!("{} cannot be read ({e})", p.display()))
+        }
+    }
+}
+
+/// The catalogue for this document: the shipped library, then every
+/// `.mch` in the user machines folder (#383; `store::user_dir`, or the
+/// folder the caller names), then the `.mch` the document has mounted
+/// from disk (Setup pane, "Load other") when it is not already listed,
+/// read fresh from that path.
 #[must_use]
-pub fn enumerate(world: &World) -> Vec<MachineEntry> {
+pub fn enumerate_with(world: &World, user_dir: Option<&Path>) -> Vec<MachineEntry> {
     let mut out = builtins();
+    if let Some(dir) = user_dir {
+        out.extend(scan_dir(dir));
+    }
     let (path, _) = super::of(world);
-    if !path.is_empty() && !path.starts_with(&posting::builtin_path("")) {
+    let listed = |p: &Path| {
+        out.iter().any(|e| matches!(&e.source, MachineSource::File(f) if f == p))
+    };
+    if !path.is_empty() && !path.starts_with(&posting::builtin_path("")) && !listed(Path::new(&path)) {
         out.push(MachineEntry::from_file(Path::new(&path)));
     }
     out
+}
+
+/// [`enumerate_with`] the process's user machines folder.
+#[must_use]
+pub fn enumerate(world: &World) -> Vec<MachineEntry> {
+    enumerate_with(world, super::store::user_dir().as_deref())
 }

@@ -34,8 +34,9 @@
 //!   silent crash: every tolerance here errs toward HIT.
 //! - **The mesh acquits, the box convicts (#339).** The box laws stay
 //!   the broad phase; a tagged model's closed world mesh
-//!   ([`meshes_for`]) then clears the upright moves its box flagged but
-//!   its real steel does not meet - a path down a vise's gap. The mesh
+//!   ([`meshes_for`]) then clears the moves its box flagged but its
+//!   real steel does not meet - a path down a vise's gap, upright, posed
+//!   or under a rotary (slice 3, `verify::mesh_posed`). The mesh
 //!   never adds a hit, and an open or refused mesh keeps its box
 //!   verdict (`camcraft_sim::verify::mesh_refined`).
 //! - **Steel is not kerf.** A retract through its own hole in STOCK is
@@ -101,9 +102,18 @@ pub fn tagged(world: &World, declared: Option<&str>) -> Vec<(String, Entity)> {
 /// stated Z-travel minimum. Any of the three unstated - or no machine
 /// loaded - means no table (the unstated-limit law; a machine whose Z
 /// axis does not reach down is not a machine we can collide-check).
+/// The table of the machine the `declared` setup context mounts (#388):
+/// an inactive setup's ops are checked against their own machine's.
 #[must_use]
-pub fn table_box(world: &World) -> Option<FixtureBox> {
-    let m = machine::of(world).1?;
+pub fn table_box(world: &World, declared: Option<&str>) -> Option<FixtureBox> {
+    table_of(&machine::of_setup(world, declared).1?)
+}
+
+/// [`table_box`] of one machine, read straight off its axes - for a
+/// caller that already holds the machine (the MCP machine tools name
+/// the document's own, which no setup context resolves to).
+#[must_use]
+pub fn table_of(m: &machine::Machine) -> Option<FixtureBox> {
     let span = |n: &str| {
         m.axes
             .iter()
@@ -137,7 +147,7 @@ pub fn boxes_for(world: &World, declared: Option<&str>) -> Vec<FixtureBox> {
             })
         })
         .collect();
-    out.extend(table_box(world));
+    out.extend(table_box(world, declared));
     out
 }
 
@@ -157,7 +167,7 @@ pub fn workholding_for(world: &World, declared: Option<&str>) -> (Vec<FixtureBox
             turning.push(b);
         }
     }
-    fixed.extend(table_box(world));
+    fixed.extend(table_box(world, declared));
     (turning, fixed)
 }
 
@@ -220,7 +230,7 @@ pub fn rotary_axis_of(
 #[must_use]
 pub fn list(world: &World, declared: Option<&str>) -> Vec<String> {
     let mut out: Vec<String> = tagged(world, declared).into_iter().map(|(n, _)| n).collect();
-    if table_box(world).is_some() {
+    if table_box(world, declared).is_some() {
         out.push(MACHINE_TABLE.to_string());
     }
     out
