@@ -12,8 +12,10 @@
 //! View state only: which row is selected and the cached catalogue are
 //! ephemeral like the dock (never a command, never saved). The one
 //! document change the pane makes is "Use for this setup" (#384): it
-//! only queues `CommandKind::UseCatalogueMachine`, which lands as the
-//! undoable `LoadMachine`; a refused or already-mounted machine leaves
+//! only queues `CommandKind::UseCatalogueMachine`, routed like every
+//! machine verb (#343): the undoable `SetSetupMachine` when the active
+//! setup owns its machine, else `LoadMachine`; a refused or
+//! already-mounted machine leaves
 //! the button disabled with the reason beside it.
 
 use egui::{Label, RichText, ScrollArea, Ui};

@@ -8,7 +8,7 @@
 //! Provenance: our own tests, specced from the issue and the egui_dock /
 //! egui_kittest vendored sources; no HSMWorks material involved.
 //!
-//! Gate map (M4.4): covers ui::egui_app::machines_pane, ui::egui_app::layout, ui::state, app::machine::library, app::machine::validate, app::commands::load_machine.
+//! Gate map (M4.4): covers ui::egui_app::machines_pane, ui::egui_app::layout, ui::state, app::machine::library, app::machine::validate, app::commands::load_machine, ui::state_setup_mount.
 
 use super::super::layout::{self, ViewRow};
 use super::super::machines_pane::{row_label, verdict, USE_FOR_SETUP};
@@ -244,4 +244,47 @@ fn a_refused_machine_cannot_be_assigned_and_names_why() {
     assert!(st.status.contains("X travel: min 10 must be below max 5"), "status: {}", st.status);
     assert_eq!(camcraft_app::machine::of(&st.world), before);
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn use_for_this_setup_replaces_an_own_machine_and_leaves_the_document_alone() {
+    let mut h = blank_harness();
+    h.run();
+    {
+        let st = &mut h.state_mut().state;
+        st.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    }
+    h.run_steps(2);
+    let s = camcraft_app::setup::active(&h.state().state.world).expect("a setup is active");
+    h.state_mut().state.pending.push_back(CommandKind::SetupOwnMachine { setup: s.clone(), own: true });
+    h.run_steps(2);
+    let world = &h.state().state.world;
+    assert!(camcraft_app::setup_mount::own_machine(world, Some(&s)).is_some(), "the setup owns its machine");
+    let doc_before = camcraft_app::machine::document_of(world);
+    let own_before = camcraft_app::machine::of(world);
+    let lathe_path = camcraft_app::posting::builtin_path("Lathe");
+    assert_ne!(own_before.0, lathe_path);
+    open_machines(&mut h);
+    let lathe = h
+        .state()
+        .state
+        .machines_pane
+        .list
+        .as_ref()
+        .and_then(|l| l.iter().find(|e| e.name == "Lathe").cloned())
+        .expect("the library lists the lathe");
+    h.get_by_label(&row_label(&lathe)).click();
+    h.run_steps(2);
+    h.get_by_label(USE_FOR_SETUP).click();
+    h.run_steps(3);
+    let st = &h.state().state;
+    assert_eq!(camcraft_app::machine::of(&st.world).0, lathe_path, "status: {}", st.status);
+    let own = camcraft_app::setup_mount::own_machine(&st.world, Some(&s)).map(|d| d.path);
+    assert_eq!(own.as_deref(), Some(lathe_path.as_str()), "the setup's own machine took the pick");
+    assert_eq!(camcraft_app::machine::document_of(&st.world), doc_before, "the document's machine is untouched");
+    assert!(button_disabled(&h));
+    ctrl_z(&mut h);
+    let world = &h.state().state.world;
+    assert_eq!(camcraft_app::machine::of(world), own_before, "undo restores the setup's machine");
+    assert_eq!(camcraft_app::machine::document_of(world), doc_before);
 }

@@ -152,6 +152,31 @@ impl MachineEntry {
     }
 }
 
+/// Read and VALIDATE a catalogue machine for assignment (#384): the
+/// path the document records and the parsed machine, or why not - the
+/// file cannot be read, a library name is stale, or the first
+/// validation refusal. Read fresh, never trusted from a cached entry:
+/// the forgiving reader would otherwise mount a machine whose stated
+/// limits it quietly dropped. The commands' `from_catalogue` doors and
+/// the ui's routed mount share it.
+pub fn read_for_assign(source: &MachineSource) -> Result<(String, super::Machine), String> {
+    let text: String = match source {
+        MachineSource::Builtin(name) => posting::MACHINES
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, t)| (*t).to_owned())
+            .ok_or_else(|| format!("machine {name} is not in the built-in library"))?,
+        MachineSource::File(path) => {
+            std::fs::read_to_string(path).map_err(|e| format!("machine file {}: {e}", path.display()))?
+        }
+    };
+    if let Some(first) = validate_text(&text).first() {
+        return Err(format!("{} fails validation - {first}", source.mount_path()));
+    }
+    let m = parse_mch(&text)?;
+    Ok((source.mount_path(), m))
+}
+
 /// The shipped library, in `posting::MACHINES` order.
 #[must_use]
 pub fn builtins() -> Vec<MachineEntry> {

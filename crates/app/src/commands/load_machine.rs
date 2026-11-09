@@ -70,39 +70,17 @@ impl LoadMachine {
         Self::new(world, crate::posting::builtin_path(name), Some(m))
     }
 
-    /// Mount a machine picked in the Machines pane's catalogue (issue
-    /// #384) - the pane's "Use for this setup". The file is read and
-    /// VALIDATED again here, not trusted from the pane's cached entry:
-    /// a file that changed on disk since the list was read, or one with
-    /// refusals, is refused at the front door by its first refusal,
-    /// because the forgiving reader would otherwise mount a machine
-    /// whose stated limits it quietly dropped.
+    /// Mount a machine picked in the Machines pane's catalogue (#384)
+    /// onto the DOCUMENT: read and validated again here
+    /// (`library::read_for_assign`), so a refused file is refused at the
+    /// front door by its first refusal. The ui routes the same read
+    /// through the active setup's own machine when it owns one.
     pub fn from_catalogue(
         world: &World,
         source: &crate::machine::library::MachineSource,
     ) -> Result<Self, CommandError> {
-        use crate::machine::library::MachineSource;
-        let text: String = match source {
-            MachineSource::Builtin(name) => match crate::posting::MACHINES.iter().find(|(n, _)| n == name) {
-                Some((_, text)) => (*text).to_owned(),
-                None => {
-                    return Err(CommandError::Invalid(format!(
-                        "machine {name} is not in the built-in library"
-                    )));
-                }
-            },
-            MachineSource::File(path) => std::fs::read_to_string(path)
-                .map_err(|e| CommandError::Invalid(format!("machine file {}: {e}", path.display())))?,
-        };
-        let refusals = crate::machine::validate::validate_text(&text);
-        if let Some(first) = refusals.first() {
-            return Err(CommandError::Invalid(format!(
-                "{} fails validation - {first}",
-                source.mount_path()
-            )));
-        }
-        let m = crate::machine::parse_mch(&text).map_err(CommandError::Invalid)?;
-        Self::new(world, source.mount_path(), Some(m))
+        let (path, m) = crate::machine::library::read_for_assign(source).map_err(CommandError::Invalid)?;
+        Self::new(world, path, Some(m))
     }
 }
 

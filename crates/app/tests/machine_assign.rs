@@ -8,13 +8,18 @@
 //! `.mch` layout of `assets/machines/AGENTS.md`.
 //! Provenance: our own tests, specced from the issue.
 //!
-//! Gate map (M4.4): covers app::commands::load_machine, app::machine::library, app::machine::validate.
+//! A setup with its own machine (#343) takes the catalogue machine as
+//! ITS machine through `SetSetupMachine::from_catalogue`, the document's
+//! untouched.
+//!
+//! Gate map (M4.4): covers app::commands::load_machine, app::commands::setup_mount, app::machine::library, app::machine::validate.
 
-use camcraft_app::commands::{CommandError, History, LoadMachine};
+use camcraft_app::commands::{CommandError, CreateSetup, History, LoadMachine, SetSetupMachine};
 use camcraft_app::machine::library::{self, MachineSource};
 use camcraft_app::machine::{self, Kind};
 use camcraft_app::posting;
 use camcraft_app::world::new_world;
+use camcraft_app::{setup, setup_mount};
 
 /// A 3-axis mill whose X travel is `min .. max`.
 fn mill(min: f64, max: f64) -> String {
@@ -101,4 +106,34 @@ fn a_refused_machine_cannot_be_assigned_and_says_why() {
     let _ = std::fs::remove_file(&file);
     assert!(LoadMachine::from_catalogue(&world, &MachineSource::File(file)).is_err());
     assert!(LoadMachine::from_catalogue(&world, &MachineSource::Builtin("No Such Mill")).is_err());
+}
+
+#[test]
+fn a_setup_with_its_own_machine_takes_the_catalogue_machine() {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, CreateSetup::new(&world, None, None).expect("setup"));
+    let s = setup::active(&world).expect("the new setup is active");
+    history.execute(&world, SetSetupMachine::builtin(&world, &s, "Lathe").expect("own machine"));
+    let doc_before = machine::document_of(&world);
+    let own_before = machine::of(&world);
+    assert_eq!(own_before.0, posting::builtin_path("Lathe"));
+    let file = temp_file("own", &mill(-150.0, 150.0));
+    let entry = library::MachineEntry::from_file(&file);
+    assert_eq!(entry.assign_block(&world), None);
+    let source = MachineSource::File(file.clone());
+    history.execute(&world, SetSetupMachine::from_catalogue(&world, &s, &source).expect("assigns"));
+    assert_eq!(machine::of(&world).0, file.display().to_string(), "the setup's machine is the pick");
+    assert!(setup_mount::own_machine(&world, Some(&s)).is_some(), "still its own");
+    assert_eq!(machine::document_of(&world), doc_before, "the document's machine is untouched");
+    assert_eq!(entry.assign_block(&world).as_deref(), Some("it is already this setup's machine"));
+    assert!(history.undo(&world));
+    assert_eq!(machine::of(&world), own_before, "undo restores the setup's previous machine");
+    assert_eq!(machine::document_of(&world), doc_before);
+    // The refused file is refused at this door too.
+    let bad = temp_file("own_bad", &mill(10.0, 5.0));
+    let refused = SetSetupMachine::from_catalogue(&world, &s, &MachineSource::File(bad.clone()));
+    assert!(refused.is_err_and(|e| e.to_string().contains("X travel: min 10 must be below max 5")));
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(&bad);
 }
