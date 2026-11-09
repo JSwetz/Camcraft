@@ -11,8 +11,8 @@
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
-    AddTool, CommandError, CreateOperation, DeleteEntity, GenerateOperation, History, ImportModel,
-    SetStock, SetWcsOrigin,
+    AddTool, CommandError, CreateOperation, CreateSetup, DeleteEntity, GenerateOperation, History,
+    ImportModel, SetSetupWorkOffset, SetStock, SetWcsOrigin,
 };
 use camcraft_app::geometry::{cube, IDENTITY_Q, Point3};
 use camcraft_app::machining2d::PocketStrategy;
@@ -123,38 +123,38 @@ fn work_offset_reference_reads_the_slots_plane() {
     let mut history = History::default();
     // Unplaced: the slot entity does not exist, so nothing resolves -
     // and the diagnostic says what to do about it.
-    let g54 = h(HeightReference::WorkOffset(0), 0.0);
+    let g54 = h(HeightReference::WorkOffset, 0.0);
     assert_eq!(g54.z(&world), None);
     assert!(operation::missing_source(&world, None, None, g54.reference)
         .unwrap()
         .contains("no origin yet"));
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, -2.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, -2.0)).expect("place G54"),
     );
     assert_eq!(g54.z(&world), Some(-2.0));
-    assert_eq!(h(HeightReference::WorkOffset(0), 0.5).z(&world), Some(-1.5));
-    // A slot placed at the origin reads the origin - "placed at 0" is a
-    // real placement, not a missing source.
+    assert_eq!(h(HeightReference::WorkOffset, 0.5).z(&world), Some(-1.5));
+    // #342: the WCS is the SETUP's, one per setup - relabelling it G55 or
+    // G59 changes the word the post writes, never the plane a height
+    // reads; placing it at the origin reads the origin ("placed at 0" is
+    // a real placement).
+    history.execute(&world, CreateSetup::new(&world, None, None).expect("materialize Setup1"));
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(1)).expect("label G55"));
+    assert_eq!(g54.z(&world), Some(-2.0), "the label moved nothing");
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G55", at(0.0, 0.0, 0.0)).expect("place G55"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 7.0)).expect("re-place the WCS"),
     );
-    assert_eq!(h(HeightReference::WorkOffset(1), 0.0).z(&world), Some(0.0));
-    // G59 is the last slot; G60 was never a machine.
-    history.execute(
-        &world,
-        SetWcsOrigin::new(&world, "G59", at(0.0, 0.0, 7.0)).expect("place G59"),
-    );
-    assert_eq!(h(HeightReference::WorkOffset(5), 0.0).z(&world), Some(7.0));
-    assert_eq!(h(HeightReference::WorkOffset(6), 0.0).z(&world), None);
-    assert!(operation::missing_source(&world, None, None, HeightReference::WorkOffset(6))
-        .unwrap()
-        .contains("out of range"));
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(5)).expect("label G59"));
+    assert_eq!(g54.z(&world), Some(7.0));
+    history.execute(&world, SetWcsOrigin::new(&world, at(0.0, 0.0, 0.0)).expect("WCS to 0"));
+    assert_eq!(g54.z(&world), Some(0.0));
+    // Back to the default word: the same WCS.
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", None).expect("unlabel"));
     // Only the plane's z feeds a height: XY and rotations stay outside.
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(99.0, 99.0, -2.0)).expect("slide G54"),
+        SetWcsOrigin::new(&world, at(99.0, 99.0, -2.0)).expect("slide G54"),
     );
     assert_eq!(g54.z(&world), Some(-2.0), "a Z reference reads the plane's height");
 }
@@ -167,12 +167,12 @@ fn resolve_params_agrees_with_resolving_heights_one_by_one() {
     let (world, mut history) = stock_and_block();
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, -1.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, -1.0)).expect("place G54"),
     );
     let params = pocket(
         h(HeightReference::TopOfStock, 5.0),
         h(HeightReference::TopOfModel, 0.0),
-        h(HeightReference::WorkOffset(0), 0.0),
+        h(HeightReference::WorkOffset, 0.0),
     );
     let r = operation::resolve_params(&world, None, None, &params).expect("all sources stand");
     if let OpParams::Pocket { clearance_z, top_z, bottom_z, retract_z, .. } = &params {
@@ -197,11 +197,11 @@ fn missing_sources_are_an_honest_mixed_state() {
     let mut history = History::default();
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 0.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 0.0)).expect("place G54"),
     );
     let clearance = h(HeightReference::TopOfStock, 25.0);
     let top = h(HeightReference::TopOfModel, 0.0);
-    let bottom = h(HeightReference::WorkOffset(0), 0.0);
+    let bottom = h(HeightReference::WorkOffset, 0.0);
     assert_eq!(clearance.z(&world), None);
     assert!(operation::missing_source(&world, None, None, clearance.reference)
         .unwrap()
@@ -270,7 +270,7 @@ fn depth_ordering_is_checked_on_resolved_values() {
     assert!(!operation::depth_sane(&world, None, None, &up), "but 5 -> 9 cuts upward");
     let unsight = pocket(
         Height::fixed(25.0),
-        h(HeightReference::WorkOffset(4), 0.0), // G58 never placed
+        h(HeightReference::WorkOffset, 0.0), // G54 never placed here
         h(HeightReference::TopOfModel, 0.0),
     );
     assert!(
@@ -316,12 +316,12 @@ fn moving_a_source_stales_an_operation_that_references_it() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 4.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 4.0)).expect("place G54"),
     );
     let params = pocket(
         h(HeightReference::TopOfStock, 5.0),
-        h(HeightReference::WorkOffset(0), 0.0),     // 4.0
-        h(HeightReference::WorkOffset(0), -3.0),    // 1.0
+        h(HeightReference::WorkOffset, 0.0),     // 4.0
+        h(HeightReference::WorkOffset, -3.0),    // 1.0
     );
     history.execute(
         &world,
@@ -333,7 +333,7 @@ fn moving_a_source_stales_an_operation_that_references_it() {
     assert_eq!(operation::status_of(&world, &op), OpStatus::Ok);
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 3.0)).expect("drop G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 3.0)).expect("drop G54"),
     );
     assert_eq!(
         operation::status_of(&world, &op),
@@ -409,12 +409,12 @@ fn references_and_placements_survive_a_project_roundtrip() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 4.0)).expect("place G54"),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 4.0)).expect("place G54"),
     );
     let params = pocket(
         h(HeightReference::TopOfStock, 5.0),
-        h(HeightReference::WorkOffset(0), 0.0),
-        h(HeightReference::WorkOffset(3), 1.5), // G57, unplaced
+        h(HeightReference::WorkOffset, 0.0),
+        h(HeightReference::BottomOfStock, 1.5),
     );
     history.execute(
         &world,
@@ -425,8 +425,8 @@ fn references_and_placements_survive_a_project_roundtrip() {
     project::save(&world, &path).expect("save");
     let saved = std::fs::read_to_string(&path).expect("read");
     let _ = std::fs::remove_file(&path);
-    assert!(saved.contains("\"work_offset\""), "the slot reference is stored: {saved}");
-    assert!(saved.contains("\"slot\": 3"), "with its slot number");
+    assert!(saved.contains("\"work_offset\""), "the work-offset reference is stored: {saved}");
+    assert!(!saved.contains("\"slot\""), "with no slot of its own (#329)");
     assert!(saved.contains("\"top_of_stock\""), "and the stock reference");
 
     let world2 = new_world();
@@ -434,14 +434,13 @@ fn references_and_placements_survive_a_project_roundtrip() {
     let op2 = model::find_by_name(&world2, "P1").expect("op");
     match model::operation_of(&world2, &op2).expect("params").params {
         OpParams::Pocket { top_z, bottom_z, .. } => {
-            assert_eq!(top_z, h(HeightReference::WorkOffset(0), 0.0));
-            assert_eq!(bottom_z, h(HeightReference::WorkOffset(3), 1.5));
+            assert_eq!(top_z, h(HeightReference::WorkOffset, 0.0));
+            assert_eq!(bottom_z, h(HeightReference::BottomOfStock, 1.5));
         }
         _ => unreachable!(),
     }
-    // G54 stands where it was left; the never-placed G57 stays unresolved.
-    assert_eq!(h(HeightReference::WorkOffset(0), 0.0).z(&world2), Some(4.0));
-    assert_eq!(h(HeightReference::WorkOffset(3), 0.0).z(&world2), None);
+    // G54 stands where it was left.
+    assert_eq!(h(HeightReference::WorkOffset, 0.0).z(&world2), Some(4.0));
     let stock = model::find_by_name(&world2, STOCK_NAME).expect("stock came back");
     assert!(model::is_stock(&world2, &stock));
 }

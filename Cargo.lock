@@ -807,6 +807,7 @@ name = "camcraft-ui"
 version = "0.14.0"
 dependencies = [
  "camcraft-app",
+ "chrono",
  "egui",
  "egui-wgpu",
  "egui-winit",

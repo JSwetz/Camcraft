@@ -112,27 +112,34 @@ pub(super) fn forbidden(
 
 /// Where the horizontal line `y` crosses the edges of `region`, sorted:
 /// the parity walk, half-open at the vertices so a vertex on the line
-/// counts once; consecutive pairs bound the inside.
-fn crossings(region: &Region, y: f64) -> Vec<f64> {
-    let mut xs: Vec<f64> = Vec::new();
-    for l in region.loops() {
+/// counts once; consecutive pairs bound the inside. Keep the boundary
+/// identity so a concave return in one hole is not called two holes.
+fn crossings(region: &Region, y: f64) -> Vec<(f64, usize)> {
+    let mut xs: Vec<(f64, usize)> = Vec::new();
+    for (boundary, l) in region.loops().iter().enumerate() {
         let pts = l.points();
         let n = pts.len();
         for i in 0..n {
             let (p, q) = (pts[i], pts[(i + 1) % n]);
             if (p.y <= y) != (q.y <= y) {
-                xs.push(p.x + (y - p.y) * (q.x - p.x) / (q.y - p.y));
+                xs.push((p.x + (y - p.y) * (q.x - p.x) / (q.y - p.y), boundary));
             }
         }
     }
-    xs.sort_by(f64::total_cmp);
+    xs.sort_by(|a, b| a.0.total_cmp(&b.0));
     xs
 }
 
-/// The first row where two bridged holes stand closer than the tool:
-/// the material between them on the row has no piece to cut it, so it
-/// would stay standing. `(y, gap)` names it; `None` is a clean row set.
-pub(super) fn narrow_gap(holes: &Region, rows: &[(f64, f64, f64)], pieces: &[Vec<(f64, f64)>]) -> Option<(f64, f64)> {
+/// The first missing row piece between distinct hole boundaries whose
+/// horizontal gap is no wider than the tool. A concave return in one
+/// hole can exclude a row at any width; it belongs to `uncut`'s swept-area
+/// account instead of the refusal about material between two holes.
+pub(super) fn narrow_gap(
+    holes: &Region,
+    rows: &[(f64, f64, f64)],
+    pieces: &[Vec<(f64, f64)>],
+    diameter: f64,
+) -> Option<(f64, f64)> {
     rows.iter().zip(pieces).find_map(|(&(y, _, _), ps)| {
         let xs = crossings(holes, y);
         // The material gaps between consecutive hole spans on the row.
@@ -140,8 +147,13 @@ pub(super) fn narrow_gap(holes: &Region, rows: &[(f64, f64, f64)], pieces: &[Vec
             .skip(1)
             .step_by(2)
             .map(|w| (w[0], w[1]))
-            .find(|&(a, b)| b > a && !ps.iter().any(|&(p0, p1)| p0.min(p1) < b && p0.max(p1) > a))
-            .map(|(a, b)| (y, b - a))
+            .find(|&((a, left), (b, right))| {
+                left != right
+                    && b > a
+                    && b - a <= diameter
+                    && !ps.iter().any(|&(p0, p1)| p0.min(p1) < b && p0.max(p1) > a)
+            })
+            .map(|((a, _), (b, _))| (y, b - a))
     })
 }
 
@@ -158,7 +170,7 @@ pub(super) fn pieces(forbidden: &Region, y: f64, xa: f64, xb: f64) -> Vec<(f64, 
     // between them.
     let mut keep: Vec<(f64, f64)> = Vec::new();
     let mut cur = lo;
-    for [x0, x1] in xs.as_chunks::<2>().0 {
+    for [(x0, _), (x1, _)] in xs.as_chunks::<2>().0 {
         let (a, b) = (x0.max(lo), x1.min(hi));
         if b <= a {
             continue;

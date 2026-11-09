@@ -1,10 +1,11 @@
 use super::*;
 
-pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectError> {
+pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Vec<String>, ProjectError> {
     // Migration hook: step UP one version at a time, each migration exact,
     // before any entity touches the world. Anything newer than this build
     // remains refused. The chain must run its steps sequentially - a v1
     // file passes through v2's effects before v3's are applied.
+    let from = file.version;
     if file.version == 1 {
         // v1 -> v2: entities gained `rotation`; v1 had translation-only
         // placements, so identity is the exact migration. Kind and stock
@@ -479,6 +480,32 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // default to name order and the stable entity name respectively.
         file.version = 50;
     }
+    if file.version == 50 {
+        // v50 setups pick no program offset; the absent key reads as
+        // the inferred per-operation law they posted with (#196).
+        file.version = 51;
+    }
+    if (51..=PROJECT_VERSION).contains(&file.version) {
+        // v51 -> v52 (#329): a work-offset height stops naming its own
+        // slot - the setup's is program zero. Agreeing setups take the
+        // slot, disagreeing ones refuse by name; a v52+ file is checked
+        // slot-free (`wcs_migrate`).
+        super::wcs_migrate::settle(&mut file, from)?;
+        file.version = file.version.max(52);
+    }
+    if file.version == 52 {
+        // v52 -> v53 (#326): a setup may hold the part turned. Absent
+        // is "as modelled" - what every v52 file machined.
+        file.version = 53;
+    }
+    let mut notes = Vec::new();
+    if (53..=PROJECT_VERSION).contains(&file.version) {
+        // v53 -> v54 (#342): one WCS per setup - each setup keeps the
+        // origin of the slot it posts, slots no setup posts are dropped
+        // with a note; a v54 file is checked one-WCS (`wcs_one`).
+        notes = super::wcs_one::settle(&mut file, from)?;
+        file.version = PROJECT_VERSION;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -494,6 +521,9 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             Some("g76") => crate::schema::ThreadingOutput::G76Cycle,
             Some(other) => return Err(corrupt(format!("unknown threading output {other:?}"))),
         },
+        // The top-level switches (#110, #111): an absent key is off.
+        skip_stops: file.skip_stops,
+        per_op: file.per_op_files,
     };
     let doc_units = match file.units.as_deref() {
         None | Some("mm") => Unit::Millimeters,
@@ -505,6 +535,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
     }
+    super::setup_links::check(&file)?;
     let keys: std::collections::HashSet<&str> = file.entities.iter()
         .filter(|e| e.kind == Some(EntityKind::Operation))
         .map(|e| e.name.as_str()).collect();
@@ -628,6 +659,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         .ok_or_else(|| corrupt("stock mesh regeneration failed"))?,
                 };
                 model::set_facets(world, &entity, facets.into());
+                // The same UNCONDITIONAL pin as the Model arm (#340): every
+                // SetStock lands facets and moves the counter, the save
+                // writes it, so the load must end where the file left it.
+                // An absent key (0) puts back what that file remembered.
+                model::set_rev(world, &entity, dto.rev);
                 entity.entity_view(world).set(StockDef {
                     shape: shape.clone(),
                 });
@@ -675,6 +711,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     setup: odto.setup,
                     area: odto.area.to_controls(),
                     coolant: odto.coolant,
+                    after: odto.after,
+                    suppressed: odto.suppressed,
                 });
                 if odto.label.is_some() || odto.order.is_some() {
                     entity.entity_view(world).set(OperationMeta {
@@ -691,10 +729,51 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                 let sdto = dto
                     .setup
                     .ok_or_else(|| corrupt("setup entity without a definition"))?;
+                // #196: the picked program offset is a G-word in the file;
+                // an unspellable one is a corrupt file, never a guess.
+                let work_offset = match sdto.work_offset.as_deref() {
+                    None => None,
+                    Some(w) => Some(crate::schema::WCS_SLOTS.iter().position(|s| *s == w).ok_or_else(|| {
+                        corrupt(format!("setup '{}' picks unknown work offset {w:?}", dto.name))
+                    })?),
+                };
+                // #326: a turned part must be a rigid transform; anything
+                // else is a corrupt file, never a guess.
+                let part_alignment = match &sdto.part_alignment {
+                    None => None,
+                    Some(a) => Some(a.to_location().ok_or_else(|| {
+                        corrupt(format!("setup '{}' holds the part at a placement that is not a rigid transform", dto.name))
+                    })?),
+                };
+                // #343: the setup's own machine, sanity-checked like the
+                // document's - a corrupt file, never a guessed limit.
+                let machine = match &sdto.machine {
+                    None => None,
+                    Some(m) => Some(m.to_def(&dto.name).map_err(corrupt)?),
+                };
+                // #320: an unknown stock-source word is a corrupt file.
+                let stock_source = match sdto.stock_source.as_deref() {
+                    None => None,
+                    Some(w) => Some(crate::setup_stock::StockSource::from_word(w).ok_or_else(|| {
+                        corrupt(format!("setup '{}' takes its stock from '{w}', which is no stock source", dto.name))
+                    })?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
-                    wcs: sdto.wcs,
+                    // `wcs_one` left exactly one name on every setup.
+                    wcs: match sdto.wcs {
+                        WcsDto::One(w) => w,
+                        WcsDto::Slots(_) => {
+                            return Err(corrupt(format!("setup '{}' still lists work offset slots", dto.name)));
+                        }
+                    },
                     datum_from: sdto.datum_from,
+                    work_offset,
+                    part_alignment,
+                    machine,
+                    post: sdto.post.as_ref().map(SetupPostDto::to_ref),
+                    relative_to: sdto.relative_to.clone(),
+                    stock_source,
                 });
             }
         }
@@ -709,5 +788,5 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             });
         }
     }
-    Ok(())
+    Ok(notes)
 }

@@ -61,9 +61,9 @@ pub(super) fn material_of(
     match src {
         SrcRef::Stock => {
             let name = crate::setup::stock_entity_name(world, setup);
-            named_material(world, &name, "no stock: set it up in Setup first")
+            named_material(world, setup, &name, "no stock: set it up in Setup first")
         }
-        SrcRef::Entity(name) => named_material(world, name, &format!("no entity named '{name}'")),
+        SrcRef::Entity(name) => named_material(world, setup, name, &format!("no entity named '{name}'")),
         SrcRef::Selection(items) => {
             // Union of the distinct selected entities (stock is a legal
             // pick): what the generators stand in and what verification
@@ -79,6 +79,7 @@ pub(super) fn material_of(
                 seen.push(g.entity.as_str());
                 let m = named_material(
                     world,
+                    setup,
                     &g.entity,
                     &format!("the selection names '{}', which is gone", g.entity),
                 )?;
@@ -169,12 +170,15 @@ pub fn detect_holes(
     Ok(params)
 }
 
-pub(super) fn named_material(world: &World, name: &str, gone: &str) -> Result<Material, GenError> {
+/// A named entity's facets in its setup's frame (#326: a part of an
+/// aligned setup reads turned; the stock and an unaligned setup read
+/// exactly the world facets they always did).
+pub(super) fn named_material(world: &World, setup: Option<&str>, name: &str, gone: &str) -> Result<Material, GenError> {
     let Some(entity) = model::find_by_name(world, name) else {
         return Err(GenError::Invalid(gone.to_string()));
     };
-    let facets = model::world_facets(world, &entity).unwrap_or_default();
-    let top = model::entity_world_aabb(world, &entity)
+    let facets = crate::setup_align::facets_in(world, &entity, setup).unwrap_or_default();
+    let top = crate::setup_align::entity_aabb_in(world, &entity, setup)
         .map(|b| b.max.z)
         .unwrap_or(f64::NAN);
     usable(facets, top, name)

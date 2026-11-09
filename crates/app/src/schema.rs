@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AfterOperation, AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -92,9 +92,11 @@ pub struct StockDef {
     pub shape: StockShape,
 }
 
-/// Unit tag marking an entity as a work coordinate system origin. The entity
-/// NAME is the slot identity (`G54`..`G59`), its `Location` the transform;
-/// there is no payload to drift. Never has facets.
+/// Unit tag marking an entity as a work coordinate system origin: a
+/// setup's one WCS (#342), named by `SetupDef::wcs` (`G54` for a document
+/// without setups), its `Location` the transform; there is no payload to
+/// drift. The NAME is not the G-word - that is the setup's label
+/// (`SetupDef::work_offset`). Never has facets.
 #[derive(Component, Debug)]
 pub struct Wcs;
 
@@ -113,20 +115,59 @@ pub struct ToolDef {
 }
 
 /// One machine setup (M3.2 stage A): the named context that says WHICH
-/// raw material and WHICH work offsets an operation is machined against.
-/// The strings are entity NAMES, resolved through [`crate::setup`] - the
-/// first setup of a pre-M3.2 document points at the legacy global names
-/// (`STOCK_NAME`, `WCS_SLOTS`) so nothing is renamed when setups arrive.
-/// `wcs` is indexed by [`WCS_SLOTS`]; an entry naming an entity that does
-/// not exist yet means "this slot is not placed in this setup", exactly
-/// as a missing `G55` entity means today. `datum_from` records the setup
-/// whose stock and G54 a new setup was cloned from - provenance for the
-/// sheet, inert for every stamp (the clones themselves carry the data).
+/// raw material and WHICH work coordinate system an operation is
+/// machined against. The strings are entity NAMES, resolved through
+/// [`crate::setup`] - the first setup of a pre-M3.2 document points at
+/// the legacy global names (`STOCK_NAME`, `G54`) so nothing is renamed
+/// when setups arrive.
+/// `wcs` names the setup's ONE work coordinate system (#342): one origin
+/// per setup, never a list of slots. An empty name, or one naming an
+/// entity that does not exist yet, means "this setup's WCS is not placed"
+/// (it sits at the origin). `datum_from` records the setup whose stock
+/// and WCS a new setup was cloned from - provenance for the sheet, inert
+/// for every stamp (the clones themselves carry the data).
+/// `work_offset` is only the setup's post LABEL (#196, #342), an index
+/// into [`WCS_SLOTS`]: the `G54`..`G59` word the post writes for this
+/// setup's WCS. It selects no stored origin - changing it moves nothing.
+/// `None` - the default - writes `G54` ([`crate::setup::wcs_slot`]).
+/// Written only by `SetSetupWorkOffset` and the loader's migrations.
+/// `part_alignment` (#326) is how the PART sits in this setup: the rigid
+/// transform from the document frame into the setup frame (which face
+/// is on the table, which edge runs along X). The stock, the WCS and
+/// the fixtures of the setup are placed in that frame already; only the
+/// parts read through it (`setup_align`). `None` - the default - is "as
+/// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
+/// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
+/// carries it) and the project loader.
+/// `machine` and `post` (#343) are the setup's OWN machine and post:
+/// `None` - the default, and every file before v55 - follows the
+/// document's (`MachineDef` / `PostRef` singletons), so an untouched
+/// document mounts and posts exactly as before. Read through
+/// [`crate::setup_mount`]; written only by `SetSetupMachine` /
+/// `SetSetupPost` and the project loader.
+/// `relative_to` (#316) names the setup this one is placed RELATIVE to
+/// (a re-clamp of it: flipped, turned). The relation itself is not
+/// stored - it is `part_alignment` read against the other setup's
+/// ([`crate::setup_relative::transform_between`]); the link only makes
+/// a later change of that setup's alignment carry into this one. `None`,
+/// the default and every file before v56, links nothing. Written only by
+/// `SetSetupRelative` and the project loader.
+/// `stock_source` (#320) is where the setup's stock comes from: its own,
+/// or what the setup before it leaves. `None`, the default and every
+/// file before v57, reads as #317's implicit rule
+/// ([`crate::setup_stock::implicit`]). Written only by
+/// `SetSetupStockSource` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
-    pub wcs: Vec<String>,
+    pub wcs: String,
     pub datum_from: String,
+    pub work_offset: Option<usize>,
+    pub part_alignment: Option<Location>,
+    pub machine: Option<MachineDef>,
+    pub post: Option<PostRef>,
+    pub relative_to: Option<String>,
+    pub stock_source: Option<crate::setup_stock::StockSource>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
@@ -180,6 +221,13 @@ pub struct Operation {
     /// The cutting fluid the post switches on for this operation
     /// (#112). Flood by default - what every post emitted before.
     pub coolant: CoolantMode,
+    /// What the machine does once this operation is done (#110):
+    /// carry on by default - what every post emitted before.
+    pub after: AfterOperation,
+    /// Left out of the posted program (#110), toolpath and all kept:
+    /// the post (and the program sim that judges it) skip it; it still
+    /// generates, and un-suppressing restores it as it was.
+    pub suppressed: bool,
 }
 
 /// User-facing operation label and explicit position within its setup.
@@ -267,12 +315,20 @@ pub enum PostRef {
 /// `SetPostOptions` (undoable) or a document load. A script reads the
 /// ones it knows from its `postOptions` global and ignores the rest;
 /// the default is every post's own default, so a document that never
-/// chose writes no key.
+/// chose writes no key. `skip_stops` (#110) posts the program without
+/// any operation's after-action (no M0 / M1, no trips home) - a
+/// debugged program runs straight through, the ops keep their choices.
+/// `per_op` (#111) is the Output choice: off (the default) posts one
+/// combined program, on writes one standalone program per operation.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PostOptions {
     /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
     /// default, or the two-block G76 cycle from the thread record).
     pub threading: ThreadingOutput,
+    /// Post without any operation's stop or trip home (#110).
+    pub skip_stops: bool,
+    /// One standalone program per operation (#111).
+    pub per_op: bool,
 }
 
 /// The thread-output choice of [`PostOptions`].
@@ -386,6 +442,7 @@ pub fn register_schema(world: &World) {
     world.component::<PostRef>();
     world.component::<PostOptions>();
     world.component::<ThemeRef>();
+    world.component::<PostOptions>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();
     world.component::<RibbonPins>();

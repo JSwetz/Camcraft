@@ -104,6 +104,8 @@ fn op(cross: Vec<CrossHole>) -> Operation {
         setup: None,
         area: Default::default(),
         coolant: Default::default(),
+        after: Default::default(),
+        suppressed: false,
     }
 }
 
@@ -131,7 +133,7 @@ fn world_with(word: &str, part: Mesh) -> (World, History) {
 
 fn place_g54(world: &World, history: &mut History, x: f64, y: f64) {
     let at = Location { pos: Point3::new(x, y, 0.0), rot: IDENTITY_Q };
-    history.execute(world, SetWcsOrigin::new(world, "G54", at).expect("set G54"));
+    history.execute(world, SetWcsOrigin::new(world, at).expect("set G54"));
 }
 
 #[test]

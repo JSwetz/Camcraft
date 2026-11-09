@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[build-dependencies]
+chrono = "0.4"
+
 [dependencies]
 camcraft-app = { workspace = true }
 flecs_ecs = { workspace = true }

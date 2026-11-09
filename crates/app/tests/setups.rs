@@ -18,7 +18,7 @@ use camcraft_app::geometry::{IDENTITY_Q, Point3};
 use camcraft_app::model;
 use camcraft_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
 use camcraft_app::rest;
-use camcraft_app::schema::{Location, STOCK_NAME, WCS_SLOTS};
+use camcraft_app::schema::{Location, STOCK_NAME};
 use camcraft_app::setup;
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools::{catalog, Tool};
@@ -137,10 +137,10 @@ fn the_first_setup_materializes_and_changes_nothing() {
     assert_eq!(setup::active(&world).as_deref(), Some("Setup1"));
     let def = setup::def_of(&world, "Setup1").expect("def");
     assert_eq!(def.stock, STOCK_NAME, "materialization points, never renames");
-    assert_eq!(def.wcs, WCS_SLOTS.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(def.wcs, "G54", "#342: one WCS - the legacy G54 entity");
     assert_eq!(def.datum_from, "");
     assert!(model::find_by_name(&world, "Setup1/Stock").is_none(), "no private copies");
-    assert!(model::find_by_name(&world, "Setup1/G54").is_none());
+    assert!(model::find_by_name(&world, "Setup1/WCS").is_none());
 
     let after = model::toolpath_of(&world, &face_e).expect("cached path");
     assert_eq!(before.path.moves.len(), after.path.moves.len());
@@ -168,26 +168,27 @@ fn new_setups_own_private_furniture_spawned_on_first_use() {
     assert_eq!(setup::names(&world), vec!["Setup1".to_string(), "Setup2".to_string()]);
     let def = setup::def_of(&world, "Setup2").expect("def");
     assert_eq!(def.stock, "Setup2/Stock");
-    assert_eq!(def.wcs[0], "Setup2/G54");
+    assert_eq!(def.wcs, "Setup2/WCS", "#342: one WCS per setup");
     // Laziness: Setup2's stock exists (box_stock ran with it active), its
-    // offsets do not until placed.
+    // WCS does not until placed.
     assert!(setup::stock_entity(&world, Some("Setup2")).is_some());
-    assert!(setup::wcs_entity(&world, Some("Setup2"), 0).is_none());
-    assert!(setup::wcs_entity(&world, None, 0).is_none(), "legacy G54 never placed");
+    assert!(setup::wcs_entity(&world, Some("Setup2")).is_none());
+    assert!(setup::wcs_entity(&world, None).is_none(), "legacy G54 never placed");
 
     run(
         &world,
         &mut history,
-        SetWcsOrigin::new(&world, "G54", at(10.0, 0.0, 0.0)),
+        SetWcsOrigin::new(&world, at(10.0, 0.0, 0.0)),
         "place G54 in Setup2",
     );
-    let placed = setup::wcs_entity(&world, Some("Setup2"), 0);
+    let placed = setup::wcs_entity(&world, Some("Setup2"));
     assert!(placed.is_some());
-    let entity = model::find_by_name(&world, "Setup2/G54").expect("furniture");
+    let entity = model::find_by_name(&world, "Setup2/WCS").expect("furniture");
     assert_eq!(placed, Some(entity));
     assert_eq!(model::transform_of(&world, &entity).expect("loc").pos.x, 10.0);
-    // The G-code WORD stays the literal; only the lookup followed the setup.
-    assert_eq!(setup::wcs_entity_name(&world, Some("Setup2"), 0).as_deref(), Some("Setup2/G54"));
+    // The G-code WORD is the setup's label; only the lookup followed the setup.
+    assert_eq!(setup::wcs_entity_name(&world, Some("Setup2")), "Setup2/WCS");
+    assert_eq!(setup::wcs_label(&world, Some("Setup2")), "WCS (G54)");
     assert!(model::find_by_name(&world, "G54").is_none());
 
     // And the STOCK edit lands on the private entity, not the legacy one.
@@ -211,10 +212,10 @@ fn heights_resolve_through_the_operations_setup_not_the_cursor() {
     run(
         &world,
         &mut history,
-        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 5.0)),
+        SetWcsOrigin::new(&world, at(0.0, 0.0, 5.0)),
         "place G54 in Setup2",
     );
-    let h = Height::of(HeightReference::WorkOffset(0), 0.0);
+    let h = Height::of(HeightReference::WorkOffset, 0.0);
     assert_eq!(h.z_for(&world, Some("Setup2")), Some(5.0));
     assert_eq!(h.z_for(&world, None), None, "Setup1's G54 was never placed");
     // Switching the cursor cannot switch the reading: the lookup takes
@@ -250,7 +251,7 @@ fn program_order_is_setup_rank_then_name() {
 #[test]
 fn datum_transfer_clones_the_world_and_undoes_exactly() {
     let (world, mut history) = two_setup_world();
-    run(&world, &mut history, SetWcsOrigin::new(&world, "G54", at(12.0, 0.0, 3.0)), "place offset");
+    run(&world, &mut history, SetWcsOrigin::new(&world, at(12.0, 0.0, 3.0)), "place offset");
     run(
         &world,
         &mut history,
@@ -274,23 +275,23 @@ fn datum_transfer_clones_the_world_and_undoes_exactly() {
         model::transform_of(&world, &s3).expect("loc"),
         model::transform_of(&world, &s2).expect("loc")
     );
-    let w3 = setup::wcs_entity(&world, Some("Setup3"), 0).expect("cloned offset");
-    let w2 = setup::wcs_entity(&world, Some("Setup2"), 0).expect("source offset");
+    let w3 = setup::wcs_entity(&world, Some("Setup3")).expect("cloned WCS");
+    let w2 = setup::wcs_entity(&world, Some("Setup2")).expect("source WCS");
     assert_ne!(w3, w2);
     assert_eq!(model::transform_of(&world, &w3).expect("loc").pos.z, 3.0);
 
     assert!(history.undo(&world));
     assert_eq!(setup::names(&world), vec!["Setup1".to_string(), "Setup2".to_string()]);
     assert!(model::find_by_name(&world, "Setup3/Stock").is_none());
-    assert!(model::find_by_name(&world, "Setup3/G54").is_none());
+    assert!(model::find_by_name(&world, "Setup3/WCS").is_none());
     // The SOURCE's furniture survived the inverse untouched - a clone
     // removes only its own copies.
     assert!(setup::stock_entity(&world, Some("Setup2")).is_some());
-    assert!(setup::wcs_entity(&world, Some("Setup2"), 0).is_some());
+    assert!(setup::wcs_entity(&world, Some("Setup2")).is_some());
     assert_eq!(setup::active(&world).as_deref(), Some("Setup2"));
     assert!(history.redo(&world));
     assert!(setup::stock_entity(&world, Some("Setup3")).is_some());
-    assert!(setup::wcs_entity(&world, Some("Setup3"), 0).is_some());
+    assert!(setup::wcs_entity(&world, Some("Setup3")).is_some());
 }
 
 #[test]
@@ -332,7 +333,7 @@ fn a_setup_with_operations_does_not_delete() {
     run(&world, &mut history, DeleteSetup::new(&world, "Setup2"), "delete Setup2");
     assert!(model::find_by_name(&world, "Setup2").is_none());
     assert!(model::find_by_name(&world, "Setup2/Stock").is_none(), "owned furniture goes");
-    assert!(model::find_by_name(&world, "Setup2/G54").is_none());
+    assert!(model::find_by_name(&world, "Setup2/WCS").is_none());
     assert!(model::find_by_name(&world, STOCK_NAME).is_some());
     assert!(history.undo(&world));
     let priv_stock = model::find_by_name(&world, "Setup2/Stock").expect("restored");

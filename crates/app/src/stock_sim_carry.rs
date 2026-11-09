@@ -1,0 +1,263 @@
+//! The program sim across setups (#317): the machined body one setup
+//! leaves is carried into the next through the transform between the
+//! two setups (`setup_relative::transform_between`, #316), so a later
+//! setup starts from what the earlier one cut instead of a fresh block.
+//!
+//! Provenance: our own design per #308's research decision (one body,
+//! viewed through each setup's transform, never re-sampled onto each
+//! setup's grid); the engine is camcraft-sim's `stock_sim::Body`. Plain
+//! re-clamp practice; no vendor material consulted.
+//!
+//! ## The laws here
+//!
+//! - **When the body is carried.** By the entered setup's stock source
+//!   (#320, `setup_stock`): "what the setup before leaves behind"
+//!   carries; "its own stock" keeps the M3.2 A CLIP in the same hold
+//!   (the new block's top lowers what stands; nothing moves) and takes a
+//!   NEW BLOCK in a different hold - the gouges of the block left behind
+//!   fold into the verdict, never dropped. Unpicked, the #317 rule: a
+//!   setup holding the part differently, or placed relative to the one
+//!   before it (#316's link, "Same as" included), carries.
+//! - **The carried body is the incoming stock.** A carried setup's own
+//!   stock entity is not read by the sim: the material the machine
+//!   holds is what the previous setup left.
+//! - **Refuse what is not verified.** A turn the column lattice cannot
+//!   carry exactly (side-on, or off the quarter turns) and a lathe or
+//!   mill-turn machine refuse by name, naming both setups. Lathe,
+//!   rotary and posed programs are refused before the walk, as before.
+
+use crate::stock_sim::{Body, Deviation, Dexel, LatticeTurn, Planned, SimOp, simulate, stock_grid};
+
+/// How the program enters a setup from the setup before it.
+pub(crate) enum Entry {
+    /// Its own stock in the same hold: the conservative clip to the new
+    /// block.
+    Clip,
+    /// The body moves through the transform.
+    Carry(LatticeTurn),
+    /// Its own stock in a different hold (#320): a new block.
+    NewBlock,
+}
+
+/// The rotation matrix of a unit quaternion, row-major (`p' = r p`).
+fn matrix_of(rot: [f64; 4]) -> [[f64; 3]; 3] {
+    use crate::geometry::{Point3, transform_point};
+    let col = |e: Point3| transform_point(e, Point3::ZERO, rot);
+    let (x, y, z) = (col(Point3::new(1.0, 0.0, 0.0)), col(Point3::new(0.0, 1.0, 0.0)), col(Point3::new(0.0, 0.0, 1.0)));
+    [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]]
+}
+
+/// The lattice turn that carries the body from setup `from` into setup
+/// `to`.
+///
+/// # Errors
+/// A transform that cannot be carried exactly, a machine kind the carry
+/// is not verified on, or a setup `transform_between` refuses - each
+/// named with both setups.
+pub(crate) fn carry_turn(world: &flecs_ecs::prelude::World, from: &str, to: &str) -> Result<LatticeTurn, String> {
+    let head = format!("carrying the machined stock from setup '{from}' into setup '{to}'");
+    if crate::machine::kind_of(world) != crate::machine::Kind::Mill {
+        return Err(format!("{head}: not supported yet on a lathe or mill-turn machine"));
+    }
+    let t = crate::setup_relative::transform_between(world, from, to).map_err(|e| format!("{head}: {e}"))?;
+    LatticeTurn::from_matrix(matrix_of(t.rot), [t.pos.x, t.pos.y, t.pos.z]).map_err(|e| format!("{head}: {e}"))
+}
+
+/// Decide how the program enters setup `to` from setup `from`, by the
+/// setup's stock source (#320; `setup_stock::between` - unpicked, the
+/// #317 rule).
+///
+/// # Errors
+/// As [`carry_turn`], when the body is to be carried.
+pub(crate) fn entry(world: &flecs_ecs::prelude::World, from: Option<&str>, to: Option<&str>) -> Result<Entry, String> {
+    use crate::setup_stock::{self, StockSource};
+    let (Some(from), Some(to)) = (from, to) else { return Ok(Entry::Clip) };
+    match setup_stock::between(world, from, to) {
+        StockSource::FromPrevious => carry_turn(world, from, to).map(Entry::Carry),
+        StockSource::Own if setup_stock::same_hold(world, from, to) => Ok(Entry::Clip),
+        StockSource::Own => Ok(Entry::NewBlock),
+    }
+}
+
+/// Fold the gouges of a block the program left behind (#320: a later
+/// setup took a new block) into the final verdict, so a gouge cut
+/// before the new block is never dropped. The cells are on another
+/// lattice, so only the counts and the worst depth fold; the worst
+/// point stays in the frame of the setup that cut it.
+pub(crate) fn fold_left(dev: &mut Deviation, left: &Deviation) {
+    dev.gouge_cells += left.gouge_cells;
+    dev.gouge_volume += left.gouge_volume;
+    if left.max_gouge > dev.max_gouge {
+        dev.max_gouge = left.max_gouge;
+        dev.max_gouge_at = left.max_gouge_at;
+    }
+}
+
+/// The stock as the walk holds it: the plain column grid until the
+/// first carry, the two-sided body after.
+pub(crate) enum Held {
+    Plain(Dexel),
+    Carried(Body),
+}
+
+impl Held {
+    pub(crate) fn dex_mut(&mut self) -> &mut Dexel {
+        match self {
+            Held::Plain(d) => d,
+            Held::Carried(b) => &mut b.dex,
+        }
+    }
+}
+
+/// Where the program's walk stands: the stock, the setup frame it is
+/// held in, and whether the program crossed into another setup.
+pub(crate) struct Walked {
+    pub held: Held,
+    pub frame: Option<String>,
+    pub spanned: bool,
+    /// The setup whose stock the plain grid (or the body) was first
+    /// built from: the program's first setup, or the last setup that
+    /// took a new block (#320).
+    pub origin: Option<String>,
+    /// The gouges of blocks left behind for a new block (#320), folded.
+    pub left: Option<Deviation>,
+}
+
+/// The first setup's stock read as a body: its floor is the stock's
+/// bottom (the box and cylinder from their placement, a from-model
+/// stock from its mesh read from below). Upright cuts never move the
+/// floor, so it is read when the first carry needs it.
+pub(crate) fn first_body(world: &flecs_ecs::prelude::World, setup: Option<&str>, dex: Dexel) -> Result<Body, String> {
+    use crate::{model, stock::StockShape};
+    let name = crate::setup::stock_entity_name(world, setup);
+    let e = model::find_by_name(world, &name).ok_or_else(|| format!("no stock '{name}' to carry"))?;
+    let shape = model::stock_def_of(world, &e).ok_or("the stock entity lost its shape")?;
+    let loc = model::transform_of(world, &e).unwrap_or_default();
+    Ok(match shape {
+        StockShape::FromModel { .. } => Body::on_mesh(dex, &model::world_facets(world, &e).unwrap_or_default()),
+        _ => Body::on_floor(dex, loc.pos.z),
+    })
+}
+
+/// Walk the program through the stock, carrying or clipping at every
+/// setup change. `until`: stop on entering that setup (its first op not
+/// cut), returning the stock it starts from.
+pub(crate) fn walk(
+    world: &flecs_ecs::prelude::World,
+    planned: &[Planned],
+    until: Option<&str>,
+) -> Result<Walked, String> {
+    let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
+    // The block the program starts on is the FIRST setup's stock - the
+    // implicit-setup law makes that the legacy `Stock` entity exactly,
+    // so a single-setup document walks this identical to before.
+    let first = planned.first().and_then(|p| p.setup.as_deref());
+    let first_eff = crate::setup::effective(world, first);
+    let mut held = Held::Plain(stock_grid(world, first, min_r)?);
+    let mut frame = first_eff.clone();
+    let mut origin = first_eff;
+    let mut left: Option<Deviation> = None;
+    let mut spanned = false;
+    for p in planned {
+        let eff = crate::setup::effective(world, p.setup.as_deref());
+        if eff != frame {
+            spanned = true;
+            match entry(world, frame.as_deref(), eff.as_deref())? {
+                Entry::Clip => clip_to_setup_stock(held.dex_mut(), world, eff.as_deref(), min_r)?,
+                Entry::Carry(turn) => {
+                    let body = match held {
+                        Held::Plain(d) => first_body(world, origin.as_deref(), d)?,
+                        Held::Carried(b) => b,
+                    };
+                    held = Held::Carried(body.carry(&turn)?);
+                }
+                Entry::NewBlock => {
+                    let dev = judge(world, &held, frame.as_deref())?;
+                    if dev.gouge_cells > 0 {
+                        match left.as_mut() {
+                            Some(l) => fold_left(l, &dev),
+                            None => left = Some(dev),
+                        }
+                    }
+                    held = Held::Plain(stock_grid(world, eff.as_deref(), min_r)?);
+                    origin = eff.clone();
+                }
+            }
+            frame = eff;
+        }
+        if until.is_some() && frame.as_deref() == until {
+            return Ok(Walked { held, frame, spanned, origin, left });
+        }
+        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner }];
+        simulate(held.dex_mut(), &sim_ops).map_err(|e| e.to_string())?;
+    }
+    if let Some(u) = until {
+        return Err(format!("the program never enters setup '{u}'"));
+    }
+    Ok(Walked { held, frame, spanned, origin, left })
+}
+
+/// The verdict of the stock as held, against the parts in `frame`.
+pub(crate) fn judge(world: &flecs_ecs::prelude::World, held: &Held, frame: Option<&str>) -> Result<Deviation, String> {
+    let facets = crate::setup_align::parts_facets_in(world, frame);
+    match held {
+        Held::Plain(d) => crate::stock_sim::deviate(d, &facets, crate::stock_sim::DEV_TOL),
+        Held::Carried(b) => b.deviate(&facets, crate::stock_sim::DEV_TOL),
+    }
+    .map_err(|e| e.to_string())
+}
+
+/// The stock setup `setup` starts from when the program reaches it: the
+/// body the setups before it leave, in `setup`'s frame (#317; #320's
+/// incoming-stock display and #318's rest read it). The program's first
+/// setup starts from its own stock.
+///
+/// # Errors
+/// Every refusal of the program sim, and a setup the program never
+/// enters.
+pub fn incoming_body(world: &flecs_ecs::prelude::World, setup: &str) -> Result<Body, String> {
+    let planned = crate::stock_sim::plan_program(world)?;
+    crate::stock_sim::refuse_unjudged(&planned)?;
+    let w = walk(world, &planned, Some(setup))?;
+    match w.held {
+        Held::Carried(b) => Ok(b),
+        Held::Plain(d) => first_body(world, w.origin.as_deref(), d),
+    }
+}
+
+/// Fold a newly-entered setup's stock into the standing grid: inside
+/// the new block, no column may stand above that block's top; outside,
+/// what the previous setup left stands untouched - the conservative
+/// clip for two setups that hold the part alike, not the carry (#317). A setup with no stock entity yet clips
+/// nothing; a rotated or from-model stock refuses, per the same law.
+fn clip_to_setup_stock(
+    dex: &mut Dexel,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    tool_r: f64,
+) -> Result<(), String> {
+    use crate::model;
+    use crate::stock::StockShape;
+    let Some(entity) = crate::setup::stock_entity(world, setup) else {
+        return Ok(());
+    };
+    if matches!(model::stock_def_of(world, &entity), Some(StockShape::FromModel { .. })) {
+        return Err(
+            "the program sim cannot clip to a later setup's from-model stock - choose what the setup before it leaves behind as its stock so the machined stock is carried instead"
+                .into(),
+        );
+    }
+    let nd = stock_grid(world, setup, tool_r)?;
+    for iy in 0..dex.ny {
+        for ix in 0..dex.nx {
+            let q = dex.center(ix, iy);
+            let Some(k) = nd.col(q) else { continue };
+            let t = nd.top_at(k);
+            let i = ix + iy * dex.nx;
+            if t.is_finite() {
+                dex.lower(i, t);
+            }
+        }
+    }
+    Ok(())
+}
