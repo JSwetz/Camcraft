@@ -7,7 +7,7 @@
 
 use super::{arg_opt, arg_str, builtin_cps, inventory, only_keys, Env};
 
-use crate::commands::{GenerateOperation, History, ImportModel, UpdateModel};
+use crate::commands::{GenerateOperation, History, ImportModel, ImportTools, UpdateModel};
 use crate::model;
 use crate::operation::OpStatus;
 use crate::posting;
@@ -65,6 +65,40 @@ pub(crate) fn v_import(env: &mut Env, args: Vec<Value>) -> Result<Value, String>
         .and_then(|e| model::facets_of(&env.world, &e))
         .map_or(0, |a| a.len());
     Ok(json!({ "model": name, "facets": facets }))
+}
+
+/// `cam.exportTools(path)` - write the document's tools as a tool
+/// library file, the very text the Tool library page's Export writes
+/// (`tool_library::export_tool_library`, #300). A document with no
+/// tools refuses, and so does a path that cannot be written.
+pub(crate) fn v_export_tools(env: &mut Env, args: Vec<Value>) -> Result<Value, String> {
+    let path = PathBuf::from(arg_str(&args, 0, "a tool library path")?);
+    let text = crate::tool_library::export_tool_library(&env.world)?;
+    let count = model::named_entities(&env.world).iter().filter(|(_, e)| model::tool_of(&env.world, e).is_some()).count();
+    std::fs::write(&path, text).map_err(|e| format!("tool library not written to {}: {e}", path.display()))?;
+    Ok(json!({ "path": path.display().to_string(), "tools": count }))
+}
+
+/// `cam.importTools(path)` - read a tool library file into the
+/// document through `ImportTools`, the GUI's own command: the whole
+/// file is checked first (a malformed or insane file refuses by name),
+/// an identical tool is skipped, a clashing name arrives as "Name (2)",
+/// and the import is one undo step.
+pub(crate) fn v_import_tools(env: &mut Env, args: Vec<Value>) -> Result<Value, String> {
+    let path = PathBuf::from(arg_str(&args, 0, "a tool library path")?);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let library = crate::tool_library::parse_tool_library(&text)?;
+    let cmd = ImportTools::new(&env.world, library).map_err(|e| e.to_string())?;
+    let report = cmd.report().clone();
+    env.history.execute(&env.world, cmd);
+    let renamed: Vec<Value> = report.renamed.iter().map(|(from, to)| json!({ "from": from, "to": to })).collect();
+    Ok(json!({
+        "path": path.display().to_string(),
+        "added": report.added,
+        "renamed": renamed,
+        "skipped": report.skipped,
+        "summary": report.summary(),
+    }))
 }
 
 /// `cam.operations()` - the tree's own order, one row per operation.

@@ -16,6 +16,7 @@ use camcraft_app::operation::SrcRef;
 
 use crate::operations::quick_params;
 use crate::state::{CommandKind, State, UiTarget};
+use crate::viewport::ProjectionMode;
 
 /// The ribbon's machine modes (the ribbon law): the workspace kind,
 /// the Title-case caption it wears on the bar, and the built-in
@@ -309,6 +310,22 @@ pub(crate) fn orient_view(state: &mut State, d: [f64; 3]) {
 /// lands on, spelled as an orientation for the nav bar.
 pub(crate) fn view_iso(state: &mut State) {
     state.cam = state.cam.oriented(0.9, 0.5);
+}
+
+/// View: flip perspective and orthographic (parallel) projection
+/// (#434) - a direct field flip on the camera like every other view
+/// toggle (ephemeral, never a command, never saved); `target`, `dist`
+/// and orientation survive, and the ortho half-height equals what
+/// perspective sees at the target plane, so the framing never jumps.
+pub(crate) fn toggle_projection(state: &mut State) {
+    state.cam.projection = match state.cam.projection {
+        ProjectionMode::Perspective => ProjectionMode::Orthographic,
+        ProjectionMode::Orthographic => ProjectionMode::Perspective,
+    };
+    state.status = match state.cam.projection {
+        ProjectionMode::Perspective => "perspective projection".to_owned(),
+        ProjectionMode::Orthographic => "orthographic projection".to_owned(),
+    };
 }
 
 /// Point the context panes at `t`. Pure view state: the panes read it

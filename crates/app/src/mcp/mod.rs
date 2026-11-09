@@ -18,8 +18,10 @@
 mod area;
 mod edit;
 mod features;
+mod fixture_tools;
 mod job;
 mod pick;
+mod setup_tools;
 mod tools;
 
 use crate::script::Env;
