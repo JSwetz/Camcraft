@@ -11,13 +11,13 @@ use crate::script::{api, Env};
 
 use serde_json::{json, Map, Value};
 
-type Handler = fn(&mut Env, &Map<String, Value>) -> Result<Value, String>;
+pub(super) type Handler = fn(&mut Env, &Map<String, Value>) -> Result<Value, String>;
 
-struct Tool {
-    name: &'static str,
-    description: &'static str,
-    schema: fn() -> Value,
-    run: Handler,
+pub(super) struct Tool {
+    pub(super) name: &'static str,
+    pub(super) description: &'static str,
+    pub(super) schema: fn() -> Value,
+    pub(super) run: Handler,
 }
 
 const TOOLS: &[Tool] = &[
@@ -40,18 +40,22 @@ const TOOLS: &[Tool] = &[
     Tool { name: "post", description: "Post the program to an NC file through a post processor (a built-in name or a .cps path; default the document's own). Returns the written files, or refuses with the reasons.", schema: s_post, run: post },
 ];
 
+/// Every row: this table, then the setup furniture's (#181).
+fn all() -> impl Iterator<Item = &'static Tool> {
+    TOOLS.iter().chain(super::setup_tools::TOOLS).chain(super::fixture_tools::TOOLS)
+}
+
 /// The `tools/list` rows.
 pub(super) fn list() -> Vec<Value> {
-    TOOLS
-        .iter()
+    all()
         .map(|t| json!({ "name": t.name, "description": t.description, "inputSchema": (t.schema)() }))
         .collect()
 }
 
 /// Run one tool by name. An unknown name is a refusal like any other.
 pub(super) fn call(env: &mut Env, name: &str, args: &Value) -> Result<Value, String> {
-    let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
-        let names: Vec<&str> = TOOLS.iter().map(|t| t.name).collect();
+    let Some(tool) = all().find(|t| t.name == name) else {
+        let names: Vec<&str> = all().map(|t| t.name).collect();
         return Err(format!("unknown tool '{name}' - tools: {}", names.join(", ")));
     };
     let empty = Map::new();

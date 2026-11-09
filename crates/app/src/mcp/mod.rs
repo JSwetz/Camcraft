@@ -16,7 +16,9 @@
 //! reason - never a panic, never a silent success.
 
 mod edit;
+mod fixture_tools;
 mod job;
+mod setup_tools;
 mod tools;
 
 use crate::script::Env;
