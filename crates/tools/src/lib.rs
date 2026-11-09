@@ -13,4 +13,6 @@
 pub mod cutting;
 // #368: a modelled tool body as the stack laws read it.
 pub mod holder_profile;
+// #93: a drawn revolved (spun) profile for milling tools and holders.
+pub mod spun;
 pub mod tools;

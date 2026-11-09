@@ -44,6 +44,9 @@ mod setup_mount;
 #[path = "state_tool_body.rs"]
 mod tool_body_ui;
 pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
+#[path = "state_tool_profile.rs"]
+mod tool_profile_ui;
+pub use tool_profile_ui::{ToolColumn, ToolProfileUi, is_spun_kind, parametric_points};
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -189,6 +192,13 @@ pub enum CommandKind {
     SetToolBody {
         name: String,
         body: Option<BodyDraft>,
+    },
+    /// #93: set a milling tool's drawn spun holder (`Some` points) or
+    /// return it to its parametric cylinder (`None`) - the tool editor's
+    /// Apply profile, one `SetToolBody::spun`.
+    SetToolProfile {
+        name: String,
+        points: Option<Vec<camcraft_app::spun::SpunPoint>>,
     },
     /// The document's workpiece material (M13.2); `None` states none.
     SetWorkMaterial(Option<camcraft_app::tools::WorkMaterial>),
@@ -1295,6 +1305,9 @@ pub struct State {
     /// #371: the tool editor's body draft (imported mesh, placement,
     /// pick mode). Ephemeral like `tool_ui`; Apply body is the command.
     pub tool_body_ui: ToolBodyUi,
+    /// #93: the tool editor's spun-profile draft (Parametric/Custom, the
+    /// points). Ephemeral like `tool_body_ui`; Apply profile is the command.
+    pub tool_profile_ui: ToolProfileUi,
     /// The machine editor window (M3.3 stage C): `None` closed. An
     /// ephemeral draft like [`State::tool_editor`] - the numbers under
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
@@ -1512,6 +1525,7 @@ impl State {
             },
             tool_editor: None,
             tool_body_ui: ToolBodyUi::default(),
+            tool_profile_ui: ToolProfileUi::default(),
             machine_editor: None,
             theme_cache: theme_files::Cache::new(),
             // One walk per window, at construction: the switcher's file
@@ -2203,6 +2217,7 @@ impl State {
         self.tool_editor = None;
         self.tool_synced = (String::new(), self.doc_version);
         self.tool_body_ui = ToolBodyUi::default();
+        self.tool_profile_ui = ToolProfileUi::default();
     }
 
     pub(crate) fn copy_operation(&mut self, name: &str) {
@@ -2659,6 +2674,7 @@ impl State {
                 }
             }
             CommandKind::SetToolBody { name, body } => self.run_set_tool_body(&name, body),
+            CommandKind::SetToolProfile { name, points } => self.run_set_tool_profile(&name, points),
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {

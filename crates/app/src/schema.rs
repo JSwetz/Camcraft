@@ -131,6 +131,10 @@ pub struct ToolBody {
     /// The placed facets, tool frame.
     pub facets: std::sync::Arc<[Triangle]>,
     pub profile: camcraft_tools::holder_profile::HolderProfile,
+    /// The drawn outline when the body is a spun profile (#93): the
+    /// facets are its revolve and `profile` its exact bands. `None` for
+    /// an imported mesh.
+    pub spun: Option<camcraft_tools::spun::SpunProfile>,
 }
 
 /// One machine setup (M3.2 stage A): the named context that says WHICH

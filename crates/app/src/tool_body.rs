@@ -23,6 +23,7 @@ use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.
 use flecs_ecs::prelude::{Entity, World};
 
 use camcraft_tools::holder_profile::{HolderProfile, HolderStack, MAX_BODY_HEIGHT};
+use camcraft_tools::spun::SpunProfile;
 
 use crate::geometry::{Point3, Triangle};
 use crate::schema::ToolBody;
@@ -82,7 +83,27 @@ pub fn build(source: &str, axis: [f64; 3], offset: f64, placed: Vec<Triangle>) -
         .map(|t| [[t.a.x, t.a.y, t.a.z], [t.b.x, t.b.y, t.b.z], [t.c.x, t.c.y, t.c.z]])
         .collect();
     let profile = HolderProfile::envelope(&tris).map_err(|e| e.to_string())?;
-    Ok(ToolBody { source: source.to_owned(), axis, offset, facets: Arc::from(placed), profile })
+    Ok(ToolBody { source: source.to_owned(), axis, offset, facets: Arc::from(placed), profile, spun: None })
+}
+
+/// What a drawn (spun) holder body is called where a file name would be.
+pub const SPUN_SOURCE: &str = "drawn profile";
+
+/// A body drawn as a spun profile (#93), already in the tool frame: its
+/// facets the revolve of the conservative outline (for display and for
+/// any reader that only has facets), its envelope the profile's exact
+/// bands. The validation is the profile's own (`SpunProfile::new`).
+#[must_use]
+pub fn build_spun(spun: SpunProfile) -> ToolBody {
+    let facets = crate::tool_body_view::revolve(&spun.outline());
+    ToolBody {
+        source: SPUN_SOURCE.to_owned(),
+        axis: [0.0, 0.0, 1.0],
+        offset: 0.0,
+        facets: Arc::from(facets),
+        profile: spun.holder_profile(),
+        spun: Some(spun),
+    }
 }
 
 /// Can `tool` carry `body`? The insert kinds are lathe-held (their

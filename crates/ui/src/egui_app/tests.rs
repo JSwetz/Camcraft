@@ -87,6 +87,8 @@ mod one_wcs;
 mod setup_tree;
 // #371: the tool editor's Body section.
 mod tool_body;
+// #93: the tool editor's spun-profile (Profile) section.
+mod tool_profile;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
