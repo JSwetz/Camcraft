@@ -27,3 +27,17 @@ Requested by the contributor (2026-11-09): PathPilot Hub simulates both lathes, 
 - **Units:** inch, the machines' native units, like the Tormach mills.
 - **Post:** the default post is the registry's lathe default (`fanuc-lathe` today). It switches to the PathPilot lathe post when #612 lands. Until then the machines judge envelope, rpm and feed, but a posted program is Fanuc-dialect and won't run on PathPilot.
 - **Dropped:** the 15LX (a newer model with different specs). It can follow on request.
+
+## #619 - the 15LX Slant-PRO (stacked on #611)
+
+**Source:** UM10860 15LX operator manual, §3.1 Specifications (contributor-supplied).
+
+| | 15LX Slant-PRO |
+|---|---|
+| X / Z stroke | 10" / 14" |
+| Spindle | max 3500 rpm; **no minimum stated** (servo spindle), so none is stated in the file (unstated-limit law) |
+| Power | 6 hp continuous ≈ 4.5 kW (10 hp peak, not used: the machine check judges sustained power) |
+| Feed / rapid | 360 IPM (EtherCAT servos) |
+| Tools | 99: gang tooling is standard, and the 8-position turret is a kit (PN 54578). A turret shop can set 8. |
+
+**Why 3500 rpm here but 2500 on the 15L:** the 15LX manual states one maximum (3500) without a chuck-specific lower figure, while the 15L manual gives 2500 rpm for its 6" chuck explicitly.

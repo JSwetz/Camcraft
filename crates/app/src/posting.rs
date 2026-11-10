@@ -142,6 +142,8 @@ pub const MACHINES: &[(&str, &str)] = &[
     // #611: Tormach's lathes, from Tormach's public spec sheets.
     ("Tormach 8L", include_str!("../../../assets/machines/tormach-8l.mch")),
     ("Tormach 15L Slant-PRO", include_str!("../../../assets/machines/tormach-15l-slant-pro.mch")),
+    // #619: the 15LX (UM10860 §3.1).
+    ("Tormach 15LX Slant-PRO", include_str!("../../../assets/machines/tormach-15lx-slant-pro.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
