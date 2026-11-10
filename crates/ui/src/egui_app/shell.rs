@@ -175,7 +175,9 @@ impl Shell {
         // File work is the real thing: New/Model/Project/Save/Save As on the ribbon
         // queue the shared command kinds, rfd picks the path, State::run
         // does the work - the machinery was never egui's to rebuild.
-        let state = State::new();
+        let mut state = State::new();
+        // #662: the user's recent projects and models, read once.
+        state.load_recent();
         let dock_state = build_dock();
         Self {
             window: None,

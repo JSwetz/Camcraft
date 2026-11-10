@@ -101,6 +101,7 @@ mod unsaved_prompt;
 mod panes;
 // #441: the ribbon's Theme door and its dropdown.
 mod theme_drop;
+mod recent_drop;
 // #343: the browser tree, split from panes (rows / pane / operation menu).
 mod browser_tree;
 // #155: Pause / Home entry rows and their menu.

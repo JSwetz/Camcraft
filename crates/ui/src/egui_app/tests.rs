@@ -101,6 +101,7 @@ mod tool_body;
 mod tool_profile;
 // #441: the Theme ribbon door; the Stock page shows stock only.
 mod theme_door;
+mod recent_door;
 // #509: the Fixtures page rows fit the pane.
 mod fixture_rows;
 
