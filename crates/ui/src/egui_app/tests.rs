@@ -94,6 +94,8 @@ mod structural;
 mod plane_face_pick;
 // #664: a left Setups page disarms its picks.
 mod setup_picks_disarm;
+// #555: real clicks pick the three points of the plane.
+mod points_vertex_pick;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
