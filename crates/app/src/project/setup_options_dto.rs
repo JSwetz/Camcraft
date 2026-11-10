@@ -22,6 +22,10 @@ pub struct SetupPostOptionsDto {
     /// so files written before it read the same.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_units: Option<String>,
+    /// #616's per-operation smoothing: absent is off, so files written
+    /// before it read the same.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smoothing: bool,
 }
 
 impl SetupPostOptionsDto {
@@ -39,6 +43,7 @@ impl SetupPostOptionsDto {
                 EndUnits::Inch => Some("inch".to_owned()),
                 EndUnits::Millimeters => Some("mm".to_owned()),
             },
+            smoothing: o.smoothing,
         }
     }
 
@@ -56,6 +61,6 @@ impl SetupPostOptionsDto {
             Some("mm") => EndUnits::Millimeters,
             Some(other) => return Err(format!("setup '{setup}' names an unknown end-of-program unit {other:?}")),
         };
-        Ok(PostOptions { threading, skip_stops: self.skip_stops, per_op: self.per_op_files, end_units })
+        Ok(PostOptions { threading, skip_stops: self.skip_stops, per_op: self.per_op_files, end_units, smoothing: self.smoothing })
     }
 }

@@ -8,6 +8,7 @@ pub use camcraft_cl::cl;
 pub mod cli;
 pub mod commands;
 pub mod cutting;
+pub mod smoothing;
 pub use camcraft_motion::drilling;
 pub mod fixture;
 // #339 slice 6: the user fixture library file.

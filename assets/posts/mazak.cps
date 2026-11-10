@@ -36,6 +36,9 @@ var afterAsk = "";         // the section's PARAM AfterOperation (#110), none wh
 var homedAt = -1;          // linesWritten() just after a trip home (#504): onClose skips its own home when nothing followed
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
+var smoothTol = 0;          // #616: the section's PARAM Smoothing, mm (0: none asked)
+var smoothMode = "";        // #616: "finish" or "rough"
+var smoothActive = false;   // #616: this section wrote its smoothing words
 var compG = "";            // G41/G42/G40 pending for the next straight block (#39)
 var compD = "";            // the D word riding the engage block ("" when the tool call selects it)
 var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
@@ -262,6 +265,8 @@ function compRefuse(what) {
 }
 
 function onParameter(name, value) {
+  if (name === "Smoothing") { smoothTol = Number(value) || 0; return; }
+  if (name === "SmoothingMode") { smoothMode = String(value || ""); return; }
   commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
@@ -289,6 +294,21 @@ function onToolChange(number, name) {
 // The preamble closes over everything a raw motion line needs to be a
 // legal program. Spindle logic is an M-word of its own here: MOTON
 // carries the speed on the same block, MOTOFF ends the section.
+// #616: per-operation smoothing. No Mazak smoothing form is stated from
+// its public documentation yet, so the ask is named once and nothing is
+// written - never a guessed word.
+var smoothNamed = false;
+function smoothOn() {
+  if (!(smoothTol > 0) || smoothNamed) return;
+  note("SMOOTHING NOT WRITTEN - NO MAZAK FORM STATED");
+  smoothNamed = true;
+}
+function smoothOff() {
+  smoothActive = false;
+  smoothTol = 0;
+  smoothMode = "";
+}
+
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
@@ -307,6 +327,7 @@ function startPreamble() {
   }
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
+  smoothOn();
 }
 
 // The op's after-action (#110), written once its spindle has stopped:
@@ -333,6 +354,7 @@ function endPreamble() {
   if (!sectionOpen) return;
   restorePlane();            // M11.2 A: the plane never leaks past its section
   sectionOpen = false;
+  smoothOff();
   if (inCycle) block(["G80"]);
   inCycle = false;
   if (compOn || compG) {
