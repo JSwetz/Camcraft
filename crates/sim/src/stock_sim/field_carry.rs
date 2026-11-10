@@ -24,16 +24,39 @@ use crate::geometry::Point3;
 pub struct CarriedField {
     pub field: SdfField,
     pub turn: LatticeTurn,
-    /// The later setup's block `[lo, hi]` in the NEW frame: the carried
-    /// solid is intersected with it - `max(d_body, d_block)`, the
-    /// field's form of the column body's `lower` clip. `None`: unclipped.
-    pub clip: Option<(Point3, Point3)>,
+    /// The later setup's block in the NEW frame: the carried solid is
+    /// intersected with it - `max(d_body, d_block)`, the field's form of
+    /// the column body's `lower` clip. `None`: unclipped.
+    pub clip: Option<Clip>,
+}
+
+/// A clip region: a block, or nothing at all once two clips miss each
+/// other (review of #651: an empty intersection stays empty through every
+/// later turn - it is never re-sorted back into a box).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Clip {
+    Block(Point3, Point3),
+    Empty,
+}
+
+/// Why a clip block was refused at `clipped`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipRefusal {
+    /// A corner coordinate is NaN or infinite.
+    NonFinite,
+    /// `lo` exceeds `hi` on some axis.
+    Inverted,
 }
 
 /// The exact signed distance to the box `[lo, hi]`: negative inside.
 #[must_use]
 pub fn box_signed(lo: Point3, hi: Point3, p: Point3) -> f64 {
     let (l, h, q) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z], [p.x, p.y, p.z]);
+    // `f64::max` drops a NaN; a NaN point must stay NaN (review of #651),
+    // never read as "inside".
+    if q.iter().chain(&l).chain(&h).any(|v| v.is_nan()) {
+        return f64::NAN;
+    }
     let mut out2 = 0.0f64;
     let mut inner = f64::NEG_INFINITY;
     for a in 0..3 {
@@ -54,17 +77,29 @@ impl CarriedField {
     }
 
     /// Clip to the next setup's block (new frame). A second clip
-    /// intersects with the first's block, never widens it.
-    #[must_use]
-    pub fn clipped(mut self, lo: Point3, hi: Point3) -> CarriedField {
+    /// intersects with the first's block, never widens it; two blocks
+    /// that miss each other leave `Clip::Empty`. A non-finite or inverted
+    /// block is refused by name.
+    pub fn clipped(mut self, lo: Point3, hi: Point3) -> Result<CarriedField, ClipRefusal> {
+        let c = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z];
+        if c.iter().any(|v| !v.is_finite()) {
+            return Err(ClipRefusal::NonFinite);
+        }
+        if lo.x > hi.x || lo.y > hi.y || lo.z > hi.z {
+            return Err(ClipRefusal::Inverted);
+        }
         self.clip = Some(match self.clip {
-            None => (lo, hi),
-            Some((a, b)) => (
-                Point3::new(a.x.max(lo.x), a.y.max(lo.y), a.z.max(lo.z)),
-                Point3::new(b.x.min(hi.x), b.y.min(hi.y), b.z.min(hi.z)),
-            ),
+            None => Clip::Block(lo, hi),
+            Some(Clip::Empty) => Clip::Empty,
+            Some(Clip::Block(a, b)) => {
+                let (l, h) = (
+                    Point3::new(a.x.max(lo.x), a.y.max(lo.y), a.z.max(lo.z)),
+                    Point3::new(b.x.min(hi.x), b.y.min(hi.y), b.z.min(hi.z)),
+                );
+                if l.x > h.x || l.y > h.y || l.z > h.z { Clip::Empty } else { Clip::Block(l, h) }
+            }
         });
-        self
+        Ok(self)
     }
 
     /// Carry again: the turns compose (`next` after this one).
@@ -72,9 +107,17 @@ impl CarriedField {
     pub fn then(self, next: LatticeTurn) -> CarriedField {
         // A clip stated in the old frame is the block it was; carrying the
         // body again carries the clip through the same turn.
-        let clip = self.clip.map(|(lo, hi)| {
-            let (a, b) = (next.apply(lo), next.apply(hi));
-            (Point3::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z)), Point3::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z)))
+        // Only a non-empty block has corners to re-sort; `Empty` stays
+        // empty.
+        let clip = self.clip.map(|c| match c {
+            Clip::Empty => Clip::Empty,
+            Clip::Block(lo, hi) => {
+                let (a, b) = (next.apply(lo), next.apply(hi));
+                Clip::Block(
+                    Point3::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z)),
+                    Point3::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z)),
+                )
+            }
         });
         CarriedField { field: self.field, turn: self.turn.then(next), clip }
     }
@@ -84,10 +127,13 @@ impl CarriedField {
     #[must_use]
     pub fn distance(&self, p: Point3) -> f64 {
         let d = self.field.distance(self.turn.unapply(p));
-        match self.clip {
-            Some((lo, hi)) => d.max(box_signed(lo, hi, p)),
-            None => d,
-        }
+        let b = match self.clip {
+            None => return d,
+            Some(Clip::Empty) => f64::INFINITY,
+            Some(Clip::Block(lo, hi)) => box_signed(lo, hi, p),
+        };
+        // NaN in either term stays NaN (`f64::max` would drop it).
+        if d.is_nan() || b.is_nan() { f64::NAN } else { d.max(b) }
     }
 
     /// The uncut stock's signed distance (the mesh term) in the new frame.
@@ -96,10 +142,17 @@ impl CarriedField {
         self.field.mesh_distance(self.turn.unapply(p))
     }
 
-    /// Membership in the new frame: inside the carried solid AND inside
-    /// the clip block when one is set.
+    /// Membership in the new frame by the UNCUT shell's parity, AND
+    /// inside the clip block when one is set. Inside a cut this disagrees
+    /// with `distance` (which includes the cuts): the carried verdict
+    /// (#637 step D) reads `distance`, never this.
     #[must_use]
     pub fn inside(&self, p: Point3) -> bool {
-        self.field.inside(self.turn.unapply(p)) && self.clip.is_none_or(|(lo, hi)| box_signed(lo, hi, p) < 0.0)
+        let in_clip = match self.clip {
+            None => true,
+            Some(Clip::Empty) => false,
+            Some(Clip::Block(lo, hi)) => box_signed(lo, hi, p) < 0.0,
+        };
+        in_clip && self.field.inside(self.turn.unapply(p))
     }
 }
