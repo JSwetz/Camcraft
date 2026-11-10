@@ -6,11 +6,11 @@ use super::*;
 
 #[test]
 fn band_snaps_to_both_coverage_centers() {
-    assert_eq!(band(0.0, 20.0, 5.0, 5.0), vec![5.0, 10.0, 15.0]);
-    assert_eq!(band(0.0, 20.0, 5.0, 12.0), vec![5.0, 15.0]);
-    assert_eq!(band(0.0, 20.0, 5.0, 7.0), vec![5.0, 12.0, 15.0]);
+    assert_eq!(band(0.0, 20.0, 5.0, 5.0).ok(), Some(vec![5.0, 10.0, 15.0]));
+    assert_eq!(band(0.0, 20.0, 5.0, 12.0).ok(), Some(vec![5.0, 15.0]));
+    assert_eq!(band(0.0, 20.0, 5.0, 7.0).ok(), Some(vec![5.0, 12.0, 15.0]));
     // Thinner than one tool: the single center row, still covering.
-    assert_eq!(band(0.0, 6.0, 5.0, 3.0), vec![3.0]);
+    assert_eq!(band(0.0, 6.0, 5.0, 3.0).ok(), Some(vec![3.0]));
 }
 
 fn ring(n: usize) -> Ring {

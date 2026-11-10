@@ -80,7 +80,7 @@ pub use contour::{contour, contour_on_bodies, contour_on_part, ContourParams, Le
 pub use contour_chain::contour_along_chain;
 pub use contour_link::DEFAULT_LEVEL_RAMP_ANGLE;
 pub use crate::links::{Link, Links};
-pub use face::{face, face_led, face_over, FaceParams, GenError};
+pub use face::{face, face_led, face_over, FaceParams, GenError, MAX_PASSES};
 pub use face_holes::FaceHoles;
 pub use face_entry::{air_lead, AIR_MARGIN};
 pub use fillet::{fillet_corners, Legal};

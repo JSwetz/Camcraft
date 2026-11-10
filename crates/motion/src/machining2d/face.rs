@@ -150,10 +150,10 @@ pub fn face_over(
         None => return Err(GenError::Empty("empty footprint".into())),
     };
     let r = p.tool_diameter * 0.5;
-    let ys = band(lo.y, hi.y, r, p.stepover);
+    let ys = band(lo.y, hi.y, r, p.stepover)?;
     let (x_in, x_out) = (lo.x - r, hi.x + r);
     let zs = match (p.top_z, p.stepdown) {
-        (Some(t), Some(s)) => cut_levels(t, p.cut_z, s),
+        (Some(t), Some(s)) => cut_levels(t, p.cut_z, s)?,
         _ => vec![p.cut_z],
     };
 
@@ -286,12 +286,13 @@ fn link(b: &mut PathBuilder, to: Point3, p: &FaceParams) {
 /// coverage center (a stride that would overshoot is replaced by that
 /// snap; a band thinner than one tool diameter gets the single center
 /// row). Never empty, never unsorted.
-pub(super) fn band(a: f64, b: f64, r: f64, step: f64) -> Vec<f64> {
+pub(super) fn band(a: f64, b: f64, r: f64, step: f64) -> Result<Vec<f64>, GenError> {
     let (first, last) = (a + r, b - r);
     let span = last - first;
     if span <= 0.0 {
-        return vec![(a + b) * 0.5];
+        return Ok(vec![(a + b) * 0.5]);
     }
+    pass_budget("stepover", span, step)?;
     let tol = span * 1e-9;
     let mut ys = vec![first];
     let mut y = first;
@@ -302,5 +303,26 @@ pub(super) fn band(a: f64, b: f64, r: f64, step: f64) -> Vec<f64> {
     if last - *ys.last().unwrap_or(&first) > tol {
         ys.push(last);
     }
-    ys
+    Ok(ys)
+}
+
+/// Most passes (rows or levels) one stepping ladder may lay (#691). A
+/// step so small it would need more is refused by name before a single
+/// entry is allocated: a 1e-9 mm stepover once asked for ~10^10 rows and
+/// aborted the process on the failed allocation.
+pub const MAX_PASSES: f64 = 100_000.0;
+
+/// Refuses a `step` that would ladder `span` in more than [`MAX_PASSES`]
+/// passes, or that cannot advance the coordinate at all (not finite, not
+/// positive, or below the span's float resolution, where `y + step == y`
+/// and the ladder would never end).
+pub(super) fn pass_budget(what: &str, span: f64, step: f64) -> Result<(), GenError> {
+    let n = span / step;
+    let stalls = span + step == span;
+    if !(step.is_finite() && step > 0.0) || !n.is_finite() || n > MAX_PASSES || stalls {
+        return Err(GenError::Invalid(format!(
+            "{what} {step} mm over {span:.3} mm needs more than {MAX_PASSES} passes - raise the {what}"
+        )));
+    }
+    Ok(())
 }
