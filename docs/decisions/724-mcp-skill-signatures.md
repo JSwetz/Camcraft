@@ -24,8 +24,9 @@
 - **Also:** the "Known Remaining Gaps" list is brought current. Pocket
   recognition (#35), in-plane part axes (#557) and the live GUI session
   (#183, #567) have shipped. `MoveModel` and `RepairModel` are open PRs
-  (#719, #721). Face-to-plane and three-point alignment (#330, #555)
-  shipped in the GUI only.
+  (#719, #721). Three-point alignment (#555, `lay_part_on_points`) and the
+  fixture locate (#561, `locate_part`) shipped while this PR was open;
+  face-to-plane alignment (#330) is GUI-only.
 - **Process:** the skill is a process file, so `.claude/PROCESS_VERSION`
   goes 4 -> 5. The merging session adds the #681 comment.
 - **Cost to change later:** small. If the skill's entries move to a

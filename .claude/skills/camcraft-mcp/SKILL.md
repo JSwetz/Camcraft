@@ -117,6 +117,8 @@ When issue #356 was originally filed, several core features were GUI-only. The f
 - **Tool library import/export (#355):** Shipped via `export_tool_library` and `import_tool_library`.
 - **Pocket and slot recognition (#35):** Shipped via `detect_pockets` (with `create`, it adds the Pocket or Slot that machines one).
 - **Part axes in the work plane (#557):** Shipped via `set_part_axes` (a straight edge or two points along +Y and/or +X).
+- **Three-point plane alignment (#555):** Shipped via `lay_part_on_points` (three vertex ids onto G17, G18 or G19).
+- **Locating the part in a fixture (#561):** Shipped via `locate_part` (one to three face or vertex mates between part and fixture).
 - **Live GUI session (#183, #567):** Shipped: start the app with `--mcp-port <n>` and connect with `camcraft-cli mcp --connect 127.0.0.1:<n>`; the agent's steps land on the open window's History.
 
 ---
@@ -127,8 +129,8 @@ The following capabilities exist in the GUI or app command layer but do not yet 
 
 1. **Part Model Translation / Rotation (`MoveModel`, #716):**
    - The GUI allows moving and turning imported models (`crates/app/src/commands/move_model.rs`). In MCP, models remain at their imported coordinates; orientation must be adjusted via `set_wcs`. A `move_model` tool is open as PR #719.
-2. **Face-to-Plane and Three-Point Alignment (`SetupAlign`, #330, #555):**
-   - Mating a picked face (or two edges) to a G17/G18/G19 plane, and aligning by three points, are on the GUI setup page. MCP has the in-plane half (`set_part_axes`); the rest still means computing the origin and quaternion for `set_wcs`.
+2. **Face-to-Plane Alignment (`SetupAlign`, #330):**
+   - Mating a picked face (or two edges) to a G17/G18/G19 plane is on the GUI setup page. MCP has the in-plane axes (`set_part_axes`) and the three-point lay (`lay_part_on_points`); laying a face down still means picking three of its vertices or computing the origin and quaternion for `set_wcs`.
 3. **Mesh Repair (`RepairModel`, #717):**
    - Welding vertices, dropping degenerate or duplicate triangles, and filling open boundary loops (`crates/app/src/commands/repair_model.rs`) are on the GUI's Model page. A `repair_model` tool is open as PR #721.
 4. **Document Units Lens (`SetUnits`):**
