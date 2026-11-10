@@ -177,7 +177,8 @@ merge ready").
 
 A PR that changes a process file (`AGENTS.md`, `.claude/agents/`,
 `.claude/skills/`, `xtask/`, `.cargo/config.toml`, `scripts/gate.ps1`,
-`scripts/gate.sh`) must increment
+`scripts/gate.sh`, `scripts/release.ps1`, `scripts/collect-decisions.ps1`,
+`scripts/collect-decisions.sh`) must increment
 the integer in `.claude/PROCESS_VERSION` (AGENTS.md "Process changes bump
 `PROCESS_VERSION`"). The reviewer checks this; a missing bump is a
 requested change (`needs-rework`). When such a PR merges, whoever merges

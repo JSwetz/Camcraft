@@ -1,9 +1,9 @@
 # CI: the batch gate tier, run BY HAND only (Actions tab -> CI -> Run
 # workflow). The repo has a 3000-minute monthly Actions budget (Windows bills
 # 2x, macOS 10x), so nothing runs on push or PR: gates run locally
-# (scripts/gate.ps1), and GitHub runs only the tag-driven release build.
-# The Windows job runs scripts/gate.ps1 -Tier batch - every debug suite
-# minus the script's SLOW_BINARIES (golden_cl and the regression suites
+# (cargo xtask gate), and GitHub runs only the tag-driven release build.
+# The Windows job runs cargo xtask gate batch - every debug suite
+# minus xtask's SLOW_BINARIES (golden_cl and the regression suites
 # included), the ui suites from crates/ui, clippy with warnings denied -
 # then the headless app run. The release tier (slow binaries and the
 # --ignored heavy lanes in release) is nightly.yml's.
@@ -30,8 +30,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Batch gate tier (debug suites minus slow, ui, clippy)
-        shell: pwsh
-        run: ./scripts/gate.ps1 -Tier batch
+        shell: bash
+        run: cargo xtask gate batch
       - name: Gate logs
         if: always()
         uses: actions/upload-artifact@v4
