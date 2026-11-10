@@ -21,11 +21,14 @@
 //!   cylinder re-fits to the turned block's bounds). A cylinder whose
 //!   axis would leave the vertical, or a following stock another setup
 //!   shares, is refused by name - never silently left behind.
-//! - **The pivot is the parts' centre.** The presets and the numeric
-//!   angles turn the parts about the centre of their bounds, so a flip
-//!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
+//! - **The presets pivot on the parts' centre.** A preset turns the
+//!   parts about the centre of their bounds, so a flip leaves them on the
+//!   same spot of the table. Typed angles ([`AlignPartToSetup::turn`],
+//!   #606) pivot on the setup's WCS origin by default - the part keeps
+//!   its relation to the origin - or on the centre, by choice. [`AlignPartToSetup::new`]
 //!   takes any rigid transform - the door the face pick (#330) uses,
-//!   through [`AlignPartToSetup::lay_on_plane`], and the in-plane axis
+//!   through [`AlignPartToSetup::lay_on_plane`], three points (#555),
+//!   through [`AlignPartToSetup::lay_on_points`], and the in-plane axis
 //!   picks (#557), through [`AlignPartToSetup::turn_in_plane`].
 //! - **Linked setups follow (#316).** Every setup placed relative to
 //!   this one (directly or through others, [`crate::setup_relative`])
@@ -41,6 +44,7 @@ use crate::geometry::{Point3, Triangle, transform_point};
 use crate::model;
 use crate::schema::{Location, SetupDef, StockDef};
 use crate::setup_align::{self, AlignPreset};
+use crate::setup_turn::TurnPivot;
 use crate::stock::{self, StockShape};
 
 use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.2.2)
@@ -178,6 +182,33 @@ impl AlignPartToSetup {
         Self::new(world, setup, Some(at))
     }
 
+    /// Would [`Self::lay_on_points`] be accepted? The same refusals, by
+    /// name, without building the command (the Setups page's Apply).
+    pub fn check_points(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        pl: crate::pick::PointsLay,
+    ) -> Result<(), CommandError> {
+        let at = crate::pick::lay_on_points(world, picks, pl).map_err(CommandError::Invalid)?;
+        change_of(world, setup, Some(at)).map(|_| ())
+    }
+
+    /// Lay the part on a G17 / G18 / G19 plane through three picked
+    /// points (#555), read by [`crate::pick::lay_on_points`] through the
+    /// face pick's own apply path; with `frame`, point 1 is the origin and
+    /// 1 -> 2 the plane's first axis (3-2-1). Refused by name before any
+    /// write.
+    pub fn lay_on_points(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        pl: crate::pick::PointsLay,
+    ) -> Result<Self, CommandError> {
+        let at = crate::pick::lay_on_points(world, picks, pl).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some(at))
+    }
+
     /// Would [`Self::turn_in_plane`] be accepted? The same refusals, by
     /// name, without building the command (the Setups page's Apply).
     pub fn check_turn(world: &World, setup: &str, axes: &crate::pick::InPlaneAxes) -> Result<(), CommandError> {
@@ -200,16 +231,20 @@ impl AlignPartToSetup {
     }
 
     /// Turn the parts about X, then Y, then Z (degrees) about the centre
-    /// of their bounds. All zero is "as modelled".
+    /// of their bounds (the presets' pivot). All zero is "as modelled".
     pub fn angles(world: &World, setup: &str, deg: [f64; 3]) -> Result<Self, CommandError> {
+        Self::turn(world, setup, deg, TurnPivot::PartCentre)
+    }
+
+    /// Turn the parts to X, then Y, then Z (degrees, from as modelled)
+    /// about `pivot` (#606): the WCS origin keeps the part's point on the
+    /// origin there; the part centre keeps the bounds centre put. All zero
+    /// is "as modelled".
+    pub fn turn(world: &World, setup: &str, deg: [f64; 3], pivot: TurnPivot) -> Result<Self, CommandError> {
         let rot = setup_align::rotation_from_angles(deg)
             .ok_or_else(|| CommandError::Invalid("the alignment angles must be finite numbers".into()))?;
-        if setup_align::is_identity_rot(rot) {
-            return Self::new(world, setup, None);
-        }
-        let c = setup_align::part_centre(world)
-            .ok_or_else(|| CommandError::Invalid("there is no part to align - import a model first".into()))?;
-        Self::new(world, setup, setup_align::about_centre(rot, c))
+        let at = crate::setup_turn::turned(world, setup, rot, pivot).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, at)
     }
 }
 
