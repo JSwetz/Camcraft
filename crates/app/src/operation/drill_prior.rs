@@ -66,7 +66,11 @@ impl PriorRead<'_> {
     /// material inside it.
     pub(super) fn surface(&self, q: Point2, r: f64) -> Option<f64> {
         let r = r + self.dex.cell.abs() * std::f64::consts::FRAC_1_SQRT_2;
-        if self.revolved { revolved_surface(self.dex, q, r) } else { crate::verify::prior_surface(self.dex, q, r) }
+        if self.revolved {
+            revolved_surface(self.dex, q, r)
+        } else {
+            crate::verify::prior_surface(&crate::stock_sim::Columns::of_grid(self.dex), q, r)
+        }
     }
 }
 
