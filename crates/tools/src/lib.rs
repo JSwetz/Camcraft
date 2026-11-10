@@ -11,4 +11,12 @@
 //! this crate only says what a tool record IS.
 
 pub mod cutting;
+// #368: a modelled tool body as the stack laws read it.
+pub mod holder_profile;
+// #93: a drawn revolved (spun) profile for milling tools and holders.
+pub mod spun;
+// #369: a lathe-held body as the revolved-stock law reads it.
+pub mod lathe_holder;
+// #396: the insert plate a lathe body's judge leaves out.
+pub mod lathe_insert_zone;
 pub mod tools;

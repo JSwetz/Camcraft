@@ -113,6 +113,8 @@ mod params;
 pub use params::*;
 mod entity;
 mod thread_dto;
+mod break_dto;
+pub use break_dto::EdgeBreakDto;
 pub use thread_dto::ThreadCycleDto;
 mod touch_dto;
 pub use touch_dto::ProbeTouchDto;
@@ -141,3 +143,9 @@ mod mount_dto;
 pub use mount_dto::{SetupMachineDto, SetupPostDto};
 // #316: setup links (v56), checked before any world write.
 mod setup_links;
+// #368: a tool's modelled body on file (v57).
+mod tool_body_wire;
+pub use tool_body_wire::ToolBodyDto;
+// #155: Pause / Home entries of the operation list.
+mod program_entry_dto;
+pub use program_entry_dto::ProgramEntryDto;

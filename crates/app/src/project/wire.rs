@@ -51,12 +51,16 @@ pub fn collect(world: &World) -> ProjectFile {
                 Some(EntityKind::Operation)
             } else if model::is_setup(world, &entity) {
                 Some(EntityKind::Setup)
+            } else if crate::program_entry::is_entry(world, &entity) {
+                Some(EntityKind::Entry)
             } else {
                 None
             };
             let stock = model::stock_def_of(world, &entity).map(|s| StockDto::from_shape(&s));
             let tool = model::tool_of(world, &entity).map(|t| ToolDto {
                 number: model::tool_number_of(world, &entity),
+                body: crate::tool_body::body_of(world, &entity)
+                    .map(|b| super::tool_body_wire::ToolBodyDto::from_body(&b)),
                 ..ToolDto::from_tool(&t)
             });
             // The setup payload only ever rides a setup row (the kind test
@@ -128,7 +132,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 Some(EntityKind::Wcs)
                 | Some(EntityKind::Tool)
                 | Some(EntityKind::Operation)
-                | Some(EntityKind::Setup) => None,
+                | Some(EntityKind::Setup)
+                | Some(EntityKind::Entry) => None,
                 Some(EntityKind::Stock)
                     if matches!(
                         stock,
@@ -153,6 +158,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 operation,
                 setup,
                 fixture,
+                entry: super::program_entry_dto::collect(world, &entity),
             }
         })
         .collect();
@@ -262,6 +268,8 @@ pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
 /// Each note is logged as well.
 pub fn open_noted(world: &World, text: &str) -> Result<Vec<String>, ProjectError> {
     let file: ProjectFile = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
+    // #321: the carried-body cache is freed with the document it served.
+    crate::rest::clear_carried_cache();
     let notes = check_and_apply(world, file)?;
     for n in &notes {
         tracing::warn!("project load note: {n}");

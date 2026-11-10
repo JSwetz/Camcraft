@@ -20,7 +20,7 @@ use camcraft_app::commands::{
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel,
     MoveFixture, MoveModel, PasteOperation, RegenerateAll, RenameOperation, ReorderOperation, RepairModel, SelectEntity, SetOperationGeometry,
     SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetToolNumber, SetUnits, SetWcsOrigin,
-    SetWorkMaterial, TagFixture, UntagFixture,
+    SetWorkMaterial, TagFixture, UntagFixture, ImportFixture,
     UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
@@ -37,8 +37,21 @@ use camcraft_app::{machine, model, posting, project, world::new_world};
 
 #[path = "state_per_op.rs"]
 mod per_op;
+#[path = "state_tool_library.rs"]
+mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_fixture.rs"]
+mod fixture_view;
+#[path = "state_program_entry.rs"]
+mod program_entry;
+pub use program_entry::EntryVerb;
+#[path = "state_tool_body.rs"]
+mod tool_body_ui;
+pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
+#[path = "state_tool_profile.rs"]
+mod tool_profile_ui;
+pub use tool_profile_ui::{ToolColumn, ToolProfileUi, is_spun_kind, parametric_points};
 use flecs_ecs::prelude::World;
 
 use crate::egui_app::{theme, theme_files};
@@ -179,6 +192,19 @@ pub enum CommandKind {
         number: Option<u32>,
     },
     DeleteTool(String),
+    /// #371: set (`Some`) or clear (`None`) a tool's modelled body - the
+    /// tool editor's Apply body / Clear body, one `SetToolBody`.
+    SetToolBody {
+        name: String,
+        body: Option<BodyDraft>,
+    },
+    /// #93: set a milling tool's drawn spun holder (`Some` points) or
+    /// return it to its parametric cylinder (`None`) - the tool editor's
+    /// Apply profile, one `SetToolBody::spun`.
+    SetToolProfile {
+        name: String,
+        points: Option<Vec<camcraft_app::spun::SpunPoint>>,
+    },
     /// The document's workpiece material (M13.2); `None` states none.
     SetWorkMaterial(Option<camcraft_app::tools::WorkMaterial>),
     /// The op page's "Apply suggestion" (M13.2): feed + spindle speed
@@ -219,6 +245,9 @@ pub enum CommandKind {
     /// The op menu's Suppress / Unsuppress row (#110): left out of the
     /// posted program, toolpath kept - one undo unit.
     SuppressOperation { name: String, suppressed: bool },
+    /// The operation list's Pause / Home entries (#155): add, change,
+    /// suppress - each one undo unit.
+    ProgramEntry(EntryVerb),
     /// The post page's "Skip pauses and homes" switch (#110).
     SetSkipStops(bool),
     /// The post page's Output choice (#111): `true` = one file per op.
@@ -1027,6 +1056,9 @@ pub struct PostView {
 pub enum Panel {
     Browser,
     Properties,
+    /// The Machines pane (#287): closed by default, opened from the View
+    /// door beside the properties pane.
+    Machines,
 }
 
 /// A dock-layout ask from the View door, applied by the shell on the
@@ -1048,6 +1080,7 @@ pub enum LayoutRequest {
 pub struct PanelsOpen {
     pub browser: bool,
     pub properties: bool,
+    pub machines: bool,
 }
 
 impl PanelsOpen {
@@ -1056,6 +1089,7 @@ impl PanelsOpen {
         match p {
             Panel::Browser => self.browser,
             Panel::Properties => self.properties,
+            Panel::Machines => self.machines,
         }
     }
 }
@@ -1072,6 +1106,16 @@ pub struct OperationClipboard {
 pub enum TreeMenuTarget {
     Operation(String),
     Operations,
+    /// #339 slice 4: a model row (Models section, or a setup's Fixtures
+    /// child) - "Use as fixture" / "Stop using as fixture". `row` is the
+    /// clicked row's index, so the menu anchors on the row clicked even
+    /// when the name stands in the tree twice.
+    Model { name: String, row: usize },
+    /// A setup's Fixtures node (`""` - the implicit setup): "Import
+    /// fixture…".
+    Fixtures(String),
+    /// A Pause / Home entry row (#155).
+    Entry(String),
 }
 
 pub struct State {
@@ -1147,6 +1191,11 @@ pub struct State {
     /// M1.7d G-code viewer: None after any document switch or refused
     /// post, `Some` while a posted program is being reviewed.
     pub post_view: Option<PostView>,
+    /// #265: the last post's refusal, `Some` from a refused post until
+    /// the user closes its window, a later post succeeds, or the
+    /// document is switched. The status line says it too, but the next
+    /// click or command writes over that line; this keeps the reason.
+    pub post_refusal: Option<crate::egui_app::post_refusal::PostRefusal>,
     /// #157: the Debug info window is open. View state - never a
     /// command, never saved.
     pub debug_info_open: bool,
@@ -1191,6 +1240,9 @@ pub struct State {
     /// The View door's open flag: the same dropdown law as
     /// `ribbon_mode_open` (one door open at a time, a frame fact).
     pub ribbon_view_open: bool,
+    /// The Theme door's open flag (#441): the same dropdown law as
+    /// `ribbon_view_open` - a frame fact, one door open at a time.
+    pub ribbon_theme_open: bool,
     /// The dock's closable panels as of this frame (see [`PanelsOpen`]).
     pub panels_open: PanelsOpen,
     /// The View door's pending dock ask (see [`LayoutRequest`]).
@@ -1244,6 +1296,11 @@ pub struct State {
     /// implicit first setup. Public so tests run the dialog hand-off
     /// without a modal file picker.
     pub import_as_fixture: Option<Option<String>>,
+    /// #339 slice 4: each fixture's mesh state, per document version
+    /// (view cache - never truth, never saved).
+    pub fixture_mesh_cache: camcraft_app::fixture_view::MeshStateCache,
+    /// The selected op's struck fixtures, per (version, op, path sig).
+    pub struck_cache: camcraft_app::fixture_view::StruckCache,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
     pub op_ui: OpUi,
     /// Viewport click routing: whole models vs feature faces vs edge
@@ -1284,11 +1341,21 @@ pub struct State {
     /// when the named tool vanishes (the ghost law, mirrored from
     /// [`State::pane_target`]).
     pub tool_editor: Option<String>,
+    /// #371: the tool editor's body draft (imported mesh, placement,
+    /// pick mode). Ephemeral like `tool_ui`; Apply body is the command.
+    pub tool_body_ui: ToolBodyUi,
+    /// #93: the tool editor's spun-profile draft (Parametric/Custom, the
+    /// points). Ephemeral like `tool_body_ui`; Apply profile is the command.
+    pub tool_profile_ui: ToolProfileUi,
     /// The machine editor window (M3.3 stage C): `None` closed. An
     /// ephemeral draft like [`State::tool_editor`] - the numbers under
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
     /// which is the command, which is the undo.
     pub machine_editor: Option<crate::egui_app::machine_editor::MachineEditor>,
+    /// The Machines pane's view state (#287): the cached catalogue and
+    /// the selected row. Ephemeral like the dock itself - browsing a
+    /// machine is not a command; assigning one will be.
+    pub machines_pane: crate::egui_app::machines_pane::MachinesPane,
     /// M6.1 C's resolution furniture (never a command, never saved -
     /// the camera's law): the parse cache for `File` themes, the
     /// discovered theme files behind the switcher's rows, and the last
@@ -1454,6 +1521,7 @@ impl State {
             display: DisplayMode::default(),
             sim: None,
             post_view: None,
+            post_refusal: None,
             program_sim: None,
             field_view: None,
             field_play: None,
@@ -1463,7 +1531,8 @@ impl State {
             ribbon_more: None,
             ribbon_mode_open: false,
             ribbon_view_open: false,
-            panels_open: PanelsOpen { browser: true, properties: true },
+            ribbon_theme_open: false,
+            panels_open: PanelsOpen { browser: true, properties: true, machines: false },
             layout_request: None,
             tree_menu: None,
             retype_confirm: None,
@@ -1489,6 +1558,8 @@ impl State {
             model_ui: ModelUi::default(),
             repair_ui: RepairUi::default(),
             import_as_fixture: None,
+            fixture_mesh_cache: Default::default(),
+            struck_cache: Default::default(),
             // The tool draft carries a plausible name from the first
             // frame: an empty Name field made Add look dead (refused
             // silently). The operation draft has no form to prefill
@@ -1501,7 +1572,10 @@ impl State {
                 ..ToolUi::default()
             },
             tool_editor: None,
+            tool_body_ui: ToolBodyUi::default(),
+            tool_profile_ui: ToolProfileUi::default(),
             machine_editor: None,
+            machines_pane: Default::default(),
             theme_cache: theme_files::Cache::new(),
             // One walk per window, at construction: the switcher's file
             // rows are furniture, not live filesystem polling (the
@@ -1809,60 +1883,13 @@ impl State {
             return;
         };
         let draft = name == self.op_ui.name;
-        let mut params = if draft {
-            self.op_ui.params.clone()
-        } else {
-            op.params.clone()
-        };
-        // The hole-list family (M2.4 C): the drill, the boring ride
-        // and the thread mill all store the same `holes` shape, so
-        // recognition fills whichever list the operation has. The
-        // radial half is the drill's alone - it is the only variant
-        // with a cross list to put them in, and a turned machine's
-        // radial holes on a plain mill's op stay the empty list.
-        let is_drill = matches!(params, OpParams::Drill { .. });
-        let holes: &mut Vec<_> = match &mut params {
-            OpParams::Drill { holes, .. }
-            | OpParams::Bore { holes, .. }
-            | OpParams::Thread { holes, .. } => holes,
-            _ => {
-                self.refuse(
-                    ErrorScope::Operation,
-                    format!("'{name}' is not a drilling operation"),
-                );
-                return;
-            }
-        };
-        // A document whose machine holds a turret gets the radial
-        // reading beside the mill's (M5.2 F2): the same mesh, its
-        // other half - walls whose axis runs AT the spindle. A plain
-        // mill asks nothing of the mesh's sides; its cross list stays
-        // the empty one it was (an op typed at a machine that cannot
-        // plunge it is the generator's refusal, not this click's).
-        let radial = if !is_drill || machine::kind_of(&self.world) == machine::Kind::Mill {
-            Ok(Vec::new())
-        } else {
-            operation::cross_holes_of(&self.world, op.setup.as_deref(), &op.src)
-        };
-        match (
-            operation::holes_of(&self.world, op.setup.as_deref(), &op.src),
-            radial,
-        ) {
-            (Err(err), _) | (_, Err(err)) => self.refuse(ErrorScope::Operation, err.to_string()),
-            (Ok(z), Ok(x)) if z.is_empty() && x.is_empty() => self.refuse(
-                ErrorScope::Operation,
-                if is_drill {
-                    "no drilled holes found in the source model - Z or radial".to_string()
-                } else {
-                    "no Z-axis holes found in the source model - this ride reads only those"
-                        .to_string()
-                },
-            ),
-            (Ok(z), Ok(x)) => {
-                *holes = z;
-                if let OpParams::Drill { cross, .. } = &mut params {
-                    *cross = x;
-                }
+        let current = if draft { &self.op_ui.params } else { &op.params };
+        // The rule (which list, the turret's radial half, the refusals)
+        // lives in the app, shared with the MCP `detect_holes` tool
+        // (#312), so a click and an agent store the same holes.
+        match operation::detect_holes(&self.world, name, current, op.setup.as_deref(), &op.src) {
+            Err(why) => self.refuse(ErrorScope::Operation, why),
+            Ok(params) => {
                 if draft {
                     self.op_ui.params = params.clone();
                 }
@@ -2191,6 +2218,8 @@ impl State {
     pub(crate) fn close_tool_editor_window(&mut self) {
         self.tool_editor = None;
         self.tool_synced = (String::new(), self.doc_version);
+        self.tool_body_ui = ToolBodyUi::default();
+        self.tool_profile_ui = ToolProfileUi::default();
     }
 
     pub(crate) fn copy_operation(&mut self, name: &str) {
@@ -2374,6 +2403,7 @@ impl State {
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
+                self.post_refusal = None;
                 self.program_sim = None;
                 self.field_view = None;
                 self.field_play = None;
@@ -2648,6 +2678,8 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Tool, format!("tool number not set: {err}")),
                 }
             }
+            CommandKind::SetToolBody { name, body } => self.run_set_tool_body(&name, body),
+            CommandKind::SetToolProfile { name, points } => self.run_set_tool_profile(&name, points),
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {
@@ -2776,6 +2808,7 @@ impl State {
                 }
             }
             CommandKind::SetPerOpOutput(per_op) => self.set_per_op_output(per_op),
+            CommandKind::ProgramEntry(verb) => self.program_entry_verb(verb),
             CommandKind::SetSkipStops(skip) => {
                 let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
                 match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
@@ -3270,7 +3303,10 @@ impl State {
             }
         }
         if !any {
-            self.cam = Camera::default();
+            self.cam = Camera {
+                projection: self.cam.projection,
+                ..Camera::default()
+            };
             self.status = String::from("nothing to frame");
             return;
         }
@@ -3281,7 +3317,10 @@ impl State {
             .fold(0.0f64, |acc, r| acc.max(*r))
             .max(f64::EPSILON)
             * 3.0f64.sqrt();
-        self.cam = Camera::frame(center, radius);
+        self.cam = Camera {
+            projection: self.cam.projection,
+            ..Camera::frame(center, radius)
+        };
     }
 
     fn import_path(&mut self, path: PathBuf) {
@@ -3348,6 +3387,27 @@ impl State {
                 // the name exists; the worker stayed world-blind on purpose.
                 // UpdateModel::new classifies further: setup furniture
                 // under this name is refused as Invalid, never overwritten.
+                // #339 slice 4: an import-as-fixture lands mesh and
+                // marker as ONE undo unit (`ImportFixture`) - one Ctrl+Z
+                // takes the whole import away.
+                if let Some(binding) = self.import_as_fixture.take() {
+                    match ImportFixture::new(&self.world, command, binding.as_deref()) {
+                        Ok(cmd) => {
+                            let verb = match cmd.update_summary() {
+                                Some(summary) => timed("updated", &format!(" ({summary})")),
+                                None => timed("imported", ""),
+                            };
+                            self.history.execute(&self.world, cmd);
+                            self.doc_version += 1;
+                            self.status = match &binding {
+                                Some(s) => format!("{verb}; marked as {s}'s fixture"),
+                                None => format!("{verb}; marked as a fixture"),
+                            };
+                        }
+                        Err(err) => self.refuse(ErrorScope::Setup, format!("fixture not imported: {err}")),
+                    }
+                    return;
+                }
                 if model::find_by_name(&self.world, &name).is_some() {
                     match UpdateModel::new(&self.world, &name, command.mesh) {
                         Ok(upd) => {
@@ -3364,29 +3424,12 @@ impl State {
                     self.doc_version += 1;
                     self.status = timed("imported", "");
                 }
-                // Stage B: an import-as-fixture tags whatever landed.
-                // Two undo units (the import, then the marker) is the
-                // honest shape - each is invertible on its own, and the
-                // worker never needed a world to begin with.
-                if let Some(binding) = self.import_as_fixture.take() {
-                    match TagFixture::new(&self.world, &name, binding.as_deref()) {
-                        Ok(tag) => {
-                            self.history.execute(&self.world, tag);
-                            self.doc_version += 1;
-                            let note = match &binding {
-                                Some(s) => format!("; marked as {s}'s fixture"),
-                                None => "; marked as a fixture".to_string(),
-                            };
-                            self.status.push_str(&note);
-                        }
-                        Err(err) => self.refuse(
-                            ErrorScope::Setup,
-                            format!("imported, but not marked as a fixture: {err}"),
-                        ),
-                    }
-                }
             }
-            Err(err) => self.status = format!("import refused: {err}"),
+            Err(err) => {
+                // A refused import-as-fixture must not tag the NEXT import.
+                self.import_as_fixture = None;
+                self.status = format!("import refused: {err}");
+            }
         }
     }
 
@@ -3607,6 +3650,7 @@ impl State {
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
+        self.post_refusal = None; // nor its refused post
         self.program_sim = None; // and neither is its stock verdict
         self.field_view = None; // nor its traced stock
         self.field_play = None; // nor its playback
@@ -3660,8 +3704,20 @@ impl State {
     /// refused post leaves both the document and any previous program on
     /// disk exactly as they were.
     fn post_program_path(&mut self, path: PathBuf) {
-        match posting::post_setup(&self.world, &path) {
-            Ok(posted) => {
+        // #388: setups on different machines or posts write one file each.
+        match posting::post_mounts(&self.world, &path) {
+            Ok(files) if files.len() > 1 => {
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
+                self.show_posted_mounts(files);
+            }
+            Ok(files) => {
+                let Some(first) = files.into_iter().next() else { return };
+                let (path, posted) = (first.path, first.posted);
+                // A program went out: an earlier refusal no longer
+                // describes the document's post (#265).
+                self.post_refusal = None;
                 self.status = format!(
                     "posted {} op(s), {} lines to {}",
                     posted.ops,
@@ -3689,8 +3745,18 @@ impl State {
                 });
             }
             // A refused post leaves any previous program (file and viewer)
-            // exactly as it was - the gate writes nothing on refusal.
-            Err(err) => self.status = format!("post refused: {err}"),
+            // exactly as it was - the gate writes nothing on refusal. The
+            // reason also goes to its own window (#265), because the
+            // status line is overwritten by the next click or command.
+            Err(err) => {
+                let reason = err.to_string();
+                self.status = format!("post refused: {reason}");
+                self.post_refusal = Some(crate::egui_app::post_refusal::PostRefusal {
+                    path,
+                    reason,
+                    doc_version: self.doc_version,
+                });
+            }
         }
     }
 
@@ -3839,13 +3905,16 @@ pub(crate) fn save_project_dialog(current: Option<&Path>) -> Option<PathBuf> {
     dialog.set_file_name(filename).save_file()
 }
 
-fn post_program_dialog() -> Option<PathBuf> {
+/// The Post dialog, opened where `crate::post_file::post_target` says
+/// (#258: the last post's folder and name, else the project's).
+fn post_program_dialog(target: &crate::post_file::PostTarget) -> Option<PathBuf> {
     // The extension law lives with the script (fanuc.cps's `extension`
     // is "nc"); the dialog just offers it.
-    rfd::FileDialog::new()
-        .add_filter("NC Program", &["nc"])
-        .set_file_name("program.nc")
-        .save_file()
+    let mut dialog = rfd::FileDialog::new().add_filter("NC Program", &["nc"]);
+    if let Some(dir) = &target.dir {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.set_file_name(&target.file_name).save_file()
 }
 
 fn save_stl_dialog() -> Option<PathBuf> {

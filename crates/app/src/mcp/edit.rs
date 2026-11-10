@@ -91,12 +91,41 @@ fn patched(base: &OpParams, patch: &Value) -> Result<OpParams, String> {
         return Err("the patched parameters could not be read back".into());
     };
     let back = back.get(&key).and_then(Value::as_object).cloned().unwrap_or_default();
-    for (k, v) in patch {
-        if !v.is_null() && !back.contains_key(k) {
-            return Err(format!("bad params patch: a {key} operation has no field \"{k}\" - see list_operation_types"));
-        }
+    if let Some(path) = lost(patch, &back, "") {
+        return Err(format!("bad params patch: unknown field {path} - a {key} operation has no field \"{path}\"; see list_operation_types"));
     }
     Ok(next)
+}
+
+/// The first key path of `patch` (dotted, e.g. `clearance_z.ofset`) the
+/// typed round-trip did not keep, at any depth. A null value is a
+/// removal (RFC 7386) and has nothing to keep; an object is checked key
+/// by key against what came back; any other value is a leaf that must
+/// simply be present.
+fn lost(patch: &Map<String, Value>, back: &Map<String, Value>, prefix: &str) -> Option<String> {
+    for (k, v) in patch {
+        if v.is_null() {
+            continue;
+        }
+        let path = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+        match (v, back.get(k)) {
+            (_, None) => return Some(path),
+            (Value::Object(p), Some(Value::Object(b))) => {
+                if let Some(deeper) = lost(p, b, &path) {
+                    return Some(deeper);
+                }
+            }
+            // An object patch whose field came back as a scalar or null
+            // lost every key it carried.
+            (Value::Object(p), Some(_)) => {
+                if let Some(first) = p.iter().find(|(_, x)| !x.is_null()).map(|(n, _)| n) {
+                    return Some(format!("{path}.{first}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn merge(target: &mut Value, patch: &Value) {
@@ -193,6 +222,25 @@ pub(super) fn edit_operation(env: &mut Env, a: &Map<String, Value>) -> Result<Va
     env.history.execute(&env.world, cmd);
     let params = model::operation_of(&env.world, &e).map(|o| project::params_to_json(&o.params));
     Ok(json!({ "operation": key, "status": "stale", "params": params }))
+}
+
+/// The app's Detect holes button over MCP (#312): the operation's
+/// source read for holes now (`operation::detect_holes`, the button's
+/// own rule) and stored as one undoable parameter edit. Answers with
+/// how many axial and radial holes went in.
+pub(super) fn detect_holes(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
+    let key = find_op(env, req_str(a, "name")?)?;
+    let e = model::find_by_name(&env.world, &key).ok_or_else(|| format!("no operation named '{key}'"))?;
+    let op = model::operation_of(&env.world, &e).ok_or_else(|| format!("'{key}' is not an operation"))?;
+    let next = operation::detect_holes(&env.world, &key, &op.params, op.setup.as_deref(), &op.src)?;
+    let (holes, radial) = match &next {
+        OpParams::Drill { holes, cross, .. } => (holes.len(), cross.len()),
+        OpParams::Bore { holes, .. } | OpParams::Thread { holes, .. } => (holes.len(), 0),
+        _ => (0, 0),
+    };
+    let cmd = EditOperationParams::new(&env.world, &key, next).map_err(cmd_err)?;
+    env.history.execute(&env.world, cmd);
+    Ok(json!({ "operation": key, "holes": holes, "radial_holes": radial, "status": "stale" }))
 }
 
 pub(super) fn delete_operation(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {

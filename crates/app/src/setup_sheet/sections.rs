@@ -218,7 +218,7 @@ fn fixture_lines(world: &World, setup: Option<&str>) -> Vec<String> {
             ))
         })
         .collect();
-    if let Some(t) = fixture::table_box(world) {
+    if let Some(t) = fixture::table_box(world, setup) {
         out.push(format!(
             "{}  top Z {}  span {} x {}  {}",
             fixture::MACHINE_TABLE,

@@ -378,11 +378,13 @@ fn the_posted_g31_z_is_the_tip_at_the_expected_contact() {
         let stream = cnc::serialize(&post::dump(t, &d));
         let out = engine::run(FANUC, &serde_json::Value::Null, &stream).expect("post");
         assert!(out.warnings.is_empty(), "{:?}", out.warnings);
-        let zs = out
-            .program
-            .lines()
-            .filter(|l| l.starts_with("G31 "))
-            .filter_map(|l| l.split_whitespace().find(|w| w.starts_with('Z')).map(str::to_string))
+        // The touches only: a protected positioning move (#174) is a G31
+        // too, told apart by its contact alarm on the next line.
+        let lines: Vec<&str> = out.program.lines().collect();
+        let zs = lines
+            .windows(2)
+            .filter(|w| w[0].starts_with("G31 ") && w[1].contains("NO CONTACT"))
+            .filter_map(|w| w[0].split_whitespace().find(|t| t.starts_with('Z')).map(str::to_string))
             .collect();
         (zs, out.program)
     };

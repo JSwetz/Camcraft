@@ -6,7 +6,8 @@
 //! back as an error line with a place in it.
 //!
 //! Gate map (M4.4): covers app::script, app::posting, app::project,
-//! app::commands, app::operation, app::tool_list, app::world.
+//! app::commands, app::operation, app::tool_list, app::tool_library,
+//! app::world.
 
 use flecs_ecs::prelude::World;
 
@@ -299,4 +300,28 @@ fn a_nonzero_exit_shape_survives_a_late_throw() {
     assert!(!out.ok);
     assert_eq!(out.logs, vec!["one".to_string()]);
     assert!(out.errors.iter().any(|e| e.starts_with("operations:")));
+}
+
+#[test]
+fn script_tool_library_verbs_roundtrip() {
+    // #355: the batch lane's exportTools / importTools are the MCP
+    // tools' verbs - one meaning per verb across both doors.
+    let world = fixture();
+    let camp = tmp("toollib", "camproj");
+    let lib = tmp("toollib", "camtools");
+    project::save(&world, &camp).expect("save fixture");
+    let out = script::run(&format!(
+        "cam.load({0}); var e = cam.exportTools({1}); var dup = null; \
+         try {{ cam.importTools({1}); }} catch (err) {{ dup = String(err.message); }} [e.tools, dup]",
+        json_str(&camp),
+        json_str(&lib)
+    ));
+    let _ = std::fs::remove_file(&camp);
+    assert_eq!(out.result[0], json!(1), "{:?}", out.errors);
+    assert!(out.result[1].as_str().is_some_and(|m| m.contains("nothing to import")), "{:?}", out.result);
+    // A fresh run imports it as one tool.
+    let out = script::run(&format!("cam.importTools({})", json_str(&lib)));
+    let _ = std::fs::remove_file(&lib);
+    assert!(out.ok, "{:?}", out.errors);
+    assert_eq!(out.result["added"], json!(["EM-0400-2FL"]));
 }

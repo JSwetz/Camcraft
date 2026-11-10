@@ -171,11 +171,12 @@ pub(super) fn list_tool_catalog(_env: &mut Env, _a: &Map<String, Value>) -> Resu
 
 /// One verifier warning as data. Exhaustive on purpose: a new warning
 /// kind fails to compile here until it says what it is called.
-fn finding(op: &str, w: &Warning) -> Value {
+pub(super) fn finding(op: &str, w: &Warning) -> Value {
     let (kind, at) = match w {
         Warning::Crossing { moves } => ("crossing", moves[0]),
         Warning::Gouge { at } => ("gouge", *at),
         Warning::ShankHit { at, .. } => ("shank_hit", *at),
+        Warning::HolderHit { at, .. } => ("holder_hit", *at),
         Warning::SweepHit { at, .. } => ("sweep_hit", *at),
         Warning::RapidInStock { at } => ("rapid_in_stock", *at),
         Warning::FixtureHit { at, .. } => ("fixture_hit", *at),

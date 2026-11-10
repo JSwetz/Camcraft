@@ -87,7 +87,7 @@ fn leaning_cut() -> Toolpath {
     let a = Point3::new(0.0, -12.0, 5.0);
     let b = Point3::new(0.0, -10.0, 5.0);
     let c = Point3::new(0.0, 10.0, 5.0);
-    Toolpath { moves: vec![feed(a, b, FROM), feed(b, c, TO)], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() }
+    Toolpath { moves: vec![feed(a, b, FROM), feed(b, c, TO)], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() }
 }
 
 fn hits(path: &Toolpath, facets: &[Triangle]) -> Vec<Warning> {
@@ -111,7 +111,7 @@ fn end_pose_alone_reads_the_same_cut_clean() {
     let b = Point3::new(0.0, -10.0, 5.0);
     let c = Point3::new(0.0, 10.0, 5.0);
     for pose in [TO, FROM] {
-        let lone = Toolpath { moves: vec![feed(b, c, pose)], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() };
+        let lone = Toolpath { moves: vec![feed(b, c, pose)], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
         assert_eq!(hits(&lone, &wall), Vec::new(), "constant pose {pose:?}");
     }
 }
@@ -139,6 +139,7 @@ fn constant_pose_moves_keep_their_verdict() {
         comps: Vec::new(),
         threads: Vec::new(),
         probes: Vec::new(),
+        breaks: Vec::new(),
     };
     assert_eq!(hits(&posed, &wall), vec![Warning::Gouge { at: 1 }]);
     // And the upright program beside the wall: clean, byte for byte.
@@ -185,7 +186,7 @@ fn contact_claimed_along_a_leaning_cut_is_judged_at_mid_travel() {
     lead.axis = Some(a0);
     let mut cut = Move::new(MoveKind::Feed, tip(-20.0, a0), tip(20.0, a1), Some(500.0));
     cut.axis = Some(a1);
-    let path = Toolpath { moves: vec![lead, cut], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() };
+    let path = Toolpath { moves: vec![lead, cut], cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
     let tol = 0.05;
     // The full top: contact everywhere, no verdict.
     let full = box_facets([-40.0, -40.0, 0.0], [40.0, 40.0, 10.0]);

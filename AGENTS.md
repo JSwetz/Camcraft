@@ -60,11 +60,22 @@ go to `CHANGELOG.md`.
   the same. The skill carries the `gh` mechanics (list limits, search
   syntax, heredoc bodies, closing keywords); this law stays the rule
   where the two differ.
-- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research"`
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked -label:in-review -label:needs-research -label:\"P?\""`
   (then drop any whose comments hold a live contributor claim - "A claim
   comment is a claim", below) and take the highest priority first: `P0` (wrong output, gouge, crash,
   data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
   polish), then the oldest. User-reported bugs outrank owed work.
+- **`P?` is paused, not prioritised** (user, 2026-11-09: "a P? label that
+  holds an issue paused until maintainer tells it to be changed"). An issue
+  labelled `P?` is held by the maintainer: Pick never takes it, no lane
+  slot works it, no agent claims, researches, files sub-issues for or
+  re-prioritises it, and the bug/enhancement lanes skip it the same way.
+  It carries `P?` *instead of* a `P0`/`P1`/`P2` label, never beside one -
+  an agent that finds both reports it rather than choosing. Only the
+  maintainer swaps `P?` for a real priority (or closes the issue); until
+  then agents may only read it, link it, and comment facts that belong on
+  it (e.g. a duplicate or a related fix), without changing its labels.
+  An agent filing a new issue never uses `P?` - it picks `P0`/`P1`/`P2`.
 - **Two lanes, two issues each** (user, 2026-11-07: "open up the issue
   limit to 2 bugs 2 enhancements.. as we are now just working on the latest
   issues and not the old ones"). At most four issues are worked at once: two
@@ -92,7 +103,29 @@ go to `CHANGELOG.md`.
   outside the working folder u started up in?"), and are removed once their
   PR is pushed. One issue, one branch; every commit for it lands there, never
   on `main`.
-- **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
+- **A fork syncs from upstream at each cut tag, not continuously** (user,
+  2026-11-09: "If we are on a forked repository (check for upstream), we
+  pull from upstream, with every detected cut tag ex. jump from 0.14 to
+  0.15, 0.15 to 0.16. The upstream pulls makes sure fork is working of the
+  latest stable main - and not the main that is in constant change.").
+  Before claiming work, check for an upstream: `git remote get-url
+  upstream` (a fork of NeoTech/Camcraft has one; the canonical repo does
+  not - there, "Start from the latest main" above applies unchanged). In a
+  fork:
+  - `git fetch upstream --tags` and find the newest cut tag,
+    `git tag -l 'v*.*.0' --sort=-v:refname | head -1`.
+  - If the fork's `main` does not contain it yet (`git merge-base
+    --is-ancestor <tag> main` fails), sync: `git switch main && git merge
+    --ff-only <tag>` (or `git merge <tag>` if the fork's main carries its own
+    commits), then `git push origin main`. Sync only to a cut tag, never to
+    `upstream/main`: tags are the tested, released state; upstream's main
+    moves several times an hour.
+  - Branch issue work from the fork's synced `main` as above. A PR into
+    upstream still targets upstream's `main`; if it conflicts there, merge
+    the conflicting upstream change into the branch (`git merge
+    upstream/main`) on that branch only, never into the fork's `main`, which
+    advances only at the next cut tag.
+  - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0"). Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
   (not main) and its PR says "stacked on #M". Before the parent merges (any
@@ -436,6 +469,20 @@ not ride the split away: `#[test]` count before and after must match, and
 the ignored set keeps its golden asserts. UI snapshot binaries resolve their
 goldens from `crates/ui` - run them with that CWD.
 
+**Pixel snapshots are release-lane** (#255). The UI's PNG goldens
+(`crates/ui/tests/snapshots/*.png`) are `#[ignore]`d out of quick and
+batch and run only in the release tier's ui snapshot lane (debug,
+`--ignored snapshot`, CWD `crates/ui`). A PR never changes a snapshot
+PNG - not to "refresh" a conflict, not to accept a new render - and a
+`UPDATE_SNAPSHOTS=1` refresh on merge is no longer a habit: the goldens
+are regenerated once at the minor/major cut, in one commit on the release
+branch, after a human look at the `.diff.png`. What a snapshot guards is
+asserted in the default suite by its structural twin
+(`crates/ui/src/egui_app/tests/structural.rs`): AccessKit labels, roles,
+enabled/disabled state and window presence, plus the painted strips' text
+and coarse placement - text-only, so it holds on every OS and merges like
+code. A UI change updates those assertions, not the PNGs.
+
 `VisualRunner` is auto-enabled: windows show, run fast, and stay open if closed
 early; hidden runs cap at 30s; auto-close after 10s when no test is pending; on
 crash or timeout, the window is left open.
@@ -605,7 +652,9 @@ PR*s made by owner should be reviewd and tagged"); a fix PR merges once
 that review is clean, a `feat` or breaking PR at the cut (step 1 above).
 **Review labels**, one colour per state: green `merge-ready` (clean review
 and mergeable), red `needs-rework` (blockers), orange `conflicts` (no
-longer merges with `main`). On red or orange the reviewer turns one of our
+longer merges with `main`), yellow `needs-maintainer` (no blockers, but
+read, not built: a new dependency or a `build.rs` / scripts / `.github`
+change waits for the owner's decision). On red or orange the reviewer turns one of our
 own PRs back into a draft; a fork PR is left as its contributor set it,
 and the review comment says what to fix.
 
