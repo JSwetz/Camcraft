@@ -958,7 +958,10 @@ fn seed_probe(c: &Carried) -> OpParams {
         target: [0.0, 0.0, 0.0],
         radius: 10.0,
         approach: 5.0,
-        overtravel: 5.0,
+        // #570: a search limit, not a destination - twice the 0.5 mm
+        // tolerance below, so a face inside tolerance always trips well
+        // before it, and a missing one alarms 1 mm past, not 5.
+        overtravel: crate::operation::probe_op::default_overtravel(0.5),
         backoff: 1.0,
         fast_feed: 300.0,
         slow_feed: 30.0,
