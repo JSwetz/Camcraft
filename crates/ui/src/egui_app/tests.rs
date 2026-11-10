@@ -98,6 +98,8 @@ mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
 mod mcp_live;
+// #389: per-setup post options and the tool-list export.
+mod setup_post_options;
 // #155: Pause / Home entries in the operation list.
 mod program_entry;
 // #371: the tool editor's Body section.

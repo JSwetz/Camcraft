@@ -41,6 +41,8 @@ mod per_op;
 mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_setup_post_options.rs"]
+mod setup_post_options;
 #[path = "state_fixture.rs"]
 mod fixture_view;
 #[path = "state_fixture_library.rs"]
@@ -161,6 +163,12 @@ pub enum CommandKind {
         own: bool,
     },
     SetupOwnPost {
+        setup: String,
+        own: bool,
+    },
+    /// #389: a setup takes its own post options (a copy of what it posts
+    /// with now) or follows the document's again (`SetSetupPostOptions`).
+    SetupOwnPostOptions {
         setup: String,
         own: bool,
     },
@@ -428,6 +436,11 @@ pub enum CommandKind {
     /// the save-dialog law; the path arm is what headless tests run.
     SetupSheetDialog,
     SetupSheetFile(PathBuf),
+    /// #389: one setup's tool list (`None` - the implicit setup) as CSV
+    /// or text, the sheet's law: a view, no history. Dialog arm and the
+    /// headless path arm.
+    ToolListExportDialog(Option<String>),
+    ToolListExportFile { setup: Option<String>, path: PathBuf },
     /// M7.2 D: what the program leaves, as binary STL - the traced
     /// stock's field iso-extracted. A view of the document like the
     /// sheet: no command, no history; dialog arm and headless path arm.
@@ -2606,6 +2619,7 @@ impl State {
             CommandKind::LoadBuiltinMachine(name) => self.mount_builtin(&name),
             CommandKind::SetupOwnMachine { setup, own } => self.own_machine(&setup, own),
             CommandKind::SetupOwnPost { setup, own } => self.own_post(&setup, own),
+            CommandKind::SetupOwnPostOptions { setup, own } => self.own_post_options(&setup, own),
             CommandKind::EditMachineDialog => {
                 let (path, m) = machine::of(&self.world);
                 match m {
@@ -2636,14 +2650,10 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
-            CommandKind::SetPostOptions(next) => match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
-                Ok(command) => {
-                    self.history.execute(&self.world, command);
-                    self.doc_version += 1;
-                    self.status = "post options set".into();
-                }
-                Err(err) => self.refuse(ErrorScope::Setup, format!("post options not set: {err}")),
-            },
+            // #389: routed to the active setup's own options when it has them.
+            CommandKind::SetPostOptions(next) => {
+                self.route_post_options(next, "post options set", "post options not set", ErrorScope::Setup);
+            }
             CommandKind::SelectTheme(next) => self.select_theme(next),
             CommandKind::SelectColorVision(next) => self.select_color_vision(next),
             CommandKind::SelectThemeDialog => {
@@ -2903,18 +2913,8 @@ impl State {
             CommandKind::ProgramEntry(verb) => self.program_entry_verb(verb),
             CommandKind::SetSkipStops(skip) => {
                 let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
-                match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = if skip {
-                            "post skips every pause and home".to_owned()
-                        } else {
-                            "post writes the operations' pauses and homes".to_owned()
-                        };
-                    }
-                    Err(err) => self.refuse(ErrorScope::Operation, format!("post options not changed: {err}")),
-                }
+                let done = if skip { "post skips every pause and home" } else { "post writes the operations' pauses and homes" };
+                self.route_post_options(next, done, "post options not changed", ErrorScope::Operation);
             }
             CommandKind::ChangeOperationKind { name, kind } => {
                 match ChangeOperationKind::new(&self.world, &name, kind) {
@@ -3351,6 +3351,8 @@ impl State {
                 }
             }
             CommandKind::SetupSheetFile(path) => self.setup_sheet_path(path),
+            CommandKind::ToolListExportDialog(setup) => self.tool_list_export_dialog(setup),
+            CommandKind::ToolListExportFile { setup, path } => self.tool_list_export_path(setup.as_deref(), &path),
             CommandKind::ExportStockDialog => {
                 if let Some(path) = save_stl_dialog() {
                     self.export_stock_path(path);

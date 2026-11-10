@@ -69,6 +69,7 @@ mod tool_profile_page;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).
 mod setup_pages;
+mod setup_post_page;
 // #509: one fixture's row on the Fixtures page, sized to the pane.
 mod fixture_rows;
 // #326: the Setups page's part-alignment control.

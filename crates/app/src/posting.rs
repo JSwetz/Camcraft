@@ -204,11 +204,12 @@ pub fn post_set(world: &World, next: &PostRef) {
     world.set(next.clone());
 }
 
-/// The document's post options (issue #34), from the `PostOptions`
-/// singleton; the default when none was ever set.
+/// The post options the program posts with (issue #34): the active
+/// setup's (#389 - its own, else the document's `PostOptions`
+/// singleton, [`crate::setup_post_options::document`]).
 #[must_use]
 pub fn post_options(world: &World) -> PostOptions {
-    world.try_get::<&PostOptions>(|p| *p).unwrap_or_default()
+    crate::setup_post_options::in_force(world)
 }
 
 /// Write the options singleton. For `SetPostOptions` and the project
@@ -579,6 +580,10 @@ pub fn verification_report(world: &World) -> GateReport {
     problems.extend(suppressed::suppressed_problems(world));
     // The rotated-offset clause (#315): the post carries translation only.
     problems.extend(wcs_rotation::rotated_wcs_problems(world));
+    // #389: the setups' post options must agree on what shapes the whole
+    // program (the Output and the thread output) - never posted half one
+    // way. Judged program-wide, ahead of #388's per-mount split.
+    problems.extend(crate::setup_post_options::program_problems(world));
     // The carried-stock clause (#319): a feed move into carried material
     // outside a setup's declared stock is engagement nothing verified.
     problems.extend(crate::operation::carried_problems(world));
@@ -726,9 +731,12 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
         return Err(msg);
     }
 
-    let skip_stops = post_options(world).skip_stops;
-    // #155: Pause / Home entries fold into the gap they stand in.
-    let afters = crate::program_entry::posted_afters(world, &ops, skip_stops)?;
+    // #155: Pause / Home entries fold into the gap they stand in; #389:
+    // "Skip pauses and homes" is read per op, from its own setup.
+    let afters = crate::program_entry::posted_afters(world, &ops, |e| {
+        model::operation_of(world, e)
+            .is_some_and(|op| crate::setup_post_options::of(world, op.setup.as_deref()).skip_stops)
+    })?;
     let mut streams = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
