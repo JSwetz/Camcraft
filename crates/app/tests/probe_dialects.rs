@@ -113,7 +113,10 @@ fn mazak_bore_centre_posts_g31_skips_with_goto_tests() {
     let n = 8 + guard_count(&stream);
     assert_eq!(prog.lines().filter(|l| l.starts_with("G31 ")).count(), n, "four touches (seek + measure) + guards");
     assert!(!prog.contains("THEN"), "the branch is IF..GOTO, not IF..THEN");
-    assert!(prog.contains("IF[ABS[#5061-43]GE0.001]GOTO9002\n#3000=2(PROBE NO CONTACT)\nN9002\n"), "{prog}");
+    // The label numbers count the guards ahead: #570's protected descent
+    // below the safe plane is one more (#695), so the first no-contact
+    // test's label is 9003.
+    assert!(prog.contains("IF[ABS[#5061-43]GE0.001]GOTO9003\n#3000=2(PROBE NO CONTACT)\nN9003\n"), "{prog}");
     assert!(prog.contains("G91 G01 X-1 Y0 Z0 F300"), "the back-off is incremental");
     assert!(prog.contains("G10 L2 P2 X[#5221+#190] Y[#5222+#191]"), "the result sets G55 from G54: {prog}");
     // Every GOTO label is unique, so no jump can land on another test's.
