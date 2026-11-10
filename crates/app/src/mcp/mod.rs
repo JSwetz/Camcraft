@@ -15,6 +15,7 @@
 //! and every failure is an MCP tool error (`isError: true`) naming the
 //! reason - never a panic, never a silent success.
 
+mod align_tools;
 mod area;
 mod bridge;
 mod edit;

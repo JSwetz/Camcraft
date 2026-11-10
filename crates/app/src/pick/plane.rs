@@ -1,43 +1,39 @@
-//! Lay the part on a G17 / G18 / G19 plane from picks (#330): one flat
-//! face, or two straight edges, turned so the face's outward normal (or
-//! the edges' plane normal) runs along the plane's axis - +Z for G17 (XY),
-//! +Y for G18 (ZX), +X for G19 (YZ), or the opposite way with `flip` - and
-//! the first edge along the plane's first axis (X for G17 / G18, Y for
-//! G19). The result is a setup's part alignment (#326): a rigid transform
-//! from the document frame into the setup frame, handed to
+//! Lay the part on a G17 / G18 / G19 plane from a pick (#330): one flat
+//! face, turned so its outward normal runs along the plane's axis - +Z
+//! for G17 (XY), +Y for G18 (ZX), +X for G19 (YZ), or the opposite way
+//! with `flip`. The result is a setup's part alignment (#326): a rigid
+//! transform from the document frame into the setup frame, handed to
 //! `AlignPartToSetup::new`. Pure: nothing here writes the world, and the
 //! work offset is never touched.
 //!
+//! #554: a face only. An edge cannot define a plane, so the #330
+//! two-edge mode is gone and an edge pick is refused by name; edges set
+//! an in-plane axis instead (#557, [`super::axis`]).
+//!
 //! Provenance: our own design over plain fixture practice (lay a datum
 //! face on the table); the shortest-arc quaternion between two unit
-//! vectors and the frame-to-frame rotation R = T * S^T are textbook
-//! rigid-body algebra (Shoemake, "Animating rotation with quaternion
+//! vectors is textbook rigid-body algebra (Shoemake, "Animating rotation with quaternion
 //! curves", SIGGRAPH 1985). No vendor material consulted.
 
 use flecs_ecs::prelude::World;
 
 use crate::cl::ArcPlane;
-use crate::geometry::feature::{self, FaceKind};
-use crate::geometry::{Point3, normalize_quat, quat_conjugate, quat_mul, quat_rotate_point, transform_point};
+use crate::geometry::feature::FaceKind;
+use crate::geometry::{Point3, normalize_quat, quat_rotate_point, transform_point};
 use crate::model;
 use crate::operation::{FeatureSel, GeoSel};
 use crate::schema::Location;
 use crate::setup_align;
 
-use super::align::{cross, dot, gone, norm, outward_normal, quat_from_axes, scale, straight_edge, sub};
+use super::align::{cross, dot, gone, norm, outward_normal, scale, sub};
 
-/// Two edges closer than this to parallel (degrees) span no plane worth
-/// trusting.
-const MIN_EDGE_ANGLE_DEG: f64 = 1.0;
-/// Two parallel edges this close (mm) lie on one line: coincident.
-const COINCIDENT_MM: f64 = 0.01;
 /// A face with less area than this (mm^2) is degenerate.
 const MIN_FACE_AREA_MM2: f64 = 1e-9;
 /// The turned normal must land on the target axis this closely (rad).
 const LAND_TOL_RAD: f64 = 1e-9;
 
 /// How to lay the part: the target plane, which way its normal faces, and
-/// whether the picked face (or the first edge) is set onto the plane's
+/// whether the picked face is set onto the plane's
 /// level (0 along the plane's axis) or the part keeps its place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlaneLay {
@@ -77,36 +73,22 @@ pub fn target_normal(lay: PlaneLay) -> [f64; 3] {
     n
 }
 
-/// What the picks fix: a source normal, an optional in-plane direction
-/// (the first edge), and the point that goes to the plane's level.
+/// What the pick fixes: a source normal and the point that goes to the
+/// plane's level.
 struct Datum {
     normal: [f64; 3],
-    along: Option<[f64; 3]>,
     anchor: [f64; 3],
-    /// For two edges: the face they both bound, whose outside they take.
-    face: Option<GeoSel>,
 }
 
 /// The part alignment (document frame -> setup frame) that lays the
-/// picked face or edges on `lay`'s plane, turned about the parts' bounds
+/// picked face on `lay`'s plane, turned about the parts' bounds
 /// centre like the Setups page presets. Every refusal names what to
 /// re-pick. The identity comes back as an identity `Location`; the
 /// command stores it as "as modelled".
 pub fn lay_on_plane(world: &World, picks: &[GeoSel], lay: PlaneLay) -> Result<Location, String> {
     let datum = datum_of(world, picks)?;
     let t3 = target_normal(lay);
-    let rot = match datum.along {
-        None => shortest_arc(datum.normal, t3, lay.plane),
-        Some(d1) => {
-            let (t1, _) = axes_of(lay.plane);
-            let t2 = cross(t3, t1);
-            let s2 = cross(datum.normal, d1);
-            let q_t = quat_from_axes(t1, t2, t3);
-            let q_s = quat_from_axes(d1, s2, datum.normal);
-            q_t.zip(q_s).and_then(|(t, s)| normalize_quat(quat_mul(t, quat_conjugate(s))))
-        }
-    }
-    .ok_or("the picks do not make a usable turn - re-pick them")?;
+    let rot = shortest_arc(datum.normal, t3, lay.plane).ok_or("the picks do not make a usable turn - re-pick them")?;
     // Prove the landing: a turn that misses the axis is refused, never
     // stored as a subtly tilted part.
     // The sine of the miss (the cross product), not a cosine: cos(1e-9)
@@ -134,35 +116,36 @@ pub fn lay_on_plane(world: &World, picks: &[GeoSel], lay: PlaneLay) -> Result<Lo
     Ok(Location { pos, rot })
 }
 
-/// Read the picks as a datum, in the DOCUMENT frame (the alignment is
+/// Read the pick as a datum, in the DOCUMENT frame (the alignment is
 /// absolute: picking the same face again in an aligned setup gives the
-/// same answer). Exactly one flat face, or exactly two straight edges.
+/// same answer). Exactly one flat face; an edge is refused by name (#554).
 fn datum_of(world: &World, picks: &[GeoSel]) -> Result<Datum, String> {
     let mut faces = Vec::new();
-    let mut edges = Vec::new();
     for g in picks {
         let e = model::find_by_name(world, &g.entity).ok_or_else(|| gone(g))?;
         if !setup_align::is_part(world, &e) {
-            return Err(format!("'{}' is not the part - pick a face or edge of the model", g.entity));
+            return Err(format!("'{}' is not the part - pick a face of the model", g.entity));
         }
         match g.feature {
             FeatureSel::Face(_) => faces.push(g),
-            FeatureSel::Chain(_) => edges.push(g),
+            FeatureSel::Chain(_) => {
+                return Err(format!(
+                    "{} of '{}' is an edge - an edge cannot set a plane; pick a flat face \
+                     (edges set an axis: Axes in the plane)",
+                    g.feature, g.entity
+                ));
+            }
             FeatureSel::Patch(_) => {
                 return Err(format!("{} of '{}' is curved - pick a flat face", g.feature, g.entity));
             }
             FeatureSel::Vertex(_) => {
-                return Err(format!(
-                    "{} of '{}' is a vertex - pick a flat face, or two straight edges",
-                    g.feature, g.entity
-                ));
+                return Err(format!("{} of '{}' is a vertex - pick a flat face", g.feature, g.entity));
             }
         }
     }
-    match (faces.as_slice(), edges.as_slice()) {
-        ([g], []) => face_datum(world, g),
-        ([], [a, b]) => edge_datum(world, a, b),
-        _ => Err("pick one flat face, or two straight edges".into()),
+    match faces.as_slice() {
+        [g] => face_datum(world, g),
+        _ => Err("pick one flat face".into()),
     }
 }
 
@@ -195,93 +178,7 @@ fn face_datum(world: &World, g: &GeoSel) -> Result<Datum, String> {
     }
     let local = Point3::new(sum[0] / area, sum[1] / area, sum[2] / area);
     let w = transform_point(local, loc.pos, loc.rot);
-    Ok(Datum { normal, along: None, anchor: [w.x, w.y, w.z], face: None })
-}
-
-fn edge_datum(world: &World, first: &GeoSel, second: &GeoSel) -> Result<Datum, String> {
-    let role = "to set the plane";
-    let (a1, b1) = straight_edge(world, first, model::transform_of, role)?;
-    let (a2, b2) = straight_edge(world, second, model::transform_of, role)?;
-    let d1 = unit(sub(b1, a1)).ok_or_else(|| gone(first))?;
-    let d2 = unit(sub(b2, a2)).ok_or_else(|| gone(second))?;
-    let c = cross(d1, d2);
-    let spread = norm(c);
-    if spread.is_nan() || spread < MIN_EDGE_ANGLE_DEG.to_radians().sin() {
-        // Parallel: on one line (coincident) or side by side.
-        let off = sub(a2, a1);
-        let gap = norm(sub(off, scale(d1, dot(off, d1))));
-        return Err(if gap <= COINCIDENT_MM {
-            "the two edges are coincident - pick two edges that meet at an angle".into()
-        } else {
-            "the two edges are parallel - pick two edges that meet at an angle".into()
-        });
-    }
-    let n = unit(c).ok_or("the two edges span no plane - re-pick them")?;
-    // The plane's outside is the outside of the one flat face both edges
-    // bound, read from that face's facet winding (#330 review). Two edges
-    // alone carry no side, and a part's centre does not tell it on a
-    // concave part, so nothing is guessed: no such face, no lay.
-    let face = shared_face(world, first, second)?;
-    let out = outward_normal(world, &face, model::transform_of)?.ok_or(NO_SHARED_FACE)?;
-    let s = dot(n, out);
-    if !(s.is_finite() && norm(cross(n, out)) <= IN_FACE_SIN) {
-        return Err(format!("the two edges do not lie in the plane of {} - pick the face instead", face.feature));
-    }
-    let n = if s < 0.0 { scale(n, -1.0) } else { n };
-    Ok(Datum { normal: n, along: Some(d1), anchor: a1, face: Some(face) })
-}
-
-/// Refusal for two edges with no single flat face between them.
-const NO_SHARED_FACE: &str = "the two edges do not bound one face, so their outside is not defined - pick the face instead";
-/// The edges' plane and their shared face's plane agree this closely
-/// (sine of the angle between the normals).
-const IN_FACE_SIN: f64 = 1e-6;
-
-/// The one flat face both picked edges bound (every feature edge of each
-/// picked run borders it), as a face pick. None, or more than one: refused.
-fn shared_face(world: &World, first: &GeoSel, second: &GeoSel) -> Result<GeoSel, String> {
-    if first.entity != second.entity {
-        return Err(NO_SHARED_FACE.into());
-    }
-    let e = model::find_by_name(world, &first.entity).ok_or_else(|| gone(first))?;
-    let features = model::features_of(world, &e).ok_or_else(|| gone(first))?;
-    let a = bounded_faces(&features, first)?;
-    let b = bounded_faces(&features, second)?;
-    let common: Vec<&feature::Face> = a
-        .iter()
-        .filter(|fi| b.contains(fi))
-        .filter_map(|&fi| features.faces.get(fi as usize))
-        .filter(|f| f.kind == FaceKind::Planar)
-        .collect();
-    match common.as_slice() {
-        [f] => Ok(GeoSel { entity: first.entity.clone(), feature: FeatureSel::Face(f.id) }),
-        _ => Err(NO_SHARED_FACE.into()),
-    }
-}
-
-/// The faces (indices) every feature edge of the picked run borders.
-fn bounded_faces(features: &feature::Features, g: &GeoSel) -> Result<Vec<u32>, String> {
-    let FeatureSel::Chain(cid) = g.feature else { return Err(gone(g)) };
-    let c = feature::resolve_chain(features, cid).ok_or_else(|| gone(g))?;
-    let mut common: Option<Vec<u32>> = None;
-    for &ei in &c.edges {
-        let te = features.edges.get(ei as usize).ok_or_else(|| gone(g))?;
-        let k = te.n_facets.min(3) as usize;
-        let mut here: Vec<u32> = te
-            .facets
-            .get(..k)
-            .unwrap_or(&[])
-            .iter()
-            .filter_map(|&t| features.facet_face.get(t as usize).copied())
-            .collect();
-        here.sort_unstable();
-        here.dedup();
-        common = Some(match common {
-            None => here,
-            Some(prev) => prev.into_iter().filter(|f| here.contains(f)).collect(),
-        });
-    }
-    Ok(common.unwrap_or_default())
+    Ok(Datum { normal, anchor: [w.x, w.y, w.z] })
 }
 
 /// Which way the picks' outside faces before Apply, in plain words, e.g.
@@ -290,10 +187,9 @@ fn bounded_faces(features: &feature::Features, g: &GeoSel) -> Result<Vec<u32>, S
 pub fn plane_side(world: &World, picks: &[GeoSel]) -> Result<String, String> {
     let d = datum_of(world, picks)?;
     let dir = axis_words(d.normal);
-    Ok(match (&d.face, picks.first()) {
-        (Some(f), _) => format!("outside: {dir}, the outside of {} that both edges bound", f.feature),
-        (None, Some(g)) => format!("outside: {dir} of {} (away from the material)", g.feature),
-        (None, None) => format!("outside: {dir}"),
+    Ok(match picks.first() {
+        Some(g) => format!("outside: {dir} of {} (away from the material)", g.feature),
+        None => format!("outside: {dir}"),
     })
 }
 

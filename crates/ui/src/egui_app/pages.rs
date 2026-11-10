@@ -106,6 +106,7 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     // Only an open Boundary group draws its viewport marks (M11.5 UX):
     // any other page this frame hides them and stops the collecting.
     state.boundary_view.shown = false;
+    state.axis_rows_shown = false; // #557: re-earned by the axes rows
     if !matches!(t, UiTarget::Operation(_)) {
         state.boundary_pick = None;
     }
@@ -755,6 +756,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             ui.label(line);
             super::setup_align_pick::picker(ui, state, name);
             super::setup_plane_pick::row(ui, state, name);
+            super::setup_axis_pick::rows(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
     }

@@ -158,6 +158,17 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity: hit.entity, feature: sel };
+    if crate::axis_pick::collecting(state) {
+        crate::axis_pick::take(state, pick); // #557: a point of an axis
+        return;
+    }
+    if state.plane_pick.is_some() {
+        crate::plane_pick::take(state, pick); // #554: a point sets no plane, refused by name
+        return;
+    }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
+    }
     if state.boundary_pick.is_some() {
         // A point bounds nothing: refused by name, never drafted.
         state.status = format!("{} of '{}' is a point - a boundary takes faces or edges", pick.feature, pick.entity);
