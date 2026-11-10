@@ -124,18 +124,31 @@ pub fn disarm(state: &mut State) {
 
 /// Disarm every Setups page pick whose rows were not drawn this frame
 /// (#664): a page change, an operation opened, the section closed - an
-/// armed axis or plane pick must not feed a hidden draft. Called once a
-/// frame after the properties pane; the picks themselves stay, so the
-/// page re-opens disarmed with them shown. Ephemeral view state, no
+/// armed axis or plane pick must not feed a hidden draft. The shell
+/// calls it once a frame after the dock, whatever the dock shows (#667),
+/// and it consumes the frame's row marks; the picks themselves stay, so
+/// the page re-opens disarmed with them shown. Ephemeral view state, no
 /// command.
 pub fn disarm_hidden(state: &mut State) {
     let shown = std::mem::take(&mut state.setup_pick_rows);
+    // #557's stray-click hint holds while the rows are on screen; the
+    // plane row and the axes rows draw together, so either mark counts.
+    state.axis_rows_shown = !shown.is_empty();
     if let Some(d) = state.axis_pick.as_mut().filter(|d| !shown.contains(&d.setup)) {
         d.picking = None;
     }
     if state.plane_pick.as_ref().is_some_and(|d| !shown.contains(&d.setup)) {
         crate::plane_pick::pause(state);
     }
+}
+
+/// Disarm every Setups page pick at once (#667): the shell calls it
+/// before the dock draws when the properties pane is closed or hidden
+/// behind another tab, so no viewport click that frame - the viewport
+/// draws inside the dock - can feed a draft whose rows are off screen.
+pub fn disarm_all(state: &mut State) {
+    state.setup_pick_rows.clear();
+    disarm_hidden(state);
 }
 
 /// Is a Setups page row collecting axis picks?

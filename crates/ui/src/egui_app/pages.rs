@@ -101,14 +101,9 @@ const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 /// like operations.rs's contents() dispatcher. The operation page owns
 /// its scroll (its action bar stays fixed under it); every other page
 /// scrolls whole.
+/// The Setups page's pick rows mark themselves drawn; the shell's
+/// per-frame sweep (#664, #667) disarms the rest after the dock.
 pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
-    state.axis_rows_shown = false; // #557: re-earned by the axes rows
-    state.setup_pick_rows.clear(); // #664: so are the setup pick rows
-    properties_page(ui, state, pal);
-    crate::axis_pick::disarm_hidden(state); // #664: a left page's picks stop
-}
-
-fn properties_page(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     let t = state.pane_target();
     // Only an open Boundary group draws its viewport marks (M11.5 UX):
     // any other page this frame hides them and stops the collecting.

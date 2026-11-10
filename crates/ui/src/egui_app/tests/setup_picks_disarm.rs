@@ -3,7 +3,8 @@
 //! collecting the moment its page is left. A real viewport click on the
 //! operation page then fills the open operation's geometry, never the
 //! hidden setup draft; back on the setup page the pick shows disarmed,
-//! its picked item kept.
+//! its picked item kept. #667 adds the same law for a Properties pane
+//! closed, or hidden behind another tab: the shell's per-frame sweep.
 //! Provenance: our own page law test over our own shell; no vendor
 //! material consulted.
 
@@ -183,4 +184,90 @@ fn a_plane_face_pick_disarms_when_its_page_is_left() {
     assert!(crate::plane_pick::collecting(&harness.state().state));
     let resumed = harness.state().state.plane_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
     assert_eq!(resumed, drafted, "re-arming keeps the pick");
+}
+
+// ------------------------------------------------------------- #667
+// The sweep runs every frame from the shell, whatever the dock shows:
+// a Properties pane closed, or behind another tab in its leaf, disarms
+// its picks before the viewport can route a click into them.
+
+/// Press the ribbon's View door, then its `panel` row - the user's way
+/// to close or reopen a pane.
+fn view_door_toggle(harness: &mut Harness<'static, ShellUi>, panel: crate::state::Panel) {
+    let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::super::shell::RIBBON_H));
+    let (cells, _) = mill_plan_at(1280.0);
+    let button = cells.iter().find(|c| c.cmd == Cmd::View).expect("the View door stands on the bar").rect;
+    let rows = panes::view_rows_of(button, strip, &theme::current());
+    let at = rows
+        .iter()
+        .find(|(r, _)| *r == super::super::layout::ViewRow::Panel(panel))
+        .expect("the View door lists the panel")
+        .1
+        .center();
+    super::machines_pane::click(harness, button.center());
+    super::machines_pane::click(harness, at);
+}
+
+fn properties_shown(harness: &Harness<'static, ShellUi>) -> bool {
+    super::super::layout::is_shown(&harness.state().dock, &Tab::Properties)
+}
+
+#[test]
+fn an_axis_pick_disarms_when_the_properties_tab_is_closed() {
+    let mut harness = on_setup_page();
+    harness.get_by_label("+Y by Edge").click();
+    harness.run();
+    let p = beside_an_edge(harness.state());
+    click_viewport(&mut harness, p);
+    let drafted = axis_y_picks(harness.state());
+    assert_eq!(drafted.len(), 1, "the setup draft takes the edge: {}", harness.state().state.status);
+    assert!(crate::axis_pick::collecting(&harness.state().state), "still armed for another pick");
+
+    view_door_toggle(&mut harness, crate::state::Panel::Properties);
+    assert!(!super::super::layout::is_open(&harness.state().dock, &Tab::Properties), "the pane closed");
+    assert!(!crate::axis_pick::collecting(&harness.state().state), "a closed pane disarms its pick");
+    assert!(!harness.state().state.axis_rows_shown, "the rows are off screen");
+    click_viewport(&mut harness, p);
+    assert_eq!(axis_y_picks(harness.state()), drafted, "the click never reaches the hidden draft");
+    assert!(!harness.state().state.status.contains("+Y"), "{}", harness.state().state.status);
+
+    view_door_toggle(&mut harness, crate::state::Panel::Properties);
+    assert!(properties_shown(&harness), "the pane reopened");
+    assert!(!crate::axis_pick::collecting(&harness.state().state), "reopened, disarmed");
+    assert!(harness.query_by_label("Pick +Y edge").is_some(), "the row offers to pick again");
+    assert!(harness.query_by_label("Stop picking +Y").is_none());
+    assert_eq!(axis_y_picks(harness.state()), drafted, "the picked edge is kept");
+}
+
+#[test]
+fn a_plane_pick_disarms_when_another_tab_hides_the_properties_pane() {
+    let mut harness = on_setup_page();
+    // The Machines pane lists no user folder - never the tester's own.
+    harness.state_mut().state.machines_pane.user_dir = Some(None);
+    harness.get_by_label("Pick a face").click();
+    harness.run();
+    let p = beside_an_edge(harness.state());
+    click_viewport(&mut harness, p);
+    let drafted = harness.state().state.plane_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
+    assert_eq!(drafted.len(), 1, "the setup draft takes the face: {}", harness.state().state.status);
+    assert!(crate::plane_pick::collecting(&harness.state().state));
+
+    // The Machines pane opens as the front tab of the properties leaf.
+    view_door_toggle(&mut harness, crate::state::Panel::Machines);
+    assert!(super::super::layout::is_open(&harness.state().dock, &Tab::Properties), "still in the dock");
+    assert!(!properties_shown(&harness), "behind the Machines tab");
+    assert!(!crate::plane_pick::collecting(&harness.state().state), "a hidden pane disarms its pick");
+    click_viewport(&mut harness, p);
+    let now = harness.state().state.plane_pick.clone().expect("the paused draft is kept");
+    assert!(!now.picking);
+    assert_eq!(now.picks, drafted, "the click never reaches the hidden draft");
+
+    // Closing the Machines tab brings the properties pane to the front.
+    view_door_toggle(&mut harness, crate::state::Panel::Machines);
+    assert!(properties_shown(&harness), "the pane is in front again");
+    assert!(!crate::plane_pick::collecting(&harness.state().state), "in front again, disarmed");
+    assert!(harness.query_by_label("Stop picking").is_none(), "the row is not collecting");
+    assert!(harness.query_by_label("Pick a face").is_some(), "the row offers to pick again");
+    let kept = harness.state().state.plane_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
+    assert_eq!(kept, drafted, "the picked face is kept");
 }

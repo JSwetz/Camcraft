@@ -626,6 +626,19 @@ pub(crate) fn shell_layout(
         .show(ui, |ui| {
             panes::status(ui, &mut *state, &pal, icons);
         });
+    // #667: the Setups page pick sweep runs here, once a frame, whatever
+    // the dock shows. Viewport clicks route inside the dock (egui_dock
+    // draws leaves breadth-first, so in the default layout the viewport
+    // draws before the properties leaf), so the sweep brackets it:
+    // a properties pane that will not draw this frame - closed, or behind
+    // another tab in its leaf - disarms every pick BEFORE the dock, and a
+    // drawn pane's rows mark their setups during it, the rest disarmed
+    // AFTER it. A pick left armed at a frame's end therefore had its rows
+    // on screen that frame, and the next frame's click sees the result:
+    // no frame where a hidden draft takes a click.
+    if !layout::is_shown(dock, &Tab::Properties) {
+        crate::axis_pick::disarm_all(state);
+    }
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
             .style(DockStyle::from_egui(ui.style().as_ref()))
@@ -640,6 +653,7 @@ pub(crate) fn shell_layout(
                 left_press,
             });
     });
+    crate::axis_pick::disarm_hidden(state); // #664/#667: undrawn rows' picks stop
     // Last, so it floats over the dock: the M1.4 graphical tool editor.
     // An in-app egui::Window - this is the shell's only kind of extra
     // surface; the single-OS-window law stands. Closed by default
