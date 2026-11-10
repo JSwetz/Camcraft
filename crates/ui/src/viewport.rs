@@ -1341,13 +1341,18 @@ impl Camera {
             // mode switch never jumps the framing. Depth is linear and
             // clip.w is 1 everywhere, so every screen-space consumer that
             // divides by w degenerates cleanly onto this matrix too.
+            // The depth row spans near -> 0.0 and far -> 1.0, NOT the
+            // OpenGL [-1, +1] span: WebGPU clips on 0 <= z <= w, and with
+            // clip.w held at 1 the OpenGL span puts every point nearer
+            // than (near + far) / 2 - everything in view - at negative
+            // clip z and blanks the viewport (#600).
             let h = self.ortho_half_height();
             let w = h * aspect;
             [
                 [1.0 / w, 0.0, 0.0, 0.0],
                 [0.0, 1.0 / h, 0.0, 0.0],
-                [0.0, 0.0, 2.0 / (near - far), 0.0],
-                [0.0, 0.0, (near + far) / (near - far), 1.0],
+                [0.0, 0.0, 1.0 / (near - far), 0.0],
+                [0.0, 0.0, near / (near - far), 1.0],
             ]
         } else {
             let g = (std::f64::consts::FRAC_PI_6).tan().recip(); // 60 deg vertical fov
