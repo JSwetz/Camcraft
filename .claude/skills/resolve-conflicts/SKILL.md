@@ -32,8 +32,11 @@ fork, `upstream` is NeoTech/Camcraft and `origin` is the fork).
 - A PR flagged ready and labelled `merge-ready` takes no pushes (AGENTS.md
   "Every PR opens as a draft"). A conflicting PR has already lost
   `merge-ready` (the label is `conflicts`), so pushing a merge to it is
-  allowed. If it's one of our own PRs and still marked ready, run `gh pr
-  ready <N> --undo` first and say why in a PR comment.
+  allowed. If the PR is still marked ready (ours or a contributor's), run
+  `gh pr ready <N> --undo` before pushing and say why in a PR comment. A
+  contributor can do this on their own PR; when you can't (someone else's
+  PR you only have push access to), say in the comment that it should be
+  re-flagged ready after the re-check.
 
 ## 1. Contributor mode - `/resolve-conflicts [login]`
 
@@ -125,7 +128,10 @@ reports `CONFLICTING` without the label - add the label to those):
      resolve-conflicts push): a **delta review** - a reviewer checks only
      the merge commit (both sides kept, nothing from main dropped, targeted
      tests). Clean -> `merge-ready`, with the reviewer marker for the new
-     head.
+     head. The delta review sets any of the review-prs labels (step 2b):
+     `needs-rework` if the resolution is wrong, `conflicts` if main moved
+     again, and `needs-maintainer` if the merge brought in a dependency,
+     `build.rs`, scripts or `.github` change the reviewer only reads.
    - **Head moved with new code commits:** a full review via `/review-prs`.
 4. Report one line per PR: still conflicting (author asked), clean again
    (label restored), sent to delta review, sent to full review.
