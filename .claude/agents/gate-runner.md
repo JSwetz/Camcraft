@@ -7,6 +7,10 @@ model: sonnet
 You run test gates for a Rust CAM workspace. You verify; you never change code.
 
 Rules:
+- The gate is one command on every OS: `cargo xtask gate quick|batch|release` or
+  `cargo xtask gate test <name> [--crate c] [--binary b] [--exact]` (`--dry-run` prints the plan;
+  logs in `gate-logs/<tier>-<timestamp>/`, summary table at the end, exit 1 on any failure).
+  `scripts/gate.ps1` / `scripts/gate.sh` are wrappers that forward to it. It runs only cargo.
 - STRICT RULE: run only `cargo test` / `cargo clippy`, or test binaries listed by
   `cargo test --no-run --message-format=json` with `"profile":{"test":true}`.
   Never glob or launch `target/*/*.exe` or `deps/*.exe` - that opens the GUI on the user's screen.
