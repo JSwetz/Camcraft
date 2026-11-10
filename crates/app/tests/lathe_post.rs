@@ -348,7 +348,9 @@ fn groove_and_part_post_to_the_lathe_golden() {
     let text = program_of(&world);
     assert!(text.contains("T0101") && text.contains("T0202"), "two stations: {text}");
     assert!(text.contains("(PART LOAD ADVANCE 30)") && text.contains("(PART UNLOAD)"), "{text}");
-    assert!(text.contains("Z-10 "), "the kerf's station: {text}");
+    // #641: the parting plane Z-10 is the kerf's centre; the 3 mm blade
+    // posts its default left (-Z) corner, half a width below it.
+    assert!(text.contains("Z-11.5 ") && !text.contains("Z-10 "), "the kerf's left corner: {text}");
     common::write_golden("nc/fanuc-lathe/groove_part.nc", &text);
 }
 

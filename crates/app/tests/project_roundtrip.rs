@@ -5368,3 +5368,30 @@ fn a_lathe_orientation_round_trips_and_old_tools_take_the_default() {
     let _ = std::fs::remove_file(&path);
     assert!(matches!(project::open(&new_world(), &bad), Err(ProjectError::Corrupt(_))), "orientation 12 is refused");
 }
+
+/// #641: a grooving blade's touched-off corner rides the same additive
+/// key - an older blade (no key) reads as the left-corner default, a
+/// stated corner round-trips byte for byte.
+#[test]
+fn a_blade_corner_round_trips_and_old_blades_take_the_left_corner() {
+    let path = tmp_path("blade-corner");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, AddTool::new(&world, "GT", catalog_tool("GT-0300")).expect("blade"));
+    let right = Tool { orientation: Some(1), ..catalog_tool("GT-0300") };
+    history.execute(&world, AddTool::new(&world, "GT1", right).expect("right-corner blade"));
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert_eq!(text.matches("\"orientation\"").count(), 1, "only the stated blade writes the key: {text}");
+
+    let back = new_world();
+    project::load(&back, &path).expect("load");
+    let tool = |n: &str| model::find_by_name(&back, n).and_then(|e| model::tool_of(&back, &e)).expect("tool");
+    assert_eq!(tool("GT").orientation, None, "an older blade states no corner");
+    assert_eq!(tool("GT").lathe_orientation(), Some(2), "and reads as the left (-Z) corner");
+    assert_eq!(tool("GT1").orientation, Some(1));
+    project::save(&back, &path).expect("resave");
+    let again = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(again, text, "byte-identical round trip");
+}

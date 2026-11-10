@@ -238,7 +238,7 @@ fn a_boring_bar_defaults_to_the_id_tip_and_refuses_an_od_one() {
     bar.orientation = Some(2);
     let e = posting::nose::checked_orientation(&bore, "BR-1000", &bar).expect_err("an OD tip in a bore");
     assert!(e.contains("orientation [3, 4, 5, 7, 8]") && e.contains("+X"), "{e}");
-    // A grooving blade, a drill or a mill posts as it always did: no
-    // nose centre, no orientation.
+    // A drill or a mill posts as it always did: no nose centre, no
+    // orientation (a blade posts its corner - #641, lathe_blade_corner).
     assert_eq!(posting::nose::checked_orientation(&facing(), "EM", &tool("EM-0400-2FL")), Ok(None));
 }
