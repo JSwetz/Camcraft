@@ -24,6 +24,7 @@ mod fixture_tools;
 mod job;
 mod listen;
 mod live;
+mod model_tools;
 mod pick;
 mod pockets;
 mod render;

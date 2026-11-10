@@ -122,6 +122,14 @@ impl MoveModel {
             stock,
         })
     }
+
+    /// The stock this move carries with the part (stock made from it, or
+    /// the stock of a one-part document), by name. The MCP `move_model`
+    /// tool (#716) reports them, because a part move that also moves the
+    /// stock is easy to miss from the part's own pose.
+    pub fn following_stock(&self) -> impl Iterator<Item = &str> {
+        self.stock.iter().map(|(name, _, _)| name.as_str())
+    }
 }
 
 impl Command for MoveModel {
