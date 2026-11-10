@@ -30,7 +30,8 @@ pub fn moves_named(w: &Warning) -> [Option<usize>; 2] {
         | Warning::HolderHit { at, .. }
         | Warning::NonFinite { at }
         | Warning::Envelope { at, .. }
-        | Warning::Scallop { at, .. } => [Some(*at), None],
+        | Warning::Scallop { at, .. }
+        | Warning::ProbeSearch { at, .. } => [Some(*at), None],
         Warning::RestUnjudged { .. } => [None, None],
     }
 }

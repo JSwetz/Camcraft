@@ -240,3 +240,37 @@ fn the_classes_the_eye_names_are_the_classes_the_verdict_counts() {
     assert!(rest_n > 0, "and the eye sees it: {rest_n} rest pixels");
     assert!(clean_n > 0, "the floor is clean to both: {clean_n} pixels");
 }
+
+#[test]
+fn an_orthographic_eye_casts_parallel_rays_from_its_view_plane() {
+    // #609: an orthographic camera traces the box as the parallel box
+    // draws it - every hit lands under its own pixel's plane point, the
+    // flat top reads one depth edge to edge, and a pixel off the box's
+    // footprint misses even where a perspective cone would have hit.
+    let stock = box_stock();
+    let cam = top_down().orthographic(10.0).unwrap(); // 20 x 20 world, 1 px = 1 unit
+    let (w, h) = (20u32, 20u32);
+    let pv = stock.preview(None, &cam, w, h, DEV_TOL).unwrap();
+    for py in 0..h {
+        for px in 0..w {
+            let (o, d) = cam.ray(px, py, w, h);
+            assert_eq!((d.x, d.y, d.z), (cam.fwd.x, cam.fwd.y, cam.fwd.z), "every ray is the view axis");
+            assert!((o.z - 40.0).abs() < 1e-9, "every origin sits on the eye plane");
+            // Pixel centre in world XY: 1 unit pixels about (5, 5), row 0 at +Y.
+            let (x, y) = (o.x, o.y);
+            let depth = pv.depth[(py * w + px) as usize];
+            let inside = (1.0..=9.0).contains(&x) && (1.0..=9.0).contains(&y);
+            let outside = !(-2.0..=12.0).contains(&x) || !(-2.0..=12.0).contains(&y);
+            if inside {
+                assert!((depth - 35.0).abs() < 0.1, "pixel ({px},{py}) over ({x},{y}) reads the top at {depth}");
+            }
+            if outside {
+                assert!(depth.is_nan(), "pixel ({px},{py}) over ({x},{y}) is off the box, yet hit at {depth}");
+            }
+        }
+    }
+    assert_eq!(pv.unresolved, 0);
+    let flat = PreviewCamera { ortho_half_height: None, ..cam };
+    assert_eq!(flat.ray(3, 7, w, h), (flat.eye, flat.ray_dir(3, 7, w, h)), "perspective rays still leave the eye");
+    assert!(top_down().orthographic(0.0).is_err() && top_down().orthographic(f64::NAN).is_err());
+}

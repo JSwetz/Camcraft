@@ -113,10 +113,22 @@ fn a_plunge_starting_with_the_holder_in_a_clamp_arm_blocks_the_post() {
     // top is 112 at the plunge's start, 106.5 at its foot.
     let (world, mut h) = face_world();
     plant(&world, &mut h, "Arm1", p(-40.0, -45.0, 108.0), p(-25.0, -35.0, 120.0));
-    let problems = posting::verification_gate(&world);
-    assert_eq!(problems, vec!["Face1: holder at move 0 strikes a fixture".to_string()]);
+    // Since #690 the face opens with an approach rapid (move 0) that ends
+    // at clearance over the plunge, so its holder stands in the arm too:
+    // both are named, the plunge (move 1) and the approach into it.
+    let mut problems = posting::verification_gate(&world);
+    problems.sort();
+    assert_eq!(
+        problems,
+        vec![
+            "Face1: holder at move 0 strikes a fixture".to_string(),
+            "Face1: holder at move 1 strikes a fixture".to_string(),
+        ]
+    );
     h.execute(&world, GenerateOperation::new(&world, "Face1").expect("regenerate"));
-    assert_eq!(hits(&world), vec![(0, FixturePart::Holder)]);
+    let mut got = hits(&world);
+    got.sort_by_key(|&(at, _)| at);
+    assert_eq!(got, vec![(0, FixturePart::Holder), (1, FixturePart::Holder)]);
 }
 
 #[test]

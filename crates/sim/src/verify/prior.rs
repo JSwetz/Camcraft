@@ -4,7 +4,7 @@ use super::types::Warning;
 
 use crate::cl::{MoveKind, Toolpath};
 use crate::geo2d::Point2;
-use crate::stock_sim::Dexel;
+use crate::stock_sim::Columns;
 
 /// `warns` without the convictions of vertical rapids DOWN that the
 /// program ahead of this operation already made safe. Law (d) judges a
@@ -22,7 +22,7 @@ use crate::stock_sim::Dexel;
 /// cell whose height is not a number, leaves the conviction standing -
 /// an unknown prior is the raw stock. Lateral rapids keep every
 /// conviction: only the vertical dive's verdict is re-read here.
-pub fn acquit_by_prior(path: &Toolpath, prior: &Dexel, tool_r: f64, z_tol: f64, warns: &mut Vec<Warning>) {
+pub fn acquit_by_prior(path: &Toolpath, prior: &Columns<'_>, tool_r: f64, z_tol: f64, warns: &mut Vec<Warning>) {
     warns.retain(|w| {
         let Warning::RapidInStock { at } = *w else { return true };
         let Some(m) = path.moves.get(at) else { return true };
@@ -38,22 +38,25 @@ pub fn acquit_by_prior(path: &Toolpath, prior: &Dexel, tool_r: f64, z_tol: f64, 
     });
 }
 
-/// The highest material the prior grid holds under the disc (q, r):
-/// `None` when the disc covers no grid cell or a height is unreadable.
+/// The highest material the prior stock holds under the disc (q, r):
+/// `None` when the disc covers no column or a height is unreadable.
 /// Issue #89: drilling's reach, R-plane and holder laws read the same
-/// conservative surface the rapid law does.
-pub fn prior_surface(dex: &Dexel, q: Point2, r: f64) -> Option<f64> {
-    if !(r.is_finite() && r >= 0.0 && dex.cell > 0.0 && q.x.is_finite() && q.y.is_finite()) {
+/// conservative surface the rapid law does. Read through the column
+/// seam (#585, M7.3): a rest grid or a field stock answers alike.
+pub fn prior_surface(dex: &Columns<'_>, q: Point2, r: f64) -> Option<f64> {
+    let cell = dex.cell();
+    if !(r.is_finite() && r >= 0.0 && cell > 0.0 && q.x.is_finite() && q.y.is_finite()) {
         return None;
     }
+    let o = dex.origin();
     // Every cell whose centre lies in the disc, plus q's own cell (a
     // disc narrower than a cell still stands on one).
-    let rr = r + dex.cell * 0.5;
-    let lo = |v: f64, o: f64| ((v - rr - o) / dex.cell).floor().max(0.0);
-    let hi = |v: f64, o: f64, n: usize| ((v + rr - o) / dex.cell).ceil().min(n as f64);
-    let (ix0, ix1) = (lo(q.x, dex.x0), hi(q.x, dex.x0, dex.nx));
-    let (iy0, iy1) = (lo(q.y, dex.y0), hi(q.y, dex.y0, dex.ny));
-    let mut top: Option<f64> = dex.col(q).map(|k| dex.top_at(k));
+    let rr = r + cell * 0.5;
+    let lo = |v: f64, o: f64| ((v - rr - o) / cell).floor().max(0.0);
+    let hi = |v: f64, o: f64, n: usize| ((v + rr - o) / cell).ceil().min(n as f64);
+    let (ix0, ix1) = (lo(q.x, o.x), hi(q.x, o.x, dex.nx()));
+    let (iy0, iy1) = (lo(q.y, o.y), hi(q.y, o.y, dex.ny()));
+    let mut top: Option<f64> = dex.col(q).map(|(ix, iy)| dex.top_at(ix, iy));
     let r2 = r * r;
     let (mut iy, mut ix);
     iy = iy0;
@@ -63,9 +66,9 @@ pub fn prior_surface(dex: &Dexel, q: Point2, r: f64) -> Option<f64> {
             let c = dex.center(ix as usize, iy as usize);
             let (ex, ey) = (c.x - q.x, c.y - q.y);
             if ex * ex + ey * ey <= r2
-                && let Some(k) = dex.col(c)
+                && let Some((cx, cy)) = dex.col(c)
             {
-                let z = dex.top_at(k);
+                let z = dex.top_at(cx, cy);
                 top = Some(top.map_or(z, |t| t.max(z)));
                 if z.is_nan() {
                     return None;
@@ -83,6 +86,7 @@ mod tests {
     use super::*;
     use crate::cl::Move;
     use crate::geometry::Point3;
+    use crate::stock_sim::Dexel;
 
     fn dive(z0: f64, z1: f64) -> Toolpath {
         let mv = |kind, a: f64, b: f64| Move {
@@ -131,14 +135,14 @@ mod tests {
         // A drill rapids 35 -> 16 over the pocket floor (Z 15): its own
         // law convicts it against the raw top Z 25; the prior says air.
         let mut w = vec![Warning::RapidInStock { at: 0 }];
-        acquit_by_prior(&dive(35.0, 16.0), &pocketed(), 2.0, 1e-3, &mut w);
+        acquit_by_prior(&dive(35.0, 16.0), &Columns::of_grid(&pocketed()), 2.0, 1e-3, &mut w);
         assert!(w.is_empty(), "{w:?}");
     }
 
     #[test]
     fn a_dive_past_the_prior_floor_still_stands() {
         let mut w = vec![Warning::RapidInStock { at: 0 }];
-        acquit_by_prior(&dive(35.0, 14.0), &pocketed(), 2.0, 1e-3, &mut w);
+        acquit_by_prior(&dive(35.0, 14.0), &Columns::of_grid(&pocketed()), 2.0, 1e-3, &mut w);
         assert_eq!(w, vec![Warning::RapidInStock { at: 0 }]);
     }
 
@@ -146,7 +150,7 @@ mod tests {
     fn a_tool_wider_than_the_cleared_pocket_still_stands() {
         // A 12 mm disc over a 10 mm pocket: its rim meets the raw top.
         let mut w = vec![Warning::RapidInStock { at: 0 }];
-        acquit_by_prior(&dive(35.0, 16.0), &pocketed(), 6.0, 1e-3, &mut w);
+        acquit_by_prior(&dive(35.0, 16.0), &Columns::of_grid(&pocketed()), 6.0, 1e-3, &mut w);
         assert_eq!(w, vec![Warning::RapidInStock { at: 0 }]);
     }
 
@@ -157,7 +161,7 @@ mod tests {
             m.to.x = 3.0;
         }
         let mut w = vec![Warning::RapidInStock { at: 0 }];
-        acquit_by_prior(&p, &pocketed(), 2.0, 1e-3, &mut w);
+        acquit_by_prior(&p, &Columns::of_grid(&pocketed()), 2.0, 1e-3, &mut w);
         assert_eq!(w, vec![Warning::RapidInStock { at: 0 }]);
     }
 }

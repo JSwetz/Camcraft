@@ -92,6 +92,18 @@ impl SetSetupMachine {
         Self::new(world, setup, Some((path.display().to_string(), Some(m))))
     }
 
+    /// Mount a Machines-pane catalogue machine (#384), read and
+    /// validated again (`library::read_for_assign`): a refused file
+    /// never becomes the setup's machine.
+    pub fn from_catalogue(
+        world: &World,
+        setup: &str,
+        source: &crate::machine::library::MachineSource,
+    ) -> Result<Self, CommandError> {
+        let (path, m) = crate::machine::library::read_for_assign(source).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some((path, Some(m))))
+    }
+
     #[must_use]
     pub fn setup(&self) -> &str {
         &self.setup

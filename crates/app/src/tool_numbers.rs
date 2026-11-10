@@ -76,3 +76,37 @@ pub fn clash(world: &World, used: &[String]) -> Option<String> {
     }
     None
 }
+
+/// The clash law per machine (#438): `ops` (program operations as
+/// `(name, entity)`) are grouped by the machine their setup mounts -
+/// `setup_mount::program_mounts` grouped by machine alone - and each
+/// group's tools are judged on their own. Two tools sharing a number on
+/// two different machines are two tool tables and never clash; on one
+/// machine they clash even across two posts (one carousel). A program on
+/// one machine refuses with the exact #221 message; a multi-machine one
+/// prefixes the mount it found the clash on.
+#[must_use]
+pub fn clash_per_machine(world: &World, ops: &[(String, flecs_ecs::prelude::Entity)]) -> Option<String> {
+    let mounts = crate::setup_mount::program_mounts(world, false);
+    let setup_of = |e: &flecs_ecs::prelude::Entity| {
+        model::operation_of(world, e).map(|op| {
+            (crate::setup::effective(world, op.setup.as_deref()).unwrap_or_default(), op.tool)
+        })
+    };
+    if mounts.len() <= 1 {
+        let used: Vec<String> = ops.iter().filter_map(|(_, e)| setup_of(e).map(|(_, t)| t)).collect();
+        return clash(world, &used);
+    }
+    for m in &mounts {
+        let used: Vec<String> = ops
+            .iter()
+            .filter_map(|(_, e)| setup_of(e))
+            .filter(|(s, _)| m.setups.contains(s))
+            .map(|(_, t)| t)
+            .collect();
+        if let Some(msg) = clash(world, &used) {
+            return Some(format!("{}: {msg}", m.label()));
+        }
+    }
+    None
+}

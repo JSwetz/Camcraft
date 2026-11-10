@@ -50,7 +50,7 @@ pub fn contour_along_chain(
         v.reverse();
         v
     };
-    let zs = p.levels();
+    let zs = p.levels()?;
     let walk = fit_arcs(&poly, p.tolerance);
     let t0 = walk_tangent(&walk, &poly, true);
     let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p.lead);

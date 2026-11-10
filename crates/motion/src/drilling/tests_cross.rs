@@ -278,8 +278,16 @@ fn cross_drill_refuses_nonsense_by_name() {
         "a NaN mouth is not a hole",
     ];
     for (h, n) in bad.iter().zip(names) {
-        assert!(matches!(cross_drill(&xparams(&dt, &[*h])), Err(GenError::Invalid(_))), "{n}");
+        // #677: a hole-shaped refusal names its mouth (At); the rest stay Invalid.
+        let e = cross_drill(&xparams(&dt, &[*h])).map(drop).err();
+        assert!(matches!(e, Some(GenError::Invalid(_) | GenError::At { .. })), "{n}: {e:?}");
     }
+    let z_plunge = cross_drill(&xparams(&dt, &[bad[2]])).map(drop).err();
+    assert_eq!(
+        z_plunge.and_then(|e| e.location()),
+        Some(bad[2].origin),
+        "a Z plunge's refusal marks the hole's mouth"
+    );
     let across = [
         ok,
         cross(15.0, 0.0, 2.0, Point3::new(1.0, 0.0, 0.0), 2.0, -10.0, false),
@@ -410,7 +418,9 @@ fn cross_drill_refuses_a_bottom_above_the_mouth() {
     let hs = [cross(15.0, 0.0, 10.0, nx(), 2.0, -10.0, false)];
     let mut p = xparams(&dt, &hs);
     p.bottom_d = Some(15.5); // a plane standing OUTSIDE the entry
-    assert!(matches!(cross_drill(&p), Err(GenError::Invalid(_))), "a hole that cuts air refuses");
+    let air = cross_drill(&p).map(drop).err();
+    assert!(matches!(air, Some(GenError::At { .. })), "a hole that cuts air refuses: {air:?}");
+    assert_eq!(air.and_then(|e| e.location()), Some(hs[0].origin), "and marks that hole's mouth (#677)");
     let mut p = xparams(&dt, &hs);
     p.stock_r = f64::NAN;
     assert!(matches!(cross_drill(&p), Err(GenError::Invalid(_))), "an unmeasurable stock refuses");

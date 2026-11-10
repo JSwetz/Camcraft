@@ -5,6 +5,7 @@
 //! no third-party code.
 
 pub mod align;
+pub mod axis;
 pub mod face;
 // #561: face / point datums for the fixture locate mates.
 pub mod mate;
@@ -12,6 +13,7 @@ pub mod plane;
 pub mod winding;
 
 pub use align::{Alignment, align_321};
+pub use axis::{AxisPick, InPlaneAxes, InPlaneAxis, in_plane_turn_deg, pick_coords, turn_in_plane};
 pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
 pub use mate::{MateDatum, mate_datum};

@@ -1,7 +1,8 @@
-//! The Setups page's "Lay on a plane" row (#330): pick one flat face, or
-//! two straight edges, in the viewport, choose G17 (XY), G18 (ZX) or G19
-//! (YZ), flip it, optionally set the face onto the plane's level, and
-//! Apply. The pick draft is view state (`crate::plane_pick`); Apply queues
+//! The Setups page's "Lay on a plane" row (#330): pick one flat face in
+//! the viewport (#554: a face only - an edge cannot set a plane; edges
+//! set an axis in the "Axes in the plane" rows), choose G17 (XY), G18
+//! (ZX) or G19 (YZ), flip it, optionally set the face onto the plane's
+//! level, and Apply. The pick draft is view state (`crate::plane_pick`); Apply queues
 //! `CommandKind::LayPartOnPlane`, the undoable `AlignPartToSetup`. The
 //! app says whether the picks make a plane and, if not, why - shown on
 //! the disabled Apply. The work offset is not touched.
@@ -37,13 +38,17 @@ impl Default for Draft {
 pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     let id = ui.id().with(("setup_plane_draft", setup));
     let mut d: Draft = ui.data_mut(|m| *m.get_temp_mut_or_insert_with(id, Draft::default));
-    let armed = state.plane_pick.as_ref().is_some_and(|p| p.setup == setup);
+    if !state.setup_pick_rows.iter().any(|s| s == setup) {
+        state.setup_pick_rows.push(setup.to_owned()); // #664
+    }
+    let mine = state.plane_pick.as_ref().is_some_and(|p| p.setup == setup);
+    let armed = mine && crate::plane_pick::collecting(state);
     ui.horizontal(|ui| {
-        ui.label("    Lay on a plane");
-        let pick_text = if armed { "Stop picking" } else { "Pick face or edges" };
+        ui.label("    Lay on a plane - pick a face");
+        let pick_text = if armed { "Stop picking" } else { "Pick a face" };
         if ui
             .selectable_label(armed, pick_text)
-            .on_hover_text("Click one flat face, or two straight edges, in the viewport.")
+            .on_hover_text("Click one flat face in the viewport; it is laid on the plane.")
             .clicked()
         {
             if armed {
@@ -60,13 +65,13 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
                 }
             })
             .response
-            .on_hover_text("The plane the picked face (or the edges' plane) is laid on.");
+            .on_hover_text("The plane the picked face is laid on.");
         ui.checkbox(&mut d.flip, "Flip")
             .on_hover_text("Face the other way: down (-Z) for G17, -Y for G18, -X for G19.");
         ui.checkbox(&mut d.place, "Face to plane level")
             .on_hover_text("Set the picked face onto the plane (e.g. Z 0 for G17); off keeps the part where it is.");
     });
-    if armed {
+    if mine {
         let picks = state.plane_pick.as_ref().map(|p| p.picks.clone()).unwrap_or_default();
         let lay = PlaneLay { plane: d.plane, flip: d.flip, place: d.place };
         // The command's own check: a refused pick, or one that gives the

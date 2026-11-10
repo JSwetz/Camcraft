@@ -23,7 +23,7 @@ use flecs_ecs::prelude::World;
 use crate::schema::Units;
 
 pub use crate::geometry::units::{
-    Unit, MM_PER_INCH, area, feed, from_display, len, len_signed, to_display,
+    Unit, MM_PER_INCH, area, feed, from_display, len, len_signed, to_display, vol,
 };
 
 /// The document's unit; a document that never set one displays
