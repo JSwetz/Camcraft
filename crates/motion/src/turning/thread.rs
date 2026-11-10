@@ -134,6 +134,7 @@ pub fn thread_in(facets: &[Triangle], p: &ThreadParams, stock: Option<StockEnv>)
         stock,
     )?;
     if f.lean() > LEAN_MAX {
+        // #677: names no spot - the bar's axis tilt, true along its whole length.
         return Err(GenError::Invalid(format!(
             "the bar's axis stands {:.1} degrees off the spindle (that is {:.0} mm over \
              100 mm of length) - threading rides XY circles square to the axis; a tilted \
