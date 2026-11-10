@@ -316,3 +316,78 @@ fn a_click_in_the_frame_the_pane_hides_misses_the_hidden_draft() {
     harness.run();
     assert_eq!(axis_y_picks(harness.state()), drafted, "nor in the frames after");
 }
+
+/// #673: the same pre-dock law for the locate draft (#566). The draft is
+/// armed on Setup1's Fixtures page and has taken the block's corner as
+/// its part point; the pane hides in the SAME frame a release reaches
+/// the viewport. Without the pre-dock drop the release lands in the
+/// still-live draft (its status asks for the vise again) before the
+/// after-dock sweep runs.
+#[test]
+fn a_click_in_the_frame_the_pane_hides_misses_the_hidden_locate_draft() {
+    let mut harness = on_setup_page();
+    {
+        let st = &mut harness.state_mut().state;
+        let vise = camcraft_app::geometry::cube(
+            camcraft_app::geometry::Point3::new(200.0, 200.0, -10.0),
+            camcraft_app::geometry::Point3::new(260.0, 240.0, 0.0),
+        );
+        st.history.execute(&st.world, camcraft_app::commands::ImportModel::from_mesh("vise", vise));
+        let tag = camcraft_app::commands::TagFixture::new(&st.world, "vise", Some("Setup1")).expect("the vise is a fixture");
+        st.history.execute(&st.world, tag);
+        st.machines_pane.user_dir = Some(None);
+    }
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Fixtures),
+    );
+    harness.run();
+    harness.get_by_label("Locate part…").click();
+    harness.run();
+    assert!(harness.state().state.locate_pick.is_some(), "the locate draft is armed");
+    let p = a_corner(harness.state());
+    click_viewport(&mut harness, p);
+    assert!(
+        harness.state().state.status.contains("vise"),
+        "the draft takes the block's corner and asks for the vise: {}",
+        harness.state().state.status
+    );
+
+    set_pos(&mut harness, p);
+    button_at(&mut harness, egui::PointerButton::Primary, p, true);
+    assert!(properties_shown(&harness), "the pane still shows at the press");
+    assert!(harness.state().state.locate_pick.is_some(), "armed at the press");
+
+    harness.state_mut().state.layout_request =
+        Some(crate::state::LayoutRequest::Toggle(crate::state::Panel::Machines));
+    harness.state_mut().state.status.clear();
+    harness.input_mut().events.push(Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    harness.step();
+    assert!(!properties_shown(&harness), "the pane hid this frame");
+    assert!(harness.state().state.locate_pick.is_none(), "hidden, dropped");
+    assert!(
+        !harness.state().state.status.contains("vise"),
+        "the click never reaches the hidden locate draft: {}",
+        harness.state().state.status
+    );
+}
+
+/// #555 meets #664: the three-points draft is dropped once its Setups
+/// page is left, so a later viewport click never feeds it.
+#[test]
+fn a_three_points_pick_disarms_when_its_page_is_left() {
+    let mut harness = on_setup_page();
+    harness.get_by_label("Pick three points").click();
+    harness.run();
+    assert!(harness.state().state.points_pick.is_some(), "the points row arms");
+    crate::actions::target(&mut harness.state_mut().state, UiTarget::Operation("Contour1".into()));
+    harness.run();
+    assert!(harness.state().state.points_pick.is_none(), "the page was left: the points draft is dropped");
+    show_setup_page(&mut harness);
+    assert!(harness.query_by_label("Pick three points").is_some(), "the row offers to pick again");
+}

@@ -222,7 +222,7 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
             .with_arc_radius(p.tool_diameter);
     }
     let mut motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
 
     for h in &p.holes {
         let rc = h.radius - (r + p.stock_to_leave);
