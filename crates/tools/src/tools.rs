@@ -676,6 +676,7 @@ pub fn torch_tool(kerf: f64) -> Tool {
         tool_material: None,
         flutes: None,
         center_cutting: false,
+        orientation: None,
     }
 }
 
