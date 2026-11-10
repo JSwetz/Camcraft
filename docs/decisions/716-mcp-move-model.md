@@ -26,3 +26,7 @@
   about workholding; part placement is a sibling, and the module has room
   for the other part verbs the `camcraft-mcp` skill lists as gaps (mesh
   repair).
+- **Cost to change later:** small. The tool is a thin reader over
+  `MoveModel`; adding Euler angles or a relative ("by") move later is a
+  new optional argument, and the reply's `stock` list can grow fields
+  without breaking callers that read `name` and `origin`.
