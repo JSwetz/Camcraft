@@ -14,6 +14,7 @@ pub mod fixture;
 pub mod fixture_library;
 pub mod fixture_carried;
 // #561: locate the part in a fixture (or the fixture on the part) by mates.
+pub mod fixture_clash;
 pub mod fixture_locate;
 pub mod fixture_struck;
 pub mod fixture_view;

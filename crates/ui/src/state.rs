@@ -47,6 +47,7 @@ mod setup_post_options;
 mod fixture_view;
 #[path = "state_locate.rs"]
 mod locate_ui;
+use locate_ui::with_warning;
 #[path = "state_fixture_library.rs"]
 mod fixture_library;
 pub use fixture_library::{FixtureLibDialog, InsertFixtureDraft, LibraryRow, SaveFixtureDraft};
@@ -3307,9 +3308,10 @@ impl State {
                 };
                 match MoveFixture::new(&self.world, &name, location) {
                     Ok(command) => {
+                        let warning = command.warning().map(str::to_owned);
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
-                        self.status = format!("moved fixture {name}");
+                        self.status = with_warning(format!("moved fixture {name}"), warning);
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("fixture not moved: {err}"));
@@ -3354,6 +3356,7 @@ impl State {
                 };
                 match MoveModel::new(&self.world, &name, location) {
                     Ok(command) => {
+                        let warning = command.warning().map(str::to_owned);
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
                         self.model_ui = ModelUi {
@@ -3365,7 +3368,7 @@ impl State {
                             pitch_deg,
                             yaw_deg,
                         };
-                        self.status = format!("moved {name}");
+                        self.status = with_warning(format!("moved {name}"), warning);
                     }
                     Err(err) => self.refuse(ErrorScope::Setup, format!("part not moved: {err}")),
                 }

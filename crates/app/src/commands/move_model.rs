@@ -33,6 +33,11 @@
 //!   move that does not turn the part carries the stock rigidly, exactly
 //!   as before; a stock copied from the model or already off the axes
 //!   follows rigidly on every move.
+//! - **A move into the steel warns (#582).** Where the move leaves the
+//!   part, or a stock that follows it, inside a fixture of any setup, the
+//!   command carries the locate's by-name warning (`crate::fixture_clash`):
+//!   the body, the fixture, a point. A warning, never a refusal; no
+//!   fixtures, no check.
 //! - **`apply` and `invert` are pure writes**, so redo replays bytes
 //!   and never re-derives.
 
@@ -91,16 +96,26 @@ pub struct MoveModel {
     prev: Location,
     next: Location,
     stock: Vec<StockMove>,
+    warning: Option<String>,
 }
 
 impl MoveModel {
     /// The move a locate makes (#561) - since #571 the same move as
-    /// [`MoveModel::new`]: every turn keeps a square stock square.
+    /// [`MoveModel::new`]: every turn keeps a square stock square. The
+    /// locate runs its own (mate-worded) interpenetration check, so this
+    /// one runs none.
     pub fn locating(world: &World, name: &str, location: Location) -> Result<Self, CommandError> {
-        Self::new(world, name, location)
+        Self::build(world, name, location, false)
     }
 
+    /// A Model-page move or turn. Since #582 it runs the locate's sampled
+    /// part-and-stock-versus-fixture check and carries a by-name warning
+    /// ([`MoveModel::warning`]) - never a refusal.
     pub fn new(world: &World, name: &str, location: Location) -> Result<Self, CommandError> {
+        Self::build(world, name, location, true)
+    }
+
+    fn build(world: &World, name: &str, location: Location, check: bool) -> Result<Self, CommandError> {
         if name == MACHINE_TABLE {
             return Err(CommandError::Invalid(
                 "the machine table is derived from the machine file - it is not a part you can move".into(),
@@ -187,12 +202,18 @@ impl MoveModel {
             let after = check_location(after, &format!("stock '{stock_name}'"))?;
             stock.push(StockMove { name: stock_name, before, after, reshape: None });
         }
-        Ok(MoveModel {
-            name: name.to_string(),
-            prev,
-            next,
-            stock,
-        })
+        let mut command = MoveModel { name: name.to_string(), prev, next, stock, warning: None };
+        if check {
+            command.warning = crate::fixture_clash::after_part_move(world, name, next, &command.moved_stock(world));
+        }
+        Ok(command)
+    }
+
+    /// The interpenetration warning (#582), by name: the part or its
+    /// stock would sit inside a fixture where this move leaves it.
+    #[must_use]
+    pub fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
     }
 
     /// Each following stock's facets where the move leaves it (setup
