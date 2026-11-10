@@ -334,6 +334,14 @@ pub struct ToolDto {
     /// holder cylinder, what every older tool judged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<super::tool_body_wire::ToolBodyDto>,
+    /// #630 addition, additive (no version step): the lathe tool
+    /// orientation (LinuxCNC 1-9). Absent from every older file and
+    /// written only when stated; absent reads as the kind's default
+    /// (`orientation::default_for`) - 2 for a turning insert, 3 for a
+    /// boring bar. An out-of-range code is refused at read by the
+    /// tool sanity law (`validate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<u8>,
 }
 
 fn centre_cutting() -> bool {
@@ -430,6 +438,7 @@ impl ToolDto {
             center_cutting: t.center_cutting,
             number: None,
             body: None,
+            orientation: t.orientation,
         }
     }
 
@@ -469,6 +478,7 @@ impl ToolDto {
             }),
             flutes: self.flutes,
             center_cutting: self.center_cutting,
+            orientation: self.orientation,
         }
     }
 }

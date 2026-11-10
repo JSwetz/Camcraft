@@ -5337,3 +5337,34 @@ fn the_shell_key_round_trips_and_absent_means_the_ladder() {
     let _ = std::fs::remove_file(&p);
     assert_eq!(second, third, "the shell shape round-trips byte-identically");
 }
+
+/// #630: the lathe tool orientation is additive - an unstated one is
+/// never written (older files read byte for byte as before and take
+/// the kind's default), a stated one round-trips, and an off-chart code
+/// is refused at read.
+#[test]
+fn a_lathe_orientation_round_trips_and_old_tools_take_the_default() {
+    let path = tmp_path("orient");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, AddTool::new(&world, "TN", catalog_tool("TN-1600-0R8")).expect("insert"));
+    let stated = Tool { orientation: Some(6), ..catalog_tool("TN-1600-0R8") };
+    history.execute(&world, AddTool::new(&world, "TN6", stated).expect("stated insert"));
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert_eq!(text.matches("\"orientation\"").count(), 1, "only the stated tool writes the key: {text}");
+
+    let back = new_world();
+    project::load(&back, &path).expect("load");
+    let tool = |n: &str| model::find_by_name(&back, n).and_then(|e| model::tool_of(&back, &e)).expect("tool");
+    assert_eq!(tool("TN").orientation, None, "an unstated orientation stays unstated");
+    assert_eq!(tool("TN").lathe_orientation(), Some(2), "and reads as the insert's default");
+    assert_eq!(tool("TN6").orientation, Some(6));
+    project::save(&back, &path).expect("resave");
+    assert_eq!(std::fs::read_to_string(&path).expect("reread"), text, "byte-identical round trip");
+
+    let bad = text.replace("\"orientation\": 6", "\"orientation\": 12");
+    assert_ne!(bad, text, "the fixture carries the key");
+    let _ = std::fs::remove_file(&path);
+    assert!(matches!(project::open(&new_world(), &bad), Err(ProjectError::Corrupt(_))), "orientation 12 is refused");
+}

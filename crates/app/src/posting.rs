@@ -331,6 +331,8 @@ mod wcs_rotation;
 mod wcs_slot;
 #[path = "posting_mounts.rs"]
 mod mounts;
+#[path = "posting_nose.rs"]
+pub mod nose;
 pub(crate) use wcs_rotation::{offset_frame, OffsetFrame};
 pub use mounts::{
     machine_checks, machine_value_for, machine_value_of, post_mounts, post_mounts_script, post_of_setup, PostedMount,
@@ -789,11 +791,17 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
         let op_kind = op.params.kind().to_string();
         let tool_kind = tool.kind.to_string();
         let setup_name = crate::setup::effective(world, setup).unwrap_or_default();
+        // #630: a nose-centre turning path posts as the tool's control
+        // point for its orientation (or is refused by name when the
+        // orientation cannot cut it); the cache stays the nose truth.
+        let (posted, tool_orientation) = nose::posted_path(&op.params, &op.tool, &tool, &cache.path, origin)
+            .map_err(|e| format!("{display_name}: {e}"))?;
         let d = Dump {
             op_kind: &op_kind,
             setup_name: &setup_name,
             tool_kind: &tool_kind,
             tool_corner_r: tool.corner_r,
+            tool_orientation,
             probe_result,
             op_name: &display_name,
             part_load,
@@ -825,7 +833,7 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
                 .map(|w| format!("{name}: {w}"))
                 .collect(),
         };
-        streams.push((name.clone(), post::dump(&cache.path, &d)));
+        streams.push((name.clone(), post::dump(&posted, &d)));
     }
     Ok(streams)
 }
