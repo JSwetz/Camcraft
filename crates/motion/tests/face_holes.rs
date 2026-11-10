@@ -147,6 +147,19 @@ fn a_strip_narrower_than_the_tool_between_two_holes_is_refused_by_name() {
 }
 
 #[test]
+fn the_narrow_strip_refusal_points_at_the_strip() {
+    // #261 part 2: the refusal names its spot - the middle of the 4 mm
+    // strip (x = 0, between the holes' walls at -2 and 2), on the row
+    // its sentence quotes, at the cut height.
+    let err = face(&plate(&[(-7.0, 0.0), (7.0, 0.0)]), &p(FaceHoles::Lift)).expect_err("refused");
+    let at = err.location().expect("a located refusal");
+    assert!(at.x.abs() < 1e-9, "the strip's middle: {at:?}");
+    assert_eq!(at.z, -2.0, "the cut height");
+    assert!(at.y.abs() <= 5.0, "a row within the holes' band (its edge included): {at:?}");
+    assert!(err.to_string().contains(&format!("on the row at Y={:.2}", at.y)), "the row the sentence names: {err}");
+}
+
+#[test]
 fn staged_facing_lifts_over_the_hole_at_every_level() {
     let region = plate(&[(0.0, 0.0)]);
     let single = face(&region, &p(FaceHoles::Lift)).expect("single");

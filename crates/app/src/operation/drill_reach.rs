@@ -66,11 +66,15 @@ fn holder(tool: &Tool, name: &str) -> Result<Option<(f64, f64)>, GenError> {
     Ok((hd > 0.0 && hl > 0.0).then(|| (finite_or_zero(tool.flute_len) + finite_or_zero(tool.shank_len), 0.5 * hd)))
 }
 
-fn too_deep(what: &str, depth: f64, name: &str, flute: f64, fix: &str) -> GenError {
-    GenError::Invalid(format!(
-        "{what} is {depth:.3} mm deep from the stock surface; tool {name}'s flute reaches {flute:.3} mm - \
-         past it the shank feeds into uncut stock (a collision); {fix}"
-    ))
+/// `at` is the hole's mouth, the spot the refusal marks (#677).
+fn too_deep(what: &str, at: Point3, depth: f64, name: &str, flute: f64, fix: &str) -> GenError {
+    GenError::invalid_at(
+        format!(
+            "{what} is {depth:.3} mm deep from the stock surface; tool {name}'s flute reaches {flute:.3} mm - \
+             past it the shank feeds into uncut stock (a collision); {fix}"
+        ),
+        at,
+    )
 }
 
 /// The cross holes' reach (spindle frame, mouths already on the raw
@@ -97,6 +101,7 @@ pub(super) fn cross_reach(
             let o = w.origin;
             return Err(too_deep(
                 &format!("cross hole {i} at ({:.3}, {:.3}, {:.3})", o.x, o.y, o.z),
+                o,
                 depth,
                 name,
                 flute,
@@ -152,10 +157,11 @@ pub(super) fn axial_reach(
         let top = top_over(part, stock, xy.x, xy.y, body, pb).unwrap_or(entry).max(entry.min(r_z));
         let depth = top - bottom_z;
         if matches!(c.kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {
-            shank_fits(c, holes, depth, flute, tool, name)?;
+            shank_fits(c, holes, top, depth, flute, tool, name)?;
         } else if depth.is_nan() || depth > flute + TOL {
             return Err(too_deep(
                 &format!("hole at ({:.3}, {:.3})", xy.x, xy.y),
+                Point3::new(xy.x, xy.y, top),
                 depth,
                 name,
                 flute,
@@ -165,12 +171,17 @@ pub(super) fn axial_reach(
         if let Some((reach, hr)) = holder(tool, name)? {
             let face = bottom_z + reach;
             if let Some(ht) = top_over(part, stock, xy.x, xy.y, hr, prior_at(hr)).filter(|&z| face < z - TOL) {
-                return Err(GenError::Invalid(format!(
-                    "tool {name}'s holder (dia. {:.3}, {reach:.3} mm above the tip) sinks to Z {face:.3} at the \
-                     hole at ({:.3}, {:.3}), below the material top {ht:.3} around it - the holder feeds into \
-                     the stock (a collision); use a longer tool or a slimmer holder",
-                    2.0 * hr, xy.x, xy.y
-                )));
+                return Err(GenError::invalid_at(
+                    format!(
+                        "tool {name}'s holder (dia. {:.3}, {reach:.3} mm above the tip) sinks to Z {face:.3} at the \
+                         hole at ({:.3}, {:.3}), below the material top {ht:.3} around it - the holder feeds into \
+                         the stock (a collision); use a longer tool or a slimmer holder",
+                        2.0 * hr,
+                        xy.x,
+                        xy.y
+                    ),
+                    Point3::new(xy.x, xy.y, top),
+                ));
             }
         }
     }
@@ -181,7 +192,7 @@ pub(super) fn axial_reach(
 /// only the cutting end is in the hole; past it the shank (the only
 /// body between flutes and holder) must fit the hole's diameter, or it
 /// is refused by name.
-fn shank_fits(c: &Cycle, holes: &[Hole], depth: f64, flute: f64, tool: &Tool, name: &str) -> Result<(), GenError> {
+fn shank_fits(c: &Cycle, holes: &[Hole], top: f64, depth: f64, flute: f64, tool: &Tool, name: &str) -> Result<(), GenError> {
     if depth.is_finite() && depth <= flute + TOL {
         return Ok(());
     }
@@ -190,15 +201,18 @@ fn shank_fits(c: &Cycle, holes: &[Hole], depth: f64, flute: f64, tool: &Tool, na
     let shank_d = tool.shank_d;
     match hole_d {
         Some(hd) if depth.is_finite() && shank_d.is_finite() && shank_d <= hd + TOL => Ok(()),
-        _ => Err(GenError::Invalid(format!(
-            "{:?} cycle at ({:.3}, {:.3}) is {depth:.3} mm deep from the stock surface, past tool {name}'s \
-             {flute:.3} mm flute, and its shank dia. {shank_d:.3} does not fit the dia. {} hole - the shank \
-             feeds into the wall (a collision); use a tool with a longer flute or a slimmer shank",
-            c.kind,
-            c.xy.x,
-            c.xy.y,
-            hole_d.map_or_else(|| "(unknown)".to_string(), |d| format!("{d:.3}"))
-        ))),
+        _ => Err(GenError::invalid_at(
+            format!(
+                "{:?} cycle at ({:.3}, {:.3}) is {depth:.3} mm deep from the stock surface, past tool {name}'s \
+                 {flute:.3} mm flute, and its shank dia. {shank_d:.3} does not fit the dia. {} hole - the shank \
+                 feeds into the wall (a collision); use a tool with a longer flute or a slimmer shank",
+                c.kind,
+                c.xy.x,
+                c.xy.y,
+                hole_d.map_or_else(|| "(unknown)".to_string(), |d| format!("{d:.3}"))
+            ),
+            Point3::new(c.xy.x, c.xy.y, top),
+        )),
     }
 }
 

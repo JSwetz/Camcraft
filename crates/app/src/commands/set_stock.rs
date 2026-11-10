@@ -43,8 +43,11 @@ impl SetStock {
             )));
         }
         if !shape.is_bounded() {
+            let u = crate::units::of(world);
             return Err(CommandError::Invalid(format!(
-                "stock dimensions exceed {MAX_STOCK_DIM:e} mm"
+                "stock dimensions exceed {} {}",
+                crate::units::len(MAX_STOCK_DIM, u, 0),
+                u.suffix()
             )));
         }
         let mut location = location;

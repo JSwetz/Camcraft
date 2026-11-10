@@ -34,7 +34,7 @@ fn edge(dir: ProbeDir, target: Point3, depth: f64) -> ProbeParams {
         radius: 0.0,
         ball_diameter: 4.0,
         approach: 5.0,
-        overtravel: 5.0,
+        overtravel: 1.0, // #570: the new-op default
         backoff: 1.0,
         fast_feed: 300.0,
         slow_feed: 30.0,
@@ -164,7 +164,7 @@ fn edge_world(stylus_len: f64, depth: f64) -> (World, History) {
         target: [b.min.x, (b.min.y + b.max.y) * 0.5, b.max.z],
         radius: 0.0,
         approach: 5.0,
-        overtravel: 5.0,
+        overtravel: 1.0, // #570: the new-op default
         backoff: 1.0,
         fast_feed: 300.0,
         slow_feed: 30.0,

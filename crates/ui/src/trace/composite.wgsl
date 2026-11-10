@@ -12,7 +12,7 @@ struct C {
     fwd: vec4<f32>,    // xyz forward, w viewport width (px)
     right: vec4<f32>,  // xyz right, w viewport height (px)
     up: vec4<f32>,     // xyz up, w viewport px per trace px
-    frame: vec4<f32>,  // trace width, trace height
+    frame: vec4<f32>,  // trace width, trace height, ortho half height (0 = perspective)
     // fs_stock's verdict palette (M13.4 colour-vision remap)
     clean: vec4<f32>,
     rest: vec4<f32>,
@@ -51,9 +51,18 @@ fn fs_composite(@builtin(position) pos: vec4<f32>) -> FOut {
     }
     let u = 2.0 * pos.x / vw - 1.0;
     let v = 1.0 - 2.0 * pos.y / vh;
-    let a = c.eye.w * (vw / vh);
-    let dir = normalize(c.fwd.xyz + c.right.xyz * (u * a) + c.up.xyz * (v * c.eye.w));
-    let hit = c.eye.xyz + dir * s.x;
+    // PreviewCamera::ray: the eye's cone, or (#609) in orthographic a
+    // parallel ray along fwd from the pixel's point on the eye plane.
+    let oh = c.frame.z;
+    var origin = c.eye.xyz;
+    var dir = c.fwd.xyz;
+    if (oh > 0.0) {
+        origin = c.eye.xyz + c.right.xyz * (u * oh * (vw / vh)) + c.up.xyz * (v * oh);
+    } else {
+        let a = c.eye.w * (vw / vh);
+        dir = normalize(c.fwd.xyz + c.right.xyz * (u * a) + c.up.xyz * (v * c.eye.w));
+    }
+    let hit = origin + dir * s.x;
     let clip = c.mvp * vec4<f32>(hit, 1.0);
     if (clip.w <= 0.0) {
         discard;

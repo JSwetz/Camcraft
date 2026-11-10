@@ -233,6 +233,7 @@ fn tool(kind: ToolKind, center_cutting: bool) -> Tool {
         feed: 120.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 

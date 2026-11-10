@@ -23,6 +23,7 @@
 /.claude/*
 !/.claude/agents/
 !/.claude/skills/
+!/.claude/PROCESS_VERSION
 /.claude/**/*.lock
 /.vscode/
 /.idea/

@@ -468,6 +468,7 @@ fn cycle_tool(kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64) -> Tool
         feed: 200.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 

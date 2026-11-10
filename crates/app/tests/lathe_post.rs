@@ -192,7 +192,12 @@ fn facing_posts_to_the_lathe_golden() {
     assert!(text.contains("G18") && text.contains("G99") && text.contains("G97 S3000 M03"), "{text}");
     assert!(text.contains("G50 S12000"), "the machine's ceiling clamps the spindle: {text}");
     assert!(text.contains("T0101"), "station and offset: {text}");
-    assert!(text.contains("X0 "), "the pass ends on the axis as X0 (diameter): {text}");
+    // #630: the nose CENTRE ends on the axis, so the posted control
+    // point (orientation 2, r 0.8) stands r past it - X-1.6 diameter -
+    // and the last pass posts the facing plane itself, Z14, not 14 + r.
+    assert!(text.contains("X-1.6 Z14 "), "the pass ends with the nose centre on the axis: {text}");
+    assert!(!text.contains("Z14.8"), "a face at Z14 posts Z14, not the nose centre: {text}");
+    assert!(text.contains("ORIENTATION 2"), "the tool note names the orientation: {text}");
     assert!(!text.contains("Y"), "a lathe program has no Y word: {text}");
     common::write_golden("nc/fanuc-lathe/facing.nc", &text);
 }
@@ -343,7 +348,9 @@ fn groove_and_part_post_to_the_lathe_golden() {
     let text = program_of(&world);
     assert!(text.contains("T0101") && text.contains("T0202"), "two stations: {text}");
     assert!(text.contains("(PART LOAD ADVANCE 30)") && text.contains("(PART UNLOAD)"), "{text}");
-    assert!(text.contains("Z-10 "), "the kerf's station: {text}");
+    // #641: the parting plane Z-10 is the kerf's centre; the 3 mm blade
+    // posts its default left (-Z) corner, half a width below it.
+    assert!(text.contains("Z-11.5 ") && !text.contains("Z-10 "), "the kerf's left corner: {text}");
     common::write_golden("nc/fanuc-lathe/groove_part.nc", &text);
 }
 

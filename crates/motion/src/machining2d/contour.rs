@@ -110,7 +110,7 @@ fn contour_impl(
     // The contour the post programs under G41/G42 (M13.11): the part
     // at the stock to leave; `None` for every path cut in computer.
     let prog = contour_comp::programmed_region(region, p)?;
-    let flat = p.levels();
+    let flat = p.levels()?;
     let mut loops: Vec<&Loop> = center.loops().iter().collect();
     loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
 

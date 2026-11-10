@@ -11,6 +11,7 @@
 use egui::{RichText, Ui};
 
 use camcraft_app::setup_stock::{self, Incoming, StockSource};
+use camcraft_app::units;
 
 use crate::state::{CommandKind, State};
 
@@ -65,11 +66,22 @@ fn incoming(ui: &mut Ui, state: &State, name: &str, prev: &str) {
     });
     match got {
         Ok(i) => {
+            let u = state.units();
             ui.label(format!(
-                "Incoming from {prev}: X {:.3} .. {:.3}, Y {:.3} .. {:.3}, Z {:.3} .. {:.3} mm",
-                i.min[0], i.max[0], i.min[1], i.max[1], i.min[2], i.max[2]
+                "Incoming from {prev}: X {} .. {}, Y {} .. {}, Z {} .. {} {}",
+                units::len(i.min[0], u, 3),
+                units::len(i.max[0], u, 3),
+                units::len(i.min[1], u, 3),
+                units::len(i.max[1], u, 3),
+                units::len(i.min[2], u, 3),
+                units::len(i.max[2], u, 3),
+                u.suffix()
             ));
-            ui.label(format!("Incoming volume: {:.1} mm³ (this setup's Stock node is not cut from)", i.volume));
+            ui.label(format!(
+                "Incoming volume: {} {} (this setup's Stock node is not cut from)",
+                units::vol(i.volume, u, 1),
+                u.vol_suffix()
+            ));
         }
         Err(why) => {
             ui.label(RichText::new(format!("Incoming stock not known yet: {why}")).weak());
