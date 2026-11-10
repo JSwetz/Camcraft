@@ -46,7 +46,7 @@ pub(crate) fn adaptive_passes(center: &Region, p: &PocketParams, what: &str, tro
     // crossing law, asked of the plan first); one refused past its
     // planning budget (issue #13) has no passes to judge.
     let cross = if refused.is_some() { None } else { first_crossing(&passes) };
-    let levels = super::levels::cut_levels(p.top_z, p.bottom_z, p.stepdown).len();
+    let levels = super::levels::cut_levels(p.top_z, p.bottom_z, p.stepdown)?.len();
     let budget = refused.or_else(|| over_budget(&travel, levels));
     if rest <= HSM_REST_MAX && cross.is_none() && budget.is_none() {
         return Ok((passes, notes, PocketStrategy::Adaptive, room, joins));

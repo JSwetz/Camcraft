@@ -45,6 +45,9 @@ mod setup_mount;
 mod setup_post_options;
 #[path = "state_fixture.rs"]
 mod fixture_view;
+#[path = "state_fixture_library.rs"]
+mod fixture_library;
+pub use fixture_library::{FixtureLibDialog, InsertFixtureDraft, LibraryRow, SaveFixtureDraft};
 #[path = "state_program_entry.rs"]
 mod program_entry;
 pub use program_entry::EntryVerb;
@@ -53,6 +56,8 @@ mod tool_body_ui;
 pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
 #[path = "state_tool_profile.rs"]
 mod tool_profile_ui;
+#[path = "state_recent.rs"]
+mod recent_ui;
 pub use tool_profile_ui::{ToolColumn, ToolProfileUi, is_spun_kind, parametric_points};
 use flecs_ecs::prelude::World;
 
@@ -69,6 +74,11 @@ pub enum CommandKind {
     SaveProjectDialog,
     SaveProjectAsDialog,
     SaveProjectFile(PathBuf),
+    /// One recent project or model (#662): the same open / import the
+    /// dialogs run, a missing file refused by name.
+    OpenRecent(camcraft_app::recent::RecentKind, PathBuf),
+    /// "Clear recent" (#662): empty one list (preference state, not undoable).
+    ClearRecent(camcraft_app::recent::RecentKind),
     /// Post NC through the save-dialog law (M1.7b): path via rfd, gate
     /// via `posting::post_setup`.
     PostProgramDialog,
@@ -127,6 +137,10 @@ pub enum CommandKind {
         path: String,
         machine: Box<camcraft_app::machine::Machine>,
     },
+    /// The Machines pane's "Use for this setup" (#384): re-read and
+    /// re-validate a catalogue machine (a refused file never mounts),
+    /// then route it like every machine verb (`state_setup_mount`).
+    UseCatalogueMachine(camcraft_app::machine::library::MachineSource),
     /// The post script (M3.3 A): the built-in arm ships, the dialog arm
     /// picks a user `.cps` through the file-pick law, and the path arm
     /// is what the headless tests run. Selection is a command like
@@ -333,12 +347,19 @@ pub enum CommandKind {
         source: camcraft_app::setup_stock::StockSource,
     },
     /// Lay the part on a G17 / G18 / G19 plane in a setup (#330): one
-    /// flat face or two straight edges, read by the app. Undoable
+    /// flat face (#554: faces only), read by the app. Undoable
     /// (`AlignPartToSetup`). Never touches the work offset.
     LayPartOnPlane {
         setup: String,
         picks: Vec<camcraft_app::operation::GeoSel>,
         lay: camcraft_app::pick::PlaneLay,
+    },
+    /// Turn the part in a setup's work plane (#557): a straight edge or
+    /// two points for +Y and/or +X, read by the app. Undoable
+    /// (`AlignPartToSetup`). Never touches the work offset.
+    TurnPartInPlane {
+        setup: String,
+        axes: camcraft_app::pick::InPlaneAxes,
     },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
@@ -373,6 +394,21 @@ pub enum CommandKind {
     },
     DeleteFixture(String),
     ImportFixtureDialog,
+    /// #339 slice 6: open the fixture library's Save / Insert dialog over
+    /// a setup's Fixtures node (`""` - the implicit setup). View state;
+    /// saving and deleting entries are confirmed file edits, not undo
+    /// entries (the #383 machine-file law).
+    FixtureLibrarySaveDialog(String),
+    FixtureLibraryInsertDialog(String),
+    /// Insert library entry `entry` as a fixture of `setup`, its datum
+    /// at `pos` (mm) turned by roll/pitch/yaw degrees (R = Rz ⊗ Ry ⊗ Rx):
+    /// one `InsertFixture`, one undo unit.
+    InsertFixtureFromLibrary {
+        entry: String,
+        setup: Option<String>,
+        pos: [f64; 3],
+        rpy_deg: [f64; 3],
+    },
     /// Part orientation (M5.2 G): a model's full rigid placement -
     /// position plus yaw-pitch-roll degrees (R = Rz ⊗ Ry ⊗ Rx, the
     /// `SetWcs` voice). The world stores a unit quaternion; the
@@ -793,6 +829,9 @@ pub struct ToolUi {
     pub flutes: Option<u32>,
     /// M11.3: may the tool plunge axially into solid?
     pub center_cutting: bool,
+    /// #630: the lathe tool orientation (LinuxCNC 1-9), None = the
+    /// kind's default - carried so an Apply never rewrites it.
+    pub orientation: Option<u8>,
 }
 
 impl Default for ToolUi {
@@ -842,6 +881,7 @@ impl ToolUi {
             tool_material: t.tool_material,
             flutes: t.flutes,
             center_cutting: t.center_cutting,
+            orientation: t.orientation,
         }
     }
 
@@ -890,6 +930,7 @@ impl ToolUi {
             tool_material: self.tool_material,
             flutes: self.flutes,
             center_cutting: self.center_cutting,
+            orientation: self.orientation,
         };
         tool.corner_r = tool.tip_corner_r();
         tool
@@ -1256,6 +1297,15 @@ pub struct State {
     /// The Theme door's open flag (#441): the same dropdown law as
     /// `ribbon_view_open` - a frame fact, one door open at a time.
     pub ribbon_theme_open: bool,
+    /// The open recent-files drop-down (#662) under the Open (projects)
+    /// or Model (models) button - the same door law, one open at a time.
+    pub ribbon_recent_open: Option<camcraft_app::recent::RecentKind>,
+    /// The recent projects and models (#662): user preference state,
+    /// never document state and never on the history.
+    pub recent: camcraft_app::recent::RecentFiles,
+    /// Where the recents are written back; `None` (every headless
+    /// State) keeps them in memory only.
+    pub recent_store: Option<PathBuf>,
     /// The dock's closable panels as of this frame (see [`PanelsOpen`]).
     pub panels_open: PanelsOpen,
     /// The View door's pending dock ask (see [`LayoutRequest`]).
@@ -1273,6 +1323,9 @@ pub struct State {
     /// Operation key being dragged in the browser; discarded on release.
     pub dragging_op: Option<String>,
     pub pending: VecDeque<CommandKind>,
+    /// #183: the live MCP session's inbox when the app was started with
+    /// `--mcp-port` / `CAMCRAFT_MCP_PORT`; drained with `pending`.
+    pub mcp: Option<camcraft_app::mcp::Inbox>,
     pub request_quit: bool,
     /// #107: a New / Open / Quit held back because the document has
     /// unsaved changes; while Some, the shell shows the Save / Don't Save
@@ -1312,6 +1365,11 @@ pub struct State {
     /// #339 slice 4: each fixture's mesh state, per document version
     /// (view cache - never truth, never saved).
     pub fixture_mesh_cache: camcraft_app::fixture_view::MeshStateCache,
+    /// #339 slice 6: the open fixture library dialog (view state).
+    pub fixture_lib: Option<FixtureLibDialog>,
+    /// The fixture library folder override (tests; `None` = the user
+    /// folder, `CAMCRAFT_FIXTURES` first).
+    pub fixture_lib_dir: Option<PathBuf>,
     /// The selected op's struck fixtures, per (version, op, path sig).
     pub struck_cache: camcraft_app::fixture_view::StruckCache,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
@@ -1324,8 +1382,18 @@ pub struct State {
     /// the selection as always.
     pub boundary_pick: Option<BoundaryPick>,
     /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
-    /// Face/Edge picks into it ahead of the boundary and the selection.
+    /// Face picks into it ahead of the boundary and the selection.
     pub plane_pick: Option<crate::plane_pick::PlanePick>,
+    /// The Setups page's axes-in-the-plane draft (#557); while it is
+    /// collecting, Edge/Vertex picks land in it ahead of everything else.
+    pub axis_pick: Option<crate::axis_pick::AxisDraft>,
+    /// The axes-in-the-plane rows were drawn this frame (#557): a
+    /// feature click with no axis armed says what to do, never falls
+    /// through to the operation pick.
+    pub axis_rows_shown: bool,
+    /// The setups whose pick rows (plane, axes) were drawn this frame
+    /// (#664): any other setup's armed pick is disarmed at frame end.
+    pub setup_pick_rows: Vec<String>,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1399,6 +1467,10 @@ pub struct State {
     /// the document version, the page draft): once any of it moves, the
     /// refusal retires - see [`crate::feedback`].
     pub feedback_ctx: Option<crate::feedback::FeedbackCtx>,
+    /// #261 part 2: the world spot a refused generation named, beside
+    /// [`State::feedback`]; read only through [`State::refusal_focus`],
+    /// which retires it with the refusal it belongs to.
+    pub feedback_at: Option<[f64; 3]>,
 }
 
 /// Which page of the Operations pane a refused command's message belongs
@@ -1515,6 +1587,9 @@ impl State {
             geo_pick: GeoPick::Model,
             boundary_pick: None,
             plane_pick: None,
+            axis_pick: None,
+            axis_rows_shown: false,
+            setup_pick_rows: Vec::new(),
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
@@ -1541,6 +1616,9 @@ impl State {
             ribbon_mode_open: false,
             ribbon_view_open: false,
             ribbon_theme_open: false,
+            ribbon_recent_open: None,
+            recent: camcraft_app::recent::RecentFiles::default(),
+            recent_store: None,
             panels_open: PanelsOpen { browser: true, properties: true, machines: false },
             layout_request: None,
             tree_menu: None,
@@ -1548,6 +1626,7 @@ impl State {
             rename_draft: None,
             dragging_op: None,
             pending: VecDeque::new(),
+            mcp: None,
             request_quit: false,
             unsaved_prompt: None,
             discard_confirmed: false,
@@ -1568,6 +1647,8 @@ impl State {
             repair_ui: RepairUi::default(),
             import_as_fixture: None,
             fixture_mesh_cache: Default::default(),
+            fixture_lib: None,
+            fixture_lib_dir: None,
             struck_cache: Default::default(),
             // The tool draft carries a plausible name from the first
             // frame: an empty Name field made Add look dead (refused
@@ -1597,6 +1678,7 @@ impl State {
             ui_target: UiTarget::None,
             feedback: None,
             feedback_ctx: None,
+            feedback_at: None,
         }
     }
 
@@ -1667,6 +1749,8 @@ impl State {
         }
         self.feedback_ctx = self.feedback_ctx_for(scope);
         self.feedback = Some((scope, msg));
+        // A new refusal names no spot until its caller says so (#261).
+        self.feedback_at = None;
     }
 
     /// Refetch the Setup pane's drafts from the world after any document
@@ -2335,6 +2419,8 @@ impl State {
         while let Some(action) = self.pending.pop_front() {
             self.run(action);
         }
+        // #183: an agent's live calls, after the user's own clicks.
+        crate::mcp_host::pump(self);
         self.poll_import();
         // A refusal that no longer describes the page retires, with its
         // status-strip mirror (crate::feedback).
@@ -2376,6 +2462,7 @@ impl State {
         // command (even a successful one) retires an old refusal.
         self.feedback = None;
         self.feedback_ctx = None;
+        self.feedback_at = None;
         // #107: New, Open and Quit over unsaved changes wait for the
         // prompt's answer instead of discarding the document.
         let Some(action) = self.hold_if_unsaved(action) else {
@@ -2438,6 +2525,8 @@ impl State {
                 }
             }
             CommandKind::SaveProjectFile(path) => self.save_project_path(path),
+            CommandKind::OpenRecent(kind, path) => self.open_recent(kind, path),
+            CommandKind::ClearRecent(kind) => self.clear_recent(kind),
             CommandKind::PostProgramDialog => self.post_program_dialog(),
             CommandKind::PostProgramFile(path) => self.post_program_path(path),
             CommandKind::PostProgramFolder(dir) => self.post_program_folder(dir),
@@ -2548,6 +2637,9 @@ impl State {
                 }
             }
             CommandKind::EditMachineApply { path, machine } => self.mount_edited(path, *machine),
+            // #384: the Machines pane's "Use for this setup" - routed
+            // like every machine verb (`setup_mount`).
+            CommandKind::UseCatalogueMachine(source) => self.mount_catalogue(&source),
             CommandKind::SelectPostBuiltin => self.select_post(PostRef::Builtin),
             CommandKind::SelectPostDialog => {
                 if let Some(path) = pick_post_file() {
@@ -2705,7 +2797,13 @@ impl State {
             CommandKind::ApplyCuttingData(name) => match ApplyCuttingData::new(&self.world, &name) {
                 Ok(command) => {
                     let s = command.suggestion();
-                    self.status = format!("{name}: suggestion applied - {:.0} rpm, {:.0} mm/min", s.rpm, s.feed);
+                    let u = self.units();
+                    self.status = format!(
+                        "{name}: suggestion applied - {:.0} rpm, {} {}",
+                        s.rpm,
+                        units::feed(s.feed, u),
+                        u.feed_suffix()
+                    );
                     self.history.execute(&self.world, command);
                     self.doc_version += 1;
                 }
@@ -2908,7 +3006,9 @@ impl State {
                         };
                     }
                     Err(err) => {
-                        self.refuse(ErrorScope::Operation, format!("generate failed: {err}"))
+                        self.refuse(ErrorScope::Operation, format!("generate failed: {err}"));
+                        // #261 part 2: where the generator refused, if it said.
+                        self.feedback_at = err.location().map(|p| [p.x, p.y, p.z]);
                     }
                 }
             }
@@ -3070,6 +3170,27 @@ impl State {
                     }
                 }
             }
+            CommandKind::TurnPartInPlane { setup, axes } => {
+                match AlignPartToSetup::turn_in_plane(&self.world, &setup, &axes) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        // The picks stay (disarmed) so Flip re-applies
+                        // onto what the setup now holds (#557 hand check).
+                        if let Some(d) = self.axis_pick.as_mut().filter(|d| d.setup == setup) {
+                            d.picking = None;
+                            d.applied = true;
+                        }
+                        self.status = format!(
+                            "{setup} part turned in the plane: {}",
+                            crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("part not turned in the plane: {err}"));
+                    }
+                }
+            }
             CommandKind::SetOperationSetup { name, setup } => {
                 match SetOperationSetup::new(&self.world, &name, setup.as_deref()) {
                     Ok(command) => {
@@ -3219,6 +3340,11 @@ impl State {
                     self.import_path(path);
                 }
             }
+            CommandKind::FixtureLibrarySaveDialog(setup) => self.open_fixture_library_save(setup),
+            CommandKind::FixtureLibraryInsertDialog(setup) => self.open_fixture_library_insert(setup),
+            CommandKind::InsertFixtureFromLibrary { entry, setup, pos, rpy_deg } => {
+                self.insert_fixture_from_library(&entry, setup, pos, rpy_deg);
+            }
             CommandKind::SetupSheetDialog => {
                 if let Some(path) = save_sheet_dialog() {
                     self.setup_sheet_path(path);
@@ -3362,7 +3488,8 @@ impl State {
     /// Called on this thread when a worker result arrives (or inline
     /// fallback completes). Execution stays a normal history command.
     fn finish_import(&mut self, result: Result<ImportModel, CommandError>) {
-        self.import_file = None;
+        // #662: the file a landed import came from joins the recent models.
+        let file = self.import_file.take();
         let secs = self
             .import_started
             .take()
@@ -3395,6 +3522,7 @@ impl State {
                             };
                             self.history.execute(&self.world, cmd);
                             self.doc_version += 1;
+                            self.note_recent_model(file.as_deref());
                             self.status = match &binding {
                                 Some(s) => format!("{verb}; marked as {s}'s fixture"),
                                 None => format!("{verb}; marked as a fixture"),
@@ -3410,6 +3538,7 @@ impl State {
                             let summary = upd.changes().describe();
                             self.history.execute(&self.world, upd);
                             self.doc_version += 1;
+                            self.note_recent_model(file.as_deref());
                             self.status = timed("updated", &format!(" ({summary})"));
                         }
                         Err(err) => self.status = format!("import refused: {err}"),
@@ -3418,6 +3547,7 @@ impl State {
                     // Fresh model: the spawn path, unchanged.
                     self.history.execute(&self.world, command);
                     self.doc_version += 1;
+                    self.note_recent_model(file.as_deref());
                     self.status = timed("imported", "");
                 }
             }
@@ -3657,6 +3787,7 @@ impl State {
         match project::load_noted(&self.world, &path) {
             Ok(notes) => {
                 self.project_path = Some(path.clone());
+                self.note_recent(camcraft_app::recent::RecentKind::Project, &path);
                 // The loaded document is the new clean point (#107).
                 self.history.mark_clean();
                 self.doc_version += 1;
@@ -3677,6 +3808,7 @@ impl State {
                 // What is on disk now matches the history position (#107).
                 self.history.mark_clean();
                 self.status = format!("saved {}", path.display());
+                self.note_recent(camcraft_app::recent::RecentKind::Project, &path);
                 self.project_path = Some(path);
             }
             Err(err) => self.status = format!("save failed: {err}"),

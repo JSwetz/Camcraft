@@ -87,10 +87,13 @@ pub(super) fn part_clear(t: &Toolpath, facets: &[Triangle], tool: &Tool, holes: 
         }
         _ => "the finished part stands in the drill's path - model the hole the tool travels".to_string(),
     };
-    Err(GenError::Invalid(format!(
-        "cross hole at ({}, {}, {}) along ({}, {}, {}) {what} the finished part: {why}",
-        o.x, o.y, o.z, h.dir.x, h.dir.y, h.dir.z
-    )))
+    Err(GenError::invalid_at(
+        format!(
+            "cross hole at ({}, {}, {}) along ({}, {}, {}) {what} the finished part: {why}",
+            o.x, o.y, o.z, h.dir.x, h.dir.y, h.dir.z
+        ),
+        o,
+    ))
 }
 
 /// The hole whose axis line `p` lies on (nearest line, within the

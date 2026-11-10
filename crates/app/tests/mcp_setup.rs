@@ -5,6 +5,7 @@
 //! input a tool error.
 //!
 //! Gate map (M4.4): covers app::mcp::setup_tools, app::mcp::fixture_tools,
+//! app::mcp::align_tools (#557),
 //! app::posting (fixture_findings).
 
 use camcraft_app::mcp::Server;
@@ -268,4 +269,59 @@ fn bad_setup_input_is_a_tool_error() {
     assert!(e.contains("position"), "{e}");
     let e = c.refused("set_wcs", json!({ "origin": [0.0, 0.0, 0.0], "typo": 1 }));
     assert!(e.contains("unknown argument"), "{e}");
+}
+
+/// #557: `set_part_axes` turns the part in the setup's work plane from an
+/// edge chain or two vertices, one undo step, refusals by name.
+#[test]
+fn set_part_axes_turns_the_part_from_an_edge_or_two_points() {
+    let dir = tmp_dir("axes");
+    let part = dir.join("block.stl");
+    write_box_stl(&part, (20.0, 20.0, 15.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+    let refused = c.refused("set_part_axes", json!({ "y": [] }));
+    assert!(refused.contains("add_setup first") || refused.contains("at least one pick"), "{refused}");
+    c.ok("add_setup", json!({}));
+    let f = c.ok("list_features", json!({ "model": "block", "kinds": ["chains", "vertices"] }));
+    let chain = |f: &Value, want: &dyn Fn(&Value, &Value) -> bool| -> String {
+        f["chains"]
+            .as_array()
+            .and_then(|cs| cs.iter().find(|c| want(&c["start"], &c["end"])))
+            .and_then(|c| c["id"].as_str())
+            .expect("a chain")
+            .to_owned()
+    };
+    let along_x = chain(&f, &|a, b| a[1] == b[1] && a[2] == b[2] && a[0] != b[0]);
+    let upright = chain(&f, &|a, b| a[0] == b[0] && a[1] == b[1]);
+    let vertex = |at: [f64; 3]| -> String {
+        f["vertices"]
+            .as_array()
+            .and_then(|vs| vs.iter().find(|v| v["at"] == json!(at)))
+            .and_then(|v| v["id"].as_str())
+            .expect("a vertex")
+            .to_owned()
+    };
+    let pick = |id: &str| json!({ "model": "block", "id": id });
+
+    let names: Vec<String> = c.request("tools/list", json!({}))["result"]["tools"]
+        .as_array()
+        .map(|t| t.iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    assert!(names.iter().any(|n| n == "set_part_axes"), "{names:?}");
+
+    let turned = c.ok("set_part_axes", json!({ "y": [pick(&along_x)] }));
+    assert_eq!(turned["turn_deg"].as_f64().map(f64::abs), Some(90.0), "{turned}");
+    assert!(turned["alignment"].is_object(), "{turned}");
+    let again = c.refused("set_part_axes", json!({ "y": [pick(&along_x)] }));
+    assert!(again.contains("already holds the part that way"), "{again}");
+    c.ok("undo", json!({}));
+    let pts = [pick(&vertex([-20.0, -20.0, 0.0])), pick(&vertex([20.0, 20.0, 0.0]))];
+    let diag = c.ok("set_part_axes", json!({ "x": pts, "primary": "x" }));
+    assert!((diag["turn_deg"].as_f64().unwrap_or(0.0) + 45.0).abs() < 1e-9, "{diag}");
+    c.ok("undo", json!({}));
+    let msg = c.refused("set_part_axes", json!({ "y": [pick(&upright)] }));
+    assert!(msg.contains("along the work plane's normal"), "{msg}");
+    let msg = c.refused("set_part_axes", json!({ "y": [pick(&along_x)], "primary": "z" }));
+    assert!(msg.contains("\"primary\""), "{msg}");
 }

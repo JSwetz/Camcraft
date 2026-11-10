@@ -1,0 +1,6 @@
+## #592 - a probe-only program is judged on a span-sized lattice
+
+- **Cause:** a touch probe stays out of the program sim's plan because it removes no stock (#108). In a probe-only program the plan is therefore empty. The stock lattice is sized by the smallest tool radius, and `min` over nothing is +inf, so the cell came out infinite. The grid builder then refused it as "invalid stock simulation setup: … box non-empty …", naming the wrong cause.
+- **Chosen:** `stock_grid` sizes the lattice by the stock's span alone (`auto_cell(0, span_x, span_y)`, the grid ceiling's floor) when no tool radius is finite. The program sim then **judges** the uncut stock against the part: clean when they agree, rest where they differ, never a gouge it did not cut. So the post shows no "not judged" note.
+- **Why not skip the sim with an accurate note:** skipping would still leave a "did not judge" line on every probe-only post. Judging the uncut stock is honest and cheap. The stock is not touched, so the verdict says only what is true: rest is not a problem, and a gouge cannot appear.
+- **Kept:** a genuinely missing or invalid stock still refuses by its own name ("no stock …", a rotated stock, a degenerate box via `Dexel::from_shape`). `auto_cell` in the sim crate is unchanged. The guard sits in the app's `stock_grid`, where the radius is chosen.

@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{PostOptions, ThreadingOutput};
+use crate::schema::{EndUnits, PostOptions, ThreadingOutput};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SetupPostOptionsDto {
@@ -18,6 +18,10 @@ pub struct SetupPostOptionsDto {
     pub threading: String,
     pub skip_stops: bool,
     pub per_op_files: bool,
+    /// #596's end-of-program unit: absent when left modal (the default),
+    /// so files written before it read the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_units: Option<String>,
 }
 
 impl SetupPostOptionsDto {
@@ -30,6 +34,11 @@ impl SetupPostOptionsDto {
             },
             skip_stops: o.skip_stops,
             per_op_files: o.per_op,
+            end_units: match o.end_units {
+                EndUnits::Leave => None,
+                EndUnits::Inch => Some("inch".to_owned()),
+                EndUnits::Millimeters => Some("mm".to_owned()),
+            },
         }
     }
 
@@ -41,6 +50,12 @@ impl SetupPostOptionsDto {
             "g76" => ThreadingOutput::G76Cycle,
             other => return Err(format!("setup '{setup}' names an unknown threading output {other:?}")),
         };
-        Ok(PostOptions { threading, skip_stops: self.skip_stops, per_op: self.per_op_files })
+        let end_units = match self.end_units.as_deref() {
+            None => EndUnits::Leave,
+            Some("inch") => EndUnits::Inch,
+            Some("mm") => EndUnits::Millimeters,
+            Some(other) => return Err(format!("setup '{setup}' names an unknown end-of-program unit {other:?}")),
+        };
+        Ok(PostOptions { threading, skip_stops: self.skip_stops, per_op: self.per_op_files, end_units })
     }
 }

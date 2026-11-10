@@ -1216,11 +1216,14 @@ impl Camera {
     /// standard orientation turns yaw/pitch. Non-finite `d` is a no-op
     /// that answers `self` - the cube's classification is finite by
     /// construction, so this is the Prime Directive's belt, not a path.
-    /// The straight-up/straight-down cases need no special yaw: `d.z`
-    /// lands pitch on `±pi/2`, and `basis_right`'s zero-guard (normalize
-    /// reads a squared length below EPSILON first) pins screen-right to
-    /// world +X there - so a pole view is roll-stable whatever `atan2`
-    /// returns for a vanishing `d.x`, `d.y`.
+    /// The straight-up/straight-down cases need a special yaw: `d.x`,
+    /// `d.y` vanish there, so `atan2` answers 0 and every pole click
+    /// would land on one canonical roll, spinning a yawed approach up to
+    /// half a turn on screen (#622). Instead the pole takes the *pre-
+    /// click* yaw snapped to the nearest quarter turn - the roll the view
+    /// had, kept; `basis_right`'s zero-guard then evaluates that yaw, so
+    /// a pole view rolls like its yaw and a second pole click changes
+    /// nothing (`docs/decisions/622-viewcube-roll-snap.md`).
     #[must_use]
     pub fn toward(&self, d: [f64; 3]) -> Camera {
         if d.iter().any(|v| !v.is_finite()) {
@@ -1234,9 +1237,18 @@ impl Camera {
             return *self;
         }
         n = [n[0] / l, n[1] / l, n[2] / l];
+        // At an exact Z pole the atan2 vanishes; take the roll from the
+        // yaw this camera already had, snapped to the nearest quarter
+        // turn, so the click levels the view without turning it (#622).
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let yaw = if n[2].abs() == 1.0 {
+            (self.yaw / quarter).round() * quarter
+        } else {
+            n[1].atan2(n[0])
+        };
         Camera {
             target: self.target,
-            yaw: n[1].atan2(n[0]),
+            yaw,
             pitch: n[2].clamp(-1.0, 1.0).asin(),
             dist: self.dist,
             projection: self.projection,
@@ -1288,13 +1300,16 @@ impl Camera {
         normalize([self.target[0] - e[0], self.target[1] - e[1], self.target[2] - e[2]])
     }
 
-    /// Right = normalize(cross(forward, +Z)); stable except straight up/down.
+    /// Right = normalize(cross(forward, +Z)); at an exact Z pole the cross
+    /// vanishes, and the guard evaluates the same expression at the camera's
+    /// (quarter-snapped, see `toward`) yaw instead - the limit every
+    /// near-pole view already rides (#622).
     #[must_use]
     fn basis_right(&self) -> (f64, f64, f64) {
         let (fx, fy, _) = self.fwd();
         let (x, y, _) = normalize([fy, -fx, 0.0]);
         if x == 0.0 && y == 0.0 {
-            return (1.0, 0.0, 0.0); // looking straight along Z
+            return (-self.yaw.sin(), self.yaw.cos(), 0.0); // looking straight along Z
         }
         (x, y, 0.0)
     }
@@ -1341,13 +1356,18 @@ impl Camera {
             // mode switch never jumps the framing. Depth is linear and
             // clip.w is 1 everywhere, so every screen-space consumer that
             // divides by w degenerates cleanly onto this matrix too.
+            // The depth row spans near -> 0.0 and far -> 1.0, NOT the
+            // OpenGL [-1, +1] span: WebGPU clips on 0 <= z <= w, and with
+            // clip.w held at 1 the OpenGL span puts every point nearer
+            // than (near + far) / 2 - everything in view - at negative
+            // clip z and blanks the viewport (#600).
             let h = self.ortho_half_height();
             let w = h * aspect;
             [
                 [1.0 / w, 0.0, 0.0, 0.0],
                 [0.0, 1.0 / h, 0.0, 0.0],
-                [0.0, 0.0, 2.0 / (near - far), 0.0],
-                [0.0, 0.0, (near + far) / (near - far), 1.0],
+                [0.0, 0.0, 1.0 / (near - far), 0.0],
+                [0.0, 0.0, near / (near - far), 1.0],
             ]
         } else {
             let g = (std::f64::consts::FRAC_PI_6).tan().recip(); // 60 deg vertical fov
@@ -1366,7 +1386,7 @@ impl Camera {
     /// same `dist` (#434). `dist` is clamped >= 0.5 by `zoom`, so this
     /// never vanishes.
     #[must_use]
-    fn ortho_half_height(&self) -> f64 {
+    pub(crate) fn ortho_half_height(&self) -> f64 {
         self.dist * (std::f64::consts::FRAC_PI_6).tan()
     }
 }

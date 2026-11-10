@@ -1192,6 +1192,7 @@ impl OpParams {
                 infeed,
                 feed,
                 plunge_feed,
+                hand,
             } => {
                 w(h, *tolerance);
                 wh(h, *clearance_z);
@@ -1200,6 +1201,14 @@ impl OpParams {
                 for v in [*pitch, *depth, *infeed, *feed, *plunge_feed] {
                     w(h, v);
                 }
+                // #629: the hand sets the helix's sense, and the passes
+                // now run toward the chuck - written for BOTH hands, so
+                // every thread cached before the fix goes stale once and
+                // regenerates the new way, saying so.
+                h.write_u8(match hand {
+                    crate::cl::ThreadHand::Right => 0xA1,
+                    crate::cl::ThreadHand::Left => 0xA2,
+                });
             }
             // The contour rides (M5.2 stage E, tags 25-27): each
             // promise-number MOVES the verdict's window or the ride

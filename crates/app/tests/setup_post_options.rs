@@ -191,10 +191,17 @@ fn own_post_options_round_trip_and_old_files_follow_the_document() {
     assert_eq!(setup_post_options::own(&w, Some("Setup1")), None);
     assert_eq!(saved(&w, "rt-untouched-resave"), untouched, "saves as it was");
 
-    let own = PostOptions { threading: ThreadingOutput::G76Cycle, skip_stops: true, per_op: true };
+    // #596's end unit rides a setup's own options too (merge with main).
+    let own = PostOptions {
+        threading: ThreadingOutput::G76Cycle,
+        skip_stops: true,
+        per_op: true,
+        end_units: camcraft_app::schema::EndUnits::Inch,
+    };
     h.execute(&world, SetSetupPostOptions::new(&world, "Setup2", Some(own)).expect("own options"));
     let text = saved(&world, "rt");
     assert!(text.contains("\"per_op_files\": true") && text.contains("\"threading\": \"g76\""), "{text}");
+    assert!(text.contains("\"end_units\": \"inch\""), "{text}");
     let w = new_world();
     project::open(&w, &text).expect("own options open");
     assert_eq!(setup_post_options::own(&w, Some("Setup2")), Some(own));

@@ -179,6 +179,7 @@ pub fn bore(facets: &[Triangle], p: &BoreParams) -> Result<Toolpath, GenError> {
             .filter(|q| q.0 >= s_lo && q.0 <= s_hi)
             .map(|q| q.1)
             .fold(f64::INFINITY, f64::min);
+        // #677: names no spot - the whole wall is too small for the bar.
         return Err(GenError::Invalid(format!(
             "the bar is bigger than its own work: a nose of radius {d:.3} cannot stand \
              inside a hole whose wall runs at radius {w_min:.3} - mount a smaller bar \
