@@ -135,7 +135,7 @@ impl LocateFixture {
         let e = model::find_by_name(world, &spec.fixture).ok_or_else(|| CommandError::NotFound(spec.fixture.clone()))?;
         let loc = model::transform_of(world, &e).unwrap_or_default();
         let next = setup_align::compose(setup_align::inverse(plan.delta), loc);
-        let write = MoveFixture::new(world, &spec.fixture, next)?;
+        let write = MoveFixture::locating(world, &spec.fixture, next)?;
         let warning = fixture_locate::join_warnings(
             fixture_locate::interpenetration(world, spec, &plan),
             fixture_locate::stock_interpenetration(world, spec, &plan, &fixture_locate::stock_carried(world, &plan)),

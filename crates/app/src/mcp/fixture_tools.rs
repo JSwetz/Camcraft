@@ -54,10 +54,12 @@ fn move_fixture(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> 
         None => current.unwrap_or_default().rot,
     };
     let cmd = MoveFixture::new(&env.world, name, Location { pos: point(pos), rot }).map_err(cmd_err)?;
+    let warning = cmd.warning().map(str::to_owned);
     env.history.execute(&env.world, cmd);
     let placed = model::find_by_name(&env.world, name).and_then(|e| model::transform_of(&env.world, &e));
     let mut out = loc_view(&placed.unwrap_or_default());
     out["fixture"] = json!(name);
+    out["warning"] = json!(warning);
     Ok(out)
 }
 

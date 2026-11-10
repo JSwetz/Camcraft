@@ -7,9 +7,9 @@
 //! the fixture. Pure: nothing here writes the world.
 //!
 //! Provenance: the 3-2-1 locating principle and face/point datums from
-//! machine-tool and fixture-design handbooks; the inside test for the
-//! interpenetration warning is the fixture mesh's own ray-crossing law
-//! (`camcraft_sim::fixture_mesh`). Our own code, no vendor material.
+//! machine-tool and fixture-design handbooks; the interpenetration
+//! warning is the shared sampled check (`crate::fixture_clash`, #582).
+//! Our own code, no vendor material.
 //!
 //! ## The laws here
 //!
@@ -32,8 +32,11 @@ pub use solve_impl::{LEN_TOL_MM, LocateOffset, MAX_MATES, NORMAL_TOL, solve};
 
 use flecs_ecs::prelude::{Entity, World};
 
+pub use crate::fixture_clash::PENETRATION_MM;
+
 use crate::fixture::{self, MACHINE_TABLE};
-use crate::geometry::{Point3, Triangle, transform_point};
+use crate::fixture_clash;
+use crate::geometry::Triangle;
 use crate::model;
 use crate::operation::GeoSel;
 use crate::pick::mate_datum;
@@ -146,12 +149,6 @@ pub fn is_still(delta: Location) -> bool {
     p.x.abs() <= 1e-9 && p.y.abs() <= 1e-9 && p.z.abs() <= 1e-9 && setup_align::is_identity_rot(delta.rot)
 }
 
-/// How deep (mm) a sample must sit inside the other body to count: the
-/// mated faces touch by design, and touching is not interpenetrating.
-pub const PENETRATION_MM: f64 = 0.05;
-/// At most this many facet samples per body (a stride beyond).
-const MAX_SAMPLES: usize = 20_000;
-
 /// The warning, by name, when the part would sit inside the fixture after
 /// `delta` (relative placement - the same whichever body moves). A
 /// sampled check: each facet's centre pushed [`PENETRATION_MM`] into its
@@ -163,14 +160,11 @@ pub fn interpenetration(world: &World, spec: &LocateSpec, plan: &Plan) -> Option
     let pe = model::find_by_name(world, &spec.part)?;
     let part: Vec<Triangle> = setup_align::facets_in(world, &pe, plan.setup.as_deref())?
         .iter()
-        .map(|t| place(*t, plan.delta))
+        .map(|t| fixture_clash::place(*t, plan.delta))
         .collect();
     let steel = model::world_facets(world, &fe)?;
-    let hit = sunk(&part, &steel).or_else(|| sunk(&steel, &part))?;
-    Some(format!(
-        "'{}' would sit inside the fixture '{}' (near {:.2}, {:.2}, {:.2}) - check the mates and the offset",
-        spec.part, spec.fixture, hit[0], hit[1], hit[2]
-    ))
+    let hit = fixture_clash::clash(&part, &steel)?;
+    Some(fixture_clash::part_message(&spec.part, &spec.fixture, hit, "check the mates and the offset"))
 }
 
 /// The warning, by name, when the setup's stock would sink into the
@@ -184,11 +178,12 @@ pub fn stock_interpenetration(world: &World, spec: &LocateSpec, plan: &Plan, sto
     let steel = model::world_facets(world, &fe)?;
     let own = crate::setup::stock_entity_name(world, plan.setup.as_deref());
     stocks.iter().filter(|(n, _)| *n == own).find_map(|(name, body)| {
-        let hit = sunk(body, &steel).or_else(|| sunk(&steel, body))?;
-        Some(format!(
-            "the stock '{name}' would sink into the fixture '{}' (near {:.2}, {:.2}, {:.2}) - check its allowance \
-             under the mated faces, or set the stock again",
-            spec.fixture, hit[0], hit[1], hit[2]
+        let hit = fixture_clash::clash(body, &steel)?;
+        Some(fixture_clash::stock_message(
+            name,
+            &spec.fixture,
+            hit,
+            "check its allowance under the mated faces, or set the stock again",
         ))
     })
 }
@@ -200,50 +195,12 @@ pub fn stock_carried(world: &World, plan: &Plan) -> Vec<(String, Vec<Triangle>)>
     let name = crate::setup::stock_entity_name(world, plan.setup.as_deref());
     model::find_by_name(world, &name)
         .and_then(|e| model::world_facets(world, &e))
-        .map(|t| vec![(name, t.into_iter().map(|t| place(t, plan.delta)).collect())])
+        .map(|t| vec![(name, t.into_iter().map(|t| fixture_clash::place(t, plan.delta)).collect())])
         .unwrap_or_default()
 }
 
 /// Both warnings, joined.
 #[must_use]
 pub fn join_warnings(a: Option<String>, b: Option<String>) -> Option<String> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
-        (a, b) => a.or(b),
-    }
-}
-
-fn place(t: Triangle, d: Location) -> Triangle {
-    Triangle::new(
-        transform_point(t.a, d.pos, d.rot),
-        transform_point(t.b, d.pos, d.rot),
-        transform_point(t.c, d.pos, d.rot),
-    )
-}
-
-/// A sample of `body` sunk inside the closed `other`, if any.
-fn sunk(body: &[Triangle], other: &[Triangle]) -> Option<[f64; 3]> {
-    let mesh = match camcraft_sim::fixture_mesh::FixtureMesh::build(other) {
-        Ok(m) => m,
-        Err(why) => {
-            tracing::info!("locate interpenetration not judged: {why}");
-            return None;
-        }
-    };
-    let stride = body.len().div_ceil(MAX_SAMPLES).max(1);
-    body.iter().step_by(stride).find_map(|t| {
-        let n = (t.b - t.a).cross(t.c - t.a);
-        let l = n.dot(n).sqrt();
-        if !(l.is_finite() && l > 1e-12) {
-            return None;
-        }
-        // Outward by winding: step against it, into the body.
-        let s = -PENETRATION_MM / l;
-        let c = Point3::new(
-            (t.a.x + t.b.x + t.c.x) / 3.0 + n.x * s,
-            (t.a.y + t.b.y + t.c.y) / 3.0 + n.y * s,
-            (t.a.z + t.b.z + t.c.z) / 3.0 + n.z * s,
-        );
-        mesh.contains(c).then_some([c.x, c.y, c.z])
-    })
+    fixture_clash::join(a.into_iter().chain(b).collect())
 }
