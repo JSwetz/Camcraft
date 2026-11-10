@@ -139,6 +139,9 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
     ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
     ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
+    // #618: the M+ upgrade kits - the M's figures with the MX's axis speeds.
+    ("Tormach 770M+", include_str!("../../../assets/machines/tormach-770m-plus.mch")),
+    ("Tormach 1100M+", include_str!("../../../assets/machines/tormach-1100m-plus.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
