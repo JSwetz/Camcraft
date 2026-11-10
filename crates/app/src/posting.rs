@@ -142,6 +142,9 @@ pub const MACHINES: &[(&str, &str)] = &[
     // #618: the M+ upgrade kits - the M's figures with the MX's axis speeds.
     ("Tormach 770M+", include_str!("../../../assets/machines/tormach-770m-plus.mch")),
     ("Tormach 1100M+", include_str!("../../../assets/machines/tormach-1100m-plus.mch")),
+    // #707: Makera's desktop mills, from Makera's product spec tables.
+    ("Makera Carvera", include_str!("../../../assets/machines/makera-carvera.mch")),
+    ("Makera Carvera Air", include_str!("../../../assets/machines/makera-carvera-air.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
