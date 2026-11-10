@@ -143,6 +143,11 @@ pub const MACHINES: &[(&str, &str)] = &[
     // #618: the M+ upgrade kits - the M's figures with the MX's axis speeds.
     ("Tormach 770M+", include_str!("../../../assets/machines/tormach-770m-plus.mch")),
     ("Tormach 1100M+", include_str!("../../../assets/machines/tormach-1100m-plus.mch")),
+    // #620: the PathPilot routers, each from its own manual / spec sheet
+    // (the plain xsTECH from its spec sheet and knowledge base: no manual).
+    ("Tormach 24R", include_str!("../../../assets/machines/tormach-24r.mch")),
+    ("Tormach xsTECH Pro", include_str!("../../../assets/machines/tormach-xstech-pro.mch")),
+    ("Tormach xsTECH", include_str!("../../../assets/machines/tormach-xstech.mch")),
     // #611: Tormach's lathes, from their operator manuals (UM10753, UM10225).
     ("Tormach 8L", include_str!("../../../assets/machines/tormach-8l.mch")),
     ("Tormach 15L Slant-PRO", include_str!("../../../assets/machines/tormach-15l-slant-pro.mch")),
