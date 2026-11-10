@@ -140,7 +140,13 @@ function joinDash(parts) {  // the non-empty parts, " - " between
   for (var i = 0; i < parts.length; i++) if (parts[i]) a.push(parts[i]);
   return a.join(" - ");
 }
-function note(s) { block(["(" + s + ")"]); }
+// #594: LinuxCNC reads some comments as commands - (MSG,..) (DEBUG,..)
+// (PRINT,..) (LOG..) (PROBEOPEN ..) (ABORT,..) and AXIS's (AXIS,..), the
+// keyword in any case (LinuxCNC G-code manual, "Comments", "Messages",
+// "Probe Logging", "Logging", "Debug Messages"). A comment whose text
+// would open with one is led by "- ", so user text stays inert.
+var ACTIVE = /^\s*(MSG|DEBUG|PRINT|LOG|LOGOPEN|LOGAPPEND|LOGCLOSE|PROBEOPEN|PROBECLOSE|ABORT|AXIS|PY|PYRUN)\b/i;
+function note(s) { block(["(" + (ACTIVE.test(s) ? "- " + s : s) + ")"]); }
 function commentParam(name, value) {
   if (name === "SetupName") setupName = clean(value);
   else if (name === "OperationName") opName = clean(value);
@@ -175,7 +181,9 @@ function toolNote() {  // just before the tool change it describes
 function onOpen() {
   inch = typeof machine !== "undefined" && machine.units === "inch";
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
-  block(["(" + nm + ")"]);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, so `Tormach 770MX (ML)` never nests.
+  note(clean(nm) || "CAMCRAFT");
   block([inch ? "G20" : "G21", "G17", "G90", "G91.1", "G94", "G40", "G49", "G80"]);
   block(["G64", inch ? "P0.001" : "P0.025"]);
   var z = safeZ();

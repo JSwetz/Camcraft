@@ -225,7 +225,9 @@ function invertedNotes() {
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block(["(" + nm + ")"]);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, so `Tormach 770MX (ML)` never nests.
+  block(["(" + (clean(nm) || "CAMCRAFT") + ")"]);
   invertedNotes();
 }
 

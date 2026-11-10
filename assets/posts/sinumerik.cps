@@ -212,7 +212,9 @@ function toolNote() {  // just before the tool change it describes
 
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
-  writeln("; " + nm);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, one rule for every comment line.
+  writeln("; " + (clean(nm) || "CAMCRAFT"));
   var z = safeZ();
   if (z !== null && z !== 0) note("SAFE RETRACT G53 Z" + fu(z) + " - STATED BY THE MACHINE");
 }
