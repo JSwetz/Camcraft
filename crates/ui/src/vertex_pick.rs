@@ -158,6 +158,14 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity: hit.entity, feature: sel };
+    if state.locate_pick.is_some() {
+        crate::locate_pick::take(state, pick); // #561: a point mate
+        return;
+    }
+    if state.points_pick.is_some() {
+        crate::points_pick::take(state, pick); // #555: a point of the plane
+        return;
+    }
     if crate::axis_pick::collecting(state) {
         crate::axis_pick::take(state, pick); // #557: a point of an axis
         return;

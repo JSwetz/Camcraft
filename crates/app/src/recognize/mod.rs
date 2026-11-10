@@ -105,6 +105,15 @@ pub fn pockets_of(world: &World, name: &str) -> Result<Vec<Pocket>, String> {
     if tris.is_empty() {
         return Err(format!("'{name}' has no geometry"));
     }
+    // #718: "up" and "leans into" are read straight off the facet winding,
+    // so a body whose outside cannot be trusted is refused first - an
+    // inside-out cube otherwise reads its own outline as a part-deep
+    // pocket. The verdict is #387's, the one the pick tools ask.
+    let all: Vec<u32> = (0..tris.len()).filter_map(|i| u32::try_from(i).ok()).collect();
+    let verdict = crate::pick::winding::verdict_for(&crate::pick::winding::winding_of(&tris), &all);
+    if let Some(why) = winding_refusal(verdict) {
+        return Err(format!("'{name}' {why}"));
+    }
     let loc = model::transform_of(world, &e).unwrap_or_default();
     let mesh = walls::Mesh::new(&tris, &loc);
     if mesh.usable == 0 {
@@ -134,4 +143,29 @@ pub fn pockets_of(world: &World, name: &str) -> Result<Vec<Pocket>, String> {
             .then(a.boundary.first().map_or(0.0, |p| p.y).total_cmp(&b.boundary.first().map_or(0.0, |p| p.y)))
     });
     Ok(out)
+}
+
+/// Why pockets cannot be read off a body with winding verdict `v`, as the
+/// tail of a refusal ("'part' {why}"); `None` for a closed, outward body.
+fn winding_refusal(v: Option<crate::pick::winding::BodyWinding>) -> Option<&'static str> {
+    use crate::pick::winding::BodyWinding;
+    let Some(v) = v else {
+        return Some("has no readable facets, so its pockets cannot be told from its outside");
+    };
+    Some(match v {
+        BodyWinding::Outward => return None,
+        BodyWinding::InsideOut => {
+            "is inside-out (its facets are wound inward), so its floors and walls would be read backwards - fix the model's facet winding (re-export it) before detecting pockets"
+        }
+        BodyWinding::Open => {
+            "is an open body (its shell has holes), so its inside cannot be told from its outside - repair the mesh (fill its holes) before detecting pockets"
+        }
+        BodyWinding::NonManifold => {
+            "is non-manifold (an edge is shared by more than two facets), so its inside cannot be told from its outside - repair the model before detecting pockets"
+        }
+        BodyWinding::Mixed => {
+            "has facets wound both ways, so its floors and walls cannot be read - fix the model's facet winding before detecting pockets"
+        }
+        BodyWinding::Flat => "has no volume, so it has no pockets to detect",
+    })
 }

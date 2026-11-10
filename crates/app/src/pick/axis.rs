@@ -207,7 +207,7 @@ pub fn pick_coords(world: &World, g: &GeoSel) -> Option<Vec<[f64; 3]>> {
 }
 
 /// A picked vertex in the document frame.
-fn point(world: &World, g: &GeoSel) -> Result<[f64; 3], String> {
+pub(super) fn point(world: &World, g: &GeoSel) -> Result<[f64; 3], String> {
     let FeatureSel::Vertex(id) = g.feature else { return Err(gone(g)) };
     let e = model::find_by_name(world, &g.entity).ok_or_else(|| gone(g))?;
     let features = model::features_of(world, &e).ok_or_else(|| gone(g))?;
