@@ -1001,3 +1001,30 @@ fn an_unstated_rotary_tilts_nothing_a_post_may_promise() {
     assert_eq!(r["rtcp"], serde_json::json!(true), "the raw door reads geometry too");
     assert_eq!(r["rapidRate"], 5000.0, "the rotary letter never joins the ceiling");
 }
+
+#[test]
+fn rows_state_each_fact_and_never_a_bare_question_mark() {
+    use camcraft_app::units::Unit;
+    let m = Machine {
+        vendor: "Acme".into(),
+        model: "Mill".into(),
+        spindle_max: Some(15000.0),
+        axes: vec![
+            AxisLimits { name: "X".into(), travel: Some((0.0, 300.0)), ..Default::default() },
+            AxisLimits { name: "Y".into(), ..Default::default() },
+        ],
+        tool_count: Some(6),
+        ..Default::default()
+    };
+    let rows = m.rows(Unit::Millimeters);
+    let get = |k: &str| rows.iter().find(|(l, _)| *l == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    assert_eq!(get("Machine"), "Acme Mill");
+    assert_eq!(get("Spindle"), "up to 15000 rpm (min not stated)");
+    assert_eq!(get("Axes"), "X 0 \u{2026} 300 mm \u{b7} Y stroke not stated");
+    assert_eq!(get("Tool changer"), "6 slots");
+    assert_eq!(get("Coolant"), "not stated");
+    assert_eq!(get("Kind"), "not stated");
+    assert!(rows.iter().all(|(_, v)| !v.contains('?')), "{rows:?}");
+    let inch = m.rows(Unit::Inches);
+    assert!(inch.iter().any(|(l, v)| *l == "Axes" && v.contains("11.8") && v.contains("in")), "{inch:?}");
+}

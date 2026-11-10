@@ -6,6 +6,7 @@
 pub mod def;
 mod direction;
 mod parse;
+mod rows;
 
 pub use def::*;
 pub use direction::{inverted_axis_line, inverted_motion, inverted_phrase, untranslated_inversion, AxisDirection};
