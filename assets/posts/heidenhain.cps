@@ -268,15 +268,15 @@ function startPreamble() {
   modalWait = true;
   if (toolWait) {
     toolNote();
-    block(["T" + ni(tNo), "G17", spindleWait ? "S" + ff(sRpm) : ""]);
+    block(["T" + ni(tNo), "G17", spindleWait && sRpm > 0 ? "S" + ff(sRpm) : ""]);
     toolWait = false;
-  } else if (spindleWait) {
+  } else if (spindleWait && sRpm > 0) {
     block(["S" + ff(sRpm)]);
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#523) states no spindle
     block(["M3"]);
-    spindleWait = false;
   }
+  spindleWait = false;
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
 }

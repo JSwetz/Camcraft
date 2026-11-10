@@ -10,7 +10,9 @@
 
 use super::setup_tools::{cmd_err, loc_view, obj, opt_nums, point, setup_or_active};
 use super::tools::{req_str, Tool};
-use crate::commands::{MoveFixture, TagFixture, UntagFixture};
+use crate::commands::{Locate, MoveFixture, TagFixture, UntagFixture};
+use crate::fixture_locate::{LocateOffset, LocateSpec, Mate, Mover};
+use crate::operation::GeoSel;
 use crate::fixture;
 use crate::model;
 use crate::schema::Location;
@@ -24,6 +26,7 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool { name: "add_fixture", description: "Mark an imported model as a fixture (workholding steel the verifier checks every toolpath against) of a setup - the active one by default. Import the model with import_model first.", schema: s_add_fixture, run: add_fixture },
     Tool { name: "remove_fixture", description: "Unmark a fixture: the model stays, the verifier stops checking against it.", schema: s_fixture_name, run: remove_fixture },
     Tool { name: "move_fixture", description: "Place a fixture: position [x, y, z] in mm and an optional unit quaternion rotation [x, y, z, w] (omitted keeps the current one).", schema: s_move_fixture, run: move_fixture },
+    Tool { name: "locate_part", description: "Locate the part in a fixture (or, with move \"fixture\", the fixture on the part) by mates: each mate pairs a part face or vertex id with the fixture face or vertex it sits on (list_features prints the ids). One to three mates - floor, fixed jaw, stop (3-2-1) - then an optional offset [dx, dy, dz] mm and turn (degrees about the first face mate's normal). One undoable step; refusals and an interpenetration warning are said by name.", schema: s_locate_part, run: locate_part },
     Tool { name: "get_fixture_findings", description: "The verifier's fixture check, live: every setup's fixtures and machine table with their boxes, and each collision of a toolpath with them (op, move index, struck part, message). Needs every operation generated.", schema: s_empty, run: get_fixture_findings },
 ];
 
@@ -55,6 +58,46 @@ fn move_fixture(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> 
     let placed = model::find_by_name(&env.world, name).and_then(|e| model::transform_of(&env.world, &e));
     let mut out = loc_view(&placed.unwrap_or_default());
     out["fixture"] = json!(name);
+    Ok(out)
+}
+
+/// #561: one locate, as the Fixtures page applies it.
+fn locate_part(env: &mut Env, a: &Map<String, Value>) -> Result<Value, String> {
+    let part = req_str(a, "part")?;
+    let steel = req_str(a, "fixture")?;
+    let mover = match super::tools::opt_str(a, "move")? {
+        None | Some("part") => Mover::Part,
+        Some("fixture") => Mover::Fixture,
+        Some(other) => return Err(format!("\"move\" is \"part\" or \"fixture\", not \"{other}\"")),
+    };
+    let Some(Value::Array(items)) = a.get("mates") else {
+        return Err("\"mates\" is required: an array of {\"part\": id, \"fixture\": id}".into());
+    };
+    let side = |m: &Map<String, Value>, key: &str, entity: &str| -> Result<GeoSel, String> {
+        let feature = super::pick::parse_feature_id(req_str(m, key)?)?;
+        Ok(GeoSel { entity: entity.to_owned(), feature })
+    };
+    let mates = items
+        .iter()
+        .map(|v| match v {
+            Value::Object(m) => Ok(Mate { part: side(m, "part", part)?, fixture: side(m, "fixture", steel)? }),
+            other => Err(format!("a mate is an object {{\"part\", \"fixture\"}}, got {other}")),
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let [dx, dy, dz] = opt_nums::<3>(a, "offset")?.unwrap_or([0.0; 3]);
+    let turn_deg = match a.get("turn") {
+        None | Some(Value::Null) => 0.0,
+        Some(v) => v.as_f64().ok_or("\"turn\" must be a number of degrees")?,
+    };
+    let spec = LocateSpec { part: part.to_owned(), fixture: steel.to_owned(), mates, offset: LocateOffset { dx, dy, dz, turn_deg } };
+    let cmd = Locate::new(&env.world, &spec, mover).map_err(cmd_err)?;
+    let warning = cmd.warning().map(str::to_owned);
+    env.history.execute(&env.world, cmd);
+    let moved = if mover == Mover::Part { part } else { steel };
+    let placed = model::find_by_name(&env.world, moved).and_then(|e| model::transform_of(&env.world, &e));
+    let mut out = loc_view(&placed.unwrap_or_default());
+    out["moved"] = json!(moved);
+    out["warning"] = json!(warning);
     Ok(out)
 }
 
@@ -149,6 +192,26 @@ fn s_add_fixture() -> Value {
 
 fn s_fixture_name() -> Value {
     obj(json!({ "name": { "type": "string", "description": "A fixture's name." } }), &["name"])
+}
+
+fn s_locate_part() -> Value {
+    obj(
+        json!({
+            "part": { "type": "string", "description": "The part (an imported model) to locate." },
+            "fixture": { "type": "string", "description": "The fixture it sits in." },
+            "mates": { "type": "array", "minItems": 1, "maxItems": 3,
+                "items": { "type": "object", "properties": {
+                    "part": { "type": "string", "description": "A part face or vertex id (\"face:0x…\", \"vertex:0x…\")." },
+                    "fixture": { "type": "string", "description": "The fixture face or vertex id it meets." } },
+                    "required": ["part", "fixture"] },
+                "description": "In order: the floor, the fixed jaw, the stop." },
+            "offset": { "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3,
+                "description": "A nudge [dx, dy, dz] mm after the mates (the part relative to the fixture)." },
+            "turn": { "type": "number", "description": "Degrees about the first face mate's normal, after the mates." },
+            "move": { "type": "string", "enum": ["part", "fixture"], "description": "Which body moves; the part by default." }
+        }),
+        &["part", "fixture", "mates"],
+    )
 }
 
 fn s_move_fixture() -> Value {

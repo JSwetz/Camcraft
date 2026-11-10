@@ -290,6 +290,10 @@ pub struct SetupDto {
     /// picked - is #317's implicit rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock_source: Option<String>,
+    /// #389: the setup's own post options, additive (no version step).
+    /// Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_options: Option<SetupPostOptionsDto>,
 }
 
 /// A setup's WCS as files hold it. v54 (#342) writes one entity name
