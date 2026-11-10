@@ -164,6 +164,8 @@ mod laws;
 mod mesh_posed;
 mod mesh_steel;
 mod midpose;
+// #672: the plasma through-cut laws (cut order, kerf crossing, tip-up).
+pub mod plasma;
 mod posed_steel;
 mod prior;
 mod probe;

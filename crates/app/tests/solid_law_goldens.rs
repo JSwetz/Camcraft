@@ -337,6 +337,7 @@ fn verdicts() -> Vec<(&'static str, Vec<Warning>)> {
         tool_material: None,
         flutes: None,
         center_cutting: true,
+        orientation: None,
     };
     let hole = |x: f64, y: f64, r: f64, floor: f64, through: bool| Hole { xy: Point2::new(x, y), radius: r, entry_z: 0.0, floor_z: floor, through, stepped: false };
     let cycle = |holes: &[Hole], tool: &Tool, clear: f64| {

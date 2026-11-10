@@ -959,7 +959,9 @@ pub enum OpParams {
     /// the blank. The V itself (crest width, flank angle) is TOOL
     /// geometry, the blade's width law again; the feeds are mm/min
     /// with the spindle turning one rev per pitch of the
-    /// synchronized pass.
+    /// synchronized pass. `hand` (#629) is the way the thread winds -
+    /// right-hand unless the drawing says LH; the passes run toward
+    /// the chuck either way and the hand sets the helix's sense.
     Threading {
         tolerance: f64,
         clearance_z: Height,
@@ -970,6 +972,7 @@ pub enum OpParams {
         infeed: f64,
         feed: f64,
         plunge_feed: f64,
+        hand: crate::cl::ThreadHand,
     },
     /// Chamfer turning (M5.2 stage E): one ride across the cone
     /// face the window `top_z`/`bottom_z` bounds. `angle_deg` is

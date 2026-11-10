@@ -27,6 +27,10 @@ use super::layout::{Action, ActionKind, BarInks, action_bar, group, prop_grid, s
 use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_MACHINE, SEC_PASSES};
 use super::theme::Tokens;
 
+/// The hover text of a refusal line that names its spot (#261 part 2);
+/// the structural test finds the link by it.
+pub(crate) const REFUSAL_LINK_HINT: &str = "show where the operation was refused in the viewport";
+
 /// Room the action bar (and the line above it) keeps under the scroll.
 const BAR_RESERVE: f32 = 120.0;
 
@@ -332,7 +336,20 @@ fn actions(ui: &mut Ui, state: &mut State, target: &str, live: Option<&Operation
         exists && model::find_by_name(&state.world, target).and_then(|e| model::toolpath_of(&state.world, &e)).is_some();
     let inks = text_inks(ui, &state.world);
     if let Some(msg) = state.error_for(ErrorScope::Operation).map(str::to_owned) {
-        ui.colored_label(inks.error, msg);
+        // #261 part 2: a refusal that names its spot is a link that
+        // frames it (view state, like every camera move - no command).
+        match state.refusal_focus() {
+            Some(p) => {
+                let text = egui::RichText::new(msg).color(inks.error).underline();
+                let r = ui.add(egui::Label::new(text).sense(egui::Sense::click()).wrap());
+                if r.on_hover_text(REFUSAL_LINK_HINT).clicked() {
+                    crate::actions::frame_at(state, p);
+                }
+            }
+            None => {
+                ui.colored_label(inks.error, msg);
+            }
+        }
     } else if !unchanged && let Some(why) = &apply_hint {
         // Enabled, but the door will refuse: a safety line, not help.
         ui.colored_label(inks.warn, why);

@@ -5,7 +5,8 @@
 //!
 //! Provenance: standard screen-space point picking (project every
 //! candidate through the view-projection, nearest within a pixel radius,
-//! then an occlusion ray) - our own code from general graphics practice;
+//! then an occlusion ray - from the eye, or in orthographic back along
+//! the parallel view direction) - our own code from general graphics practice;
 //! no vendor material consulted.
 
 use camcraft_app::geometry::feature::{self, VertexId};
@@ -16,6 +17,7 @@ use camcraft_app::{model, pick};
 use crate::interact::{Mods, project_uv, queue_feature_pick};
 
 use crate::state::{CommandKind, HoverHit, State};
+use crate::viewport::{Camera, ProjectionMode};
 
 /// How close a corner must draw to the cursor to be pickable, logical px.
 pub(crate) const PICK_VERTEX_PX: f32 = 8.0;
@@ -53,6 +55,22 @@ pub fn nearest_vertex(
     near.into_iter().map(|(_, i)| i).find(|&i| visible(i))
 }
 
+/// Where the occlusion ray toward world point `q` starts: the eye in
+/// perspective; in orthographic (#610) `q`'s own point on the eye plane,
+/// so the ray runs back along the parallel view direction as
+/// `Camera::ray_through` casts it. `None` for a point at or behind the
+/// eye plane (nothing on screen to test) or degenerate math.
+pub(crate) fn sight_origin(cam: &Camera, q: [f64; 3]) -> Option<[f64; 3]> {
+    let eye = cam.eye();
+    if cam.projection == ProjectionMode::Perspective {
+        return Some(eye);
+    }
+    let (_, _, f) = cam.view_basis();
+    let depth = (q[0] - eye[0]) * f.0 + (q[1] - eye[1]) * f.1 + (q[2] - eye[2]) * f.2;
+    let o = [q[0] - f.0 * depth, q[1] - f.1 * depth, q[2] - f.2 * depth];
+    (depth.is_finite() && depth > 1e-9 && o.iter().all(|v| v.is_finite())).then_some(o)
+}
+
 /// Depth tolerance for the occlusion ray: the facets meeting AT a corner
 /// hit at its own distance; this absorbs their float noise.
 fn depth_tol(dist: f64) -> f64 {
@@ -69,7 +87,6 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
         return None;
     }
     let mvp = state.cam.mvp(f64::from(w / h));
-    let eye = state.cam.eye();
     let hidden = |name: &str| state.hidden_in_view(name);
     let mut entities: Vec<(String, flecs_ecs::prelude::Entity)> =
         model::model_entities(&state.world).into_iter().filter(|(n, _)| !hidden(n)).collect();
@@ -101,8 +118,9 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
     }
     let best = nearest_vertex(&pts, &mvp, state.viewport_rect, p, radius, |i| {
         let q = pts[i];
-        let dist = ((q[0] - eye[0]).powi(2) + (q[1] - eye[1]).powi(2) + (q[2] - eye[2]).powi(2)).sqrt();
-        pick::point_visible(&state.world, eye, q, depth_tol(dist), hidden)
+        let Some(o) = sight_origin(&state.cam, q) else { return false };
+        let dist = ((q[0] - o[0]).powi(2) + (q[1] - o[1]).powi(2) + (q[2] - o[2]).powi(2)).sqrt();
+        pick::point_visible(&state.world, o, q, depth_tol(dist), hidden)
     })?;
     let (k, id) = *tags.get(best)?;
     Some((entities.get(k)?.0.clone(), id))
@@ -140,6 +158,17 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity: hit.entity, feature: sel };
+    if crate::axis_pick::collecting(state) {
+        crate::axis_pick::take(state, pick); // #557: a point of an axis
+        return;
+    }
+    if crate::plane_pick::collecting(state) {
+        crate::plane_pick::take(state, pick); // #554: a point sets no plane, refused by name
+        return;
+    }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
+    }
     if state.boundary_pick.is_some() {
         // A point bounds nothing: refused by name, never drafted.
         state.status = format!("{} of '{}' is a point - a boundary takes faces or edges", pick.feature, pick.entity);

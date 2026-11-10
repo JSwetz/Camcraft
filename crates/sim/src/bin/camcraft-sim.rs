@@ -1,11 +1,13 @@
 //! `camcraft-sim` - headless stock simulation (M13.3): cuts a box of
-//! stock with a CLFile's moves on the dexel grid and prints the removed
-//! volume and a rapid/depth verdict. Provenance: dexel (height-field)
-//! stock removal is general CAM verification practice from published
-//! literature, as the `stock_sim` module states; the CLI is ours.
+//! stock with a CLFile's moves through the `Stock` seam on the field
+//! engine (#588, M7.3 - the column engine is being retired) and prints
+//! the removed volume and a rapid/depth verdict, read column by column
+//! through `Columns`. Provenance: height-field stock removal is general
+//! CAM verification practice from published literature, as the
+//! `stock_sim` module states; the CLI is ours.
 
 use camcraft_sim::cl::{text, MoveKind};
-use camcraft_sim::stock_sim::{auto_cell, simulate, Dexel, SimOp};
+use camcraft_sim::stock_sim::{auto_cell, Backend, SimOp, Stock, FIELD_BAND};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -91,24 +93,32 @@ fn main() -> ExitCode {
         Ok(t) => t,
         Err(e) => return die(format!("cannot parse {path}: {e}")),
     };
-    let mut dex = match Dexel::block(x0, y0, x1, y1, z1, cell) {
-        Ok(d) => d,
+    let mut stock = match Stock::block(Backend::Field { band: FIELD_BAND }, x0, y0, x1, y1, z1, cell) {
+        Ok(s) => s,
         Err(e) => return die(e.to_string()),
     };
     let op = SimOp { moves: &t.moves, radius: r, ball, cone: None, corner: None };
-    if let Err(e) = simulate(&mut dex, &[op]) {
+    if let Err(e) = stock.simulate(&[op]) {
         return die(e.to_string());
     }
+    let cols = match stock.columns() {
+        Ok(c) => c,
+        Err(e) => return die(e.to_string()),
+    };
     // Removed volume: per column, the stock surface down to what stands,
-    // floored at the stock bottom (the grid has no floor of its own).
-    let a2 = dex.cell * dex.cell;
+    // floored at the stock bottom (the stock has no floor of its own). A
+    // column the field gives no verdict for (NaN) counts as uncut - the
+    // same abstention every column consumer makes (`Columns`).
+    let a2 = cols.cell() * cols.cell();
     let (mut removed, mut cut_cells, mut lowest) = (0.0f64, 0usize, z1);
-    for k in 0..dex.nx * dex.ny {
-        let top = dex.top_at(k);
-        if top.is_finite() && top < z1 {
-            removed += (z1 - top.max(z0)) * a2;
-            cut_cells += 1;
-            lowest = lowest.min(top);
+    for iy in 0..cols.ny() {
+        for ix in 0..cols.nx() {
+            let top = cols.top_at(ix, iy);
+            if top.is_finite() && top < z1 {
+                removed += (z1 - top.max(z0)) * a2;
+                cut_cells += 1;
+                lowest = lowest.min(top);
+            }
         }
     }
     let inside = |x: f64, y: f64| x > x0 - r && x < x1 + r && y > y0 - r && y < y1 + r;
@@ -130,7 +140,7 @@ fn main() -> ExitCode {
     let through = lowest < z0;
     println!("file: {path}");
     println!("moves: {}", t.len());
-    println!("grid: {} x {} cells of {cell:.4} mm", dex.nx, dex.ny);
+    println!("grid: {} x {} cells of {:.4} mm", cols.nx(), cols.ny(), cols.cell());
     println!("stock volume: {:.3} mm^3", (x1 - x0) * (y1 - y0) * (z1 - z0));
     println!("removed volume: {removed:.3} mm^3");
     println!("cut cells: {cut_cells}");
