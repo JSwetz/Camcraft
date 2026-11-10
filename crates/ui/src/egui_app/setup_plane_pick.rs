@@ -5,7 +5,8 @@
 //! level, and Apply. The pick draft is view state (`crate::plane_pick`); Apply queues
 //! `CommandKind::LayPartOnPlane`, the undoable `AlignPartToSetup`. The
 //! app says whether the picks make a plane and, if not, why - shown on
-//! the disabled Apply. The work offset is not touched.
+//! the disabled "Apply face", on a line of its own so it stays on
+//! screen (#330). The work offset is not touched.
 //!
 //! Provenance: our own UI over plain datum-face practice; no vendor
 //! material consulted.
@@ -39,6 +40,9 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     let id = ui.id().with(("setup_plane_draft", setup));
     let mut d: Draft = ui.data_mut(|m| *m.get_temp_mut_or_insert_with(id, Draft::default));
     let armed = state.plane_pick.as_ref().is_some_and(|p| p.setup == setup);
+    // #330 (reopened): short lines, so Flip, "Face to plane level" and
+    // Apply stay on screen in the narrow properties pane - one long row
+    // ran them past its right edge at a 1280-wide window, out of reach.
     ui.horizontal(|ui| {
         ui.label("    Lay on a plane - pick a face");
         let pick_text = if armed { "Stop picking" } else { "Pick a face" };
@@ -53,6 +57,9 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
                 crate::plane_pick::arm(state, setup);
             }
         }
+    });
+    ui.horizontal(|ui| {
+        ui.label("     ");
         ComboBox::from_id_salt(("setup_plane", setup))
             .selected_text(pick::plane_label(d.plane))
             .show_ui(ui, |ui| {
@@ -64,6 +71,9 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
             .on_hover_text("The plane the picked face is laid on.");
         ui.checkbox(&mut d.flip, "Flip")
             .on_hover_text("Face the other way: down (-Z) for G17, -Y for G18, -X for G19.");
+    });
+    ui.horizontal(|ui| {
+        ui.label("     ");
         ui.checkbox(&mut d.place, "Face to plane level")
             .on_hover_text("Set the picked face onto the plane (e.g. Z 0 for G17); off keeps the part where it is.");
     });
@@ -74,16 +84,21 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
         // alignment the setup already holds, greys Apply out with the why.
         let check = AlignPartToSetup::check_lay(&state.world, setup, &picks, lay).map_err(|e| e.to_string());
         let side = pick::plane_side(&state.world, &picks).ok();
+        // #330 (reopened): the picked face's words carry its long id, so
+        // they get a line of their own - Apply sat after them and ran off
+        // the pane's right edge, leaving only the alignment row's Apply
+        // (a turn about the bounds centre) in reach.
+        let words: Vec<String> = picks.iter().map(|g| format!("{} of '{}'", g.feature, g.entity)).collect();
+        let text = if words.is_empty() { "nothing picked yet".to_owned() } else { words.join(", ") };
+        ui.label(RichText::new(format!("      Picked: {text}")).weak());
         ui.horizontal(|ui| {
-            let words: Vec<String> = picks.iter().map(|g| format!("{} of '{}'", g.feature, g.entity)).collect();
-            let text = if words.is_empty() { "nothing picked yet".to_owned() } else { words.join(", ") };
-            ui.label(RichText::new(format!("      Picked: {text}")).weak());
+            ui.label("     ");
             let tip = match &check {
-                Ok(()) => format!("Turn the part so the pick lies on {}.", pick::plane_label(d.plane)),
+                Ok(()) => format!("Turn the part so the picked face lies on {}.", pick::plane_label(d.plane)),
                 Err(why) => why.clone(),
             };
             if ui
-                .add_enabled(check.is_ok(), egui::Button::new("Apply"))
+                .add_enabled(check.is_ok(), egui::Button::new("Apply face"))
                 .on_hover_text(&tip)
                 .on_disabled_hover_text(&tip)
                 .clicked()

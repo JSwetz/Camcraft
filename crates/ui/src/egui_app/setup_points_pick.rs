@@ -42,8 +42,11 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     let id = ui.id().with(("setup_points_draft", setup));
     let mut d: Draft = ui.data_mut(|m| *m.get_temp_mut_or_insert_with(id, Draft::default));
     let armed = state.points_pick.as_ref().is_some_and(|p| p.setup == setup);
+    // Short lines like the face row (#330): its options stay on screen in
+    // the narrow properties pane.
+    ui.label("    Lay on a plane - pick three points");
     ui.horizontal(|ui| {
-        ui.label("    Lay on a plane - pick three points");
+        ui.label("     ");
         let pick_text = if armed { "Stop picking points" } else { "Pick three points" };
         if ui
             .selectable_label(armed, pick_text)
@@ -65,10 +68,16 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
             })
             .response
             .on_hover_text("The plane the three points are laid on.");
+    });
+    ui.horizontal(|ui| {
+        ui.label("     ");
         ui.checkbox(&mut d.flip, "Flip points")
             .on_hover_text("Face the points' outside the other way: down (-Z) for G17 rests them on the table.");
         ui.checkbox(&mut d.place, "Point 1 to plane level")
             .on_hover_text("Set the points onto the plane (e.g. Z 0 for G17); off keeps the part where it is.");
+    });
+    ui.horizontal(|ui| {
+        ui.label("     ");
         ui.checkbox(&mut d.frame, "3-2-1 frame").on_hover_text(
             "Also turn the part so point 1 -> 2 runs along +X (+Y for G19) and move point 1 to the origin.",
         );
