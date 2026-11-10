@@ -16,6 +16,7 @@ capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 axisInversion = true; // verified on the engine's mirrored stream for an inverted X/Y (#374): goldens + equivalence test
+probeAxisInversion = true; // probing blocks verified on the mirrored stream (#392): macro interpreter on a simulated inverted machine
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -436,6 +437,12 @@ function onCycle() {
 // back-off after a trip is incremental (G91), so a part nearer than the
 // model is never driven into. Arming the probe (its M-code output) is
 // the machine's own, stated by no stream record: the operator arms it.
+// On an inverted X / Y (#392) the engine hands these hooks the stream
+// already mirrored (target, trip, back-off delta and expected values
+// negated on that axis): every word below then reads in the controller's
+// own frame, where the offset register holds the datum negated too, so
+// the written correction is the physical one. Nothing here is
+// inversion-aware; inverted_probe runs it on a simulated inverted machine.
 var probeBase = 100;
 function axisIx(a) { return a === "X" ? 0 : (a === "Y" ? 1 : 2); }
 function travelAxis(p) {  // where the target and the nominal trip differ most
