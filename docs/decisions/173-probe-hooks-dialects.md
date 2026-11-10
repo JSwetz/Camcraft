@@ -67,3 +67,26 @@
 - **Cost to change:** each dialect's hooks are one section of its
   `.cps` and one golden; a Heidenhain voicing needs the touch-probe
   cycle manual and a fourth golden.
+
+## #173 follow-up: protected positioning moves (#174's onProbeGuard) on Haas, Mazak, Sinumerik
+
+- **Chosen:** each dialect voices #174's GUARD record, modelled on
+  `fanuc.cps`:
+  - Haas: `G31` to the target, then one `IF[ABS[#506x-target]GT0.001]
+    THEN#3000=3(PROBE HIT ON POSITIONING)` per moving axis (a skip that
+    did not reach the target was a trip). Haas Mill Operator's Manual
+    (G31, #5061-#5063, #3000).
+  - Mazak: the same test in the `IF[..]GOTOn` / `#3000=3` / `Nn` form
+    the no-contact test already uses. Mazak EIA/ISO programming manual.
+  - Sinumerik 840D sl: `MEAS=1 G1` to the target, then `IF
+    $AC_MEA[1]==1` -> `MSG`, `SETAL(65002)`, `M0`. Job Planning manual
+    (measurement, MEAS/$AC_MEA; SETAL user alarms).
+  - Each alarm is distinct from no-contact (Fanuc-family 3 vs 2;
+    Siemens 65002 vs 65000) and from out-of-tolerance (1 / 65001).
+  - Haas/Mazak gain a `minusU` helper (as in `fanuc.cps`) so a
+    negative target never writes `#5061--7`; the no-contact test now
+    uses it too (no golden changes: the bore's targets are positive).
+- **Considered and dropped:** a Sinumerik `$AA_MW[axis]` vs target
+  test - the measured value is only written on a trip, so on a clean
+  move it is stale; `$AC_MEA[1]` (probe responded) is the direct,
+  documented status.

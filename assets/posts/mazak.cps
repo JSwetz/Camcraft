@@ -443,6 +443,11 @@ function alarmUnless(cond, n, text) {  // alarm #3000=n unless cond holds
   block(["#3000=" + n + "(" + text + ")"]);
   block(["N" + probeLabel]);
 }
+function minusU(expr, v) {  // expr - v, the sign folded into the operator
+  var s = fu(v);
+  if (s === "0") return expr;
+  return s.charAt(0) === "-" ? expr + "+" + s.substring(1) : expr + "-" + s;
+}
 function onProbeMove() {
   startPreamble();
   compRefuse("a probing move");
@@ -450,7 +455,7 @@ function onProbeMove() {
   block(["G31", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
   var ai = travelAxis(p);
   var tgt = [p.X - orgX, p.Y - orgY, p.Z - orgZ][ai];
-  alarmUnless("ABS[#" + (5061 + ai) + "-" + fu(tgt) + "]GE0.001", 2, "PROBE NO CONTACT");
+  alarmUnless("ABS[" + minusU("#" + (5061 + ai), tgt) + "]GE0.001", 2, "PROBE NO CONTACT");
   if (has(p.Measure) && p.Measure >= 0) {
     var b = probeBase + 3 * p.Measure;
     block(["#" + b + "=#5061"]);
@@ -462,6 +467,26 @@ function onProbeRetreat() {
   var p = properties;
   block(["G91", "G01", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
   block(["G90"]);
+}
+// #174. A protected positioning move (the descent to a touch's start,
+// the travel between touches, the rise) is the same G31 skip read the
+// other way round (Mazak EIA/ISO manual, as above): with no skip signal
+// the block ends at its target and #5061-#5063 hold that end point; a
+// trip on the way stops it short, so any moving axis whose skip
+// position is not the target alarms (#3000=3, distinct from
+// no-contact's 2), in the same IF[..]GOTOn form - an obstacle where the
+// model has none stops the program instead of the stylus being driven
+// into it.
+function onProbeGuard() {
+  startPreamble();
+  compRefuse("a protected probe move");
+  var p = properties;
+  block(["G31", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  var to = [p.X, p.Y, p.Z], from = [p.StartX, p.StartY, p.StartZ], org = [orgX, orgY, orgZ];
+  for (var ai = 0; ai < 3; ai++) {
+    if (has(from[ai]) && Math.abs(to[ai] - from[ai]) < 1e-6) continue;  // an axis that holds still
+    alarmUnless("ABS[" + minusU("#" + (5061 + ai), to[ai] - org[ai]) + "]LE0.001", 3, "PROBE HIT ON POSITIONING");
+  }
 }
 function slotOf(word) {  // "G55" -> 1
   var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;

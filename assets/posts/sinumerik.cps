@@ -481,6 +481,23 @@ function onProbeRetreat() {
   block(["G91", "G1", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
   block(["G90"]);
 }
+// #174. A protected positioning move (the descent to a touch's start,
+// the travel between touches, the rise) is the same MEAS=1 G1 block,
+// read the other way round (840D sl Job Planning, measurement as
+// above): MEAS deletes the distance-to-go on a trip and sets
+// $AC_MEA[1] to 1, so a guard block that ends with the probe responded
+// was stopped short by contact - it alarms (SETAL 65002, distinct from
+// no-contact's 65000) and stops, so an obstacle where the model has
+// none stops the program instead of the stylus being driven into it.
+// $AC_MEA[1] is the test, not $AA_MW: the measured value is only
+// written on a trip, so it is meaningless when the move ran clear.
+function onProbeGuard() {
+  startPreamble();
+  compRefuse("a protected probe move");
+  var p = properties;
+  block(["MEAS=1", "G1", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  stopAlarm("$AC_MEA[1]==1", 65002, "PROBE HIT ON POSITIONING");
+}
 function frameOf(word) {  // "G54".."G57" -> 1..4, G505..G599 -> 5..99; 0 none
   var n = Number(String(word).replace(/[^0-9]/g, ""));
   if (n >= 54 && n <= 57) return n - 53;
