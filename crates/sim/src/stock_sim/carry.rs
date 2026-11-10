@@ -139,7 +139,9 @@ impl LatticeTurn {
 
     /// The pre-image of an image point: the inverse map (#637), exact -
     /// the XY part is the orthogonal `m`'s transpose and Z's sign is
-    /// its own inverse. `unapply(apply(p)) == p` bit for bit.
+    /// its own inverse. `unapply(apply(p)) == p` to rounding - exactly
+    /// for integer shifts, within an ulp of a fractional one (review of
+    /// #646).
     #[must_use]
     pub fn unapply(&self, p: Point3) -> Point3 {
         let (x, y) = self.back_xy(p.x, p.y);
