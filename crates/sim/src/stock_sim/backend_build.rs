@@ -147,10 +147,7 @@ fn block_field(
     // out-ran the per-facet seed ceiling and refused a block the
     // column builds - a backend-dependent refusal, the law above's
     // exact violation.
-    let m = super::field_gen::box_shell(
-        Point3::new(x0, y0, top_z - 10.0 * span),
-        Point3::new(x1, y1, top_z),
-        cell,
-    );
-    SdfField::from_mesh(&m, cell, band)
+    // #633: the box's distance is closed-form - no band fill along the
+    // ten-span walls (the BFS made a 120 mm block take a minute).
+    SdfField::from_box(Point3::new(x0, y0, top_z - 10.0 * span), Point3::new(x1, y1, top_z), cell, band)
 }

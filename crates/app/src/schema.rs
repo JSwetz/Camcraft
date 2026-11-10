@@ -380,6 +380,26 @@ pub struct PostOptions {
     pub skip_stops: bool,
     /// One standalone program per operation (#111).
     pub per_op: bool,
+    /// The length unit the control is left in after the program (#596).
+    pub end_units: EndUnits,
+}
+
+/// The end-units choice of [`PostOptions`] (#596). LinuxCNC's M2 / M30
+/// reset list (linuxcnc.org/docs, M-codes, "M2, M30 Program End") names
+/// offsets, plane, distance and feed modes, overrides, comp, spindle,
+/// motion mode and coolant - never G20 / G21 - so a program posted in mm
+/// for a control the operator runs in inches leaves it in mm. A post
+/// that knows the option (Tormach PathPilot) writes the target's unit
+/// word before its program end when it differs from the program's unit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EndUnits {
+    /// The program's own unit stays modal (every older document).
+    #[default]
+    Leave,
+    /// End in inches: a mm program writes G20 before M30.
+    Inch,
+    /// End in millimetres: an inch program writes G21 before M30.
+    Millimeters,
 }
 
 /// The thread-output choice of [`PostOptions`].

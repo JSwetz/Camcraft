@@ -9,6 +9,8 @@ pub mod delete_entity;
 pub mod fixture;
 pub mod import_fixture;
 pub mod import_model;
+// #339 slice 6: a fixture library entry placed into a setup.
+pub mod insert_fixture;
 pub mod load_machine;
 pub mod move_model;
 pub mod operation;
@@ -57,6 +59,7 @@ pub use fixture::{
 };
 pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
+pub use insert_fixture::InsertFixture;
 pub use load_machine::LoadMachine;
 pub use move_model::MoveModel;
 pub use operation::{
@@ -101,6 +104,22 @@ pub enum CommandError {
     UnsupportedType(String),
     #[error("could not generate the toolpath: {0}")]
     Machining(String),
+    /// A [`Machining`](CommandError::Machining) refusal about one spot
+    /// of the part (#261 part 2): `at` is world coordinates. Reads as
+    /// `Machining` does.
+    #[error("could not generate the toolpath: {msg}")]
+    MachiningAt { msg: String, at: crate::geometry::Point3 },
+}
+
+impl CommandError {
+    /// The spot a refused generation names, in world coordinates.
+    #[must_use]
+    pub fn location(&self) -> Option<crate::geometry::Point3> {
+        match self {
+            CommandError::MachiningAt { at, .. } => Some(*at),
+            _ => None,
+        }
+    }
 }
 
 pub trait Command {

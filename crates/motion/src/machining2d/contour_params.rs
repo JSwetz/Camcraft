@@ -212,7 +212,7 @@ impl ContourParams {
 
     /// Cut levels from `top_z` down to `bottom_z`, always ending exactly
     /// at the bottom (same snap rule as facing rows).
-    pub(super) fn levels(&self) -> Vec<f64> {
+    pub(super) fn levels(&self) -> Result<Vec<f64>, GenError> {
         cut_levels(self.top_z, self.bottom_z, self.stepdown)
     }
 }

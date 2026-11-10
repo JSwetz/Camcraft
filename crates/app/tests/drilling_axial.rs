@@ -248,6 +248,9 @@ fn an_off_axis_hole_refuses_by_name() {
     let e = operation::generate(&world, &op("bar", axial_params(vec![hole(3.0, 0.0, BORE)], None)), "")
         .expect_err("the turret drills on the axis only");
     assert!(format!("{e}").contains("off the spindle axis"), "{e}");
+    // #677: the refusal marks the off-axis hole's mouth.
+    let at = e.location();
+    assert!(at.is_some_and(|p| p.x == 3.0 && p.y == 0.0 && p.z.is_finite()), "marks the hole at (3, 0): {at:?}");
 }
 
 #[test]
@@ -260,6 +263,8 @@ fn a_hole_past_the_bar_end_refuses_by_name() {
     )
     .expect_err("the drill would leave through the chuck side");
     assert!(format!("{e}").contains("past the bar's far end"), "{e}");
+    // #677: the refusal marks the hole's floor, past the bar's end.
+    assert_eq!(e.location(), Some(Point3::new(0.0, 0.0, END - 5.0)), "{e}");
 }
 
 #[test]

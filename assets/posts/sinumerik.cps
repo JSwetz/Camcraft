@@ -212,7 +212,9 @@ function toolNote() {  // just before the tool change it describes
 
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
-  writeln("; " + nm);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, one rule for every comment line.
+  writeln("; " + (clean(nm) || "CAMCRAFT"));
   var z = safeZ();
   if (z !== null && z !== 0) note("SAFE RETRACT G53 Z" + fu(z) + " - STATED BY THE MACHINE");
 }
@@ -323,7 +325,7 @@ function startPreamble() {
     block(["T" + ni(tNo), "D" + ni(tNo), "M6"]);
     toolWait = false;
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#173) states no spindle
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
@@ -430,6 +432,115 @@ function onCycle() {
   words.push(fw(p.FeedRate));
   block(words);
   inCycle = true;
+}
+
+// ------------------------------------------------------------ probing
+// #173. Words from Siemens' published SINUMERIK 840D sl programming
+// manuals (Fundamentals; Job Planning): MEAS=1 (measure with probe 1,
+// rising edge, deleting distance-to-go) on a G1 block, $AC_MEA[1] (the
+// probe responded, 1, or not, 0), $AA_MW[axis] (the trip position in
+// workpiece coordinates), IF..ENDIF, MSG, SETAL (user cycle alarms from
+// 65000), the settable frames $P_UIFR[n,axis,TR|FI] (G54..G57 = 1..4)
+// whose new value takes effect when the G5x is programmed again.
+// Reading a main-run variable stops preprocessing implicitly, so the
+// trip is read after the move ends. A measuring block that never trips
+// alarms at once - a probe that never touched must not back off and
+// measure air. A measured trip k is kept in R(50+3k)..R(52+3k) and the
+// deviations in R90.., inside R0..R99 (the R parameters every 840D
+// carries; more are a machine-data option). The back-off is incremental
+// (G91). G58/G59 are axial programmable offsets
+// on this control, not settable frames: setting one is refused by name.
+// Arming the probe is the machine's own.
+var probeBase = 50;
+function axisIx(a) { return a === "X" ? 0 : (a === "Y" ? 1 : 2); }
+function travelAxis(p) {  // where the target and the nominal trip differ most
+  var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
+  return d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
+}
+function stopAlarm(cond, n, text) {  // message, alarm and stop when cond holds
+  block(["IF " + cond]);
+  block(["MSG(\"" + text + "\")"]);
+  block(["SETAL(" + n + ")"]);
+  block(["M0"]);
+  block(["ENDIF"]);
+}
+function onProbeMove() {
+  startPreamble();
+  compRefuse("a probing move");
+  var p = properties;
+  block(["MEAS=1", "G1", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  stopAlarm("$AC_MEA[1]==0", 65000, "PROBE NO CONTACT");
+  if (has(p.Measure) && p.Measure >= 0) {
+    if (p.Measure > 12) { msg("probing: measurement " + p.Measure + " - only 13 trips fit R50..R88"); return; }
+    var b = probeBase + 3 * p.Measure;
+    block(["R" + b + "=$AA_MW[X]"]);
+    block(["R" + (b + 1) + "=$AA_MW[Y]"]);
+    block(["R" + (b + 2) + "=$AA_MW[Z]"]);
+  }
+}
+function onProbeRetreat() {
+  var p = properties;
+  block(["G91", "G1", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
+  block(["G90"]);
+}
+// #174. A protected positioning move (the descent to a touch's start,
+// the travel between touches, the rise) is the same MEAS=1 G1 block,
+// read the other way round (840D sl Job Planning, measurement as
+// above): MEAS deletes the distance-to-go on a trip and sets
+// $AC_MEA[1] to 1, so a guard block that ends with the probe responded
+// was stopped short by contact - it alarms (SETAL 65002, distinct from
+// no-contact's 65000) and stops, so an obstacle where the model has
+// none stops the program instead of the stylus being driven into it.
+// $AC_MEA[1] is the test, not $AA_MW: the measured value is only
+// written on a trip, so it is meaningless when the move ran clear.
+function onProbeGuard() {
+  startPreamble();
+  compRefuse("a protected probe move");
+  var p = properties;
+  block(["MEAS=1", "G1", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  stopAlarm("$AC_MEA[1]==1", 65002, "PROBE HIT ON POSITIONING");
+}
+function frameOf(word) {  // "G54".."G57" -> 1..4, G505..G599 -> 5..99; 0 none
+  var n = Number(String(word).replace(/[^0-9]/g, ""));
+  if (n >= 54 && n <= 57) return n - 53;
+  if (n >= 505 && n <= 599) return n - 500;
+  return 0;
+}
+function onProbeResult() {
+  var p = properties;
+  var org = [orgX, orgY, orgZ];
+  var axes = p.Axes || [];
+  var dev = 90;   // R90.. hold each axis's deviation, found - expected
+  for (var i = 0; i < axes.length; i++) {
+    var a = axes[i];
+    var ai = axisIx(a.Axis);
+    var sum = [];
+    for (var k = 0; k < a.Measures.length; k++) sum.push("R" + (probeBase + 3 * a.Measures[k] + ai));
+    var mean = a.Measures.length > 1 ? "(" + sum.join("+") + ")/" + a.Measures.length : sum[0];
+    // The sign is folded into the operator so a negative expected value
+    // (edge, outside corner) never writes a doubled sign like `--`.
+    var ex = a.Expected - org[ai];
+    var op = ex < 0 ? "+" : "-";
+    block(["R" + (dev + i) + "=" + mean + op + fu(Math.abs(ex))]);
+    stopAlarm("ABS(R" + (dev + i) + ")>" + fu(p.Tolerance), 65001, "PROBE " + a.Axis + " OUT OF TOLERANCE");
+  }
+  if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
+    var want = "G" + (54 + Number(p.SetWorkOffset));
+    var to = frameOf(want), from = frameOf(wcsWord);
+    if (!to || !from) {
+      msg("probing: setting " + want + " from " + wcsWord + " - only the settable frames G54..G57 / G505..G599 can be set on this control");
+      return;
+    }
+    for (var j = 0; j < axes.length; j++) {
+      var ax = axes[j].Axis;
+      block(["$P_UIFR[" + to + "," + ax + ",TR]=$P_UIFR[" + from + "," + ax + ",TR]+R" + (dev + j)]);
+      if (to !== from) block(["$P_UIFR[" + to + "," + ax + ",FI]=$P_UIFR[" + from + "," + ax + ",FI]"]);
+    }
+    block([wcsWord]);  // re-select: a written frame takes effect on its G5x
+  } else {
+    block(["MSG(\"CHECK PROBE RESULT R" + dev + "..\")"]);
+    block(["M0"]);
+  }
 }
 
 // ------------------------------------------------------------ footer

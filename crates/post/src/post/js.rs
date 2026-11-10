@@ -54,7 +54,13 @@ function writeAddress(letter, value, dp) {
   if (value === undefined || value === null) return;
   write(String(letter) + formatUnit(Number(value), dp));
 }
-function writeComment(s) { writeln("(" + String(s) + ")"); }
+// #594: the default comment is the RS-274 / ISO 6983 `( )` form, so
+// its text loses every parenthesis (one would end or nest the comment)
+// and every control character (one would end the block).
+function writeComment(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  writeln("(" + t.replace(/[()]/g, " ").replace(/[\x00-\x1F\x7F]/g, " ") + ")");
+}
 function writeBlankLine() { _flushLine(); OUT.push(""); }
 function writeOutput(s) { write(s); }
 function message(s) { MESSAGES.push(String(s)); }
@@ -171,6 +177,11 @@ pub struct Script {
     /// interpreter on a simulated inverted machine. Without it probing
     /// on an inverted axis is refused by name.
     probe_axis_inversion: bool,
+    /// The `threadHands = true` manifest flag (issue #629): the script
+    /// reads `PARAM SpindleDirection` and states the thread's hand.
+    /// Without it a thread that needs the spindle reversed is refused
+    /// by name - the script would cut it the other hand under M03.
+    thread_hands: bool,
 }
 
 impl Script {
@@ -190,6 +201,7 @@ impl Script {
             after_modes: false,
             axis_inversion: false,
             probe_axis_inversion: false,
+            thread_hands: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -210,6 +222,10 @@ impl Script {
             .unwrap_or(false);
         s.after_modes = s
             .eval("typeof afterModes !== \"undefined\" && afterModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.thread_hands = s
+            .eval("typeof threadHands !== \"undefined\" && threadHands === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         s.axis_inversion = s
@@ -299,6 +315,12 @@ impl Script {
     /// the section's `PARAM Coolant` (#150).
     pub fn reads_coolant(&self) -> bool {
         self.coolant_modes
+    }
+
+    /// True when the script declares `threadHands = true` - it reads
+    /// `PARAM SpindleDirection` and voices a thread's hand (#629).
+    pub fn voices_thread_hands(&self) -> bool {
+        self.thread_hands
     }
 
     /// True when the script declares `liveTooling = true` - it voices

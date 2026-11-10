@@ -1,5 +1,5 @@
 //! Probing on a machine with an inverted X / Y (#392): the posted Fanuc
-//! probing blocks, run by a macro B controller (`macro_b`) on a
+//! and Haas probing blocks, run by a macro B controller (`macro_b`) on a
 //! simulated machine whose inverted axis moves the other way, against a
 //! part sitting off its model position, write the PHYSICALLY correct
 //! work offset - the part datum in the controller's coordinates - for
@@ -10,10 +10,14 @@
 //! NOT find it on the inverted machine (the reader is no tautology).
 //!
 //! Provenance: Fanuc's published operator documentation (G31, custom
-//! macro B, G10 L2); touch-probe practice. Fixture values are our own.
+//! macro B, G10 L2); the Haas Mill Operator's Manual (G31 Feed Until
+//! Skip, macro variables #5061-#5063 / #5221.., #3000 / #3006, G10 L2
+//! P1..P6) - the same words with the same meaning, so one reader runs
+//! both; touch-probe practice. Fixture values are our own.
 //!
 //! Gate map (M4.4): covers post::invert (probing), post::js (manifest
-//! flags), assets/posts fanuc.cps (probing hooks), motion::probing.
+//! flags), assets/posts fanuc.cps + haas.cps (probing hooks),
+//! motion::probing.
 
 mod inverted_support;
 mod macro_b;
@@ -40,6 +44,8 @@ const UNSET: f64 = 999.0;
 const TOL: f64 = 0.002;
 
 const MACHINES: &[&[&str]] = &[&[], &["X"], &["Y"], &["X", "Y"]];
+/// The posts that declare `probeAxisInversion = true`.
+const POSTS: &[&str] = &["fanuc", "haas"];
 
 /// The part, in model coordinates of the stylus ball CENTRE.
 #[derive(Clone, Debug)]
@@ -157,11 +163,22 @@ fn records(c: &Case) -> Vec<Record> {
     post::dump(&t, &d)
 }
 
-fn post_for(records: &[Record], letters: &[&str]) -> String {
-    let out = engine::run(&cps("fanuc"), &machine(letters), &cnc::serialize(records))
+fn post_for(post: &str, records: &[Record], letters: &[&str]) -> String {
+    post_with(&cps(post), records, letters)
+}
+
+fn post_with(script: &str, records: &[Record], letters: &[&str]) -> String {
+    let out = engine::run(script, &machine(letters), &cnc::serialize(records))
         .unwrap_or_else(|e| panic!("inverted {letters:?}: {e}"));
     assert!(out.warnings.is_empty(), "inverted {letters:?}: {:?}", out.warnings);
     out.program
+}
+
+/// `post`'s script with its `probeAxisInversion` line taken out.
+fn without_probe_flag(post: &str) -> String {
+    let s = cps(post);
+    let line = s.lines().find(|l| l.starts_with("probeAxisInversion = true;")).expect("declares the flag");
+    s.replacen(line, "", 1)
 }
 
 fn sign(flip: [bool; 3]) -> Pt {
@@ -206,14 +223,14 @@ fn correct(run: &Run, c: &Case, flip: [bool; 3], shift: Pt) -> bool {
 
 #[test]
 fn every_mode_sets_the_physical_offset_on_every_machine() {
-    for c in cases() {
+    for (post, c) in POSTS.iter().flat_map(|p| cases().into_iter().map(move |c| (*p, c))) {
         let recs = records(&c);
         let touches = recs.iter().filter(|r| matches!(r, Record::Touch(_))).count();
         for letters in MACHINES {
             let flip = flip_of(letters);
-            let program = post_for(&recs, letters);
+            let program = post_for(post, &recs, letters);
             let run = simulate(&program, flip, &c.shape, SHIFT);
-            let what = format!("{} on inverted {letters:?}", c.name);
+            let what = format!("{post}: {} on inverted {letters:?}", c.name);
             assert_eq!(run.stop, Stop::End, "{what}\n{program}");
             assert_eq!(run.trips.len(), touches, "{what}: every touch trips once\n{program}");
             assert!(
@@ -229,11 +246,11 @@ fn every_mode_sets_the_physical_offset_on_every_machine() {
 
 #[test]
 fn a_part_where_the_model_says_sets_the_unchanged_datum() {
-    for c in cases() {
+    for (post, c) in POSTS.iter().flat_map(|p| cases().into_iter().map(move |c| (*p, c))) {
         for letters in MACHINES {
             let flip = flip_of(letters);
-            let run = simulate(&post_for(&records(&c), letters), flip, &c.shape, [0.0; 3]);
-            assert!(correct(&run, &c, flip, [0.0; 3]), "{} on {letters:?}: {:?}", c.name, run);
+            let run = simulate(&post_for(post, &records(&c), letters), flip, &c.shape, [0.0; 3]);
+            assert!(correct(&run, &c, flip, [0.0; 3]), "{post}: {} on {letters:?}: {:?}", c.name, run);
         }
     }
 }
@@ -242,34 +259,37 @@ fn a_part_where_the_model_says_sets_the_unchanged_datum() {
 fn a_part_out_of_reach_alarms_no_contact_and_writes_nothing() {
     let c = cases().into_iter().find(|c| c.name == "face -X").expect("face -X");
     // Travelling -X onto a part 7 mm further -X: past the 5 mm overtravel.
-    for letters in MACHINES {
-        let run = simulate(&post_for(&records(&c), letters), flip_of(letters), &c.shape, [-7.0, 0.0, 0.0]);
-        assert_eq!(run.stop, Stop::Alarm(2, "PROBE NO CONTACT".into()), "{letters:?}");
-        assert_eq!(run.offsets[1], [UNSET; 3], "{letters:?}: no offset is written");
+    for (post, letters) in POSTS.iter().flat_map(|p| MACHINES.iter().map(move |l| (*p, *l))) {
+        let run = simulate(&post_for(post, &records(&c), letters), flip_of(letters), &c.shape, [-7.0, 0.0, 0.0]);
+        assert_eq!(run.stop, Stop::Alarm(2, "PROBE NO CONTACT".into()), "{post} {letters:?}");
+        assert_eq!(run.offsets[1], [UNSET; 3], "{post} {letters:?}: no offset is written");
     }
 }
 
 #[test]
 fn a_part_off_by_more_than_the_tolerance_alarms() {
     let c = cases().into_iter().find(|c| c.name == "bore").expect("bore");
-    for letters in MACHINES {
-        let run = simulate(&post_for(&records(&c), letters), flip_of(letters), &c.shape, [0.8, 0.0, 0.0]);
-        assert_eq!(run.stop, Stop::Alarm(1, "PROBE X OUT OF TOLERANCE".into()), "{letters:?}");
-        assert_eq!(run.offsets[1], [UNSET; 3], "{letters:?}");
+    for (post, letters) in POSTS.iter().flat_map(|p| MACHINES.iter().map(move |l| (*p, *l))) {
+        let run = simulate(&post_for(post, &records(&c), letters), flip_of(letters), &c.shape, [0.8, 0.0, 0.0]);
+        assert_eq!(run.stop, Stop::Alarm(1, "PROBE X OUT OF TOLERANCE".into()), "{post} {letters:?}");
+        assert_eq!(run.offsets[1], [UNSET; 3], "{post} {letters:?}");
     }
 }
 
 #[test]
 fn the_standard_program_on_an_inverted_machine_does_not_find_the_part() {
-    for c in cases().into_iter().filter(|c| c.found.iter().any(|&a| a < 2)) {
-        let program = post_for(&records(&c), &[]);
+    for (post, c) in POSTS.iter().flat_map(|p| cases().into_iter().map(move |c| (*p, c))) {
+        if !c.found.iter().any(|&a| a < 2) {
+            continue;
+        }
+        let program = post_for(post, &records(&c), &[]);
         for letters in &MACHINES[1..] {
             let flip = flip_of(letters);
             if !c.found.iter().any(|&a| flip[a]) {
                 continue; // nothing measured on the inverted axis
             }
             let run = simulate(&program, flip, &c.shape, SHIFT);
-            assert!(!correct(&run, &c, flip, SHIFT), "{} untranslated on {letters:?} passed: {run:?}", c.name);
+            assert!(!correct(&run, &c, flip, SHIFT), "{post}: {} untranslated on {letters:?} passed: {run:?}", c.name);
         }
     }
 }
@@ -298,13 +318,14 @@ type Undo = fn(&mut Record);
 #[test]
 fn every_translated_probing_word_is_needed() {
     let (x, flip) = (invert::Flip { x: true, y: false, z: false }, [true, false, false]);
-    for c in cases().into_iter().filter(|c| c.name.starts_with("corner")) {
+    let corners = || cases().into_iter().filter(|c| c.name.starts_with("corner"));
+    for (post, c) in POSTS.iter().flat_map(|p| corners().map(move |c| (*p, c))) {
         let mirrored = invert::translate_with(records(&c), x, true).expect("translates");
         // The pre-translated stream on a standard post is the engine's
         // own (less the header line naming the machine's inverted axis).
         let body = |p: String| p.lines().filter(|l| !l.starts_with("(MACHINE ")).collect::<Vec<_>>().join("\n");
-        assert_eq!(body(post_for(&mirrored, &[])), body(post_for(&records(&c), &["X"])), "{}", c.name);
-        assert!(behaves(&post_for(&mirrored, &[]), &c, flip), "{}: the full translation", c.name);
+        assert_eq!(body(post_for(post, &mirrored, &[])), body(post_for(post, &records(&c), &["X"])), "{post}: {}", c.name);
+        assert!(behaves(&post_for(post, &mirrored, &[]), &c, flip), "{post}: {}: the full translation", c.name);
         let undo: [(&str, Undo); 3] = [
             ("touch target", |r| {
                 if let Record::Touch(t) = r {
@@ -325,23 +346,43 @@ fn every_translated_probing_word_is_needed() {
         for (what, f) in undo {
             let mut broken = mirrored.clone();
             broken.iter_mut().for_each(f);
-            assert!(!behaves(&post_for(&broken, &[]), &c, flip), "{}: passes without the {what}", c.name);
+            assert!(!behaves(&post_for(post, &broken, &[]), &c, flip), "{post}: {}: passes without the {what}", c.name);
         }
     }
 }
 
+/// Every shipped post that translates an inverted axis now also
+/// declares its probing verified, so the refusal is pinned on a shipped
+/// script with the flag taken out: still refused by name.
 #[test]
 fn probing_through_an_unverified_script_still_refuses_by_name() {
     let c = cases().into_iter().find(|c| c.name == "bore").expect("bore");
     let stream = cnc::serialize(&records(&c));
-    let e = engine::run(&cps("haas"), &machine(&["X"]), &stream).map(|o| o.program).expect_err("refused").to_string();
-    assert_eq!(
-        e,
-        "machine VMC 3-AXIS has an inverted X axis: operation Probe1: probing with a post script that does not \
-         declare probeAxisInversion = true (Fanuc does) is not supported for an inverted axis yet"
-    );
+    for post in POSTS {
+        let e = engine::run(&without_probe_flag(post), &machine(&["X"]), &stream)
+            .map(|o| o.program)
+            .expect_err("refused")
+            .to_string();
+        assert_eq!(
+            e,
+            "machine VMC 3-AXIS has an inverted X axis: operation Probe1: probing with a post script that does \
+             not declare probeAxisInversion = true (Fanuc and Haas do) is not supported for an inverted axis yet",
+            "{post}"
+        );
+    }
     let probing = invert::translate(records(&c), invert::Flip { x: false, y: true, z: false });
     assert!(probing.is_err_and(|e| e.iter().any(|l| l.contains("probeAxisInversion"))), "plain translate refuses");
+}
+
+/// Declaring the flag changes nothing on a standard machine: every
+/// case posts byte for byte as the script without it (the Haas probe
+/// golden from #173 stays as it was, too).
+#[test]
+fn an_uninverted_program_is_unchanged_by_the_flag() {
+    for (post, c) in POSTS.iter().flat_map(|p| cases().into_iter().map(move |c| (*p, c))) {
+        let recs = records(&c);
+        assert_eq!(post_for(post, &recs, &[]), post_with(&without_probe_flag(post), &recs, &[]), "{post}: {}", c.name);
+    }
 }
 
 /// The reader itself: both deviation forms (main's `a--b` and #377's

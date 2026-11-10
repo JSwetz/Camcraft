@@ -7,7 +7,7 @@
 //!
 //! Gate map (M4.4): covers app::mcp, app::script, app::project::json,
 //! app::cli, app::tool_library, app::commands (tool_import),
-//! app::operation (detect_holes, #312).
+//! app::operation (detect_holes, #312), app::mcp::pockets (detect_pockets, #35).
 
 mod common;
 
@@ -108,7 +108,7 @@ fn handshake_and_tool_list() {
     for want in [
         "open_project", "import_model", "save_project", "get_job", "list_operation_types", "add_operation",
         "edit_operation", "delete_operation", "set_tool", "undo", "redo", "generate", "verify", "post",
-        "export_tool_library", "import_tool_library", "detect_holes",
+        "export_tool_library", "import_tool_library", "detect_holes", "detect_pockets",
     ] {
         assert!(names.contains(&want), "missing tool {want}: {names:?}");
     }

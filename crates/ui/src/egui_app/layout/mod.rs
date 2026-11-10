@@ -72,6 +72,14 @@ pub(crate) fn is_open(dock: &DockState<Tab>, tab: &Tab) -> bool {
     dock.find_tab(tab).is_some()
 }
 
+/// Whether `tab` draws this frame (#667): in the dock, the active tab
+/// of its leaf, and that leaf not collapsed. A tab behind another in its
+/// leaf, or closed, does not.
+pub(crate) fn is_shown(dock: &DockState<Tab>, tab: &Tab) -> bool {
+    dock.find_tab(tab)
+        .is_some_and(|p| dock.leaf(p.node_path()).is_ok_and(|l| l.active == p.tab && !l.collapsed))
+}
+
 /// The closable panels' presence, for the View door's checkmarks.
 pub(crate) fn panels_open(dock: &DockState<Tab>) -> PanelsOpen {
     PanelsOpen {
