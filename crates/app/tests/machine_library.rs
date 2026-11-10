@@ -80,7 +80,12 @@ fn every_shipped_machine_lists_and_validates_clean() {
         assert!(e.is_valid(), "{} refuses: {:?}", e.name, e.refusals);
         assert!(matches!(e.source, MachineSource::Builtin(_)));
         assert!(e.kind.is_some(), "{} has a kind", e.name);
-        assert!(!e.posts.is_empty(), "{} has a post", e.name);
+        if e.kind == Some(Kind::Plasma) {
+            // #669: no plasma post ships until #671 - the entry says so.
+            assert!(e.posts.is_empty(), "{}: a cutting post never serves a plasma table", e.name);
+        } else {
+            assert!(!e.posts.is_empty(), "{} has a post", e.name);
+        }
         assert!(!e.groups.is_empty(), "{} has a property sheet", e.name);
     }
     let lathe = list.iter().find(|e| e.name == "Lathe").expect("the library has a lathe");
@@ -187,7 +192,7 @@ fn required_keys_per_kind_refuse_by_name() {
 #[test]
 fn other_stated_values_refuse_by_name() {
     let t = mill(|v| *at(v, "/general/kind") = "drill press".into());
-    one_refusal(&t, "general.kind", "not mill, lathe or mill-turn");
+    one_refusal(&t, "general.kind", "not mill, lathe, mill-turn or plasma");
     let t = mill(|v| *at(v, "/kinematics/default/units/length") = "cm".into());
     one_refusal(&t, "units.length", "not mm or inch");
     let t = mill(|v| *at(v, "/tooling/number_of_tools") = 0.into());

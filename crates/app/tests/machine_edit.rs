@@ -168,7 +168,7 @@ fn live_tool_codes_are_all_four_or_none() {
 
 #[test]
 fn every_blank_kind_starts_with_its_required_keys_and_validates() {
-    for (k, axes) in [(Kind::Mill, "XYZ"), (Kind::Lathe, "XZ"), (Kind::MillTurn, "XYZC")] {
+    for (k, axes) in [(Kind::Mill, "XYZ"), (Kind::Lathe, "XZ"), (Kind::MillTurn, "XYZC"), (Kind::Plasma, "XYZ")] {
         let m = MachineDraft::blank(k);
         assert!(m.refusals().is_empty(), "{k:?}: {:?}", m.refusals());
         assert!(m.path.is_none() && !m.read_only && m.dirty);

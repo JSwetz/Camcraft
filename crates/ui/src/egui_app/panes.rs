@@ -659,6 +659,8 @@ pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
             camcraft_app::machine::Kind::Lathe => Icon::RotaryContour,
             camcraft_app::machine::Kind::MillTurn => Icon::RotaryParallel,
             camcraft_app::machine::Kind::Mill => Icon::Face,
+            // #669: a plasma table cuts 2D profiles - the contour glyph.
+            camcraft_app::machine::Kind::Plasma => Icon::Contour,
         }),
         Cmd::Undo => Some(Icon::Undo),
         Cmd::Redo => Some(Icon::Redo),

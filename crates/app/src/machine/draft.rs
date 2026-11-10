@@ -80,7 +80,8 @@ impl MachineDraft {
 
     /// A new machine with the keys its kind requires: the model, the
     /// kind, the units and the axis tree the kind moves (mill X/Y/Z,
-    /// lathe X/Z, mill-turn X/Y/Z and a C rotary), with one head to
+    /// lathe X/Z, mill-turn X/Y/Z and a C rotary, plasma X/Y/Z and a
+    /// spindle-less torch head), with one head to
     /// carry the spindle and tool station. Travels, feeds and speeds
     /// are left unstated for the user to fill.
     #[must_use]
@@ -90,12 +91,14 @@ impl MachineDraft {
             "spindle": {}, "tool_station": { "coolants": [ { "name": "Flood", "mCode": "M8" } ] } });
         let mut parts: Vec<Value> = match kind {
             Kind::Lathe => vec![lin("X"), lin("Z")],
-            Kind::Mill | Kind::MillTurn => vec![lin("X"), lin("Y"), lin("Z")],
+            Kind::Mill | Kind::MillTurn | Kind::Plasma => vec![lin("X"), lin("Y"), lin("Z")],
         };
         if kind == Kind::MillTurn {
             parts.push(json!({ "id": "c", "name": "C", "type": "rotary", "axis": [0.0, 0.0, 1.0] }));
         }
-        parts.push(head);
+        // #669: a plasma table's head is the torch - no spindle, no
+        // coolant (the plasma rules refuse both by name).
+        parts.push(if kind == Kind::Plasma { json!({ "id": "torch", "name": "torch", "type": "head" }) } else { head });
         let value = json!({
             "general": { "model": format!("New {}", kind.word()), "kind": kind.word() },
             "kinematics": { "default": {
