@@ -55,16 +55,22 @@ filter by default, the exact fn name with `-Exact`. A match that is
 
 ## Release
 
-`release.ps1` cuts a release: preflight, gate, version bump, commits and tag
-(`-NoTag` on a `release/vX.Y.Z` branch: no tag - main is tagged after the
-release PR merges, AGENTS.md "A cut goes PR review"),
-release build, signing (if configured), the portable zip (same layout as
-`.github/workflows/release.yml`) and, on request, the installer.
+`cargo xtask release` cuts a release (xtask/src/release*.rs, #749):
+preflight, the release gate tier (in process), version bump, commits
+(`--no-tag` on a `release/vX.Y.Z` branch: no tag - main is tagged after the
+release PR merges, AGENTS.md "A cut goes PR review"), release build of the
+product packages, signing (Windows, if configured), the portable zip (same
+layout as `.github/workflows/release.yml`) and, on request, the installer
+(Windows). On Linux, macOS and FreeBSD the packaging phase runs that OS's
+`package-*.sh` instead, and `--installer` is refused by name.
+`release.ps1` is a thin wrapper forwarding its old switches.
 
-    powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.8.0 -Title "..."
+    cargo xtask release --version 0.8.0 --no-tag --title "..."
+    powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.8.0 -NoTag -Title "..."
 
-Switches: `-SkipGate`, `-SkipBuild`, `-Installer`, `-DryRun` (prints every
-command, changes nothing).
+Switches: `--skip-gate`, `--skip-build`, `--installer`, `--dry-run` (prints
+every command, changes nothing); the wrapper's `-SkipGate`, `-SkipBuild`,
+`-Installer`, `-DryRun`.
 Update RELEASE_NOTES.md / TESTING.md first; the script commits them.
 It never pushes; it prints the push command for you to run.
 
