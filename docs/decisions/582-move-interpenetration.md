@@ -31,3 +31,15 @@
 - **Only stock that moves is judged.** A stock left where it was cannot
   newly sink by this move; judging it would warn about state the move
   did not make.
+- **Runs on every `MoveModel::new`, unthrottled.** Each Model-page nudge
+  builds the part's and the following stock's placed facets and samples
+  them against every fixture mesh. It is cheap at vise-and-part sizes,
+  so nothing caches or throttles it now. Considered and dropped for
+  now: debouncing a drag, or caching the placed fixture meshes. Either
+  can be added later in `after_part_move` without changing the
+  command's contract.
+- **A part without facets still has its stock judged.** If a part's
+  facets cannot be read, the part check for that setup is skipped, but
+  its stock is still checked and warnings already found in earlier
+  setups are kept. Dropped: returning `None`, which threw away warnings
+  already gathered (review on PR #597).

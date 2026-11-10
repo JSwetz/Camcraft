@@ -109,13 +109,14 @@ pub fn after_part_move(world: &World, part: &str, at: Location, stocks: &[(Strin
         if tris.is_none() {
             tris = model::facets_of(world, &entity);
         }
-        let Some(raw) = &tris else { return None };
+        // A part without facets has no body to judge; its stock still is,
+        // and warnings from earlier setups stand.
         let pose = setup_align::alignment(world, ctx.as_deref()).map_or(at, |a| setup_align::compose(a, at));
-        let body: Vec<Triangle> = raw.iter().map(|t| place(*t, pose)).collect();
+        let body: Option<Vec<Triangle>> = tris.as_ref().map(|raw| raw.iter().map(|t| place(*t, pose)).collect());
         let own = crate::setup::stock_entity_name(world, ctx.as_deref());
         for (fname, fe) in steel_list {
             let Some(steel) = model::world_facets(world, &fe) else { continue };
-            if let Some(hit) = clash(&body, &steel) {
+            if let Some(hit) = body.as_deref().and_then(|b| clash(b, &steel)) {
                 warnings.push(part_message(part, &fname, hit, MOVE_HINT));
             }
             for (sname, sbody) in stocks.iter().filter(|(n, _)| *n == own) {
