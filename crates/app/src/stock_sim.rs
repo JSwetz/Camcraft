@@ -87,7 +87,16 @@ pub fn stock_grid(
             ((x1 - x0).max(0.0), (y1 - y0).max(0.0))
         }
     };
-    let cell = auto_cell(tool_r, span_x, span_y);
+    // A program none of whose ops sweeps a tool through material (a
+    // probe-only program, #592: the probe stays out of the plan) has no
+    // radius to size the lattice by - `min` over nothing is +inf, and
+    // an infinite cell was refused as "invalid stock simulation setup",
+    // naming the wrong cause. The stock then simply stands uncut: size
+    // its lattice by the span alone (the grid ceiling's floor), and the
+    // verdict reads the raw stock against the part - clean when they
+    // agree, rest where they don't, never a gouge it did not cut.
+    let sizing_r = if tool_r.is_finite() { tool_r } else { 0.0 };
+    let cell = auto_cell(sizing_r, span_x, span_y);
     let dex = match &shape {
         StockShape::FromModel { .. } => {
             Dexel::from_facets(&stock_facets, cell).map_err(|e| e.to_string())?
