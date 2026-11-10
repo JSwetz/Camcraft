@@ -94,6 +94,8 @@ mod structural;
 mod plane_face_lay;
 // #554: the plane row's click takes the face, an axis row's the edge.
 mod plane_face_pick;
+// #692: one pick rule on the op page, the setup page and a smooth wall.
+mod one_pick_rule;
 // #664: a left Setups page disarms its picks.
 mod setup_picks_disarm;
 // #555: real clicks pick the three points of the plane.
@@ -115,6 +117,8 @@ mod theme_door;
 mod recent_door;
 // #509: the Fixtures page rows fit the pane.
 mod fixture_rows;
+// #709 hand check: both points of a two-point axis stay marked.
+mod two_point_marks;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.

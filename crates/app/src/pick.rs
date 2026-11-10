@@ -10,6 +10,7 @@ pub mod face;
 pub mod feature_arc;
 pub mod feature_graph;
 pub mod feature_pick;
+pub mod feature_sel;
 // #561: face / point datums for the fixture locate mates.
 pub mod mate;
 pub mod plane;
@@ -22,10 +23,15 @@ pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
 pub use points::{PointsLay, lay_on_points, points_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
 pub use feature_arc::ArcCentre;
-pub use feature_graph::{FeatureGraph, FeaturePoint, PointKind, WeldedFace, feature_graph, feature_graph_cached};
+pub use feature_graph::{
+    FeatureGraph, FeaturePoint, PointKind, WeldedFace, feature_graph, feature_graph_cached, feature_graph_shared,
+};
 pub use feature_pick::{
     FeaturePick, PickBody, PickKinds, PickQuery, PickRay, PickTarget, Projection, pick_bodies, pick_bodies_of,
     pick_feature,
+};
+pub use feature_sel::{
+    EdgeUnit, check_pickable, feature_chains, graph_of, is_feature_chain, pick_selection, selection_of,
 };
 pub use mate::{MateDatum, mate_datum};
 

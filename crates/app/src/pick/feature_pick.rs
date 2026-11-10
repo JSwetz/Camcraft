@@ -22,7 +22,7 @@ use crate::model;
 use crate::operation::FeatureSel;
 use crate::schema::Location;
 
-use super::feature_graph::{FeatureGraph, FeaturePoint, feature_graph_cached};
+use super::feature_graph::{FeatureGraph, FeaturePoint, feature_graph_shared};
 use super::ray_triangle;
 
 /// How the view casts rays: perspective sight lines meet at the ray's
@@ -67,6 +67,13 @@ pub struct PickQuery {
     /// Snap radius in world units (mm) at the surface hit. In perspective
     /// it scales with depth, so it stays one screen-space size.
     pub radius: f64,
+    /// Perspective only (#692 step 2): when finite and above 0, the snap
+    /// radius at depth `t` along the ray is `radius_per_depth * t` mm -
+    /// one screen-space size at every depth, a miss included (the
+    /// silhouette, where an edge pick belongs and no surface anchors
+    /// `radius`). The viewport sets it from its pixel radius and field of
+    /// view; 0 keeps `radius` anchored at the hit.
+    pub radius_per_depth: f64,
     pub kinds: PickKinds,
     /// Ignore occlusion: pick edges and points behind the model. Off by
     /// default everywhere; only an explicit "pick through" mode sets it.
@@ -112,13 +119,21 @@ pub struct PickBody {
 }
 
 impl PickBody {
-    /// A model body at `pose`, its graph from the shared cache.
+    /// A model body at `pose`, its graph from the shared cache (keyed by
+    /// the facet allocation, so a per-frame call never re-hashes a mesh).
     #[must_use]
     pub fn new(name: &str, tris: Arc<[Triangle]>, pose: Location) -> PickBody {
-        let graph = feature_graph_cached(&tris);
+        let graph = feature_graph_shared(&tris);
         PickBody { name: name.to_string(), tris, graph, pose, stock: false }
     }
 }
+
+/// At most this many candidates per tier pay for a sight ray (#692 step
+/// 2): a dense run of hidden ones - the far rim of a finely tessellated
+/// bore - would otherwise cost one full ray per chord. Past the cap the
+/// tier yields to the next (an edge to the face); the loss is a visible
+/// feature ranked below 32 hidden ones, never a hidden pick.
+const OCCLUSION_TRIES: usize = 32;
 
 /// Visibility slack of the occlusion ray, mm: the facets that meet AT an
 /// edge or corner cross the sight line at its own distance.
@@ -234,7 +249,9 @@ pub fn pick_bodies(bodies: &[PickBody], q: &PickQuery) -> Option<FeaturePick> {
     let surface = hit.map(|(_, _, t)| along(o, d, t));
     // Perspective: one screen-space radius means a world radius growing
     // with depth, anchored at the surface hit.
+    let per_depth = if q.radius_per_depth.is_finite() && q.radius_per_depth > 0.0 { q.radius_per_depth } else { 0.0 };
     let reach = |depth: f64| match (q.ray.projection, hit) {
+        (Projection::Perspective, _) if per_depth > 0.0 => per_depth * depth,
         (Projection::Perspective, Some((_, _, t))) if t > 0.0 => radius * depth / t,
         _ => radius,
     };
@@ -273,7 +290,8 @@ pub fn pick_bodies(bodies: &[PickBody], q: &PickQuery) -> Option<FeaturePick> {
         // Nearest the ray first, then nearest the eye; only the winners
         // pay for the occlusion test.
         tier.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-        let found = tier.into_iter().find(|c| q.through || !occluded(bodies, c.2, &q.ray, d, c.4));
+        let tries = if q.through { usize::MAX } else { OCCLUSION_TRIES };
+        let found = tier.into_iter().take(tries).find(|c| q.through || !occluded(bodies, c.2, &q.ray, d, c.4));
         if let Some((_, _, bi, target, at)) = found {
             let entity = bodies.get(bi)?.name.clone();
             return Some(FeaturePick { entity, target, at, surface });
@@ -289,19 +307,26 @@ pub fn pick_bodies(bodies: &[PickBody], q: &PickQuery) -> Option<FeaturePick> {
     Some(FeaturePick { entity: b.name.clone(), target: PickTarget::Face { facet, face, sel }, at: surface?, surface })
 }
 
-/// The world's pickable bodies: every named entity with facets except
-/// those `skip` names (hidden in the view), at its view pose (#326).
+/// The world's pickable bodies - what the viewport draws: every named
+/// entity with facets except those `skip` names (hidden in the view) and
+/// the stocks of setups other than the active one (only the active
+/// setup's stock stands in the viewport), each at its view pose (#326).
 #[must_use]
 pub fn pick_bodies_of(world: &World, skip: impl Fn(&str) -> bool) -> Vec<PickBody> {
+    let shown_stock = crate::setup::stock_entity_name(world, crate::setup::active(world).as_deref());
     let mut out = Vec::new();
     for (name, entity) in model::named_entities(world) {
         if skip(&name) {
             continue;
         }
+        let stock = model::is_stock(world, &entity);
+        if stock && name != shown_stock {
+            continue;
+        }
         let Some(tris) = model::facets_of(world, &entity) else { continue };
         let pose = crate::setup_align::view_pose(world, &entity).unwrap_or_default();
         let mut body = PickBody::new(&name, tris, pose);
-        body.stock = model::is_stock(world, &entity);
+        body.stock = stock;
         out.push(body);
     }
     out

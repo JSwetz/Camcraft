@@ -14,9 +14,9 @@ use camcraft_app::{model, operation};
 
 use crate::egui_app::world;
 use crate::interact::{
-    CLEARANCE_RGB, CUT_RGB, FEED_RGB, MAX_OVERLAY_VERTICES, PICK_EDGE_PX, PLUNGE_RGB, RAPID_RGB,
+    CLEARANCE_RGB, CUT_RGB, FEED_RGB, MAX_OVERLAY_VERTICES, PLUNGE_RGB, RAPID_RGB,
     REGION_RGB, RETRACT_RGB, anchor_hit, anchor_points, anchor_reference, capped, chevrons,
-    collect_overlay, edge_nearest, feature_of_facet, ftoz, height_plane_lines, height_planes,
+    collect_overlay, ftoz, height_plane_lines, height_planes,
     gizmo_segments, hover_features, is_axis_label, overlay_labels, plane_corner, plane_rect, project_uv, queue_feature_pick,
     region_lines, selection_feature_lines, shown_regions, toolpath_lines,
 };
@@ -970,9 +970,9 @@ mod feature_pick_tests {
     //! The Face/Edge click path as it lands on State: a plain click
     //! replaces the open operation's geometry list, Ctrl/Shift adds to it,
     //! a repeat is refused as a no-op, and with no operation open nothing
-    //! queues. The screen-space edge search - the half `pick_edge` reads
-    //! but headless tests cannot drive through a window - is pinned here
-    //! too, at the same projection the gizmo and anchor tests use.
+    //! queues. The edge pick - the one pick rule (#692) as the viewport
+    //! asks it, `feature_click::feature_at` - is pinned here too, at the
+    //! same projection the gizmo and anchor tests use.
 
     use super::*;
     use camcraft_app::commands::{AddTool, CreateOperation, ImportModel};
@@ -980,6 +980,25 @@ mod feature_pick_tests {
     use camcraft_app::operation::{GeoSel, Height, OpParams, SrcRef};
     use camcraft_app::stock::StockShape;
     use camcraft_app::tools::catalog;
+
+    /// The welded face a facet belongs to, by the one pick rule's graph
+    /// (what a Face click on that facet stores).
+    fn feature_of_facet(state: &State, entity: &str, facet: usize) -> Option<FeatureSel> {
+        camcraft_app::pick::graph_of(&state.world, entity)?.face_of(facet)?.sel
+    }
+
+    /// The feature edge an Edge-only pick takes at `p`: (entity, edge).
+    fn edge_nearest(state: &State, p: [f32; 2]) -> Option<(String, u32)> {
+        let ask = crate::feature_click::Ask {
+            kinds: camcraft_app::pick::PickKinds::EDGES,
+            unit: camcraft_app::pick::EdgeUnit::Chain,
+        };
+        let (pick, _) = crate::feature_click::feature_at(state, p, ask)?;
+        match pick.target {
+            camcraft_app::pick::PickTarget::Edge { edge } => Some((pick.entity, edge)),
+            _ => None,
+        }
+    }
 
     fn state_with_op() -> State {
         let mut state = State::new();
@@ -1188,14 +1207,14 @@ mod feature_pick_tests {
         let (edge, mid) = rim_mid_px(&state, &mvp, "part", 4.9, 800.0, 600.0)
             .expect("a part rim edge visible from the default camera");
         let (name, hit) =
-            edge_nearest(&state, mid, PICK_EDGE_PX).expect("an edge under its own midpoint");
+            edge_nearest(&state, mid).expect("an edge under its own midpoint");
         assert_eq!(name, "part", "the part draws over the stock here");
         assert_eq!(hit, edge, "and it is the edge that drew there");
 
         // The browser eye closes the geometry off the screen too.
         state.hidden_models.push("part".into());
         assert!(
-            edge_nearest(&state, mid, 4.0 * PICK_EDGE_PX).is_none_or(|(n, _)| n != "part"),
+            edge_nearest(&state, mid).is_none_or(|(n, _)| n != "part"),
             "a hidden model's edges are not on screen, even nearby"
         );
     }
@@ -1210,14 +1229,14 @@ mod feature_pick_tests {
         });
         state.drain_actions();
         assert!(
-            edge_nearest(&state, [10.0, 10.0], 50.0).is_none(),
+            edge_nearest(&state, [10.0, 10.0]).is_none(),
             "pre-layout there is no image to project into - no phantom picks"
         );
         state.viewport_rect = ([0.0, 0.0], [800.0, 600.0]);
         let mvp = state.cam.mvp(800.0 / 600.0);
         let (_, mid) = rim_mid_px(&state, &mvp, STOCK_NAME, 19.9, 800.0, 600.0)
             .expect("a stock rim edge visible from the default camera");
-        let (name, _) = edge_nearest(&state, mid, PICK_EDGE_PX).expect("the stock's own edge");
+        let (name, _) = edge_nearest(&state, mid).expect("the stock's own edge");
         assert_eq!(name, STOCK_NAME, "the stock's top is pickable geometry, no tree needed");
     }
 }

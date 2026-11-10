@@ -117,7 +117,8 @@ pub fn parts(state: &State) -> Vec<String> {
 
 /// Start collecting mates for `fixture` (and `part`, when the page knows
 /// it - else the only part, else the first part pick). Face mode: a click
-/// on a face takes the face; switch to Vertex for points.
+/// takes a feature point near the cursor, else the face (#692's one rule);
+/// Vertex mode takes points only.
 pub fn arm(state: &mut State, fixture: &str, part: Option<&str>) {
     let part = part.map(str::to_owned).or_else(|| match parts(state).as_slice() {
         [only] => Some(only.clone()),

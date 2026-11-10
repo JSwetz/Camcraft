@@ -33,7 +33,7 @@ fn mesh_tris(m: Mesh) -> Vec<Triangle> {
 }
 
 fn query(origin: [f64; 3], dir: [f64; 3], projection: Projection, kinds: PickKinds) -> PickQuery {
-    PickQuery { ray: PickRay { origin, dir, projection }, radius: 1.0, kinds, through: false }
+    PickQuery { ray: PickRay { origin, dir, projection }, radius: 1.0, radius_per_depth: 0.0, kinds, through: false }
 }
 
 /// A ray from `eye` aimed at `at`.
