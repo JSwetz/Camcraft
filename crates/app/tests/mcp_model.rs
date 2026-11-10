@@ -1,9 +1,11 @@
-//! The MCP part-placement tool (#716), driven in-process over the
-//! server's JSON-RPC handler: a part moved and turned, the stock that
-//! rides with it, one undo step per move, and every bad input a tool
-//! error that names it and enters no history.
+//! The MCP part-model tools, driven in-process over the server's
+//! JSON-RPC handler: a part moved and turned with the stock that rides
+//! along (#716), an open STL's missing face filled by repair (#717), one
+//! undo step each, and every bad input a tool error that names it and
+//! enters no history.
 //!
-//! Gate map (M4.4): covers app::mcp::model_tools, app::commands::move_model.
+//! Gate map (M4.4): covers app::mcp::model_tools, app::commands::move_model,
+//! app::commands::repair_model.
 
 use camcraft_app::mcp::Server;
 
@@ -23,14 +25,31 @@ fn tmp_dir(tag: &str) -> PathBuf {
     p
 }
 
+/// The box's six faces as corner indices (bit 0 = +x, bit 1 = +y,
+/// bit 2 = top); `TOP_FACE` is the one at z = `z`.
+const BOX_QUADS: [[usize; 4]; 6] = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+const TOP_FACE: usize = 1;
+
 /// A `2x` by `2y` by `z` box as ASCII STL, centered in XY, z from 0.
-fn write_box_stl(path: &Path, (x, y, z): (f64, f64, f64)) {
+fn write_box_stl(path: &Path, dims: (f64, f64, f64)) {
+    write_box_faces(path, dims, None);
+}
+
+/// The same box with its top face left out: 10 triangles around one
+/// 4-edge open loop, the hole a repair fills with 2 triangles.
+fn write_open_top_box_stl(path: &Path, dims: (f64, f64, f64)) {
+    write_box_faces(path, dims, Some(TOP_FACE));
+}
+
+fn write_box_faces(path: &Path, (x, y, z): (f64, f64, f64), skip: Option<usize>) {
     let v = |i: usize| -> [f64; 3] {
         [if i & 1 == 0 { -x } else { x }, if i & 2 == 0 { -y } else { y }, if i & 4 == 0 { 0.0 } else { z }]
     };
-    let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
     let mut s = String::from("solid box\n");
-    for q in quads {
+    for (face, q) in BOX_QUADS.iter().enumerate() {
+        if Some(face) == skip {
+            continue;
+        }
         for tri in [[q[0], q[1], q[2]], [q[0], q[2], q[3]]] {
             s.push_str(" facet normal 0 0 0\n  outer loop\n");
             for i in tri {
@@ -95,6 +114,13 @@ impl Client {
     /// The first setup's stock bounds, as get_job reports them.
     fn stock_bounds(&mut self) -> Value {
         self.ok("get_job", json!({}))["setups"][0]["stock_bounds"].clone()
+    }
+
+    /// How many facets the named model has, as get_job reports them.
+    fn facets(&mut self, name: &str) -> Option<u64> {
+        let job = self.ok("get_job", json!({}));
+        let models = job["models"].as_array().cloned().unwrap_or_default();
+        models.iter().find(|m| m["name"] == json!(name)).and_then(|m| m["facets"].as_u64())
     }
 }
 
@@ -235,4 +261,73 @@ fn move_model_refuses_by_name_and_a_refusal_enters_no_history() {
     assert_eq!(fixture_of(&mut c), Some(json!(true)));
     c.ok("undo", json!({}));
     assert_eq!(fixture_of(&mut c), Some(json!(false)), "undo took back add_fixture, not a refused move");
+}
+
+/// An STL with its top face missing gets the hole filled, the counts
+/// come back as data, and one undo restores the open mesh exactly.
+/// Guards #717: without the tool an agent could see an open edge but
+/// never close it headlessly.
+#[test]
+fn repair_model_fills_an_open_boxs_missing_face_in_one_undo_step() {
+    let dir = tmp_dir("repair");
+    let part = dir.join("open.stl");
+    write_open_top_box_stl(&part, (10.0, 5.0, 4.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+    assert_eq!(c.facets("open"), Some(10), "five faces of two triangles");
+
+    let r = c.ok("repair_model", json!({ "name": "open" }));
+    assert_eq!(r["model"], json!("open"), "{r}");
+    assert_eq!(r["weld_tol"], json!(0.001), "the Model page's default tolerance: {r}");
+    assert_eq!(r["max_hole_edges"], json!(256), "the Model page's default budget: {r}");
+    assert_eq!((r["holes_filled"].as_u64(), r["triangles_added"].as_u64()), (Some(1), Some(2)), "{r}");
+    assert_eq!((r["triangles_before"].as_u64(), r["triangles_after"].as_u64()), (Some(10), Some(12)), "{r}");
+    assert!(r["summary"].as_str().is_some_and(|s| s.contains("filled 1 hole")), "{r}");
+    assert_eq!(c.facets("open"), Some(12), "the repaired mesh is the document's");
+
+    // One History step: undo brings the hole back, redo closes it again.
+    c.ok("undo", json!({}));
+    assert_eq!(c.facets("open"), Some(10));
+    c.ok("redo", json!({}));
+    assert_eq!(c.facets("open"), Some(12));
+    // A closed mesh has nothing left to repair, and says so.
+    let why = c.refused("repair_model", json!({ "name": "open" }));
+    assert!(why.contains("nothing to repair"), "{why}");
+}
+
+/// Every refusal names what is wrong and leaves the history alone, so
+/// the next undo undoes the import. Guards the "refusals are data" rule
+/// and the "a repair with nothing to do is a refusal, not a no-op step"
+/// rule `RepairModel` keeps.
+#[test]
+fn repair_model_refuses_by_name_and_a_refusal_enters_no_history() {
+    let dir = tmp_dir("repair-refuse");
+    let part = dir.join("open.stl");
+    let closed = dir.join("closed.stl");
+    write_open_top_box_stl(&part, (10.0, 5.0, 4.0));
+    write_box_stl(&closed, (10.0, 5.0, 4.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": closed.display().to_string() }));
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+
+    let why = c.refused("repair_model", json!({ "name": "closed" }));
+    assert!(why.contains("nothing to repair"), "a closed box is a refusal, not a no-op step: {why}");
+    let why = c.refused("repair_model", json!({ "name": "ghost" }));
+    assert!(why.contains("ghost"), "an unknown name is quoted: {why}");
+    let why = c.refused("repair_model", json!({ "name": "open", "weld_tol": -0.1 }));
+    assert!(why.contains("weld tolerance"), "{why}");
+    let why = c.refused("repair_model", json!({ "name": "open", "max_hole_edges": 2 }));
+    assert!(why.contains("at least 3 edges"), "{why}");
+    let why = c.refused("repair_model", json!({ "name": "open", "max_hole_edges": 2.5 }));
+    assert!(why.contains("\"max_hole_edges\" must be a whole number"), "{why}");
+    let why = c.refused("repair_model", json!({ "name": "open", "weld_tol": "fine" }));
+    assert!(why.contains("\"weld_tol\" must be a number"), "{why}");
+    let why = c.refused("repair_model", json!({}));
+    assert!(why.contains("\"name\" is required"), "{why}");
+
+    // Nothing changed, and the next undo is still the second import.
+    assert_eq!(c.facets("open"), Some(10));
+    c.ok("undo", json!({}));
+    assert_eq!(c.facets("open"), None, "undo took back the import, not a refused repair");
+    assert_eq!(c.facets("closed"), Some(12));
 }
