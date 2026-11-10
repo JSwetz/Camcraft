@@ -214,7 +214,7 @@ pub fn thread_mill(p: &ThreadParams) -> Result<Toolpath, GenError> {
     p.validate()?;
     let r = p.tool_diameter * 0.5;
     let h = THREAD_DEPTH_PER_PITCH * p.pitch;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
 
     for x in &p.holes {
         let rho_end = x.radius + h - r; // major circle, minus one tool

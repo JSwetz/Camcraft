@@ -171,7 +171,7 @@ fn contour_impl(
 
     let eng = Engage { p, center: &center, cert: &cert, plan: &plan, m: &m, legal: &legal };
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
     let mut lifted = LinkTally::default();

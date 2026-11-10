@@ -275,7 +275,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         s => s,
     };
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     // The HSM plan may choose where its entry stands (`pocket_hsm`).
     let (passes, strategy, room, joins) = match strategy {
         PocketStrategy::Adaptive => {

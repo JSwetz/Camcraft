@@ -25,7 +25,7 @@ pub fn radial(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = false;
     if let Some((c, radius, mz)) = shallow_footprint(&sups) {
         let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz);
@@ -100,7 +100,7 @@ pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = false;
     if let Some((c, radius, mz)) = shallow_footprint(&sups) {
         let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz);
@@ -175,7 +175,7 @@ pub fn morphed_spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpat
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = false;
     if let Some((c, radius, _mz)) = shallow_footprint(&sups) {
         // The flat-ground figure: the morph's whole point is that
