@@ -25,7 +25,7 @@ afterwards - the work must not bother them.
   `RECOMMENDED.md` itself: every branch appending to one shared file made
   each merge re-conflict every other open PR (user, 2026-11-08: "this is
   getting annoying"). The cut gathers the files into `RECOMMENDED.md`
-  (`scripts/collect-decisions.ps1`, release step 2); `docs/decisions/README.md`
+  (`cargo xtask decisions`, release step 2); `docs/decisions/README.md`
   has the format.
 - **Never stop, never recap mid-roadmap.** There is no "wrap up and check
   in" state: the next issue is claimed when the current gate is green.
@@ -153,17 +153,27 @@ go to `CHANGELOG.md`.
   - **Process files sync on every session, not only at tags** (user,
     2026-11-10: "we need a way to inform all forks that there is changes
     to skills and agents"). The process - `AGENTS.md`, `.claude/agents/`,
-    `.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh` - changes
-    between releases, and a fork's agents must follow the current rules.
+    `.claude/skills/`, `xtask/` (the gate and decision tooling, #748),
+    `.cargo/config.toml` (its `cargo xtask` alias), and the wrappers that
+    forward to it - `scripts/gate.ps1`, `scripts/gate.sh`,
+    `scripts/release.ps1`, `scripts/collect-decisions.ps1`,
+    `scripts/collect-decisions.sh` - changes between releases, and a fork's
+    agents must follow the current rules.
     At the start of every session in a fork, before claiming work,
     compare `git show upstream/main:.claude/PROCESS_VERSION` with the
     local `.claude/PROCESS_VERSION`. If upstream's is higher, pull just
     those files: `git checkout upstream/main -- AGENTS.md .claude/agents
-    .claude/skills .claude/PROCESS_VERSION scripts/gate.ps1
-    scripts/gate.sh`, commit as `chore(process): sync process files to
-    upstream PROCESS_VERSION <n>` on a `process-sync` branch, and merge
+    .claude/skills .claude/PROCESS_VERSION xtask .cargo/config.toml
+    scripts/gate.ps1 scripts/gate.sh scripts/release.ps1
+    scripts/collect-decisions.ps1 scripts/collect-decisions.sh`, commit as `chore(process): sync
+    process files to upstream PROCESS_VERSION <n>` on a `process-sync`
+    branch, and merge
     it into the fork's `main` (or open a PR there if the fork protects
-    main), then re-read AGENTS.md before going on. This is the one
+    main), then re-read AGENTS.md before going on. A fork whose cut tag
+    predates `xtask/` (the first cut after #748) also adds `"xtask"` to the
+    `members` of its root `Cargo.toml` in that same commit (and lets
+    `Cargo.lock` take the new package) - the wrappers call `cargo xtask`,
+    which needs the member; it adds no product code. This is the one
     exception to "sync only to a cut tag": process files don't change
     product code, so the fork's code stays on the tag while its rules stay
     current. What changed and why is in the pinned issue #681 ("Process
@@ -200,10 +210,55 @@ go to `CHANGELOG.md`.
   is a claim", below).
 - **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
   an Agent should have the tag source:agent"). Every issue an agent opens
-  carries the `source:agent` label alongside its `P*` and `area:*` labels -
+  carries the `source:agent` label alongside its `P*`, `effort:*` and `area:*` labels -
   including a bug the user reported in chat and an agent filed for them.
   An issue a human opens on GitHub never gets it. Agents and the user share
   one GitHub account, so the label, not the author, tells them apart.
+- **Every issue is weighted by effort** (user, 2026-11-10: "we need a way
+  of 'weighting' an issue ... to manage token spend on different levels of
+  complexity of tickets"). Beside its `P*`, every issue carries exactly one
+  effort label: how hard the *work* is, not which model does it. `P*`
+  still decides which issue is worked next; `effort:*` decides who works
+  it.
+
+  | Label | The work | Examples |
+  |---|---|---|
+  | `effort:low` | mechanical, one file, no new logic | docs, labels, a test fixture or field fix (#711), a string or layout tweak |
+  | `effort:medium` | one module or crate, a known pattern | a UI page change, an MCP tool over an existing command, a new machine file |
+  | `effort:high` | several crates, new behaviour with its tests | a new undoable command with its MCP tool, simulation or post logic, a refusal law |
+  | `effort:max` | new algorithms, formats or open design | geometry or toolpath algorithms, collision laws, a file format (DXF, #743), research-shaped work |
+
+  - **Set at filing.** Whoever files an issue sets its effort label with
+    its `P*` and `area:*`, from the table. A human-filed issue without
+    one gets it at triage (the first agent that reads it for a pick).
+  - **Safety floor.** Anything that can change posted G-code, a collision
+    or gouge check, stock simulation or geometry is at least
+    `effort:high`, however small the diff; every `P0` is at least
+    `effort:high`. The Prime Directive is never handed to the cheapest
+    tier.
+  - **Who works it.** The main session picks by Pick and the lanes as
+    before, then dispatches the issue to the worker agent of its effort -
+    `.claude/agents/issue-worker-<effort>.md`, each running the shared
+    `/work-issue` skill (claim, worktree, fix, pinning test, quick gate,
+    draft PR). The worker never merges; the main session keeps the
+    review and merge decisions. The model behind each effort is set only
+    in those agent files (`model:`), so a fork on other models changes
+    four lines, not this law. If an agent's model is unavailable (a 404),
+    run it without the `model:` line (the session's model) and note it in
+    the claim comment.
+  - **Review tier.** The review of a worker's PR runs at least on the
+    `effort:medium` model, and at the `effort:high` model for anything
+    under the safety floor. A cheap review of cheap work is how a bug
+    gets through.
+  - **Escalation, never silent.** A worker that fails its quick gate
+    twice, or finds the work is bigger than its label, stops: it comments
+    what it learned and where any held work lives, raises the label one
+    step (`low` -> `medium` -> `high` -> `max`), and releases the claim; the
+    next pick goes to the higher tier. At most one escalation per run.
+    Only the maintainer lowers an effort label.
+  - **Measured.** The PR's `review-cost` comment names the effort and
+    whether it escalated, so the table can be recalibrated from data
+    (escalation rate and cost per tier), not by feel.
 - **A claim comment is a claim** (user, 2026-11-08: "a comment should
   suffice ... if we come across a claimed issue thru comment we should
   just label it as such - and vice versa if they remove their comment,
@@ -241,7 +296,7 @@ go to `CHANGELOG.md`.
   code", with `plan: research`), but takes no branch, no PR and no lane
   slot. Working it means: answer the open questions in issue comments
   (research, recorded decisions), then file the concrete sub-issues it
-  lists - each with one `P*`, `area:*`, `source:agent` when an agent files
+  lists - each with one `P*`, one `effort:*`, `area:*`, `source:agent` when an agent files
   it, a "Done means" line and "Part of #N" - and link them back from the
   umbrella. When every sub-issue is filed, drop `needs-research` and close
   the umbrella with a comment naming them - it is not kept open, so Pick
@@ -249,7 +304,7 @@ go to `CHANGELOG.md`.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
-  work, open a new issue for it (labels: one `P*`, one or more `area:*`)
+  work, open a new issue for it (labels: one `P*`, one `effort:*`, one or more `area:*`)
   rather than burying it (and `source:agent`).
 - **Done on a branch = pushed + PR, never merged to main** (user,
   2026-11-07: "when closing an issue we should push the branch, not merge
@@ -381,7 +436,10 @@ If a UI change has no command for it, that's a bug - add one.
 **Commands ship with an MCP tool** (#128, #356). The MCP server lets an AI agent
 drive CamCraft headlessly. A PR that adds a user-facing command also adds its
 MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a
-`source:agent` follow-up issue `MCP: <command>` and names it in the PR body. MCP
+`source:agent` follow-up issue `MCP: <command>` and names it in the PR body. Every
+MCP issue (an `MCP:` title, or work on `crates/app/src/mcp/` or the camcraft-mcp
+skill) carries `area:mcp` and is `P1`, unless the maintainer paused it `P?` (user, 2026-11-10: "find all MCP tickets
+and make P1"), so the agent surface keeps up with the GUI. MCP
 tools call the same undoable commands the GUI uses, so undo/redo history and
 invariants hold headlessly.
 
@@ -469,40 +527,52 @@ app-level fixtures in `crates/app/tests/common/mod.rs`). Each future subcrate
 carries its own tests inside its crate (M4.1).
 
 **Three gate tiers - never hours per change** (user, 2026-11-07: "break up
-those test suites so we don't have to run hours on hours of tests"):
+those test suites so we don't have to run hours on hours of tests"). One
+command runs them on Windows, macOS and Linux alike (#748): `cargo xtask
+gate <tier>`, from the workspace's `xtask/` crate. `scripts/gate.ps1`
+(`-Tier quick`, `-Test <name>`, ...) and `scripts/gate.sh` (`quick`,
+`test <name>`, ...) still work: they are thin wrappers that forward to it.
 
 1. **quick** (per patch, by the agent or gate-runner, target ≤ 5 min): only
    the test binaries the diff touches, picked from the gate maps and the
-   touched crates (`scripts/gate.ps1 -Tier quick`); debug; no heavy lanes.
+   touched crates (`cargo xtask gate quick [--base main]`); debug; no heavy
+   lanes.
 2. **batch** (main session, before committing a batch, target ≤ 20 min):
    every debug suite except those tagged slow, the ui suites from
-   `crates/ui`, clippy (`-Tier batch`). No release-mode heavy lanes.
+   `crates/ui`, clippy (`cargo xtask gate batch`). No release-mode heavy
+   lanes.
 3. **release** (only at a cut, run locally): everything - all debug
-   suites, the `--ignored` heavy lanes in release (`-Tier release`).
+   suites, the `--ignored` heavy lanes in release (`cargo xtask gate
+   release`).
+
+Any tier takes `--dry-run` to print its plan without running it; logs go
+to `gate-logs/<tier>-<timestamp>/`.
 
 **GitHub Actions minutes are budgeted** (3000/month; Windows bills 2x,
 macOS 10x). Nothing runs on push or PR: every gate tier runs locally
-through `scripts/gate.ps1`. GitHub runs only `release.yml` on a pushed tag
+through `cargo xtask gate`. GitHub runs only `release.yml` on a pushed tag
 (the build that publishes the artifact). `ci.yml` and `nightly.yml` are
 manual (`workflow_dispatch`) for the rare case a clean-machine run is
 wanted. Never add a `push`, `pull_request` or `schedule` trigger without
 the user's say-so.
 
 **Test the change, not everything.** A fix is proved by the test(s) that pin
-it, run one by one: `scripts/gate.ps1 -Test <name>` (or plain `cargo test -p
-<crate> --test <binary> -- <name> --exact`). A whole suite runs only when the
+it, run one by one: `cargo xtask gate test <name> [--crate c] [--binary b]
+[--exact]` (or plain `cargo test -p <crate> --test <binary> -- <name>
+--exact`). A whole suite runs only when the
 change touches what that suite covers; the full set runs only at a release
 cut (user, 2026-11-07: "tests should also be possible to run one by one …
 so we are testing changes rather than everything every time").
 
-Batch skips the debug binaries in `SLOW_BINARIES` at the top of
-`scripts/gate.ps1` (motion finish3d, pivot5d, flow; app
+Batch skips the debug binaries in `SLOW_BINARIES` (`xtask/src/plan.rs`,
+pinned by its unit tests) (motion finish3d, pivot5d, flow; app
 center_cut_multiaxis - each ~40-50 s); release runs them. camcraft-kernel
 runs in release, and in quick only when kernel itself is touched. Quick
 prints what it chose before running: the changed `#[test]` fns of a changed
 suite (`--exact`), and the gate-mapped suites of a changed src module; a
 change to shared test code (tests/common, goldens, snapshots) runs that
-crate's suites; geometry/cl/Cargo changes fall back to batch.
+crate's suites; geometry/cl/Cargo changes fall back to batch; a change
+under `xtask/` runs xtask's own unit tests.
 
 A test that takes more than ~60 s in debug moves to the heavy lane (with
 its lane named in the ignore reason) or gets a slimmer fixture; the batch
@@ -635,8 +705,10 @@ that broke them. A red result does not revert the merge by itself; the
 issue is worked in the normal order, and a minor/major cut does not start
 while a `P0` it opened is unfixed. The full release tier runs only at a
 minor/major cut. A fix-only stretch produces no build; to hand-test one, run
-`scripts/release.ps1 -Version <next> -NoTag` locally on main and discard the
-bump (no tag, no push).
+`cargo xtask release --version <next> --no-tag --skip-gate` (or the wrapper
+`scripts/release.ps1 -Version <next> -NoTag -SkipGate`) locally on a scratch
+branch off main (it refuses `--no-tag` on main) and discard the branch and
+its bump (no tag, no push).
 
 **A cut goes PR review → merge to main → tag** (user, 2026-11-07: "when
 cutting a tag, we are doing that by PR review, merging to main, then we cut
@@ -659,7 +731,7 @@ a tag"):
 2. **Release branch.** Sync main (`git pull --ff-only`), then
    `git switch -c release/vX.Y.Z`. The version is the highest bump among
    the commits since the last tag (table above). Run
-   `scripts/collect-decisions.ps1 -Version X.Y.Z` (appends every
+   `cargo xtask decisions --version X.Y.Z` (appends every
    `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
    removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per
@@ -667,10 +739,13 @@ a tag"):
    The release notes also get a short "Process changes" section listing
    each `PROCESS_VERSION` since the previous tag (taken from the pinned
    issue #681). Commit all of it as `docs: X.Y.Z release notes;
-   changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
-   - it runs the release gate tier on that tree (pass `-SkipGate` only if
+   changelog`; then `cargo xtask release --version X.Y.Z --no-tag
+   --installer` (Windows; `scripts/release.ps1 -Version X.Y.Z -NoTag
+   -Installer` is the same command through its wrapper; on macOS and Linux
+   it hands packaging to `scripts/package-*.sh` and refuses `--installer`)
+   - it runs the release gate tier on that tree (pass `--skip-gate` only if
    this exact tree already passed it), commits the version bump, builds
-   the zip and installer, and makes no tag (it refuses `-NoTag` on main).
+   the zip and installer, and makes no tag (it refuses `--no-tag` on main).
 3. **Release PR.** `git push -u origin release/vX.Y.Z`,
    `gh pr create --base main --title "chore(release): X.Y.Z"`, reviewed like
    any PR. Record the branch tip first (`tip=$(git rev-parse

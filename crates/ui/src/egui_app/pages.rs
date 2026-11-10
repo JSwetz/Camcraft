@@ -405,6 +405,7 @@ pub(super) fn post_section(ui: &mut Ui, state: &mut State) {
         state.pending.push_back(CommandKind::SetPerOpOutput(pick));
     }
     super::post_options::threading_picker(ui, state);
+    super::post_options::smoothing_switch(ui, state);
     super::post_options::end_units_picker(ui, state);
 }
 
@@ -444,8 +445,8 @@ fn post_offer_banner(ui: &mut Ui, state: &mut State) {
 
 /// The document's machine (M2.3 C, group completed by M3.3 stage C):
 /// setup furniture read live off the world singleton - no mirror to go
-/// stale. The summary is exactly what the file stated; a blank is a
-/// `?`, never an invented ceiling. The library combo picks a shipped
+/// stale. The overview grid is exactly what the file stated; a blank is
+/// "not stated", never an invented ceiling. The library combo picks a shipped
 /// machine BY NAME, "Load other" reaches any `.mch` through the file
 /// law, and "Edit" opens the draft editor; all three land on the
 /// same `LoadMachine` command, so every change here is undoable
@@ -454,9 +455,9 @@ fn post_offer_banner(ui: &mut Ui, state: &mut State) {
 pub(super) fn machine_section(ui: &mut Ui, state: &mut State) {
     let (path, m) = machine::of(&state.world);
     ui.label("Machine");
+    let names: Vec<&str> = posting::MACHINES.iter().map(|(n, _)| *n).collect();
     ui.horizontal(|ui| {
         ui.label("Library");
-        let names: Vec<&str> = posting::MACHINES.iter().map(|(n, _)| *n).collect();
         let sel: Option<usize> = names.iter().position(|n| path == posting::builtin_path(n));
         let text = match sel {
             Some(i) => names[i].to_owned(),
@@ -480,11 +481,15 @@ pub(super) fn machine_section(ui: &mut Ui, state: &mut State) {
     });
     match &m {
         Some(m) => {
-            ui.label(m.summary());
-            ui.label(format!("{} workspace", machine::kind(Some(m)).label()));
-            if !path.is_empty() {
-                ui.label(format!("loaded from {path}"));
-            }
+            let source = if path.is_empty() {
+                "not stated".to_owned()
+            } else {
+                match names.iter().find(|n| path == posting::builtin_path(n)) {
+                    Some(n) => format!("Built-in: {n}"),
+                    None => path.clone(),
+                }
+            };
+            super::machine_grid::machine_grid(ui, "machine_overview", m, state.units(), &[("Source", source)]);
             ui.horizontal(|ui| {
                 if ui.button("Load other").clicked() {
                     state.pending.push_back(CommandKind::LoadMachineDialog);
@@ -757,6 +762,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             ui.label(line);
             super::setup_align_pick::picker(ui, state, name);
             super::setup_plane_pick::row(ui, state, name);
+            super::setup_points_pick::row(ui, state, name);
             super::setup_axis_pick::rows(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
@@ -1695,6 +1701,8 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
             apply_model_draft(state);
         }
     });
+    // #561: the part into a fixture (or a fixture onto the part) by mates.
+    super::locate_form::model_row(ui, state, &name);
     // Mesh repair (M13.11): weld and fill on the user's say-so, never on
     // import. The button queues `RepairModel`; the report lands in the
     // status line and stays here while this model is on the page.

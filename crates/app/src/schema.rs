@@ -192,6 +192,9 @@ impl ToolBody {
 /// file before v57, reads as #317's implicit rule
 /// ([`crate::setup_stock::implicit`]). Written only by
 /// `SetSetupStockSource` and the project loader.
+/// `post_options` (#389) is the setup's own post options; `None`, the
+/// default and every earlier file, follows the document's `PostOptions`.
+/// Written only by `SetSetupPostOptions` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
@@ -203,6 +206,7 @@ pub struct SetupDef {
     pub post: Option<PostRef>,
     pub relative_to: Option<String>,
     pub stock_source: Option<crate::setup_stock::StockSource>,
+    pub post_options: Option<PostOptions>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
@@ -380,6 +384,12 @@ pub struct PostOptions {
     pub skip_stops: bool,
     /// One standalone program per operation (#111).
     pub per_op: bool,
+    /// Per-operation smoothing (#616): off (the default) posts no
+    /// smoothing words; on, each op asks its tolerance and the dialect
+    /// writes its control's mode (G64 P, G5.1, G187, CYCLE832, CYCL
+    /// DEF 32), reset at the op's end. Opt-in because several controls
+    /// need an option for it (Fanuc's AI contour control).
+    pub smoothing: bool,
     /// The length unit the control is left in after the program (#596).
     pub end_units: EndUnits,
 }

@@ -21,11 +21,14 @@
 //!   cylinder re-fits to the turned block's bounds). A cylinder whose
 //!   axis would leave the vertical, or a following stock another setup
 //!   shares, is refused by name - never silently left behind.
-//! - **The pivot is the parts' centre.** The presets and the numeric
-//!   angles turn the parts about the centre of their bounds, so a flip
-//!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
+//! - **The presets pivot on the parts' centre.** A preset turns the
+//!   parts about the centre of their bounds, so a flip leaves them on the
+//!   same spot of the table. Typed angles ([`AlignPartToSetup::turn`],
+//!   #606) pivot on the setup's WCS origin by default - the part keeps
+//!   its relation to the origin - or on the centre, by choice. [`AlignPartToSetup::new`]
 //!   takes any rigid transform - the door the face pick (#330) uses,
-//!   through [`AlignPartToSetup::lay_on_plane`], and the in-plane axis
+//!   through [`AlignPartToSetup::lay_on_plane`], three points (#555),
+//!   through [`AlignPartToSetup::lay_on_points`], and the in-plane axis
 //!   picks (#557), through [`AlignPartToSetup::turn_in_plane`].
 //! - **Linked setups follow (#316).** Every setup placed relative to
 //!   this one (directly or through others, [`crate::setup_relative`])
@@ -41,6 +44,7 @@ use crate::geometry::{Point3, Triangle, transform_point};
 use crate::model;
 use crate::schema::{Location, SetupDef, StockDef};
 use crate::setup_align::{self, AlignPreset};
+use crate::setup_turn::TurnPivot;
 use crate::stock::{self, StockShape};
 
 use flecs_ecs::core::EntityViewGet; // try_get is not re-exported in prelude (0.2.2)
@@ -93,8 +97,19 @@ pub struct AlignPartToSetup {
 impl AlignPartToSetup {
     /// Any rigid transform document -> setup frame; `None` clears.
     pub fn new(world: &World, setup: &str, alignment: Option<Location>) -> Result<Self, CommandError> {
+        Self::build(world, setup, alignment, false)
+    }
+
+    /// The alignment a locate writes (#561): this setup's square box or
+    /// cylinder stock keeps its allowance on each side round the part
+    /// (`crate::stock_follow`) instead of re-fitting the turned block.
+    pub fn locating(world: &World, setup: &str, alignment: Option<Location>) -> Result<Self, CommandError> {
+        Self::build(world, setup, alignment, true)
+    }
+
+    fn build(world: &World, setup: &str, alignment: Option<Location>, square: bool) -> Result<Self, CommandError> {
         let (prev, next) = change_of(world, setup, alignment)?;
-        let stock = following_stock(world, setup, prev, next)?;
+        let stock = following_stock(world, setup, prev, next, square)?;
         let mut carried = Vec::new();
         for (child, c_prev, c_next) in crate::setup_relative::carried(world, setup, prev, next) {
             let follow = |e: CommandError| {
@@ -107,10 +122,31 @@ impl AlignPartToSetup {
                 ))
             };
             let c_next = c_next.map(|a| check_location(a, "the carried part alignment")).transpose().map_err(follow)?;
-            let stock = following_stock(world, &child, c_prev, c_next).map_err(follow)?;
+            let stock = following_stock(world, &child, c_prev, c_next, false).map_err(follow)?;
             carried.push(Step { setup: child, prev: c_prev, next: c_next, stock });
         }
         Ok(AlignPartToSetup { main: Step { setup: setup.to_string(), prev, next, stock }, carried })
+    }
+
+    /// The main setup's following stock where the change leaves it
+    /// (setup frame) - what a locate's interpenetration check reads.
+    #[must_use]
+    pub fn moved_stock(&self) -> Vec<(String, Vec<Triangle>)> {
+        self.main
+            .stock
+            .iter()
+            .map(|(name, _, (_, at, mesh))| {
+                let tris = mesh
+                    .iter()
+                    .map(|t| Triangle::new(
+                        transform_point(t.a, at.pos, at.rot),
+                        transform_point(t.b, at.pos, at.rot),
+                        transform_point(t.c, at.pos, at.rot),
+                    ))
+                    .collect();
+                (name.clone(), tris)
+            })
+            .collect()
     }
 
     /// How many linked setups this change re-places with it (#316).
@@ -146,6 +182,33 @@ impl AlignPartToSetup {
         Self::new(world, setup, Some(at))
     }
 
+    /// Would [`Self::lay_on_points`] be accepted? The same refusals, by
+    /// name, without building the command (the Setups page's Apply).
+    pub fn check_points(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        pl: crate::pick::PointsLay,
+    ) -> Result<(), CommandError> {
+        let at = crate::pick::lay_on_points(world, picks, pl).map_err(CommandError::Invalid)?;
+        change_of(world, setup, Some(at)).map(|_| ())
+    }
+
+    /// Lay the part on a G17 / G18 / G19 plane through three picked
+    /// points (#555), read by [`crate::pick::lay_on_points`] through the
+    /// face pick's own apply path; with `frame`, point 1 is the origin and
+    /// 1 -> 2 the plane's first axis (3-2-1). Refused by name before any
+    /// write.
+    pub fn lay_on_points(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        pl: crate::pick::PointsLay,
+    ) -> Result<Self, CommandError> {
+        let at = crate::pick::lay_on_points(world, picks, pl).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some(at))
+    }
+
     /// Would [`Self::turn_in_plane`] be accepted? The same refusals, by
     /// name, without building the command (the Setups page's Apply).
     pub fn check_turn(world: &World, setup: &str, axes: &crate::pick::InPlaneAxes) -> Result<(), CommandError> {
@@ -168,16 +231,20 @@ impl AlignPartToSetup {
     }
 
     /// Turn the parts about X, then Y, then Z (degrees) about the centre
-    /// of their bounds. All zero is "as modelled".
+    /// of their bounds (the presets' pivot). All zero is "as modelled".
     pub fn angles(world: &World, setup: &str, deg: [f64; 3]) -> Result<Self, CommandError> {
+        Self::turn(world, setup, deg, TurnPivot::PartCentre)
+    }
+
+    /// Turn the parts to X, then Y, then Z (degrees, from as modelled)
+    /// about `pivot` (#606): the WCS origin keeps the part's point on the
+    /// origin there; the part centre keeps the bounds centre put. All zero
+    /// is "as modelled".
+    pub fn turn(world: &World, setup: &str, deg: [f64; 3], pivot: TurnPivot) -> Result<Self, CommandError> {
         let rot = setup_align::rotation_from_angles(deg)
             .ok_or_else(|| CommandError::Invalid("the alignment angles must be finite numbers".into()))?;
-        if setup_align::is_identity_rot(rot) {
-            return Self::new(world, setup, None);
-        }
-        let c = setup_align::part_centre(world)
-            .ok_or_else(|| CommandError::Invalid("there is no part to align - import a model first".into()))?;
-        Self::new(world, setup, setup_align::about_centre(rot, c))
+        let at = crate::setup_turn::turned(world, setup, rot, pivot).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, at)
     }
 }
 
@@ -226,6 +293,7 @@ fn following_stock(
     setup: &str,
     prev: Option<Location>,
     next: Option<Location>,
+    square: bool,
 ) -> Result<Option<(String, StockState, StockState)>, CommandError> {
     let name = crate::setup::stock_entity_name(world, Some(setup));
     let Some(entity) = model::find_by_name(world, &name) else { return Ok(None) };
@@ -253,6 +321,9 @@ fn following_stock(
     // The change as one transform: undo the old alignment, apply the new.
     let undo = prev.map_or_else(Location::default, setup_align::inverse);
     let delta = setup_align::compose(next.unwrap_or_default(), undo);
+    if square && let Some(after) = square_refit(world, &name, &shape, (loc, &facets), &parts, (prev, next))? {
+        return Ok(Some((name, (shape, loc, facets), after)));
+    }
     let after = match &shape {
         StockShape::FromModel { .. } => {
             let moved = check_location(setup_align::compose(delta, loc), &format!("stock '{name}'"))?;
@@ -285,6 +356,32 @@ fn following_stock(
         }
     };
     Ok(Some((name, (shape, loc, facets), after)))
+}
+
+/// #561: the square block re-fitted round the one part with its
+/// allowance kept (`None`: not a square parametric block - the turned
+/// block is re-fitted as before).
+fn square_refit(
+    world: &World,
+    name: &str,
+    shape: &StockShape,
+    (loc, facets): (Location, &std::sync::Arc<[Triangle]>),
+    parts: &[String],
+    (prev, next): (Option<Location>, Option<Location>),
+) -> Result<Option<StockState>, CommandError> {
+    let [part] = parts else { return Ok(None) };
+    let Some(pe) = model::find_by_name(world, part) else { return Ok(None) };
+    let Some(tris) = model::facets_of(world, &pe) else { return Ok(None) };
+    let doc = model::transform_of(world, &pe).unwrap_or_default();
+    let seen = |a: Option<Location>| {
+        let at = a.map_or(doc, |a| setup_align::compose(a, doc));
+        tris.iter().flat_map(|t| [t.a, t.b, t.c]).map(|p| transform_point(p, at.pos, at.rot)).collect::<Vec<_>>()
+    };
+    let fit = crate::stock_follow::keep_square(name, shape, loc, &seen(prev), &seen(next)).map_err(CommandError::Invalid)?;
+    let Some((sized, at)) = fit else { return Ok(None) };
+    let at = check_location(at, &format!("stock '{name}'"))?;
+    let mesh = if &sized == shape { facets.clone() } else { mesh_of(&sized, name)? };
+    Ok(Some((sized, at, mesh)))
 }
 
 /// A stock-local point through its placement, then through the change.

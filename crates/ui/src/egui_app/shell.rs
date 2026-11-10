@@ -660,7 +660,11 @@ pub(crate) fn shell_layout(
     // no frame where a hidden draft takes a click.
     if !layout::is_shown(dock, &Tab::Properties) {
         crate::axis_pick::disarm_all(state);
+        // #673: the locate draft's form is on that pane too - dropped
+        // here, before the dock routes a viewport release to it.
+        crate::locate_pick::disarm(state);
     }
+    state.locate_form_drawn = false;
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
             .style(DockStyle::from_egui(ui.style().as_ref()))
@@ -675,6 +679,8 @@ pub(crate) fn shell_layout(
                 left_press,
             });
     });
+    // A locate draft whose form the dock did not draw is dropped (#566).
+    crate::locate_pick::sweep(state);
     crate::axis_pick::disarm_hidden(state); // #664/#667: undrawn rows' picks stop
     // Last, so it floats over the dock: the M1.4 graphical tool editor.
     // An in-app egui::Window - this is the shell's only kind of extra
@@ -1306,14 +1312,12 @@ fn viewport_panel(
                 ui.painter().text(at, egui::Align2::LEFT_TOP, text, font.clone(), rgb8(rgb));
             }
         }
+        // #709: picked points, violet and never occluded; the hover over them.
+        for (a, b) in crate::vertex_pick::picked_point_marks(state, aspect) {
+            ui.painter().line_segment([to_px(a), to_px(b)], egui::Stroke::new(2.0, rgb8(interact::PICK_RGB)));
+        }
         for (a, b) in interact::hover_features(state, aspect) {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(rx0 + a[0] * rw, ry0 + a[1] * rh),
-                    egui::pos2(rx0 + b[0] * rw, ry0 + b[1] * rh),
-                ],
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)),
-            );
+            ui.painter().line_segment([to_px(a), to_px(b)], egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)));
         }
         // The machined mesh's hovered facet (#25): the hover ink's yellow,
         // a veil over the class colour and its outline.

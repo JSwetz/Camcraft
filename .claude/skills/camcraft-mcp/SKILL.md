@@ -63,6 +63,8 @@ The server exposes tools across three modules in `crates/app/src/mcp/` (see `cra
 - `open_project { "path": string }`: Load an existing `.camproj` file, replacing the current document and clearing history.
 - `save_project { "path"?: string }`: Save the current document to disk. Without a path, overwrites the last opened/saved file.
 - `import_model { "path": string, "name"?: string }`: Import a mesh model (STEP, STL, OBJ). Re-importing with an existing name updates that model.
+- `move_model { "name": string, "position": [x, y, z], "rotation"?: [x, y, z, w] }`: Place and turn an imported part (mm, unit quaternion; omitted rotation keeps the current one). Undoable; reports where stock that follows the part ended up (#716).
+- `repair_model { "name": string, "weld_tol"?: number, "max_hole_edges"?: integer }`: Weld vertices (default 0.001 mm), drop degenerate or duplicate triangles and fill open loops of at most `max_hole_edges` edges (default 256); reports the counts (#717).
 - `get_job {}`: Dump the entire document state (setups, stock, WCS, models, tools, operations, status).
 - `undo {}`: Undo the last mutating document command.
 - `redo {}`: Redo the last undone command.
@@ -127,24 +129,20 @@ When issue #356 was originally filed, several core features were GUI-only. The f
 
 The following capabilities exist in the GUI or app command layer but do not yet have an MCP tool:
 
-1. **Part Model Translation / Rotation (`MoveModel`, #716):**
-   - The GUI allows moving and turning imported models (`crates/app/src/commands/move_model.rs`). In MCP, models remain at their imported coordinates; orientation must be adjusted via `set_wcs`. A `move_model` tool is open as PR #719.
-2. **Face-to-Plane Alignment (`SetupAlign`, #330):**
+1. **Face-to-Plane Alignment (`SetupAlign`, #330):**
    - Mating a picked face (or two edges) to a G17/G18/G19 plane is on the GUI setup page. MCP has the in-plane axes (`set_part_axes`) and the three-point lay (`lay_part_on_points`); laying a face down still means picking three of its vertices or computing the origin and quaternion for `set_wcs`.
-3. **Mesh Repair (`RepairModel`, #717):**
-   - Welding vertices, dropping degenerate or duplicate triangles, and filling open boundary loops (`crates/app/src/commands/repair_model.rs`) are on the GUI's Model page. A `repair_model` tool is open as PR #721.
-4. **Document Units Lens (`SetUnits`):**
+2. **Document Units Lens (`SetUnits`):**
    - Toggling the document-level unit lens between millimeters and inches (`crates/app/src/commands/set_units.rs`, #578). The MCP server currently exchanges dimensions in millimeters.
-5. **Persistent Program Header Metadata (#258):**
+3. **Persistent Program Header Metadata (#258):**
    - Setting document/setup program numbers and comments (`crates/app/src/commands/program_entry.rs`, `post_options.rs`). The MCP `post` tool currently relies on default or dialect-inferred numbers.
-6. **STEP Vendor Tool Body Attachment (`SetToolBody`, #368, #370):**
+4. **STEP Vendor Tool Body Attachment (`SetToolBody`, #368, #370):**
    - Attaching and aligning vendor STEP models to tool holders is supported in the tool editor GUI, but lacks an MCP command wrapper.
 
-*Note:* Several remaining gaps above are tracked under dedicated milestone and feature issues (e.g. #258 program headers, #370 tool body alignment, #511 the UI's pocket recognition entry point). Per `AGENTS.md`, any future command PR that does not bundle an MCP tool must file a corresponding `source:agent` issue titled `MCP: <command>`.
+*Note:* Several remaining gaps above are tracked under dedicated milestone and feature issues (e.g. #258 program headers, #370 tool body alignment, #511 the UI's pocket recognition entry point). Per `AGENTS.md`, any future command PR that does not bundle an MCP tool must file a corresponding `source:agent` issue titled `MCP: <command>`, labelled `P1` and `area:mcp`.
 
 ---
 
 ## Rule for Contributors
 
 Per `AGENTS.md` ("Everything Is a Command"):
-> A PR that adds a user-facing command also adds its MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a `source:agent` follow-up issue `MCP: <command>` and names it in the PR body.
+> A PR that adds a user-facing command also adds its MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a `source:agent` follow-up issue `MCP: <command>` (labels `P1`, `area:mcp`) and names it in the PR body.

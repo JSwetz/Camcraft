@@ -208,10 +208,22 @@ pub struct MoveFixture {
     name: String,
     prev: Location,
     next: Location,
+    warning: Option<String>,
 }
 
 impl MoveFixture {
+    /// A Fixtures-page move. Since #582 it carries a by-name warning when
+    /// the moved fixture would sit in a part or the setup's stock - the
+    /// same sampled check a locate runs, never a refusal.
     pub fn new(world: &World, name: &str, location: Location) -> Result<Self, CommandError> {
+        let mut command = Self::locating(world, name, location)?;
+        command.warning = crate::fixture_clash::after_fixture_move(world, name, command.next);
+        Ok(command)
+    }
+
+    /// The move a `LocateFixture` makes: no check here, the locate runs
+    /// its own (mate-worded) one.
+    pub fn locating(world: &World, name: &str, location: Location) -> Result<Self, CommandError> {
         let entity = require_writable(world, name)?;
         if !model::is_fixture(world, &entity) {
             return Err(CommandError::Invalid(format!("'{name}' is not a fixture")));
@@ -222,7 +234,14 @@ impl MoveFixture {
             name: name.to_string(),
             prev,
             next,
+            warning: None,
         })
+    }
+
+    /// The interpenetration warning (#582), if any.
+    #[must_use]
+    pub fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
     }
 }
 
