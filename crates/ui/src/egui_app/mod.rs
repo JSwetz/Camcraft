@@ -69,6 +69,7 @@ mod tool_profile_page;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).
 mod setup_pages;
+mod setup_post_page;
 // #509: one fixture's row on the Fixtures page, sized to the pane.
 mod fixture_rows;
 // #326: the Setups page's part-alignment control.
@@ -77,6 +78,8 @@ pub(crate) use setup_align_pick::align_text;
 // #330: the Setups page's lay-on-a-plane row.
 mod setup_plane_pick;
 mod setup_axis_pick;
+// #555: the Setups page's lay-on-three-points row.
+mod setup_points_pick;
 // #316: the setup page's "relative to the previous setup" control.
 mod setup_relative_pick;
 // The operation dialog, split out of `pages` with the property grid
@@ -176,6 +179,8 @@ mod setup_stock_tests;
 mod setup_plane_tests;
 #[cfg(test)]
 mod setup_axis_tests;
+#[cfg(test)]
+mod setup_points_tests;
 #[cfg(test)]
 mod ball_corner_tests;
 #[cfg(test)]

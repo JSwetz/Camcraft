@@ -55,9 +55,12 @@ pub mod setup_align;
 pub mod setup_mount;
 // #316: transforms between setups and the setup-relative link.
 pub mod setup_relative;
+pub mod setup_post_options;
 pub mod setup_sheet;
 // #320: a setup's stock source - its own, or what the setup before leaves.
 pub mod setup_stock;
+// #606: the pivot of a typed part-alignment turn.
+pub mod setup_turn;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;
@@ -68,6 +71,7 @@ pub mod stock_play_worker;
 pub mod stock_view;
 pub mod tool_library;
 pub mod tool_list;
+pub mod tool_list_export;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
 pub use camcraft_tools::tools;

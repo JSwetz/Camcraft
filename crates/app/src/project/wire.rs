@@ -81,6 +81,7 @@ pub fn collect(world: &World) -> ProjectFile {
                         post: d.post.as_ref().map(SetupPostDto::from_ref),
                         relative_to: d.relative_to.clone(),
                         stock_source: d.stock_source.map(|s| s.word().to_string()),
+                        post_options: d.post_options.as_ref().map(SetupPostOptionsDto::from_options),
                     })
             } else {
                 None
@@ -188,7 +189,7 @@ pub fn collect(world: &World) -> ProjectFile {
         // The default options write no key (issue #34, the post's law);
         // the #110 / #111 switches ride their own top-level keys below.
         post_options: {
-            let o = crate::posting::post_options(world);
+            let o = crate::setup_post_options::document(world);
             (o.threading != crate::schema::ThreadingOutput::default()
                 || o.end_units != crate::schema::EndUnits::default())
             .then(|| PostOptionsDto {
@@ -223,9 +224,9 @@ pub fn collect(world: &World) -> ProjectFile {
         // No stated material writes no key (the theme's law again).
         material: crate::cutting::material_of(world).map(|m| m.word().to_owned()),
         // Off writes no key (the material's law, #110).
-        skip_stops: crate::posting::post_options(world).skip_stops,
+        skip_stops: crate::setup_post_options::document(world).skip_stops,
         // One combined program writes no key (#111).
-        per_op_files: crate::posting::post_options(world).per_op,
+        per_op_files: crate::setup_post_options::document(world).per_op,
         entities,
     }
 }
