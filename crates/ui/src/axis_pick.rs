@@ -122,6 +122,22 @@ pub fn disarm(state: &mut State) {
     }
 }
 
+/// Disarm every Setups page pick whose rows were not drawn this frame
+/// (#664): a page change, an operation opened, the section closed - an
+/// armed axis or plane pick must not feed a hidden draft. Called once a
+/// frame after the properties pane; the picks themselves stay, so the
+/// page re-opens disarmed with them shown. Ephemeral view state, no
+/// command.
+pub fn disarm_hidden(state: &mut State) {
+    let shown = std::mem::take(&mut state.setup_pick_rows);
+    if let Some(d) = state.axis_pick.as_mut().filter(|d| !shown.contains(&d.setup)) {
+        d.picking = None;
+    }
+    if state.plane_pick.as_ref().is_some_and(|d| !shown.contains(&d.setup)) {
+        crate::plane_pick::pause(state);
+    }
+}
+
 /// Is a Setups page row collecting axis picks?
 #[must_use]
 pub fn collecting(state: &State) -> bool {
@@ -150,7 +166,7 @@ pub fn set_by(state: &mut State, setup: &str, axis: InPlaneAxis, by: AxisBy) {
 /// the operation pick - with no operation open on a Setups page. Say
 /// what to do instead and swallow the click. `true` when handled.
 pub fn hint_stray(state: &mut State) -> bool {
-    if !state.axis_rows_shown || collecting(state) || state.plane_pick.is_some() {
+    if !state.axis_rows_shown || collecting(state) || crate::plane_pick::collecting(state) {
         return false;
     }
     let (y, x) = state.axis_pick.as_ref().map_or((AxisBy::Edge, AxisBy::Edge), |d| (d.y_by, d.x_by));

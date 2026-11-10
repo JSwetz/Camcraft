@@ -45,6 +45,13 @@ fn beside_an_edge(sh: &ShellUi) -> egui::Pos2 {
 #[test]
 fn a_click_beside_an_edge_picks_the_face_for_the_plane_and_the_edge_for_an_axis() {
     let mut harness = shell_harness();
+    // #664: a pick collects only while its setup page is shown.
+    harness.state_mut().state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.run();
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Settings),
+    );
     harness.run();
     let p = beside_an_edge(harness.state());
     assert!(
@@ -57,7 +64,7 @@ fn a_click_beside_an_edge_picks_the_face_for_the_plane_and_the_edge_for_an_axis(
     let picks = harness.state().state.plane_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
     assert_eq!(picks.len(), 1, "one pick drafted: {picks:?} ({})", harness.state().state.status);
     assert!(matches!(picks[0].feature, FeatureSel::Face(_)), "the face, not the edge: {picks:?}");
-    assert!(harness.state().state.op_ui.geo.len() <= 1, "nothing joins the open operation");
+    assert!(harness.state().state.op_ui.geo.len() <= 1, "nothing joins an operation");
 
     // The axis row takes the edge at the same pixel.
     crate::axis_pick::arm(&mut harness.state_mut().state, "Setup1", InPlaneAxis::Y);
