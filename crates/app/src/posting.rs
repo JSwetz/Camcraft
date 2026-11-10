@@ -208,7 +208,14 @@ pub fn options_value(o: PostOptions) -> Value {
         ThreadingOutput::G32Passes => "G32",
         ThreadingOutput::G76Cycle => "G76",
     };
-    serde_json::json!({ "Threading": threading, "Smoothing": o.smoothing })
+    let mut v = serde_json::json!({ "Threading": threading });
+    // #616: stated only when on - off, the object a script sees is
+    // byte-identical to before (the posts read the per-op PARAMs; this
+    // word is for a script that wants the document-wide switch).
+    if o.smoothing {
+        v["Smoothing"] = serde_json::json!(true);
+    }
+    v
 }
 
 /// The document's post for display: built-in name, or the file path
