@@ -16,14 +16,23 @@
 //! reason - never a panic, never a silent success.
 
 mod area;
+mod bridge;
 mod edit;
 mod features;
 mod fixture_tools;
 mod job;
+mod listen;
+mod live;
 mod pick;
 mod render;
 mod setup_tools;
 mod tools;
+
+// #183: the same tool table served live from inside the GUI, over a
+// loopback socket, against the app's own document and History.
+pub use bridge::bridge;
+pub use listen::{port_from, Inbox, Request, Wake};
+pub use live::{answer_live, LiveAnswer};
 
 use crate::script::Env;
 

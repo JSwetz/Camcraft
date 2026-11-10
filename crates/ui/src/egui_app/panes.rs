@@ -1476,6 +1476,10 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconS
                     .color(pal.text_faint)
                     .small(),
             );
+            // #183: the live MCP server says it is listening.
+            if let Some(note) = crate::mcp_host::badge(state) {
+                ui.label(RichText::new(note).color(pal.text_faint).small());
+            }
             if stale > 0 {
                 let button = ui.button(format!("Regenerate all stale ({stale})"));
                 if button.clicked() {

@@ -93,6 +93,7 @@ mod structural;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
+mod mcp_live;
 // #155: Pause / Home entries in the operation list.
 mod program_entry;
 // #371: the tool editor's Body section.

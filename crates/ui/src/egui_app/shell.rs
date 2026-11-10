@@ -61,7 +61,7 @@ const STATUS_H: f32 = 22.0;
 
 /// The windowed shell (the `--ui egui` entry without `--headless`); returns
 /// the process exit code.
-pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
+pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>, mcp_port: Option<u16>) -> i32 {
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(err) => {
@@ -74,6 +74,26 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
     // through the guarded Quit instead of ending the process.
     let _ = super::os_quit::install();
     let mut shell = Shell::new(pick, want);
+    // #183: the opt-in live MCP server. Its waker posts an empty user
+    // event, which wakes the idle loop for a frame that answers the call.
+    if let Some(port) = mcp_port {
+        let proxy = event_loop.create_proxy();
+        let wake: camcraft_app::mcp::Wake = Box::new(move || {
+            let _ = proxy.send_event(());
+        });
+        match camcraft_app::mcp::Inbox::listen(port, wake) {
+            Ok(inbox) => {
+                if let Some(addr) = inbox.addr() {
+                    eprintln!("mcp: listening on {addr} (connect with: camcraft-cli mcp --connect {addr})");
+                }
+                shell.state.mcp = Some(inbox);
+            }
+            Err(err) => {
+                eprintln!("mcp: cannot listen on 127.0.0.1:{port}: {err}");
+                shell.state.status = format!("MCP server not started: 127.0.0.1:{port}: {err}");
+            }
+        }
+    }
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
         Err(err) => {
@@ -708,6 +728,13 @@ impl winit::application::ApplicationHandler for Shell {
         }
     }
 
+    /// #183: the MCP listener's wake-up - draw a frame, which answers it.
+    fn user_event(&mut self, _el: &ActiveEventLoop, _event: ()) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if let WindowEvent::Occluded(occluded) = &event {
             self.occluded = *occluded;
@@ -883,6 +910,9 @@ impl Shell {
     fn shutdown(&mut self) {
         // Surface/renderer first, window last (see the field-order note);
         // `state` (and its world) drops after all GPU objects.
+        // #183: the MCP listener stops (and its thread is joined) first,
+        // so no wake-up reaches a closing loop.
+        self.state.mcp = None;
         self.renderer = None;
         self.view = None;
         self.surface = None;

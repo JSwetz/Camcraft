@@ -17,6 +17,7 @@ pub mod feedback;
 pub mod headless_gpu;
 pub mod interact;
 pub mod machined;
+pub mod mcp_host;
 pub mod operations;
 pub mod path_lines;
 pub mod post_file;
