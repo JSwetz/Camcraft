@@ -109,7 +109,7 @@ pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSur
 pub use dexel::{reach, Dexel};
 pub use edge_break::credit_breaks;
 pub use field::SdfField;
-pub use field_carry::CarriedField;
+pub use field_carry::{box_signed, CarriedField};
 pub use field_floor::FloorRead;
 pub use field_batch::CutStats;
 pub use field_blade::{LatheProfile, CROWN_SAG_TOL};

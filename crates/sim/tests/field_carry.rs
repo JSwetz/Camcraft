@@ -98,3 +98,34 @@ fn carrying_twice_is_carrying_through_the_composed_turn() {
         assert_eq!(twice.distance(*p).to_bits(), once.distance(*p).to_bits(), "{p:?}");
     }
 }
+
+#[test]
+fn a_clip_intersects_the_carried_solid_with_the_next_block() {
+    // #637 step C: the next setup's block clips the carried body -
+    // max(d_body, d_block); inside only where both hold material.
+    use camcraft_sim::stock_sim::box_signed;
+    let f = cut_field();
+    let t = turns()[0];
+    let (lo, hi) = (Point3::new(5.0, 0.0, 0.0), Point3::new(15.0, 14.0, 9.0));
+    let c = CarriedField::new(f.clone(), t).clipped(lo, hi);
+    for p in samples() {
+        let body = f.distance(t.unapply(p));
+        let block = box_signed(lo, hi, p);
+        assert_eq!(c.distance(p).to_bits(), body.max(block).to_bits(), "{p:?}");
+        assert_eq!(c.inside(p), f.inside(t.unapply(p)) && block < 0.0, "{p:?}");
+    }
+    // A second clip narrows, never widens.
+    let narrow = c.clone().clipped(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 14.0, 9.0));
+    let p = Point3::new(12.3, 4.2, 2.1);
+    assert!(narrow.distance(p) >= c.distance(p) && narrow.distance(p) > 0.0, "x 12.3 is outside the narrowed block");
+}
+
+#[test]
+fn box_signed_is_negative_inside_and_euclidean_outside() {
+    use camcraft_sim::stock_sim::box_signed;
+    let (lo, hi) = (Point3::new(0.0, 0.0, 0.0), Point3::new(4.0, 2.0, 2.0));
+    assert_eq!(box_signed(lo, hi, Point3::new(1.0, 1.0, 1.0)), -1.0, "1 from the nearest face (y and z)");
+    assert_eq!(box_signed(lo, hi, Point3::new(7.0, 1.0, 1.0)), 3.0);
+    assert!((box_signed(lo, hi, Point3::new(7.0, 6.0, 1.0)) - 5.0).abs() < 1e-12, "a 3-4-5 corner");
+    assert_eq!(box_signed(lo, hi, Point3::new(4.0, 1.0, 1.0)), 0.0, "on a face");
+}
