@@ -234,7 +234,7 @@ fn tool_editor_structure() {
 /// #557 / #554 / #555: a setup's own page carries the part-alignment rows in
 /// the properties leaf - the plane row (a face), the three-points row (#555) and the axes-in-the-plane
 /// rows (an edge or two points), each saying which pick it takes, with nothing armed and Apply hidden until
-/// an axis is picked.
+/// an axis is picked, and every option of the plane rows on screen (#330).
 #[test]
 fn setup_page_alignment_rows_structure() {
     let _g = snapshot_guard();
@@ -272,5 +272,13 @@ fn setup_page_alignment_rows_structure() {
         assert!(h.query_by_label(label).is_none(), "{label:?} waits for the row to be armed");
     }
     assert!(h.query_by_label_contains("Point 1:").is_none(), "no prompts until armed");
+    // #330 (reopened): short lines, so every option is on screen in the
+    // narrow properties pane (one long row ran Flip, the level box and
+    // the pick buttons past its right edge at this window size).
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 720.0));
+    for label in ["Pick a face", "Flip", "Face to plane level", "Pick three points", "Flip points", "Point 1 to plane level", "3-2-1 frame", "+Y by Two points", "Pick +Y edge", "Flip +Y", "+X by Two points", "Pick +X edge", "Flip +X"] {
+        let r = h.get_by_label(label).rect();
+        assert!(screen.contains_rect(r), "{label:?} is on screen: {r:?}");
+    }
     assert!(h.state().state.points_pick.is_none(), "nothing is armed by drawing the page");
 }

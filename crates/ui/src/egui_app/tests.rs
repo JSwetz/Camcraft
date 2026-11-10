@@ -90,6 +90,8 @@ mod post_refusal;
 mod gcode_viewer;
 mod first_setup;
 mod structural;
+// #330: a clicked tilted face is turned flat onto the plane.
+mod plane_face_lay;
 // #554: the plane row's click takes the face, an axis row's the edge.
 mod plane_face_pick;
 // #664: a left Setups page disarms its picks.

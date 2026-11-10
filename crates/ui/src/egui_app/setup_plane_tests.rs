@@ -100,7 +100,7 @@ fn the_row_picks_a_face_and_lays_it_on_g17_through_the_command() {
     crate::plane_pick::take(h.state_mut(), wall);
     h.run();
     assert!(h.state().op_ui.geo.is_empty(), "a draft pick is not an operation pick");
-    h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply")).click();
+    h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face")).click();
     h.run();
     let n = wall_normal(h.state()).expect("Setup1 holds the part laid");
     assert!(n[2] > 1.0 - 1e-9, "the wall faces up: {n:?}");
@@ -152,7 +152,7 @@ fn the_side_is_shown_and_a_pick_that_changes_nothing_greys_apply_out() {
         h.query_by_label_contains("outside: -Y in the model").is_some()
     };
     assert!(side(&h), "the wall's outside (-Y) is shown before Apply");
-    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply"));
+    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face"));
     assert!(!apply.accesskit_node().is_disabled(), "the wall lays the part differently");
     apply.click();
     h.run();
@@ -162,7 +162,7 @@ fn the_side_is_shown_and_a_pick_that_changes_nothing_greys_apply_out() {
     h.run();
     crate::plane_pick::take(h.state_mut(), wall);
     h.run();
-    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply"));
+    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face"));
     assert!(apply.accesskit_node().is_disabled(), "the setup already holds the part that way");
     assert!(side(&h), "the side is still shown");
 }
