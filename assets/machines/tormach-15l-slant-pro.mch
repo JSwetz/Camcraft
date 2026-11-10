@@ -8,7 +8,7 @@
           { "id": "car", "name": "Z", "type": "linear", "travel": { "min": -12.0, "max": 12.0 } }
         ] },
         { "id": "ms", "name": "head", "type": "head",
-          "spindle": { "min_speed": 180.0, "max_speed": 2500.0, "power": 1.1,
+          "spindle": { "min_speed": 180.0, "max_speed": 2500.0, "power": 2.24,
             "body_diameter": 0.0, "body_length": 0.0 },
           "tool_station": {
             "coolants": [ { "name": "Flood", "mCode": "M8" } ] } }

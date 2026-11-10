@@ -36,6 +36,7 @@ struct Spec {
     rpm: (f64, f64),
     ranges: &'static [(f64, f64)],
     ipm: f64,
+    kw: f64,
     tools: usize,
 }
 
@@ -43,11 +44,11 @@ const SPECS: [Spec; 2] = [
     // 8L: X 4.5 in, Z 10 in; 180-2500 / 350-5000 rpm (two belt
     // ranges, 5C nose); 150 IPM; gang / quick-change post (no turret
     // - PathPilot's 99-entry tool table bounds the numbers).
-    Spec { name: "Tormach 8L", travel_in: [4.5, 10.0], rpm: (180.0, 5000.0), ranges: &[(180.0, 2500.0), (350.0, 5000.0)], ipm: 150.0, tools: 99 },
+    Spec { name: "Tormach 8L", travel_in: [4.5, 10.0], rpm: (180.0, 5000.0), ranges: &[(180.0, 2500.0), (350.0, 5000.0)], ipm: 150.0, kw: 1.1, tools: 99 },
     // 15L Slant-PRO: X 10 in, Z 12 in; 180-2500 rpm with its 6 in
     // chuck (the 5C collet's 3500 is NOT the default - see the
     // decision); 60 IPM; 8-station turret.
-    Spec { name: "Tormach 15L Slant-PRO", travel_in: [10.0, 12.0], rpm: (180.0, 2500.0), ranges: &[], ipm: 60.0, tools: 8 },
+    Spec { name: "Tormach 15L Slant-PRO", travel_in: [10.0, 12.0], rpm: (180.0, 2500.0), ranges: &[], ipm: 60.0, kw: 2.24, tools: 8 },
 ];
 
 #[test]
@@ -68,6 +69,7 @@ fn every_tormach_lathe_states_its_spec_sheet_figures() {
         assert_eq!((m.spindle_min, m.spindle_max), (Some(s.rpm.0), Some(s.rpm.1)), "{n} rpm");
         assert_eq!(m.spindle_ranges, s.ranges.to_vec(), "{n} ranges");
         assert_eq!(m.tool_count, Some(s.tools), "{n} tool count");
+        assert!(m.spindle_power.is_some_and(|p| close(p, s.kw)), "{n} power {:?}", m.spindle_power);
     }
 }
 

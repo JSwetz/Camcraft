@@ -2,7 +2,7 @@
 
 Requested by the contributor (2026-11-09): PathPilot Hub simulates both lathes, and CamCraft shipped only a generic `lathe.mch`.
 
-**Sources (public Tormach specifications):**
+**Sources:** Tormach's operator manuals, supplied by the contributor: **UM10753** (8L, §3.1 Specifications) and **UM10225** (15L Slant-PRO, §1.1 Specifications). Both confirm every figure below, and the 8L manual settles its X stroke at 4.5". Tormach's public web pages were cross-checked:
 - 8L: Tormach knowledge base "8L Machine Specifications" (knowledgebase.tormach.com/8l/machine-specifications), the 8L spec sheet, and Tormach's "8L / 15L / RapidTurn package comparison" PDF.
 - 15L: Tormach "15L Slant-PRO Lathe Technical Specifications" (tormach.com/support/lathe/15l-slant-pro-lathe-technical-specifications) and the knowledge base "15L Machine Specifications".
 
@@ -12,7 +12,7 @@ Requested by the contributor (2026-11-09): PathPilot Hub simulates both lathes, 
 | Z stroke | 10 in | 12 in |
 | Spindle | 180–2500 / 350–5000 rpm (two belt ranges, 5C nose) | 180–2500 rpm (6 in chuck) |
 | Feed / rapid | 150 IPM | 60 IPM |
-| Power | 1.5 hp ≈ 1.1 kW | 1.5 hp ≈ 1.1 kW |
+| Power | 1.5 hp ≈ 1.1 kW (Tormach web; the 8L manual states none) | 3 hp continuous ≈ 2.24 kW (UM10225 §1.1) |
 | Tools | 99 (gang / quick-change post, PathPilot tool table) | 8 (8-station turret) |
 
 **Decisions:**
