@@ -179,6 +179,54 @@ fn in_world(e: GenError, local: &[CrossHole], world: &[CrossHole]) -> GenError {
     match e {
         GenError::Invalid(s) => GenError::Invalid(fix(s)),
         GenError::Empty(s) => GenError::Empty(fix(s)),
+        // #261 part 2: the spindle frame is a pure translation (see
+        // `back` above), so the spot rides the same world - local shift
+        // every mouth does. No hole to read it from: the spot is dropped,
+        // never shown in the wrong frame.
+        GenError::At { msg, at } => {
+            let msg = fix(msg);
+            match local.first().zip(world.first()) {
+                Some((l, w)) => GenError::invalid_at(
+                    msg,
+                    Point3::new(
+                        at.x + (w.origin.x - l.origin.x),
+                        at.y + (w.origin.y - l.origin.y),
+                        at.z + (w.origin.z - l.origin.z),
+                    ),
+                ),
+                None => GenError::Invalid(msg),
+            }
+        }
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hole(x: f64, y: f64) -> CrossHole {
+        CrossHole {
+            origin: Point3::new(x, y, 5.0),
+            dir: Point3::new(-1.0, 0.0, 0.0),
+            radius: 2.0,
+            entry_d: 0.0,
+            floor_d: -8.0,
+            through: false,
+        }
+    }
+
+    #[test]
+    fn a_located_kernel_refusal_lands_on_the_world_mouth() {
+        // #261 part 2: the kernel ran 10 mm left of the world (ox = 10),
+        // so its spot and its words both move back by that shift.
+        let (local, world) = ([hole(20.0, 0.0)], [hole(30.0, 0.0)]);
+        let e = GenError::invalid_at("a Drill cycle at (20, 0) plunges into solid", Point3::new(20.0, 0.0, 5.0));
+        let w = in_world(e, &local, &world);
+        assert_eq!(w.location(), Some(Point3::new(30.0, 0.0, 5.0)));
+        assert!(w.to_string().contains("at (30, 0)"), "{w}");
+        // No hole to read the shift from: the spot is dropped, never shown in the wrong frame.
+        let lone = in_world(GenError::invalid_at("x", Point3::new(1.0, 2.0, 3.0)), &[], &[]);
+        assert_eq!(lone, GenError::Invalid("x".into()));
     }
 }

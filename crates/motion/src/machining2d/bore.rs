@@ -156,12 +156,17 @@ impl BoreParams {
                     "a bored hole must have its floor below its entry".into(),
                 ));
             }
+            // #261 part 2: a refusal about this hole points at its mouth.
+            let mouth = Point3::new(h.xy.x, h.xy.y, h.top_z);
             if h.stepped {
-                return Err(GenError::Invalid(format!(
-                    "hole at ({}, {}) carries a counterbore fold - circular boring finishes \
-                     the wall it can see and would silently miss the ring it cannot",
-                    h.xy.x, h.xy.y
-                )));
+                return Err(GenError::invalid_at(
+                    format!(
+                        "hole at ({}, {}) carries a counterbore fold - circular boring finishes \
+                         the wall it can see and would silently miss the ring it cannot",
+                        h.xy.x, h.xy.y
+                    ),
+                    mouth,
+                ));
             }
             // The mouth door: the rim's circle must stay inside the
             // wall - a cutter that cannot enter the hole mouth has no
@@ -169,13 +174,16 @@ impl BoreParams {
             // silent empty path).
             let rc = h.radius - (self.tool_diameter * 0.5 + self.stock_to_leave);
             if rc <= 0.0 {
-                return Err(GenError::Invalid(format!(
-                    "a {} mm cutter has no circle left inside the {} mm hole at ({}, {})",
-                    self.tool_diameter,
-                    h.radius * 2.0,
-                    h.xy.x,
-                    h.xy.y
-                )));
+                return Err(GenError::invalid_at(
+                    format!(
+                        "a {} mm cutter has no circle left inside the {} mm hole at ({}, {})",
+                        self.tool_diameter,
+                        h.radius * 2.0,
+                        h.xy.x,
+                        h.xy.y
+                    ),
+                    mouth,
+                ));
             }
         }
         Ok(())

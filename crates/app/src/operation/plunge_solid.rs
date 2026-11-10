@@ -61,6 +61,8 @@ pub(super) fn face_air_entry(
         }
         Err(why) => match audit(&path, false, tool_r, &solid, SITE) {
             Err(GenError::Invalid(m)) => Err(GenError::Invalid(format!("{m} ({why})"))),
+            // The plunge law names its spot (#261 part 2): same words, spot kept.
+            Err(GenError::At { msg, at }) => Err(GenError::invalid_at(format!("{msg} ({why})"), at)),
             other => other.map(|()| path),
         },
     }

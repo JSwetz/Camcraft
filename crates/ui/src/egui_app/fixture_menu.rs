@@ -1,7 +1,9 @@
 //! The browser's fixture menu (#339 slice 4): a right-click on a model
 //! row offers "Use as fixture" (the active setup's) or "Stop using as
-//! fixture"; on a setup's Fixtures node, "Import fixture…". Every row
-//! queues the very command the setup's Fixtures page queues
+//! fixture"; on a setup's Fixtures node, "Import fixture…" and the
+//! fixture library's "Save fixture to library…" / "Insert from
+//! library…" (#339 slice 6, `fixture_library_dialog`). Every row
+//! of slice 4 queues the very command the setup's Fixtures page queues
 //! (`TagFixture`, `UntagFixture`, `ImportFixtureDialog`) - one undo unit
 //! each, never a world poke. Hand-drawn like the operation menu
 //! (`tree_menu`): an Area at Foreground order; any other primary press
@@ -43,9 +45,13 @@ pub(crate) fn menu_rows(state: &State, target: &TreeMenuTarget) -> Vec<(String, 
             };
             vec![("Fixture".to_owned(), None), (verb.0, Some(verb.1))]
         }
-        TreeMenuTarget::Fixtures(_) => {
-            vec![("Fixtures".to_owned(), None), ("Import fixture…".to_owned(), Some(CommandKind::ImportFixtureDialog))]
-        }
+        TreeMenuTarget::Fixtures(s) => vec![
+            ("Fixtures".to_owned(), None),
+            ("Import fixture…".to_owned(), Some(CommandKind::ImportFixtureDialog)),
+            // #339 slice 6: the user fixture library.
+            ("Save fixture to library…".to_owned(), Some(CommandKind::FixtureLibrarySaveDialog(s.clone()))),
+            ("Insert from library…".to_owned(), Some(CommandKind::FixtureLibraryInsertDialog(s.clone()))),
+        ],
         TreeMenuTarget::Operation(_) | TreeMenuTarget::Operations | TreeMenuTarget::Entry(_) => Vec::new(),
     }
 }

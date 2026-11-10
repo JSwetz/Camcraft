@@ -5,8 +5,38 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::cl::{lattice, Move, ThreadCycle};
+use crate::cl::{lattice, Move, ThreadCycle, ThreadHand};
 use crate::geometry::Point3;
+
+/// The thread's hand in the file (#629): `right` / `left`. Absent reads
+/// right - what every drawing means unless it says LH, and the hand
+/// every cached record before the key existed laid (its passes rose
+/// turning counter-clockwise: a right-hand helix).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadHandDto {
+    #[default]
+    Right,
+    Left,
+}
+
+impl From<ThreadHand> for ThreadHandDto {
+    fn from(h: ThreadHand) -> Self {
+        match h {
+            ThreadHand::Right => ThreadHandDto::Right,
+            ThreadHand::Left => ThreadHandDto::Left,
+        }
+    }
+}
+
+impl From<ThreadHandDto> for ThreadHand {
+    fn from(h: ThreadHandDto) -> Self {
+        match h {
+            ThreadHandDto::Right => ThreadHand::Right,
+            ThreadHandDto::Left => ThreadHand::Left,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ThreadCycleDto {
@@ -24,6 +54,9 @@ pub struct ThreadCycleDto {
     pub pull_out: f64,
     pub first: u64,
     pub last: u64,
+    /// The hand the passes cut (#629); absent reads right.
+    #[serde(default)]
+    pub hand: ThreadHandDto,
 }
 
 impl ThreadCycleDto {
@@ -46,6 +79,7 @@ impl ThreadCycleDto {
             pull_out: t.pull_out,
             first: t.first as u64,
             last: t.last as u64,
+            hand: t.hand.into(),
         }
     }
 
@@ -68,6 +102,7 @@ impl ThreadCycleDto {
             pull_out: self.pull_out,
             first: usize::try_from(self.first).unwrap_or(usize::MAX),
             last: usize::try_from(self.last).unwrap_or(usize::MAX),
+            hand: self.hand.into(),
         };
         t.is_sane(moves).then_some(t)
     }

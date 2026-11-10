@@ -244,7 +244,7 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
                 kind
             )));
         }
-        super::cycle::refuse_solid_cycle(p.tool, kind, h.origin.x, h.origin.y)?;
+        super::cycle::refuse_solid_cycle(p.tool, kind, h.origin)?;
         match kind {
             CycleKind::Spot | CycleKind::Drill => {
                 b.push(MoveKind::Plunge, along(h, bottom), Some(p.plunge_feed));
