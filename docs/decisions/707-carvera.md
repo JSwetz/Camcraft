@@ -21,7 +21,18 @@
 - **Units: mm.** The firmware's G20 "will halt the machine", so the machines are metric only.
 - **The 4th axis module is left out of these files.** It's an optional add-on (Ø92 × 240 / 200 mm, harmonic drive), and how its table-side A axis is modelled needs its own look, so it's a later step. The base machines are 3-axis.
 
-**Step 2 (the post):** follows on the same PR before it's flagged ready, so the machines never ship without a post that speaks their firmware.
+**Step 2, the post (`assets/posts/carvera.cps`, registered as "Makera Carvera"):** it writes only words the firmware's tables list.
+
+| Area | Choice and reason |
+|---|---|
+| Header | `G21 G17 G90 G94`. No G40 / G49 / G80, because the tables list none of them. No G91.1, because the firmware's arc centres are relative by default. An inch machine is refused by name, because G20 halts the firmware. |
+| Tool change | `M6 Tn`, the firmware's auto tool change (the Air's quick changer prompts through the same word). The firmware measures tool length itself, so no G43 follows. Tool 0 is refused by name, because T0 is the wireless probe. Tool numbers past the C1's six slots are the machine check's refusal, from `tooling.number_of_tools`. |
+| Spindle and air | `M3 S…` (the tables' own example order). The air is the machine's M7, off with M9 at section end. |
+| Drilling | The tables list no canned cycle, so drilling posts as its expanded chain, as `heidenhain.cps` does. A dwell becomes `G4 P<seconds>` at the hole bottom. Tapping is refused by name: no cycle, and M4 isn't wired on the stock machine. |
+| Other refusals | Cutter compensation in the control (no G41 / G42). Tilted moves (the 4th axis module isn't supported yet). Probe operations: the engine refuses them for a post without probe hooks, because how the firmware reports a G38 trip isn't in the sources. |
+| Program end | `M2`, the tables' "end program, stop spindle and air". M30 is listed as "no action on the Carvera". No machine-coordinate retract is written: the manual puts machine zero at the top right but states no safe G53 height. |
+
+**Not exercised:** no run on a real Carvera or in Carvera Controller. A contributor with the machine is asked to run the two-tool pocket golden before the post is trusted on a machine.
 
 **Considered and dropped:**
 - **The PDF manual as the source:** it has no spec table.

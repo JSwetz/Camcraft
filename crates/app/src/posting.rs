@@ -37,6 +37,7 @@ pub const BUILTINS: &[(&str, &str)] = &[
     ("Heidenhain", include_str!("../../../assets/posts/heidenhain.cps")),
     ("Mazak", include_str!("../../../assets/posts/mazak.cps")),
     ("Tormach PathPilot", include_str!("../../../assets/posts/tormach.cps")),
+    ("Makera Carvera", include_str!("../../../assets/posts/carvera.cps")),
     ("Fanuc Lathe", include_str!("../../../assets/posts/fanuc-lathe.cps")),
 ];
 
