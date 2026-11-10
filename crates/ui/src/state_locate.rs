@@ -17,7 +17,12 @@ impl State {
                 let warning = command.warning().map(str::to_owned);
                 self.history.execute(&self.world, command);
                 self.doc_version += 1;
-                self.locate_pick = None;
+                // The mates stay (hand check of #566): an Offset or Turn
+                // edit re-solves from them and Apply lands it as one more
+                // undo step; Stop locating ends the draft.
+                if let Some(d) = self.locate_pick.as_mut() {
+                    d.half = None;
+                }
                 let moved = match mover {
                     Mover::Part => format!("located {} in {}", spec.part, spec.fixture),
                     Mover::Fixture => format!("located {} on {}", spec.fixture, spec.part),

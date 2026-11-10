@@ -111,7 +111,9 @@ pub(super) fn form(ui: &mut Ui, state: &mut State) {
             locate_pick::remove_last(state);
         }
     });
-    if let Err(why) = &check {
+    if locate_pick::is_located(&draft, &check) {
+        ui.add(Label::new(RichText::new("  Located. Edit Offset or Turn to adjust, then Apply locate again.").weak()).wrap());
+    } else if let Err(why) = &check {
         ui.add(Label::new(RichText::new(format!("  Not yet: {why}")).weak()).wrap());
     }
 }

@@ -113,8 +113,23 @@ fn the_fixtures_page_locates_the_part_by_a_face_mate_through_the_command() {
     h.run();
     let l = loc(h.state(), "part");
     assert!(l.pos.z.abs() < 1e-9, "the bottom sits on the floor at Z 0: {:?}", l.pos);
-    assert!(h.state().locate_pick.is_none(), "a landed locate ends the picks");
     assert!(h.state().status.contains("located part in vise"), "{}", h.state().status);
+    // Hand check of #566: the mates stay, so the offset can be adjusted
+    // after the part sits in the fixture - its bottom face is no longer
+    // reachable to pick again.
+    assert!(h.state().locate_pick.as_ref().is_some_and(|d| d.mates.len() == 1), "the mates stay after Apply");
+    assert!(!apply_enabled(&h), "already there: Apply waits for an edit");
+    assert!(h.query_by_label_contains("Located. Edit Offset or Turn").is_some(), "the located line says what to do");
+    if let Some(d) = h.state_mut().locate_pick.as_mut() {
+        d.offset.dz = 1.0;
+    }
+    h.run();
+    assert!(apply_enabled(&h), "an Offset edit re-enables Apply");
+    h.get_by_label("Apply locate").click();
+    h.run();
+    assert!((loc(h.state(), "part").pos.z - 1.0).abs() < 1e-9, "lifted 1 mm off the floor: {:?}", loc(h.state(), "part").pos);
+    key(&mut h, Key::Z);
+    assert!(loc(h.state(), "part").pos.z.abs() < 1e-9, "one undo step takes the offset back");
     key(&mut h, Key::Z);
     assert!((loc(h.state(), "part").pos.z - 30.0).abs() < 1e-9, "undo puts the part back");
     key(&mut h, Key::Y);
@@ -184,22 +199,19 @@ fn the_mates_read_in_plain_words_and_stay_drawn() {
 fn a_refused_draft_says_why_instead_of_offering_apply() {
     let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(fixtures_frame, with_vise());
     h.run();
-    // Locate once, then draft the same mate again: nothing would move.
-    for _ in 0..2 {
-        h.get_by_label("Locate part…").click();
-        h.run();
-        { let f = face(h.state(), "part", [10.0, 5.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
-        { let f = face(h.state(), "vise", [50.0, 30.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
-        h.run();
-        if apply_enabled(&h) {
-            h.get_by_label("Apply locate").click();
-            h.run();
-        }
-    }
-    assert!(h.state().locate_pick.is_some(), "the second draft is still open");
+    // Locate once; the draft stays with its mate, and the part already
+    // sits there: Apply waits, and the hint says what an edit would do.
+    h.get_by_label("Locate part…").click();
+    h.run();
+    { let f = face(h.state(), "part", [10.0, 5.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+    { let f = face(h.state(), "vise", [50.0, 30.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+    h.run();
+    h.get_by_label("Apply locate").click();
+    h.run();
+    assert!(h.state().locate_pick.is_some(), "the draft is still open");
     assert!(!apply_enabled(&h), "the part already sits there");
     let next = h.query_by_label_contains("Next:").and_then(|n| n.accesskit_node().value()).expect("the hint");
-    assert!(!next.contains("Apply,") && next.contains("nothing would move"), "{next}");
+    assert!(!next.contains("Apply,") && next.contains("edit Offset or Turn"), "{next}");
     assert!(!h.state().status.contains("Apply,"), "the status hint agrees: {}", h.state().status);
-    assert!(h.query_by_label_contains("Not yet: nothing would move").is_some());
+    assert!(h.query_by_label_contains("Not yet:").is_none(), "a located draft is not a refusal");
 }
