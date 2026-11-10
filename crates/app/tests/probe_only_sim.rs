@@ -70,9 +70,7 @@ fn a_probe_only_program_is_judged_not_refused_as_an_invalid_setup() {
 fn a_probe_only_program_without_a_stock_still_says_why() {
     let world = probe_only(None);
     let report = posting::verification_report(&world);
-    let line = report.not_judged.unwrap_or_default();
+    let line = report.not_judged.expect("a program with no stock is not judged - and says so");
     assert!(!line.contains("invalid stock simulation setup"), "never the wrong cause: {line}");
-    if !line.is_empty() {
-        assert!(line.contains("no stock"), "a real refusal names its own reason: {line}");
-    }
+    assert!(line.contains("no stock"), "the refusal names its own reason: {line}");
 }

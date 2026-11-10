@@ -95,7 +95,10 @@ pub fn stock_grid(
     // its lattice by the span alone (the grid ceiling's floor), and the
     // verdict reads the raw stock against the part - clean when they
     // agree, rest where they don't, never a gouge it did not cut.
-    let sizing_r = if tool_r.is_finite() { tool_r } else { 0.0 };
+    // Exactly +inf (the empty fold), nothing wider: a NaN or negative
+    // radius still reaches `auto_cell` and is refused by name (review
+    // of #599) - only "no tool cut" falls back to the span.
+    let sizing_r = if tool_r == f64::INFINITY { 0.0 } else { tool_r };
     let cell = auto_cell(sizing_r, span_x, span_y);
     let dex = match &shape {
         StockShape::FromModel { .. } => {
