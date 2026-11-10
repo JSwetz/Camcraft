@@ -10,6 +10,8 @@ pub mod commands;
 pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
+// #339 slice 6: the user fixture library file.
+pub mod fixture_library;
 pub mod fixture_carried;
 pub mod fixture_struck;
 pub mod fixture_view;

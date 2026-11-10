@@ -108,6 +108,8 @@ mod tree_entry;
 mod browser_pane;
 mod tree_menu;
 mod fixture_menu;
+// #339 slice 6: the fixture library's Save / Insert dialogs.
+pub(crate) mod fixture_library_dialog;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
 // (state.rs) installs the live table, the format tests read the
@@ -131,6 +133,8 @@ mod heights_tests;
 mod fixture_tests;
 #[cfg(test)]
 mod fixture_ux_tests;
+#[cfg(test)]
+mod fixture_library_tests;
 #[cfg(test)]
 mod footer_tests;
 #[cfg(test)]

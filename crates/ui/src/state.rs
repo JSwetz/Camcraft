@@ -43,6 +43,9 @@ mod tool_library_io;
 mod setup_mount;
 #[path = "state_fixture.rs"]
 mod fixture_view;
+#[path = "state_fixture_library.rs"]
+mod fixture_library;
+pub use fixture_library::{FixtureLibDialog, InsertFixtureDraft, LibraryRow, SaveFixtureDraft};
 #[path = "state_program_entry.rs"]
 mod program_entry;
 pub use program_entry::EntryVerb;
@@ -369,6 +372,21 @@ pub enum CommandKind {
     },
     DeleteFixture(String),
     ImportFixtureDialog,
+    /// #339 slice 6: open the fixture library's Save / Insert dialog over
+    /// a setup's Fixtures node (`""` - the implicit setup). View state;
+    /// saving and deleting entries are confirmed file edits, not undo
+    /// entries (the #383 machine-file law).
+    FixtureLibrarySaveDialog(String),
+    FixtureLibraryInsertDialog(String),
+    /// Insert library entry `entry` as a fixture of `setup`, its datum
+    /// at `pos` (mm) turned by roll/pitch/yaw degrees (R = Rz ⊗ Ry ⊗ Rx):
+    /// one `InsertFixture`, one undo unit.
+    InsertFixtureFromLibrary {
+        entry: String,
+        setup: Option<String>,
+        pos: [f64; 3],
+        rpy_deg: [f64; 3],
+    },
     /// Part orientation (M5.2 G): a model's full rigid placement -
     /// position plus yaw-pitch-roll degrees (R = Rz ⊗ Ry ⊗ Rx, the
     /// `SetWcs` voice). The world stores a unit quaternion; the
@@ -1303,6 +1321,11 @@ pub struct State {
     /// #339 slice 4: each fixture's mesh state, per document version
     /// (view cache - never truth, never saved).
     pub fixture_mesh_cache: camcraft_app::fixture_view::MeshStateCache,
+    /// #339 slice 6: the open fixture library dialog (view state).
+    pub fixture_lib: Option<FixtureLibDialog>,
+    /// The fixture library folder override (tests; `None` = the user
+    /// folder, `CAMCRAFT_FIXTURES` first).
+    pub fixture_lib_dir: Option<PathBuf>,
     /// The selected op's struck fixtures, per (version, op, path sig).
     pub struck_cache: camcraft_app::fixture_view::StruckCache,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
@@ -1559,6 +1582,8 @@ impl State {
             repair_ui: RepairUi::default(),
             import_as_fixture: None,
             fixture_mesh_cache: Default::default(),
+            fixture_lib: None,
+            fixture_lib_dir: None,
             struck_cache: Default::default(),
             // The tool draft carries a plausible name from the first
             // frame: an empty Name field made Add look dead (refused
@@ -3231,6 +3256,11 @@ impl State {
                     self.import_as_fixture = Some(camcraft_app::setup::active(&self.world));
                     self.import_path(path);
                 }
+            }
+            CommandKind::FixtureLibrarySaveDialog(setup) => self.open_fixture_library_save(setup),
+            CommandKind::FixtureLibraryInsertDialog(setup) => self.open_fixture_library_insert(setup),
+            CommandKind::InsertFixtureFromLibrary { entry, setup, pos, rpy_deg } => {
+                self.insert_fixture_from_library(&entry, setup, pos, rpy_deg);
             }
             CommandKind::SetupSheetDialog => {
                 if let Some(path) = save_sheet_dialog() {
