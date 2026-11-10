@@ -125,17 +125,19 @@ fn three_points_picked_in_order_lay_the_part_through_the_command_and_undo() {
     assert!(h.state().status.contains("Remove last or Clear"), "{}", h.state().status);
     assert!(h.state().op_ui.geo.is_empty(), "a draft pick is not an operation pick");
     h.run();
-    // The top already faces +Z; kept where it is, nothing would change:
-    // the reason is shown on the greyed Apply.
-    assert!(!disabled(&h, "Apply points"), "to the level, the top drops to Z 0");
+    // #606: points down by default - the top goes onto the table.
+    assert!(!disabled(&h, "Apply points"), "points down, the top rests on the table");
+    // Up and kept where it is: the top already faces +Z, nothing would
+    // change - the reason is shown on the greyed Apply.
+    h.get_by_label("Points down").click();
     h.get_by_label("Point 1 to plane level").click();
     h.run();
     assert!(disabled(&h, "Apply points"), "the top's outside already faces +Z");
     assert!(h.query_by_label_contains("already holds the part that way").is_some(), "the reason is shown");
     h.get_by_label("Point 1 to plane level").click();
-    h.get_by_label("Flip points").click();
+    h.get_by_label("Points down").click();
     h.run();
-    assert!(!disabled(&h, "Apply points"), "flipped, the points rest on the table");
+    assert!(!disabled(&h, "Apply points"), "down again, the points rest on the table");
     h.get_by_label("Apply points").click();
     h.run();
     let up = held_up(h.state()).expect("Setup1 holds the part laid");

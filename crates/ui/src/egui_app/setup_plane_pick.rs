@@ -1,8 +1,8 @@
 //! The Setups page's "Lay on a plane" row (#330): pick one flat face in
 //! the viewport (#554: a face only - an edge cannot set a plane; edges
 //! set an axis in the "Axes in the plane" rows), choose G17 (XY), G18
-//! (ZX) or G19 (YZ), flip it, optionally set the face onto the plane's
-//! level, and Apply. The pick draft is view state (`crate::plane_pick`); Apply queues
+//! (ZX) or G19 (YZ), lay the face down on it (the default, #606) or up,
+//! optionally set the face onto the plane's level, and Apply. The pick draft is view state (`crate::plane_pick`); Apply queues
 //! `CommandKind::LayPartOnPlane`, the undoable `AlignPartToSetup`. The
 //! app says whether the picks make a plane and, if not, why - shown on
 //! the disabled "Apply face", on a line of its own so it stays on
@@ -25,13 +25,19 @@ const PLANES: [ArcPlane; 3] = [ArcPlane::Xy, ArcPlane::Xz, ArcPlane::Yz];
 #[derive(Clone, Copy)]
 struct Draft {
     plane: ArcPlane,
+    /// "Face down": the picked face's outside faces -axis - the face goes
+    /// onto the table with the part above it. `PlaneLay::flip`.
     flip: bool,
     place: bool,
 }
 
 impl Default for Draft {
+    /// #606: a new pick lays the face DOWN on the plane (the face becomes
+    /// the part's bottom) - "lay a face on the table". Only this view
+    /// default changed: `PlaneLay::flip` keeps its meaning, and a saved
+    /// setup stores the resulting transform, not the choice.
     fn default() -> Self {
-        Draft { plane: ArcPlane::Xy, flip: false, place: true }
+        Draft { plane: ArcPlane::Xy, flip: true, place: true }
     }
 }
 
@@ -69,8 +75,10 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
             })
             .response
             .on_hover_text("The plane the picked face is laid on.");
-        ui.checkbox(&mut d.flip, "Flip")
-            .on_hover_text("Face the other way: down (-Z) for G17, -Y for G18, -X for G19.");
+        ui.checkbox(&mut d.flip, "Face down").on_hover_text(
+            "On: the picked face goes down onto the plane, its outside facing -Z for G17, -Y for G18, \
+             -X for G19, with the part on top of it. Off: the face looks out along +Z / +Y / +X.",
+        );
     });
     ui.horizontal(|ui| {
         ui.label("     ");
@@ -108,7 +116,7 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
         });
         if let Some(side) = &side {
             ui.label(RichText::new(format!("      {side}")).weak())
-                .on_hover_text("The side of the pick taken as its outside: it faces the plane's axis (or away, with Flip).");
+                .on_hover_text("The side of the pick taken as its outside: it faces down onto the plane (or up, with Face down off).");
         }
     }
     ui.data_mut(|m| m.insert_temp(id, d));

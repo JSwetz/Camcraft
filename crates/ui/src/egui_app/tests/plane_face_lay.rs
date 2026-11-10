@@ -1,8 +1,9 @@
 //! #330 (reopened)'s frame test: the seed's block turned 30 degrees
 //! about X, its most camera-facing tilted face picked by a real viewport
-//! click with the Setups page's "Lay on a plane" row armed, Flip on,
-//! "Apply face" clicked - all at the hand-test window size, where the
-//! row's Flip, level box and Apply must be ON SCREEN (one long row ran
+//! click with the Setups page's "Lay on a plane" row armed, "Face down"
+//! on (the #606 default), "Apply face" clicked - all at the hand-test
+//! window size, where the row's Face down, level box and Apply must be
+//! ON SCREEN (one long row ran
 //! them past the properties pane's edge, out of reach). The part as the
 //! viewport draws it is TURNED, not only moved: the face's outward normal
 //! is -Z, the face lies in Z 0 and the part stands above it. Ctrl+Z puts
@@ -12,6 +13,7 @@
 //! material consulted.
 
 use camcraft_app::geometry::{Point3, quat_rotate_point, transform_point};
+use egui_kittest::kittest::NodeT;
 
 use crate::state::SetupPage;
 
@@ -104,16 +106,19 @@ fn a_clicked_tilted_face_is_turned_flat_onto_g17_not_only_moved() {
         "the clicked face, not an edge or another face: {picks:?}"
     );
 
-    // Flip: G17 face down, part above (the floor of the table).
-    // The row's options are on screen too (they ran past the pane's
-    // right edge at this window size).
+    // Face down (on by default, #606): G17 face down, part above (the
+    // floor of the table) - no click needed. The row's options are on
+    // screen too (they ran past the pane's right edge at this window size).
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 720.0));
-    for label in ["Flip", "Face to plane level"] {
+    for label in ["Face down", "Face to plane level"] {
         let r = harness.get_by_label(label).rect();
         assert!(screen.contains_rect(r), "{label:?} is on screen: {r:?}");
     }
-    harness.get_by_label("Flip").click();
-    harness.run();
+    assert_eq!(
+        harness.get_by_label("Face down").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "#606: a new pick lays the face down"
+    );
     // The row's own Apply, ON SCREEN at the window's size: it used to sit
     // after the picked face's long id, past the pane's right edge.
     let apply = harness.get_by_label("Apply face");
