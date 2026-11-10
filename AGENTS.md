@@ -355,6 +355,13 @@ operation property panel.
 Systems and UI never write these fields ad hoc; they only respond to commands.
 If a UI change has no command for it, that's a bug - add one.
 
+**Commands ship with an MCP tool** (#128, #356). The MCP server lets an AI agent
+drive CamCraft headlessly. A PR that adds a user-facing command also adds its
+MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a
+`source:agent` follow-up issue `MCP: <command>` and names it in the PR body. MCP
+tools call the same undoable commands the GUI uses, so undo/redo history and
+invariants hold headlessly.
+
 Components are auto-registered: declare them in `crates/app/src/schema.rs`
 and the startup hook (`flecs_bits::register_schema`) handles the rest, in every
 binary. Current policy: components are Rust-owned types (`Vec`/`Box` fields),
