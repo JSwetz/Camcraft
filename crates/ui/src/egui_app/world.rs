@@ -27,7 +27,6 @@ use camcraft_app::geometry::{Point3, cube, feature, transform_point};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
-use camcraft_app::schema::WCS_SLOTS;
 use camcraft_app::tools::{Tool, catalog};
 
 use crate::interact::ftoz;
@@ -97,12 +96,11 @@ pub fn seed(state: &mut State) {
     };
     state.pending.push_back(CommandKind::StockFit { margin: 2.0, shape: 0 });
     state.pending.push_back(CommandKind::AddTool { name: "EM-0600-4FL".into(), tool });
-    // The seed's Contour bottoms out at work offset G54 (hand-test 4's
-    // fixture law), so G54 must exist before generate or the command is
+    // The seed's Contour bottoms out at the WCS (hand-test 4's
+    // fixture law), so the WCS must exist before generate or the command is
     // refused by name. The block sits z 0..30; the offset at the world
     // origin puts Cut Z at the model bottom.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: WCS_SLOTS[0].to_string(),
         pos: [0.0, 0.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,
@@ -154,7 +152,7 @@ fn contour_params() -> OpParams {
         clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
         retract_z: Height::of(HeightReference::TopOfStock, 10.0),
         top_z: Height::of(HeightReference::TopOfModel, 0.0),
-        bottom_z: Height::of(HeightReference::WorkOffset(0), 0.0),
+        bottom_z: Height::of(HeightReference::WorkOffset, 0.0),
         stepdown: 5.0,
         feed: 1200.0,
         plunge_feed: 300.0,
@@ -185,7 +183,8 @@ pub fn collect(state: &State) -> Scene {
 
 fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 3]> {
     let tris = model::facets_of(&state.world, entity).unwrap_or_default();
-    let loc = model::transform_of(&state.world, entity).unwrap_or_default();
+    // #326: the part where the active setup holds it.
+    let loc = camcraft_app::setup_align::view_pose(&state.world, entity).unwrap_or_default();
     let mut verts = Vec::with_capacity(tris.len() * 3);
     for t in tris.iter() {
         for p in [t.a, t.b, t.c] {
@@ -200,30 +199,34 @@ fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 
 /// translucent cut-region fills - `App::collect_parts`'s exact law, fills
 /// included so the region reads as an area, not only an outline.
 fn collect_parts(state: &State) -> Vec<GpuPart> {
+    // #339 slice 4: the fixtures the selected op's warnings strike are
+    // tinted (display only - the classes ride the vertex, nothing else).
+    let struck = state.fixture_highlight();
     let mut parts: Vec<GpuPart> = model::model_entities(&state.world)
         .into_iter()
         .filter(|(name, _)| !state.hidden_models.iter().any(|h| h == name))
-        .map(|(_, entity)| GpuPart {
-            verts: world_verts(state, &entity),
-            selected: model::is_selected(&state.world, &entity),
-            stock: false,
-            fill: false,
-            classes: Vec::new(),
+        .map(|(name, entity)| {
+            let verts = world_verts(state, &entity);
+            let classes =
+                if struck.contains(&name) { vec![crate::viewport::STRUCK_CLASS; verts.len()] } else { Vec::new() };
+            GpuPart { verts, selected: model::is_selected(&state.world, &entity), stock: false, fill: false, classes }
         })
         .collect();
+    parts.extend(sim_body_part(state));
     if !state.active_stock_hidden() {
         match (&state.program_sim, crate::machined::mesh(state)) {
             // The machined stock's extracted mesh (M13.1 owed) takes the
             // slot when the whole-program field view has one: the closed
             // shell the program leaves, through the stock pipeline like the
-            // box it replaces. Unjudged (no classes): it paints as material,
-            // and the GPU eye, when it traces, still paints over the slot.
+            // box it replaces. Judged per facet by the eye's law (#25,
+            // `machined::vertex_classes`; plain material until judged), and
+            // the GPU eye, when it traces, still paints over the slot.
             (_, Some(mesh)) => parts.push(GpuPart {
                 verts: mesh.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect(),
                 selected: false,
                 stock: true,
                 fill: false,
-                classes: Vec::new(),
+                classes: crate::machined::vertex_classes(state, mesh.len()),
             }),
             // The Deviate sheet takes the stock's slot in the draw order:
             // it IS the stock's surface after the program, judged - same
@@ -286,6 +289,33 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
         parts.push(GpuPart { verts, selected: false, stock: false, fill: true, classes: Vec::new() });
     }
     parts
+}
+
+/// #371: the running tool's assembly at the playhead - cutter and shank
+/// revolved from its numbers, then its modelled body, or without one the
+/// holder cylinder from its own numbers (what the collision laws judge),
+/// posed by the frame's tip and axis, world space. Only while the
+/// transport is up and its timeline is this document's (`cached_script`
+/// refreshes it before the next frame), any playhead including 0 and the
+/// end, playing or paused, the op fresh or stale (display reads the
+/// cached path). Lathe insert kinds yield nothing (marker only).
+pub(crate) fn sim_tool_tris(state: &State) -> Option<Vec<camcraft_app::geometry::Triangle>> {
+    let sim = state.sim?;
+    let (version, sc) = state.sim_script_cache.as_ref()?;
+    if *version != state.doc_version || sc.is_empty() {
+        return None;
+    }
+    let f = sc.at(sim.t);
+    let op = sc.ops.get(f.op?)?;
+    let tris = camcraft_app::tool_body_view::assembly_for_operation(&state.world, op)?;
+    Some(camcraft_app::tool_body_view::posed(&tris, [f.pos.x, f.pos.y, f.pos.z], f.axis))
+}
+
+/// [`sim_tool_tris`] as a model part (depth-tested, shaded).
+fn sim_body_part(state: &State) -> Option<GpuPart> {
+    let tris = sim_tool_tris(state)?;
+    let verts = tris.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect();
+    Some(GpuPart { verts, selected: false, stock: false, fill: false, classes: Vec::new() })
 }
 
 // -------------------------------------------------------------- overlay

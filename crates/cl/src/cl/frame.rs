@@ -175,7 +175,11 @@ impl TiltedFrame {
     /// exact endpoints keep their bits). `cycles` pass through:
     /// drilling refuses tilt at the parameter door, so a tilted path
     /// with a cycle in it is a contract violation upstream, not a
-    /// thing this function silently re-expresses.
+    /// thing this function silently re-expresses. A stated spindle C
+    /// (`Move::rotary`) rides every move it maps, chords included
+    /// (#295): the part's turn is not the frame's to drop. No tilted kind
+    /// is C-stamped today - the rotary kinds take no tilt
+    /// (`OpParams::tilt`) - so this keeps the angle rather than losing it.
     #[must_use]
     pub fn world_path(&self, local: &Toolpath, chord_tol: f64) -> Toolpath {
         let stamp = if self.is_upright() { None } else { Some(self.axis) };
@@ -194,6 +198,7 @@ impl TiltedFrame {
                     let (cu, cv) = arc.plane.center_uv(arc.center);
                     let c3 = self.to_world(arc.plane.point(cu, cv, 0.0));
                     moves.push(Move {
+                        rotary: m.rotary,
                         kind: m.kind,
                         from: self.to_world(m.from),
                         to: self.to_world(m.to),
@@ -210,6 +215,7 @@ impl TiltedFrame {
                             continue; // a collapsed chord is no motion
                         }
                         moves.push(Move {
+                            rotary: m.rotary,
                             kind: m.kind,
                             from: a,
                             to: b,
@@ -222,6 +228,7 @@ impl TiltedFrame {
                 // Upright: an arc is still an arc — translate and go.
                 Some(arc) if self.is_upright() => {
                     moves.push(Move {
+                        rotary: m.rotary,
                         kind: m.kind,
                         from: self.to_world(m.from),
                         to: self.to_world(m.to),
@@ -267,6 +274,7 @@ impl TiltedFrame {
                             continue; // a collapsed chord is no motion
                         }
                         moves.push(Move {
+                            rotary: m.rotary,
                             kind: m.kind,
                             from: w[0],
                             to: w[1],
@@ -278,6 +286,7 @@ impl TiltedFrame {
                 }
                 None => {
                     moves.push(Move {
+                        rotary: m.rotary,
                         kind: m.kind,
                         from: self.to_world(m.from),
                         to: self.to_world(m.to),
@@ -303,6 +312,7 @@ impl TiltedFrame {
                         .programmed
                         .iter()
                         .map(|m| Move {
+                            rotary: m.rotary,
                             kind: m.kind,
                             from: self.to_world(m.from),
                             to: self.to_world(m.to),
@@ -345,7 +355,19 @@ impl TiltedFrame {
                 super::ProbeTouch { index, target: self.to_world(t.target), ..*t }
             })
             .collect();
-        Toolpath { moves, cycles: local.cycles.clone(), notes, comps, threads: Vec::new(), probes }
+        // Edge breaks (#303) ride an upright frame's translation; a
+        // tilted cone's bevel is not the vertical law they state, and a
+        // posed program is refused by the sim's verdict anyway.
+        let breaks = if self.is_upright() {
+            local
+                .breaks
+                .iter()
+                .map(|b| super::EdgeBreak { edge: b.edge.iter().map(|p| self.to_world(*p)).collect(), ..b.clone() })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Toolpath { moves, cycles: local.cycles.clone(), notes, comps, threads: Vec::new(), probes, breaks }
     }
 
     /// A local planar region (the cut's footprint at local height

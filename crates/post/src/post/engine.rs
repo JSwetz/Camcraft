@@ -63,14 +63,44 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
     run_with(cps, mch, stream, &Value::Null)
 }
 
+/// The file extension the script's manifest states (`extension`), or
+/// `nc` when it states none - what a program written by it is named.
+pub fn extension_of(cps: &str) -> Result<String, PostError> {
+    let mut s = Script::load(cps)?;
+    Ok(s.string_global("extension")?.filter(|e| !e.is_empty()).unwrap_or_else(|| "nc".to_owned()))
+}
+
+/// [`run`] as program number `program` (#111): one file per operation
+/// numbers its programs 1, 2, 3..., and a dialect with an O-word
+/// writes it; everything else posts exactly as [`run`].
+pub fn run_numbered(cps: &str, mch: &Value, stream: &str, program: u32) -> Result<PostOutput, PostError> {
+    run_numbered_with(cps, mch, stream, &Value::Null, program)
+}
+
 /// [`run`] with the document's post options (issue #34): a JSON object
 /// the script reads as the global `postOptions` - the user's choices
 /// for this post (e.g. `{"Threading": "G76"}`). `Value::Null` (or any
 /// non-object) leaves the PRELUDE's empty object: every default.
 pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result<PostOutput, PostError> {
+    run_numbered_with(cps, mch, stream, options, 1)
+}
+
+/// The whole seam: post options (issue #34) and the program number
+/// (#111) together - what one file per operation posts each op with.
+pub fn run_numbered_with(
+    cps: &str,
+    mch: &Value,
+    stream: &str,
+    options: &Value,
+    program: u32,
+) -> Result<PostOutput, PostError> {
     let records = super::normalize_program_order(cnc::parse(stream)?);
     let mut s = Script::load(cps)?;
+    // #374: an inverted machine axis - the one place the stream is
+    // mirrored into the controller's frame, or refused by name.
+    let records = super::invert::apply(records, mch, &s)?;
     s.set_machine(&machine::script_props(mch))?;
+    s.set_program_number(program)?;
     if options.is_object() {
         s.set_options(options)?;
     }
@@ -86,6 +116,9 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
         blocks.push(TraceBlock { record: None, label: "header".into(), first: 0, last: head });
     }
     let mut swallowed = 0usize;
+    // #174: the operations already refused for want of onProbeGuard -
+    // one named refusal per operation, not one per positioning move.
+    let mut unguarded: Vec<String> = Vec::new();
 
     for (i, r) in records.iter().enumerate() {
         let before = s.out_len()?;
@@ -109,8 +142,39 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                     let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
                     let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
                     warnings.push(format!(
-                        "{who}asks {} coolant, but this post script does not declare                          coolantModes (it does not read PARAM Coolant) - set the operation's                          coolant to Flood or use a post that reads it",
+                        "{who}asks {} coolant, but this post script does not declare coolantModes (it does not read PARAM Coolant) - set the operation's coolant to Flood or use a post that reads it",
                         value.as_str().unwrap_or("non-flood")
+                    ));
+                }
+                // A post that does not declare `afterModes` would run
+                // straight on past an operator's stop or trip home (#110):
+                // refused by name, a counted warning, never silent.
+                if name == "AfterOperation" && !s.reads_after_operation() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}asks {} after it, but this post script does not declare afterModes (it does not read PARAM AfterOperation) - set the operation to Continue or use a post that reads it",
+                        super::AfterOperation::describe_word(value.as_str().unwrap_or(""))
+                    ));
+                }
+                // A C-axis live-tool section (issue #33) posted through a
+                // script that cannot voice it would come out as XYZ for
+                // a tool that is not there: refused by name.
+                if name == "LiveTool" && !s.voices_live_tooling() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}is C-axis live-tool work (the spindle turns as C under a radial live tool), but this post script does not declare liveTooling - use a lathe post that voices the C axis"
+                    ));
+                }
+                // A thread whose hand needs the spindle reversed (#629),
+                // posted through a script that cannot voice it, would
+                // come out under M03 - the other hand: refused by name.
+                if name == "SpindleDirection" && value.as_str() == Some("reverse") && !s.voices_thread_hands() {
+                    let op = base.get("OperationName").and_then(Value::as_str).unwrap_or("");
+                    let who = if op.is_empty() { String::new() } else { format!("operation {op}: ") };
+                    warnings.push(format!(
+                        "{who}cuts a thread that needs the spindle reversed (M04) for its hand, but this post script does not declare threadHands - it would cut the other hand; use a lathe post that states the thread's hand"
                     ));
                 }
                 s.set_properties(&merged(&base, &BTreeMap::new(), pos))?;
@@ -277,6 +341,26 @@ pub fn run_with(cps: &str, mch: &Value, stream: &str, options: &Value) -> Result
                     s.call("onProbeRetreat", "")?;
                 }
                 pos = (r.expect[0], r.expect[1], r.expect[2]);
+            }
+            Record::Guard(g) => {
+                // A protected positioning move (#174): no PRELUDE
+                // default - a plain feed would drive the stylus into an
+                // unexpected obstacle, so a script without the hook is
+                // refused by name (once per operation).
+                if s.hook_exists("onProbeGuard") {
+                    s.set_properties(&merged(&base, &g.props(), pos))?;
+                    s.call("onProbeGuard", "")?;
+                } else {
+                    let op = op_name(&base);
+                    if !unguarded.contains(&op) {
+                        warnings.push(format!(
+                            "probing: {op}: this post script does not define onProbeGuard - it cannot write \
+                             a protected (stop-on-contact) positioning move, so the probe operation is refused"
+                        ));
+                        unguarded.push(op);
+                    }
+                }
+                pos = (g.to[0], g.to[1], g.to[2]);
             }
             Record::Found(f) => {
                 if !s.hook_exists("onProbeResult") {

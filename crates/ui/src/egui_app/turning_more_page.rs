@@ -29,6 +29,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             infeed,
             feed,
             plunge_feed,
+            hand,
         } => {
             if tab == SEC_HEIGHTS {
                 height_editor(
@@ -59,10 +60,19 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                 hint(ui, "radial depth of the groove, crest to root - the deepest rung stands this far under the turned skin");
                 prop_row(ui, "Infeed", |ui| num(ui, u, infeed));
                 hint(ui, "radial growth per pass of the growing wave; the last pass reaches full depth and the turns between them are the spring pass");
+                // #629: the hand, by name. The draft takes the pick;
+                // Apply rides EditOperationParams, so it undoes.
+                // The row lays right to left: Left first reads "Right
+                // hand  Left hand" on screen.
+                prop_row(ui, "Hand", |ui| {
+                    ui.radio_value(hand, camcraft_app::cl::ThreadHand::Left, "Left hand");
+                    ui.radio_value(hand, camcraft_app::cl::ThreadHand::Right, "Right hand");
+                });
+                hint(ui, "the way the thread winds - every pass runs toward the chuck; right hand posts under M03, left hand under M04 with the insert mounted for reverse rotation");
             }
             if tab == SEC_FEEDS {
                 prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));
-                hint(ui, "the synchronized helix cuts at this feed - the spindle turns once as the axis rises one pitch");
+                hint(ui, "the synchronized helix cuts at this feed - the spindle turns once as the tool travels one pitch toward the chuck");
                 prop_row(ui, "Plunge feed", |ui| num_feed(ui, u, plunge_feed));
                 hint(ui, "the lead-in arc swings into the first turn at this feed; every pass after the first rides the ladder in rapids");
             }

@@ -1,6 +1,8 @@
-# Release build (M1.7e, M13.3): a v* tag builds Windows, Linux, and macOS.
+# Release build (M1.7e, M13.3): a v* tag builds Windows, Linux, macOS,
+# and FreeBSD.
 # Linux packages TAR.GZ, DEB, RPM, AppImage, Snap, and Flatpak; macOS packages
-# a universal app as ZIP and DMG; Windows assembles its zip and installer.
+# a universal app as ZIP and DMG; FreeBSD an amd64 tarball; Windows assembles
+# its zip and installer.
 # Signing is optional and secret-gated (scripts/sign.ps1): with no
 # CAMCRAFT_SIGN_* secret the binaries ship unsigned, as every release so
 # far has. The decision is logged in RECOMMENDED.md ("M13.3").
@@ -9,8 +11,8 @@
 # releases that carry features (AGENTS.md "Versioning is semantic").
 # workflow_dispatch builds any ref by hand (it builds every platform but
 # publishes nothing: only a tag run reaches the publish job).
-# Graph (#125): windows, linux and macos start at once; snap and flatpak
-# repackage linux's tarball; publish waits for all five with !cancelled(),
+# Graph (#125): windows, linux, macos and freebsd start at once; AUR, snap
+# and flatpak follow Linux; publish waits for all seven with !cancelled(),
 # puts every asset that was built on the release page and names any
 # platform whose build failed, so one broken package never withholds the rest.
 name: Release
@@ -103,6 +105,41 @@ jobs:
             dist/*-macos-universal.zip
             dist/*-macos-universal.dmg
           if-no-files-found: error
+
+  freebsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and package in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: '14'
+          cpu: 3
+          mem: 5120
+          run: |
+            pkg install -y bash rust pkgconf libxkbcommon libX11 wayland vulkan-loader mesa-libs
+            export CARGO_TARGET_DIR=/tmp/camcraft-target
+            cargo build --locked --release -p camcraft-ui -p camcraft-app -p camcraft-post
+            "$CARGO_TARGET_DIR/release/camcraft-cli" --version
+            "$CARGO_TARGET_DIR/release/post" --version
+            CAMCRAFT_BIN_DIR="$CARGO_TARGET_DIR/release" bash scripts/package-freebsd.sh
+            tar -tzf dist/*-freebsd-amd64.tar.gz | grep '/camcraft-ui$'
+      - name: Check copied archive
+        run: test -s dist/*-freebsd-amd64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-package
+          path: dist/*-freebsd-amd64.tar.gz
+          if-no-files-found: error
+
+  aur:
+    needs: linux
+    uses: ./.github/workflows/aur-package.yml
+    permissions:
+      contents: read
 
   snap:
     needs: linux
@@ -215,7 +252,7 @@ jobs:
           Copy-Item assets/ui/* "$stage/assets/ui"
           Copy-Item assets/scripts/* "$stage/assets/scripts"
           Copy-Item assets/themes/* "$stage/assets/themes"
-          Copy-Item RELEASE_NOTES.md, TESTING.md, LICENSE $stage
+          Copy-Item RELEASE_NOTES.md, TESTING.md, LICENSE, NOTICE $stage
           Compress-Archive -Path $stage -DestinationPath "dist/camcraft-$ver-win-x64.zip" -Force
           Get-ChildItem dist
       - name: Build installer (Inno Setup, same staged tree as the zip)
@@ -254,7 +291,7 @@ jobs:
     # Runs after every build job whatever their result (but not on a
     # cancelled run), and only for a tag: a workflow_dispatch run builds
     # everything and publishes nothing.
-    needs: [windows, linux, macos, snap, flatpak]
+    needs: [windows, linux, macos, freebsd, aur, snap, flatpak]
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     permissions:
@@ -310,6 +347,8 @@ jobs:
           RESULT_WINDOWS: ${{ needs.windows.result }}
           RESULT_LINUX: ${{ needs.linux.result }}
           RESULT_MACOS: ${{ needs.macos.result }}
+          RESULT_FREEBSD: ${{ needs.freebsd.result }}
+          RESULT_AUR: ${{ needs.aur.result }}
           RESULT_SNAP: ${{ needs.snap.result }}
           RESULT_FLATPAK: ${{ needs.flatpak.result }}
         run: |
@@ -368,6 +407,8 @@ jobs:
             'Windows (zip, installer)' = $env:RESULT_WINDOWS
             'Linux (tar.gz, deb, rpm, AppImage)' = $env:RESULT_LINUX
             'macOS (zip, dmg)' = $env:RESULT_MACOS
+            'FreeBSD (tar.gz)' = $env:RESULT_FREEBSD
+            'Arch (pkg.tar.zst)' = $env:RESULT_AUR
             'Snap' = $env:RESULT_SNAP
             'Flatpak' = $env:RESULT_FLATPAK
           }
@@ -384,7 +425,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          assets=(dist/*.zip dist/*-setup.exe dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.dmg dist/*.AppImage dist/*.snap dist/*.flatpak)
+          assets=(dist/*.zip dist/*-setup.exe dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.dmg dist/*.AppImage dist/*.snap dist/*.flatpak dist/*.pkg.tar.zst)
           if [ ${#assets[@]} -eq 0 ]; then
             echo "::error::no platform built an asset - nothing to publish"
             exit 1
@@ -403,6 +444,7 @@ jobs:
             dist/*.AppImage
             dist/*.snap
             dist/*.flatpak
+            dist/*.pkg.tar.zst
           body_path: dist/release-body.md
           # A failed platform leaves its globs empty; the step above already
           # refused a release with no asset at all.

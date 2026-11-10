@@ -34,6 +34,7 @@ fn rect() -> Region {
 
 fn at(kind: MoveKind, a: (f64, f64, f64), b: (f64, f64, f64)) -> Move {
     Move {
+        rotary: None,
         kind,
         from: Point3::new(a.0, a.1, a.2),
         to: Point3::new(b.0, b.1, b.2),
@@ -73,7 +74,7 @@ fn link_after(pockets: &[(f64, f64)], y_a: f64, y_b: f64) -> (Vec<Warning>, usiz
 }
 
 fn judge(moves: Vec<Move>) -> Vec<Warning> {
-    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new() };
+    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
     let region = rect();
     let tool = ToolGeom {
         radius: R,

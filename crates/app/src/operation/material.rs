@@ -30,8 +30,14 @@ pub(super) const Z_TOL: f64 = 1e-6;
 pub(super) const FOOTPRINT_SAMPLES: usize = 16;
 /// One micron under a grazing section plane, for the slice retry.
 pub(super) const SLICE_NUDGE: f64 = 1e-3;
-/// Points per semicircular slot cap when building the stadium region.
-pub(super) const CAP_SEGMENTS: usize = 16;
+/// How far a slot cap's polygon may stand OUTSIDE the true arc, mm
+/// (#510). The verifier's slack for a real over-cut is this plus
+/// `GOUGE_TOL`, so it is held a decade under the tolerance.
+pub(super) const CAP_SAG_BUDGET: f64 = 0.001;
+/// Floor and ceiling of the chords per semicircular slot cap: the floor
+/// keeps a tiny cap a real polygon, the ceiling keeps a huge one cheap.
+pub(super) const CAP_MIN_SEGMENTS: usize = 16;
+pub(super) const CAP_MAX_SEGMENTS: usize = 2048;
 
 /// The source geometry in world coordinates, plus its top.
 pub(super) struct Material {
@@ -61,9 +67,9 @@ pub(super) fn material_of(
     match src {
         SrcRef::Stock => {
             let name = crate::setup::stock_entity_name(world, setup);
-            named_material(world, &name, "no stock: set it up in Setup first")
+            named_material(world, setup, &name, "no stock: set it up in Setup first")
         }
-        SrcRef::Entity(name) => named_material(world, name, &format!("no entity named '{name}'")),
+        SrcRef::Entity(name) => named_material(world, setup, name, &format!("no entity named '{name}'")),
         SrcRef::Selection(items) => {
             // Union of the distinct selected entities (stock is a legal
             // pick): what the generators stand in and what verification
@@ -79,6 +85,7 @@ pub(super) fn material_of(
                 seen.push(g.entity.as_str());
                 let m = named_material(
                     world,
+                    setup,
                     &g.entity,
                     &format!("the selection names '{}', which is gone", g.entity),
                 )?;
@@ -127,12 +134,58 @@ pub fn cross_holes_of(
     Ok(crate::drilling::recognize_cross(&m.facets))
 }
 
-pub(super) fn named_material(world: &World, name: &str, gone: &str) -> Result<Material, GenError> {
+/// Detect holes (M2.4 C; shared with the MCP server by #312): `params`
+/// with its source's holes, read NOW, written into whichever hole list
+/// the kind has - the drill, the boring ride and the thread mill store
+/// the same `holes` shape - plus the drill's radial list when the
+/// document's machine holds a turret (M5.2 F2; a plain mill asks nothing
+/// of the mesh's sides). `name` only words the refusals. The caller
+/// commits the result as one undoable `EditOperationParams`, so the
+/// app's Detect holes button and the MCP `detect_holes` tool store the
+/// same list.
+pub fn detect_holes(
+    world: &World,
+    name: &str,
+    params: &OpParams,
+    setup: Option<&str>,
+    src: &SrcRef,
+) -> Result<OpParams, String> {
+    let mut params = params.clone();
+    let is_drill = matches!(params, OpParams::Drill { .. });
+    let holes: &mut Vec<_> = match &mut params {
+        OpParams::Drill { holes, .. } | OpParams::Bore { holes, .. } | OpParams::Thread { holes, .. } => holes,
+        _ => return Err(format!("'{name}' is not a drilling operation")),
+    };
+    let axial = holes_of(world, setup, src).map_err(|e| e.to_string())?;
+    // #388: the op's own setup's machine, not the active one.
+    let radial = if !is_drill || crate::machine::kind_of_setup(world, setup) == crate::machine::Kind::Mill {
+        Vec::new()
+    } else {
+        cross_holes_of(world, setup, src).map_err(|e| e.to_string())?
+    };
+    if axial.is_empty() && radial.is_empty() {
+        return Err(if is_drill {
+            "no drilled holes found in the source model - Z or radial".to_string()
+        } else {
+            "no Z-axis holes found in the source model - this ride reads only those".to_string()
+        });
+    }
+    *holes = axial;
+    if let OpParams::Drill { cross, .. } = &mut params {
+        *cross = radial;
+    }
+    Ok(params)
+}
+
+/// A named entity's facets in its setup's frame (#326: a part of an
+/// aligned setup reads turned; the stock and an unaligned setup read
+/// exactly the world facets they always did).
+pub(super) fn named_material(world: &World, setup: Option<&str>, name: &str, gone: &str) -> Result<Material, GenError> {
     let Some(entity) = model::find_by_name(world, name) else {
         return Err(GenError::Invalid(gone.to_string()));
     };
-    let facets = model::world_facets(world, &entity).unwrap_or_default();
-    let top = model::entity_world_aabb(world, &entity)
+    let facets = crate::setup_align::facets_in(world, &entity, setup).unwrap_or_default();
+    let top = crate::setup_align::entity_aabb_in(world, &entity, setup)
         .map(|b| b.max.z)
         .unwrap_or(f64::NAN);
     usable(facets, top, name)
@@ -176,10 +229,40 @@ pub(super) fn section(facets: &[Triangle], z: f64) -> Result<Region, GenError> {
     }
 }
 
-/// Closed-form stadium: `a`/`b` centers, half-width `h`, semicircles of
-/// `CAP_SEGMENTS` points at each end. The region only feeds verification
-/// (the slot generator computes the path in closed form), and any finite
-/// inputs build a simple closed ring.
+/// Chords per semicircular cap of half-width `h` such that the
+/// circumscribed polygon's corners stand at most `CAP_SAG_BUDGET`
+/// outside the arc: a step of `phi` puts the corner at `h / cos(phi/2)`.
+pub(super) fn cap_segments(h: f64) -> usize {
+    if !(h.is_finite() && h > 0.0) {
+        return CAP_MIN_SEGMENTS;
+    }
+    let half = (h / (h + CAP_SAG_BUDGET)).clamp(-1.0, 1.0).acos();
+    if !(half.is_finite() && half > 0.0) {
+        return CAP_MAX_SEGMENTS;
+    }
+    let n = (std::f64::consts::PI / (2.0 * half)).ceil();
+    if n.is_finite() && n >= 1.0 {
+        (n as usize).clamp(CAP_MIN_SEGMENTS, CAP_MAX_SEGMENTS)
+    } else {
+        CAP_MAX_SEGMENTS
+    }
+}
+
+/// Closed-form stadium: `a`/`b` centers, half-width `h`. The region only
+/// feeds verification and the drawn outline (the slot generator computes
+/// the path in closed form), and any finite inputs build a simple closed
+/// ring.
+///
+/// Each round end is the polygon CIRCUMSCRIBED about its semicircle
+/// (#510): `n` tangent chords of step `phi = pi / n`, whose corners sit
+/// at radius `h / cos(phi/2)` midway between tangent points. Every chord
+/// is tangent to the true arc, so a cutter tangent to the cap is never
+/// nearer to the polygon than to the arc - an inscribed cap put its
+/// chords up to `h (1 - cos(phi/2))` INSIDE the arc (16 chords, 6 mm
+/// cutter: 0.0145 mm, past `GOUGE_TOL`) and convicted every pass that
+/// reached the end. The corners give a real over-cut at most
+/// `CAP_SAG_BUDGET` of slack. The first and last corner of each cap lie
+/// on the straight sides' lines, so the sides stay exact.
 pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let len = (dx * dx + dy * dy).sqrt();
@@ -189,14 +272,17 @@ pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> 
         (1.0, 0.0)
     };
     let (nx, ny) = (-uy, ux);
-    let mut pts = Vec::with_capacity(2 * CAP_SEGMENTS + 2);
-    for (c, t0, t1) in [(b, -90.0f64, 90.0), (a, 90.0, 270.0)] {
-        for i in 0..=CAP_SEGMENTS {
-            let th = (t0 + (t1 - t0) * i as f64 / CAP_SEGMENTS as f64).to_radians();
+    let n = cap_segments(h);
+    let phi = std::f64::consts::PI / n as f64;
+    let rc = h / (phi * 0.5).cos();
+    let mut pts = Vec::with_capacity(2 * n);
+    for (c, t0) in [(b, -std::f64::consts::FRAC_PI_2), (a, std::f64::consts::FRAC_PI_2)] {
+        for i in 0..n {
+            let th = t0 + phi * (i as f64 + 0.5);
             let (ca, sa) = (th.cos(), th.sin());
             pts.push(Point2::new(
-                c.x + h * (ca * ux + sa * nx),
-                c.y + h * (ca * uy + sa * ny),
+                c.x + rc * (ca * ux + sa * nx),
+                c.y + rc * (ca * uy + sa * ny),
             ));
         }
     }

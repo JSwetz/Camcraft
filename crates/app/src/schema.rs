@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AfterOperation, AreaControls, CoolantMode, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -92,9 +92,11 @@ pub struct StockDef {
     pub shape: StockShape,
 }
 
-/// Unit tag marking an entity as a work coordinate system origin. The entity
-/// NAME is the slot identity (`G54`..`G59`), its `Location` the transform;
-/// there is no payload to drift. Never has facets.
+/// Unit tag marking an entity as a work coordinate system origin: a
+/// setup's one WCS (#342), named by `SetupDef::wcs` (`G54` for a document
+/// without setups), its `Location` the transform; there is no payload to
+/// drift. The NAME is not the G-word - that is the setup's label
+/// (`SetupDef::work_offset`). Never has facets.
 #[derive(Component, Debug)]
 pub struct Wcs;
 
@@ -112,21 +114,95 @@ pub struct ToolDef {
     pub number: Option<u32>,
 }
 
+/// A tool's modelled body (#368): a holder or assembly mesh (a vendor
+/// STEP, an STL) placed in the tool's frame, and what the judging laws
+/// read off it, derived from those facets at landing and never stored
+/// apart from them. A milling tool's frame is the spindle's (tip at the
+/// origin, axis +Z toward the spindle; its revolved envelope); a lathe
+/// steel's is the turning tool frame (#369: tip at the origin, +x away
+/// from the spindle axis, +z along it; its clearance bands) - see
+/// [`crate::tool_body::BodyFrame`]. A tool without one judges its
+/// `holder_d`/`holder_len` cylinder, as always. Written only through
+/// `SetToolBody` (`crate::tool_body`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ToolBody {
+    /// Where the mesh came from (a file name), for display only.
+    pub source: String,
+    /// The placed facets, in the frame `frame` names.
+    pub facets: std::sync::Arc<[Triangle]>,
+    /// The drawn outline when the body is a spun profile (#93): the
+    /// facets are its revolve and the spindle frame's `profile` its exact
+    /// bands. `None` for an imported mesh (and every lathe-frame body).
+    pub spun: Option<camcraft_tools::spun::SpunProfile>,
+    /// The frame, the placement it landed with, and the derived read.
+    pub frame: crate::tool_body::BodyFrame,
+}
+
+impl ToolBody {
+    /// The revolved envelope of a milling (spindle-frame) body.
+    #[must_use]
+    pub fn profile(&self) -> Option<&camcraft_tools::holder_profile::HolderProfile> {
+        match &self.frame {
+            crate::tool_body::BodyFrame::Spindle { profile, .. } => Some(profile),
+            crate::tool_body::BodyFrame::Lathe { .. } => None,
+        }
+    }
+}
+
 /// One machine setup (M3.2 stage A): the named context that says WHICH
-/// raw material and WHICH work offsets an operation is machined against.
-/// The strings are entity NAMES, resolved through [`crate::setup`] - the
-/// first setup of a pre-M3.2 document points at the legacy global names
-/// (`STOCK_NAME`, `WCS_SLOTS`) so nothing is renamed when setups arrive.
-/// `wcs` is indexed by [`WCS_SLOTS`]; an entry naming an entity that does
-/// not exist yet means "this slot is not placed in this setup", exactly
-/// as a missing `G55` entity means today. `datum_from` records the setup
-/// whose stock and G54 a new setup was cloned from - provenance for the
-/// sheet, inert for every stamp (the clones themselves carry the data).
+/// raw material and WHICH work coordinate system an operation is
+/// machined against. The strings are entity NAMES, resolved through
+/// [`crate::setup`] - the first setup of a pre-M3.2 document points at
+/// the legacy global names (`STOCK_NAME`, `G54`) so nothing is renamed
+/// when setups arrive.
+/// `wcs` names the setup's ONE work coordinate system (#342): one origin
+/// per setup, never a list of slots. An empty name, or one naming an
+/// entity that does not exist yet, means "this setup's WCS is not placed"
+/// (it sits at the origin). `datum_from` records the setup whose stock
+/// and WCS a new setup was cloned from - provenance for the sheet, inert
+/// for every stamp (the clones themselves carry the data).
+/// `work_offset` is only the setup's post LABEL (#196, #342), an index
+/// into [`WCS_SLOTS`]: the `G54`..`G59` word the post writes for this
+/// setup's WCS. It selects no stored origin - changing it moves nothing.
+/// `None` - the default - writes `G54` ([`crate::setup::wcs_slot`]).
+/// Written only by `SetSetupWorkOffset` and the loader's migrations.
+/// `part_alignment` (#326) is how the PART sits in this setup: the rigid
+/// transform from the document frame into the setup frame (which face
+/// is on the table, which edge runs along X). The stock, the WCS and
+/// the fixtures of the setup are placed in that frame already; only the
+/// parts read through it (`setup_align`). `None` - the default - is "as
+/// modelled", exactly the pre-#326 behaviour. Never `Some(identity)`.
+/// Written only by `AlignPartToSetup`, `CreateSetup` (a datum transfer
+/// carries it) and the project loader.
+/// `machine` and `post` (#343) are the setup's OWN machine and post:
+/// `None` - the default, and every file before v55 - follows the
+/// document's (`MachineDef` / `PostRef` singletons), so an untouched
+/// document mounts and posts exactly as before. Read through
+/// [`crate::setup_mount`]; written only by `SetSetupMachine` /
+/// `SetSetupPost` and the project loader.
+/// `relative_to` (#316) names the setup this one is placed RELATIVE to
+/// (a re-clamp of it: flipped, turned). The relation itself is not
+/// stored - it is `part_alignment` read against the other setup's
+/// ([`crate::setup_relative::transform_between`]); the link only makes
+/// a later change of that setup's alignment carry into this one. `None`,
+/// the default and every file before v56, links nothing. Written only by
+/// `SetSetupRelative` and the project loader.
+/// `stock_source` (#320) is where the setup's stock comes from: its own,
+/// or what the setup before it leaves. `None`, the default and every
+/// file before v57, reads as #317's implicit rule
+/// ([`crate::setup_stock::implicit`]). Written only by
+/// `SetSetupStockSource` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
-    pub wcs: Vec<String>,
+    pub wcs: String,
     pub datum_from: String,
+    pub work_offset: Option<usize>,
+    pub part_alignment: Option<Location>,
+    pub machine: Option<MachineDef>,
+    pub post: Option<PostRef>,
+    pub relative_to: Option<String>,
+    pub stock_source: Option<crate::setup_stock::StockSource>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
@@ -180,6 +256,13 @@ pub struct Operation {
     /// The cutting fluid the post switches on for this operation
     /// (#112). Flood by default - what every post emitted before.
     pub coolant: CoolantMode,
+    /// What the machine does once this operation is done (#110):
+    /// carry on by default - what every post emitted before.
+    pub after: AfterOperation,
+    /// Left out of the posted program (#110), toolpath and all kept:
+    /// the post (and the program sim that judges it) skip it; it still
+    /// generates, and un-suppressing restores it as it was.
+    pub suppressed: bool,
 }
 
 /// User-facing operation label and explicit position within its setup.
@@ -188,6 +271,22 @@ pub struct Operation {
 pub struct OperationMeta {
     pub label: Option<String>,
     pub order: Option<u32>,
+}
+
+/// A standalone Pause or Home entry in the operation list (#155): an
+/// after-action with no tool and no toolpath, placed between operations
+/// by the same `OperationMeta::order` its siblings use. It is not an
+/// `Operation`, so every program walk that needs a tool or a toolpath
+/// (`setup::operation_order` and all who walk it) never sees it; the
+/// post folds it into the gap it stands in (`program_entry`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ProgramEntry {
+    /// What the machine does here - never `AfterOperation::None`.
+    pub action: AfterOperation,
+    /// The setup it stands in, the `Operation::setup` law.
+    pub setup: Option<String>,
+    /// Left out of the posted program, like a suppressed operation.
+    pub suppressed: bool,
 }
 
 /// The cached result of generating an operation: the path plus the
@@ -267,12 +366,40 @@ pub enum PostRef {
 /// `SetPostOptions` (undoable) or a document load. A script reads the
 /// ones it knows from its `postOptions` global and ignores the rest;
 /// the default is every post's own default, so a document that never
-/// chose writes no key.
+/// chose writes no key. `skip_stops` (#110) posts the program without
+/// any operation's after-action (no M0 / M1, no trips home) - a
+/// debugged program runs straight through, the ops keep their choices.
+/// `per_op` (#111) is the Output choice: off (the default) posts one
+/// combined program, on writes one standalone program per operation.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PostOptions {
     /// How a lathe post writes a thread (Fanuc Lathe: G32 passes, the
     /// default, or the two-block G76 cycle from the thread record).
     pub threading: ThreadingOutput,
+    /// Post without any operation's stop or trip home (#110).
+    pub skip_stops: bool,
+    /// One standalone program per operation (#111).
+    pub per_op: bool,
+    /// The length unit the control is left in after the program (#596).
+    pub end_units: EndUnits,
+}
+
+/// The end-units choice of [`PostOptions`] (#596). LinuxCNC's M2 / M30
+/// reset list (linuxcnc.org/docs, M-codes, "M2, M30 Program End") names
+/// offsets, plane, distance and feed modes, overrides, comp, spindle,
+/// motion mode and coolant - never G20 / G21 - so a program posted in mm
+/// for a control the operator runs in inches leaves it in mm. A post
+/// that knows the option (Tormach PathPilot) writes the target's unit
+/// word before its program end when it differs from the program's unit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EndUnits {
+    /// The program's own unit stays modal (every older document).
+    #[default]
+    Leave,
+    /// End in inches: a mm program writes G20 before M30.
+    Inch,
+    /// End in millimetres: an inch program writes G21 before M30.
+    Millimeters,
 }
 
 /// The thread-output choice of [`PostOptions`].
@@ -378,14 +505,17 @@ pub fn register_schema(world: &World) {
     world.component::<StockDef>();
     world.component::<Wcs>();
     world.component::<ToolDef>();
+    world.component::<ToolBody>();
     world.component::<Operation>();
     world.component::<OperationMeta>();
+    world.component::<ProgramEntry>();
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();
     world.component::<PostRef>();
     world.component::<PostOptions>();
     world.component::<ThemeRef>();
+    world.component::<PostOptions>();
     world.component::<ColorVision>();
     world.component::<WorkMaterialDef>();
     world.component::<RibbonPins>();

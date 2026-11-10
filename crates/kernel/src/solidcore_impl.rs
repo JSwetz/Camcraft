@@ -1,11 +1,11 @@
-//! The solidcore (SMLib port) impl of the kernel seam: primitives, boolean
-//! difference, whole offset, and exact measure via the port's mass-property
+//! The solidcore (SMLib port) impl of the kernel seam: primitives, the three
+//! booleans, whole offset, edge blends (solidcore_blend.rs), and exact measure via the port's mass-property
 //! integrator and tight bounding box.
 //! Provenance: calls solidcore 1.0.1's public API as documented in its
 //! rustdoc and its own public tests (boolean_api.rs, offset fixtures); no
 //! SMLib/solidcore internals reimplemented here.
 
-use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::math::Point3;
@@ -14,7 +14,9 @@ use solidcore::primitive::api_primitives as prim;
 use solidcore::query::brep::{BoundingBoxOptions, calculate_bounding_box};
 use solidcore::topology::Brep;
 
-use crate::{Kernel, KernelError, Measure, P3, finite_point, offset_distance, positive_len};
+use crate::{
+    Blend, Kernel, KernelError, Measure, P3, finite_point, offset_distance, positive_len,
+};
 
 const NAME: &str = "solidcore";
 
@@ -31,7 +33,7 @@ pub struct SolidcoreKernel {
     pub k: solidcore::Kernel,
 }
 
-fn failed(op: &'static str, e: &solidcore::SolidError) -> KernelError {
+pub(crate) fn failed(op: &'static str, e: &solidcore::SolidError) -> KernelError {
     KernelError::Failed {
         kernel: NAME,
         op,
@@ -43,9 +45,24 @@ fn p(v: P3) -> Point3 {
     Point3::new(v[0], v[1], v[2])
 }
 
+/// An operand with no faces is refused before the port sees it: the port
+/// answers `box & empty` with the whole box, a wrong answer dressed as a
+/// solid (pinned in tests/corrupt_input.rs), and an empty operand is a
+/// caller bug for every boolean.
+fn operands(op: &'static str, a: &Brep, b: &Brep) -> Result<(), KernelError> {
+    if a.faces().is_empty() || b.faces().is_empty() {
+        Err(KernelError::InvalidInput {
+            op,
+            detail: "empty operand (a B-rep with no faces)".into(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// A result must pass the port's integrity check and be a closed manifold
 /// solid before the seam hands it out.
-fn checked(op: &'static str, b: Brep) -> Result<Brep, KernelError> {
+pub(crate) fn checked(op: &'static str, b: Brep) -> Result<Brep, KernelError> {
     solidcore::topology::integrity::check(&b).map_err(|e| KernelError::InvalidResult {
         kernel: NAME,
         op,
@@ -90,8 +107,32 @@ impl Kernel for SolidcoreKernel {
     }
 
     fn boolean_subtract(&mut self, a: Brep, b: Brep) -> Result<Brep, KernelError> {
+        operands("boolean_subtract", &a, &b)?;
         let r = boolean_difference(&mut self.k, a, b).map_err(|e| failed("boolean_subtract", &e))?;
         checked("boolean_subtract", r)
+    }
+
+    fn boolean_union(&mut self, a: Brep, b: Brep) -> Result<Brep, KernelError> {
+        operands("boolean_union", &a, &b)?;
+        let r = boolean_union(&mut self.k, a, b).map_err(|e| failed("boolean_union", &e))?;
+        checked("boolean_union", r)
+    }
+
+    fn boolean_intersect(&mut self, a: Brep, b: Brep) -> Result<Brep, KernelError> {
+        operands("boolean_intersect", &a, &b)?;
+        let r = boolean_intersection(&mut self.k, a, b)
+            .map_err(|e| failed("boolean_intersect", &e))?;
+        checked("boolean_intersect", r)
+    }
+
+    fn blend_edges(
+        &mut self,
+        s: Brep,
+        picks: &[P3],
+        radius: f64,
+        kind: Blend,
+    ) -> Result<Brep, KernelError> {
+        crate::solidcore_blend::blend_edges(self, s, picks, radius, kind)
     }
 
     /// Guards around the port's offset, each one answering a bench finding

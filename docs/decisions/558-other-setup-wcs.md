@@ -1,0 +1,7 @@
+## #558 - another setup's WCS is drawn through the part's transform between setups
+
+- **Chosen:** a new app helper, `setup_relative::wcs_view_pose(world, wcs_name, stored)`, maps a WCS owned by a setup other than the active one with `transform_between(owner, active)`. The viewport gizmo builder (`interact::gizmos`) draws that pose. The active setup's own WCS, and a document with no setups, return `Ok(None)` and draw the stored pose unchanged, byte for byte as before.
+- **Why:** a WCS is setup furniture, placed in its own setup's frame, so it is a point on the part *as that setup holds it*. The viewport shows the active setup's frame (`setup_align::view_pose`), so the same rigid transform the part goes through must carry the WCS. The helper lives in app, so the UI makes no world-level calls (layering law).
+- **Unmappable:** if `transform_between` refuses (a non-rigid stored alignment), the triad is **hidden** and the reason is logged at debug level in app. That follows the issue's "never drawn somewhere wrong". A greyed triad with a note was considered and dropped: no current gizmo style carries text, and a hidden triad cannot mislead.
+- **Shared WCS:** a WCS entity that two setups name is mapped from the first owner. It shows unmapped only if the active setup is one of its owners.
+- **Not changed:** picking, `MoveModel`, stock transforms, and the posted output. This is display only.

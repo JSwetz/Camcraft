@@ -29,23 +29,8 @@ impl SelectPost {
     /// real names, so a stranger is a corrupt project, and a corrupt
     /// project's post choice is refused the same way.
     pub fn new(world: &World, next: PostRef) -> Result<Self, CommandError> {
-        match &next {
-            PostRef::File(path) => {
-                let text = std::fs::read_to_string(path)
-                    .map_err(|e| CommandError::Invalid(format!("post script {path}: {e}")))?;
-                engine::run(&text, &serde_json::Value::Null, "")
-                    .map_err(|e| CommandError::Invalid(format!("post script {path} does not run: {e}")))?;
-            }
-            PostRef::Named(name) => {
-                if !posting::BUILTINS.iter().any(|(n, _)| n == name) {
-                    return Err(CommandError::Invalid(format!(
-                        "built-in post {name} is not in the registry"
-                    )));
-                }
-            }
-            PostRef::Builtin => {}
-        }
-        let prev = posting::post_of(world);
+        validate(&next)?;
+        let prev = posting::document_post_of(world);
         if prev == next {
             return Err(CommandError::Invalid(
                 "that post is already selected".to_owned(),
@@ -53,6 +38,29 @@ impl SelectPost {
         }
         Ok(Self { prev, next })
     }
+}
+
+/// The front-door check every post choice passes (`SelectPost`, and a
+/// setup's own post, #343): a file must read and run, a registry name
+/// must exist.
+pub(crate) fn validate(next: &PostRef) -> Result<(), CommandError> {
+    match next {
+        PostRef::File(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| CommandError::Invalid(format!("post script {path}: {e}")))?;
+            engine::run(&text, &serde_json::Value::Null, "")
+                .map_err(|e| CommandError::Invalid(format!("post script {path} does not run: {e}")))?;
+        }
+        PostRef::Named(name) => {
+            if !posting::BUILTINS.iter().any(|(n, _)| n == name) {
+                return Err(CommandError::Invalid(format!(
+                    "built-in post {name} is not in the registry"
+                )));
+            }
+        }
+        PostRef::Builtin => {}
+    }
+    Ok(())
 }
 
 impl Command for SelectPost {

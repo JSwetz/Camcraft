@@ -19,11 +19,32 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`, `coolantModes`. All but the last are text the engine
-reads none of; `coolantModes = true` says the script reads `PARAM
+`capabilities`, `coolantModes`, `liveTooling`, `afterModes`, `axisInversion`, `probeAxisInversion`, `threadHands`. All but the last six are
+text the engine reads none of; `threadHands = true` (#629) says the script
+reads `PARAM SpindleDirection` and states a thread's hand (M04 when the
+helix needs the spindle reversed) - without it the engine refuses a
+reverse-spindle thread section by name (only fanuc-lathe.cps sets it); `liveTooling = true` (issue #33) says the
+script voices a `PARAM LiveTool` section - C-axis live-tool work, the
+stream's X Y Z the part-frame tip and C the stated spindle angle - and
+without it the engine refuses such a section by name (only
+fanuc-lathe.cps sets it); `coolantModes = true` says the script reads `PARAM
 Coolant` (#150) - without it the engine refuses a section asking Off,
 Mist or Through tool by name, since the script would post its own
-flood. Every shipped post sets it. The file-viewer's about box reads
+flood. Every shipped post sets it. `afterModes = true` says the script
+reads `PARAM AfterOperation` (#110) - without it the engine refuses a
+section asking Optional stop, Program stop or Go home by name, since
+the script would run straight on into the next tool. The six posts
+that write it set it. `axisInversion = true` (#374) says the script's
+output on the engine's mirrored stream (an inverted X / Y: negated
+coordinates, centres and origin, CW/CCW reversed in a plane holding one
+inverted axis, the comp side swapped) is verified by goldens and the
+controller-interpretation test - without it a machine with an inverted
+axis is refused by name. Fanuc and Haas set it. `probeAxisInversion =
+true` (#392) says the script's probing blocks on that mirrored stream
+(negated touch target and trip, back-off delta, found expected values)
+are verified by the macro-B interpreter on a simulated inverted machine
+(`crates/app/tests/inverted_probe.rs`) - without it probing on an
+inverted axis is refused by name. Fanuc and Haas set it. The file-viewer's about box reads
 the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
@@ -35,7 +56,7 @@ argument semantics in `docs/CNC-INTERMEDIATE.md`):
 
 | hook | fires |
 |---|---|
-| `onOpen` | once, before all records (write the header here) |
+| `onOpen` | once, before all records (write the header here; the global `programNumber` is the program's number - 1 for a whole job, 1, 2, 3... per file when posting one file per operation (#111) - for a dialect with an O-word) |
 | `onParameter(name, value)` | per `PARAM`; `onSpindleSpeed` follows the `SpindleSpeed` one |
 | `onToolChange(number, name)` | per `TOOL` |
 | `onSection` / `onSectionEnd` | per operation span (preamble bookends) |
@@ -67,10 +88,23 @@ write (the gate), so the released program never carries one.
   end; a flood ask on a machine whose list states only other kinds is
   refused the same way, and every coolant refusal names the section's
   `OperationName` (#150); names compare case-blind, spaces and
-  underscores read as hyphens), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  underscores read as hyphens; a section's `PARAM AfterOperation` -
+  `optional-stop`, `stop`, `home` (#110) - is written after its
+  spindle stop in the dialect's own words, a home the dialect cannot
+  trust is refused by `message()` naming the operation, and the ask
+  resets there too; a script that writes it declares
+  `afterModes = true`, and the engine refuses any stop or home ask,
+  by operation name, for a script that does not), `machine.rtcp` and `machine.rotaries` (RTCP may be
   OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
   machine is a `message()` refusal — never a reinterpretation), and
   the rate ceilings for anything you pace.
+- **Up is the machine's word.** A retract in machine coordinates
+  (`G53 G0 Z..`) reads `machine.safeRetractZ` (#495); machine Z0 is the
+  top of travel only by convention (Tormach's), and a machine homed
+  with Z0 at the bottom would rapid down into the part. Unstated and
+  not a known-convention machine is a `message()` refusal by name
+  (`sinumerik.cps`, #503: no name is a known convention there - only
+  "no machine at all" keeps the old `G53 Z0`).
 - **Refuse, never lie.** A record you cannot honor in this dialect
   gets a counted `message()` naming why (Fanuc's `tilt()` returns null
   after one refusal per program — a per-line refusal is noise, a

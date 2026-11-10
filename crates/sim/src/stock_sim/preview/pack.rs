@@ -306,6 +306,7 @@ mod tests {
         let c = cube(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 5.0));
         let mut stock = Stock::from_facets(Backend::Field { band: FIELD_BAND }, &c.facets, 1.0).unwrap();
         let mv = vec![Move {
+            rotary: None,
             kind: MoveKind::Feed,
             from: Point3::new(5.0, 5.0, 6.0),
             to: Point3::new(5.0, 5.0, 2.0),

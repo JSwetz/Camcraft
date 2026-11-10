@@ -40,6 +40,11 @@ pub fn parse(data: &[u8]) -> Result<Mesh, ImportError> {
     let Some(section) = exchange.data.first() else {
         return Err(ImportError::Step("file has no DATA section".into()));
     };
+    // #306: the file's own length unit, read before any geometry - a
+    // part saved in inches or metres must not import with its numbers
+    // read as millimetres. No stated unit keeps millimetres.
+    let mm_per_unit = super::step_units::mm_per_unit(section)
+        .map_err(|e| ImportError::Step(format!("length unit: {e}")))?;
     let table = Table::from_data_section(section);
     if table.shell.is_empty() {
         return Err(ImportError::Step("no shells found".into()));
@@ -72,6 +77,15 @@ pub fn parse(data: &[u8]) -> Result<Mesh, ImportError> {
     }
     if facets.is_empty() {
         return Err(ImportError::Empty);
+    }
+    // Scale after tessellating: the tolerance schedule is relative to
+    // each shell's own extent, so the mesh's quality is the same in any
+    // unit, and only the numbers change.
+    if let Some(k) = mm_per_unit.filter(|k| *k != 1.0) {
+        let mm = |p: Point3| Point3::new(p.x * k, p.y * k, p.z * k);
+        for t in &mut facets {
+            *t = Triangle::new(mm(t.a), mm(t.b), mm(t.c));
+        }
     }
     Ok(Mesh::from_facets(facets))
 }

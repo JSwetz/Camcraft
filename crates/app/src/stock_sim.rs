@@ -23,6 +23,14 @@ pub use rotary::{
 pub mod lathe;
 pub use lathe::{LathePlan, LATHE_HELIX_REFUSAL, LATHE_THREAD_REFUSAL, LATHE_VERDICT_REFUSAL};
 
+// The carry across setups (#317): the machined body moved into the
+// next setup's frame through the transform between the two.
+#[path = "stock_sim_carry.rs"]
+pub mod carry;
+#[path = "stock_sim_breaks.rs"]
+pub mod breaks;
+pub use carry::{CARRY_MACHINE_CHANGE_REFUSAL, CARRY_MACHINE_REFUSAL, incoming_body};
+
 use crate::geometry::Triangle;
 
 /// The document's stock, as an axis-aligned grid in world. Box and
@@ -81,7 +89,19 @@ pub fn stock_grid(
             ((x1 - x0).max(0.0), (y1 - y0).max(0.0))
         }
     };
-    let cell = auto_cell(tool_r, span_x, span_y);
+    // A program none of whose ops sweeps a tool through material (a
+    // probe-only program, #592: the probe stays out of the plan) has no
+    // radius to size the lattice by - `min` over nothing is +inf, and
+    // an infinite cell was refused as "invalid stock simulation setup",
+    // naming the wrong cause. The stock then simply stands uncut: size
+    // its lattice by the span alone (the grid ceiling's floor), and the
+    // verdict reads the raw stock against the part - clean when they
+    // agree, rest where they don't, never a gouge it did not cut.
+    // Exactly +inf (the empty fold), nothing wider: a NaN or negative
+    // radius still reaches `auto_cell` and is refused by name (review
+    // of #599) - only "no tool cut" falls back to the span.
+    let sizing_r = if tool_r == f64::INFINITY { 0.0 } else { tool_r };
+    let cell = auto_cell(sizing_r, span_x, span_y);
     let dex = match &shape {
         StockShape::FromModel { .. } => {
             Dexel::from_facets(&stock_facets, cell).map_err(|e| e.to_string())?
@@ -114,19 +134,65 @@ pub fn simulate_document(
     world: &flecs_ecs::prelude::World,
 ) -> Result<ProgramSim, String> {
     let planned = plan_program(world)?;
+    refuse_unjudged(&planned)?;
 
-    // The posed clause (M13.1 follow-up): the verdict below is the
-    // COLUMN engine, whose atoms stand upright - a 5-axis lean or a
-    // 3+2 frame's tilted moves would be cut as if vertical, a silent
-    // wrong verdict. The field arm does cut a posed move exactly (the
-    // pose rides `field_cut`'s solid), but its verdict reads heights
-    // marched from above, and a tilted tool is precisely the tool that
-    // can reach UNDER an overhang: a gouge there stands beneath an
-    // untouched top and reads clean. So neither arm's height verdict
-    // judges a posed program - refusal by name, which the post gate
-    // shows as "not judged" (the generator-time verify, which reads
-    // the lean, is what governs these ops).
-    for p in &planned {
+    // Setup changes (#317): a setup that holds the part differently, or
+    // is placed relative to the one before it, starts from the body the
+    // earlier setups left, carried through the transform between them
+    // (`carry`); two setups holding it alike keep the M3.2 A clip. The
+    // verdict is read in the frame of the setup the program ends in.
+    let walked = carry::walk(world, &planned, None)?;
+    let model_facets = if walked.spanned {
+        crate::setup_align::parts_facets_in(world, walked.frame.as_deref())
+    } else {
+        part_facets(world)?
+    };
+    let (mut dev, display) = match walked.held {
+        carry::Held::Plain(dex) => (deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?, dex),
+        carry::Held::Carried(body) => (body.deviate(&model_facets, DEV_TOL).map_err(|e| e.to_string())?, body.display()),
+    };
+    // #303: the op owns its break - a chamfer's or deburr's declared
+    // bevel is part of the finished part, judged by its own depth.
+    credit_breaks(&mut dev, &display, &model_facets, &program_breaks(world, &planned, walked.spanned, &walked.frame));
+    // #320: a gouge on a block a later setup set aside for a new one.
+    if let Some(left) = &walked.left {
+        carry::fold_left(&mut dev, left);
+    }
+    let classes = color_classes(&dev);
+    let surface = display.surface(&classes);
+    Ok(ProgramSim { dev, surface })
+}
+
+/// The edge breaks the program declares, in the frame the verdict is
+/// read in: every op's when one frame holds the whole program, only
+/// the final frame's ops' when the program spans setups that hold the
+/// part differently (an earlier frame's bevel is not this frame's).
+fn program_breaks(
+    world: &flecs_ecs::prelude::World,
+    planned: &[Planned],
+    spanned: bool,
+    frame: &Option<String>,
+) -> Vec<crate::cl::EdgeBreak> {
+    planned
+        .iter()
+        .filter(|p| !spanned || crate::setup::effective(world, p.setup.as_deref()) == *frame)
+        .flat_map(|p| p.breaks.iter().cloned())
+        .collect()
+}
+
+/// The kinds the column verdict cannot judge, refused by name before
+/// any material is cut.
+///
+/// The posed clause (M13.1 follow-up): the verdict is the COLUMN
+/// engine, whose atoms stand upright - a 5-axis lean or a 3+2 frame's
+/// tilted moves would be cut as if vertical, a silent wrong verdict.
+/// The field arm does cut a posed move exactly, but its verdict reads
+/// heights marched from above, and a tilted tool is precisely the tool
+/// that can reach UNDER an overhang. So neither arm's height verdict
+/// judges a posed program - refusal by name, which the post gate shows
+/// as "not judged".
+pub(crate) fn refuse_unjudged(planned: &[Planned]) -> Result<(), String> {
+    for p in planned {
         // The lathe clause (#19): a turning program is the field
         // eye's to cut (`stock_sim::lathe`), never this height
         // field's to judge.
@@ -134,8 +200,7 @@ pub fn simulate_document(
             return Err(format!("{}: {LATHE_VERDICT_REFUSAL}", p.name));
         }
         // The rotary clause (M13.1): named before the posed one, so
-        // the gate says WHY this posed program is not judged here and
-        // where it is cut (the field eye, `stock_sim::rotary`).
+        // the gate says WHY this posed program is not judged here.
         if p.rotary.is_some() {
             return Err(format!("{}: {ROTARY_VERDICT_REFUSAL}", p.name));
         }
@@ -143,46 +208,7 @@ pub fn simulate_document(
             return Err(format!("{}: move {k}: {POSED_REFUSAL}", p.name));
         }
     }
-
-    let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
-    // The block the program starts on is the FIRST setup's stock - the
-    // implicit-setup law makes that the legacy `Stock` entity exactly,
-    // so a single-setup document walks this identical to before.
-    let mut dex = stock_grid(
-        world,
-        planned.first().and_then(|p| p.setup.as_deref()),
-        min_r,
-    )?;
-
-    // M3.2 A, multi-setup: the flip transform between setups is M3.3's
-    // engine, so until then a new setup's stock can only ADD material
-    // where its own block stands - never move what the previous setup
-    // already cut. That reads as a CLIP: inside the new block every
-    // column drops to at most the new stock's top, outside it material
-    // stands as left. The verdict then over-estimates leftover (a
-    // re-clamped face reads as uncut) - visible as rest, never as a
-    // gouge, the mask law's conservative direction. A later stock that
-    // is rotated or from-model cannot be judged in this frame at all:
-    // refusal, not a guess.
-    let mut prev_setup = crate::setup::effective(
-        world,
-        planned.first().and_then(|p| p.setup.as_deref()),
-    );
-    for p in &planned {
-        let eff = crate::setup::effective(world, p.setup.as_deref());
-        if eff != prev_setup {
-            clip_to_setup_stock(&mut dex, world, eff.as_deref(), min_r)?;
-            prev_setup = eff;
-        }
-        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner }];
-        simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
-    }
-
-    let model_facets = part_facets(world);
-    let dev = deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?;
-    let classes = color_classes(&dev);
-    let surface = dex.surface(&classes);
-    Ok(ProgramSim { dev, surface })
+    Ok(())
 }
 
 /// One operation of the program, resolved for the sim: its cached
@@ -205,6 +231,9 @@ pub(crate) struct Planned {
     /// its moves about the axis (`lathe::lathe_plan`); the column
     /// verdict refuses the program by name. `None` for every mill op.
     pub lathe: Option<LathePlan>,
+    /// The edge breaks the op was asked to cut (#303); empty for every
+    /// kind but the chamfer and the deburr.
+    pub breaks: Vec<crate::cl::EdgeBreak>,
 }
 
 /// The corner radius a tool's atom carries (M13.1): Some only for a
@@ -302,6 +331,8 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         planned.push(Planned {
             name: name.clone(),
             moves: cache.path.moves,
+            // #529: only what the op itself declared, never wider.
+            breaks: breaks::bounded(name, &op.params, cache.path.breaks),
             radius,
             ball: tool.kind == crate::tools::ToolKind::BallNose,
             cone,
@@ -322,7 +353,40 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
 /// to the gouge verdict (counting them here would read a clamped job
 /// as a part with a vise-shaped hole in it). Visibility is a display
 /// choice; the verdict judges all the rest.
-pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Vec<Triangle> {
+///
+/// #326: in a document where a setup holds the part turned, the part is
+/// read in the frame of the one setup the program machines in; a program
+/// spanning setups that hold it differently is refused by name here - the
+/// field view draws one setup's frame. The program verdict
+/// (`simulate_document`) carries the body across such setups (#317) and
+/// reads the part in the frame the program ends in instead.
+pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Result<Vec<Triangle>, String> {
+    if !crate::setup_align::any_aligned(world) {
+        return Ok(part_facets_as_modelled(world));
+    }
+    let mut setups: Vec<Option<String>> = Vec::new();
+    for (_, e) in crate::setup::operation_order(world) {
+        let Some(op) = crate::model::operation_of(world, &e) else { continue };
+        if op.suppressed {
+            continue;
+        }
+        let eff = crate::setup::effective(world, op.setup.as_deref());
+        if !setups.contains(&eff) {
+            setups.push(eff);
+        }
+    }
+    match setups.as_slice() {
+        [] => Ok(crate::setup_align::parts_facets_in(world, crate::setup::active(world).as_deref())),
+        [one] => Ok(crate::setup_align::parts_facets_in(world, one.as_deref())),
+        many if many.iter().any(|s| crate::setup_align::alignment(world, s.as_deref()).is_some()) => Err(
+            "the program spans setups that hold the part differently (part alignment) - the field view draws one setup's frame; the program verdict carries the stock between them"
+                .into(),
+        ),
+        _ => Ok(part_facets_as_modelled(world)),
+    }
+}
+
+fn part_facets_as_modelled(world: &flecs_ecs::prelude::World) -> Vec<Triangle> {
     use crate::geometry::transform_point;
     use crate::model;
 
@@ -341,45 +405,6 @@ pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Vec<Triangle> {
     }
     model_facets
 }
-
-/// Fold a newly-entered setup's stock into the standing grid: inside
-/// the new block, no column may stand above that block's top; outside,
-/// what the previous setup left stands untouched. See the law comment
-/// in [`simulate_document`] - this is the conservative clip, not the
-/// flip transform (M3.3). A setup with no stock entity yet clips
-/// nothing; a rotated or from-model stock refuses, per the same law.
-fn clip_to_setup_stock(
-    dex: &mut Dexel,
-    world: &flecs_ecs::prelude::World,
-    setup: Option<&str>,
-    tool_r: f64,
-) -> Result<(), String> {
-    use crate::model;
-    use crate::stock::StockShape;
-    let Some(entity) = crate::setup::stock_entity(world, setup) else {
-        return Ok(());
-    };
-    if matches!(model::stock_def_of(world, &entity), Some(StockShape::FromModel { .. })) {
-        return Err(
-            "the program sim cannot judge a later setup's from-model stock - the flip transform arrives with M3.3"
-                .into(),
-        );
-    }
-    let nd = stock_grid(world, setup, tool_r)?;
-    for iy in 0..dex.ny {
-        for ix in 0..dex.nx {
-            let q = dex.center(ix, iy);
-            let Some(k) = nd.col(q) else { continue };
-            let t = nd.top_at(k);
-            let i = ix + iy * dex.nx;
-            if t.is_finite() {
-                dex.lower(i, t);
-            }
-        }
-    }
-    Ok(())
-}
-
 
 // The engine-law unit tests (the ball atom, the reach law, the
 // envelope gate), split out by the 400-line law (M13.1).

@@ -37,6 +37,13 @@ use crate::machining2d::GenError;
 
 /// World weld grid: 1 unit = 1 um, the slicer's own quantization.
 const WELD: f64 = 1e6;
+/// Seam vertices whose azimuths differ by less than this (radians)
+/// stand on one meridian column (#228): the weld grid's grain read as
+/// an angle - 1 um of arc per mm of radius, the same relative quantum
+/// the column profiles are compared at, and coarser than a float32
+/// STL's own azimuth noise. A flat's or keyway's ragged vertices stand
+/// apart by whole degrees. It was 1e-9, inside the axis fit's rounding.
+const SEAM_TH_TOL: f64 = 1.0 / WELD;
 
 type Key = (i64, i64, i64);
 
@@ -89,23 +96,24 @@ pub(super) fn refuse_open(facets: &[Triangle]) -> Result<(), GenError> {
     Ok(())
 }
 
-/// Refuse a work whose seam is not turned: `cols` are the off-axis
-/// vertices `(azimuth, station, radius)` of every facet straddling the
-/// wrap's ±π branch. On a revolve those stand on exactly two meridian
-/// columns, one each side of the branch, with one profile. A flat, a
-/// keyway or a cross hole crossing the seam breaks that: its vertices
-/// sit at their own azimuths (a ragged seam), or the columns either side
-/// carry different radii. Such a seam is refused by name - the cover's
-/// ends would read the metal another lap holds as air (PR #210's review:
-/// cut tips down to the axis).
-pub(super) fn refuse_feature_on_seam(cols: &[(f64, f64, f64)], scale: f64) -> Result<(), GenError> {
-    let th_tol = 1e-9;
+/// Is the seam turned? `cols` are the off-axis vertices `(azimuth,
+/// station, radius)` of every facet straddling the wrap's ±π branch.
+/// On a revolve those stand on exactly two meridian columns, one each
+/// side of the branch, with one profile: `None`. A flat, a keyway or a
+/// cross hole crossing the seam breaks that - its vertices sit at their
+/// own azimuths (a ragged seam), or the columns either side carry
+/// different radii - and so does a turned mesh whose diameters were
+/// tessellated with different column counts (#228): `Some(columns)`,
+/// the number of meridian columns meeting the seam. Such a seam is not
+/// wrapped - the cover's ends would read the metal another lap holds as
+/// air (PR #210's review: cut tips down to the axis).
+pub(super) fn seam_columns(cols: &[(f64, f64, f64)], scale: f64) -> Option<usize> {
     let q = |x: f64| (x * WELD / scale.max(1.0)).round() as i64;
     let mut columns: Vec<(f64, Vec<(i64, i64)>)> = Vec::new();
     for &(th, v, rho) in cols {
         let a = th.rem_euclid(std::f64::consts::TAU);
         let at = (q(v), q(rho));
-        match columns.iter_mut().find(|(c, _)| (c - a).abs() <= th_tol) {
+        match columns.iter_mut().find(|(c, _)| (c - a).abs() <= SEAM_TH_TOL) {
             Some((_, prof)) => prof.push(at),
             None => columns.push((a, vec![at])),
         }
@@ -114,18 +122,25 @@ pub(super) fn refuse_feature_on_seam(cols: &[(f64, f64, f64)], scale: f64) -> Re
         prof.sort_unstable();
         prof.dedup();
     }
-    let turned = match columns.as_slice() {
-        [] => true,
-        [(_, a), (_, b)] => a == b,
-        _ => false,
-    };
-    if turned {
-        return Ok(());
+    match columns.as_slice() {
+        [] => None,
+        [(_, a), (_, b)] if a == b => None,
+        _ => Some(columns.len()),
     }
-    Err(GenError::Invalid(format!(
-        "a feature that is not turned (a flat, a keyway, a cross hole) crosses the rotary wrap's seam ({} meridian columns meet it, a turned seam has 2 alike): refused rather than read the seam's metal as air - rotate the work so the feature is clear of the seam",
-        columns.len()
-    )))
+}
+
+/// The refusal of a seam that is not turned, `n` columns meeting it;
+/// `everywhere` when no seam angle the wrap could take is turned (issue
+/// #226: a feature all the way round).
+pub(super) fn seam_refusal(n: usize, everywhere: bool) -> GenError {
+    let at = if everywhere {
+        "at every angle the seam could take (a feature all the way round), "
+    } else {
+        ""
+    };
+    GenError::Invalid(format!(
+        "a feature that is not turned (a flat, a keyway, a cross hole) crosses the rotary wrap's seam {at}or the mesh tessellates its diameters with different column counts ({n} meridian columns meet the seam, a turned seam has 2 alike): refused rather than read the seam's metal as air - leave the bar a turned band, or export the model with one column count"
+    ))
 }
 
 /// The curtains closing the developed sheet's seam: `edges` are the

@@ -308,6 +308,8 @@ fn the_twins_inherit_the_closed_chain_law() {
             setup: None,
             area: Default::default(),
             coolant: Default::default(),
+            after: Default::default(),
+            suppressed: false,
         };
         let err = match operation::generate(&world, &op, "") {
             Ok((path, _)) => panic!("{name} generated from an open run: {} moves", path.moves.len()),

@@ -20,7 +20,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 fn feed(from: Point3, to: Point3) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis: None }
+    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis: None, rotary: None }
 }
 
 /// A closed box [x0,x1] x [y0,y1] x [z0,z1]: two triangles per face.

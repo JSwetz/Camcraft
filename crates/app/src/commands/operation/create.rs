@@ -37,12 +37,10 @@ type Reordered = Vec<(String, OperationMeta, OperationMeta)>;
 /// siblings carry no stored order (their name order is kept, made explicit).
 fn append_position(world: &World, context: Option<&str>) -> Result<(Reordered, u32), CommandError> {
     let effective = setup::effective(world, context);
-    let siblings: Vec<_> = setup::operation_order(world)
+    // #155: the list's Pause / Home entries hold positions too.
+    let siblings: Vec<_> = crate::program_entry::sequence(world)
         .into_iter()
-        .filter(|(_, entity)| {
-            model::operation_of(world, entity)
-                .and_then(|op| setup::effective(world, op.setup.as_deref())) == effective
-        })
+        .filter(|(_, entity)| crate::program_entry::effective_setup(world, entity) == effective)
         .collect();
     let mut reordered = Vec::with_capacity(siblings.len());
     for (index, (sibling, entity)) in siblings.into_iter().enumerate() {
@@ -101,7 +99,7 @@ impl CreateOperation {
         if let Some(msg) = crate::operation::side_sane(&params, &src) {
             return Err(CommandError::Invalid(msg));
         }
-        family_gate(world, &params)?;
+        family_gate(world, setup.as_deref(), &params)?;
         tool_gate(world, &params, tool)?;
         area_gate(world, setup.as_deref(), &src, &params)?;
         let (reordered, order) = append_position(world, setup.as_deref())?;
@@ -117,6 +115,8 @@ impl CreateOperation {
                 setup,
                 area: Default::default(),
                 coolant: Default::default(),
+                after: Default::default(),
+                suppressed: false,
             },
         })
     }
@@ -171,7 +171,7 @@ impl PasteOperation {
         if let Some(msg) = crate::operation::side_sane(&operation.params, &operation.src) {
             return Err(CommandError::Invalid(msg));
         }
-        family_gate(world, &operation.params)?;
+        family_gate(world, context, &operation.params)?;
         tool_gate(world, &operation.params, &operation.tool)?;
         area_gate(world, context, &operation.src, &operation.params)?;
         operation.stamp = None;

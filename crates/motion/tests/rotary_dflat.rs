@@ -5,14 +5,21 @@
 //! seam's two copies) and plain solid-modelling topology (a closed
 //! 2-manifold has no free edge); no vendor material consulted.
 //!
-//! Read here: a D-flat bar clear of the wrap's seam wraps (flat through
-//! the ends, a closed flat) and its Offset-rings rough keeps every cut tip
-//! out of the part's true cross-section; a flat ACROSS the seam, on or
-//! off its centre line, is refused by name (PR #210's review: wrapped, it
-//! gouged to the axis); a bar with a facet missing is refused by name.
+//! Read here: a D-flat bar wraps in every placement (flat through the
+//! ends, a closed flat) and its Offset-rings rough keeps every cut tip out
+//! of the part's true cross-section. A flat across the DEFAULT seam, on or
+//! off its centre line, used to be refused by name (PR #210's review:
+//! wrapped there, it gouged to the axis); since #226 the wrap turns its
+//! seam to an azimuth where the bar is turned, and refuses by name only a
+//! feature all the way round. A bar with a facet missing is refused by
+//! name.
+//!
+//! #228: a plain bar tessellated as two rings wraps in every
+//! orientation (its axis fit is exact, not tilted by rounding), and a
+//! seam refusal names a tessellation cause as well as a feature.
 //!
 //! Gate map (M4.4): covers camcraft_motion::multiaxis (rotary_offset,
-//! rotary_seam), on
+//! rotary_seam, rotary_seam_angle, rotary_sheet, axis, axis_refine), on
 //! this suite's own prism fixtures.
 //! Lane shape (M4.4): every wrap here is Offset rings or a refusal;
 //! the suite runs in about a minute in debug.
@@ -21,7 +28,7 @@ use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::machining2d::PocketStrategy;
 use camcraft_motion::cl::MoveKind;
 use camcraft_motion::machining3d::{Entry3D, Pocket3DParams};
-use camcraft_motion::multiaxis::{rotary_offset_developed, rotary_offset_in, AxisControl};
+use camcraft_motion::multiaxis::{axis, rotary_offset_developed, rotary_offset_in, AxisControl};
 
 const TAU: f64 = std::f64::consts::TAU;
 const RAD: f64 = 6.0;
@@ -143,8 +150,8 @@ fn control() -> AxisControl {
 /// wrap's +-pi branch, so its flat crosses the seam), and an odd one.
 const PHIS: [f64; 4] = [0.0, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 2.3];
 
-/// The flat across the seam (the branch the wrap's basis puts at -y
-/// for this fixture's fitted axis): the placement main refused.
+/// The flat across the default seam (the branch the wrap's basis puts at
+/// -y for this fixture's fitted axis): the placement refused before #226.
 const SEAM_PHI: f64 = -std::f64::consts::FRAC_PI_2;
 
 fn feeds(t: &camcraft_motion::cl::Toolpath) -> impl Iterator<Item = &camcraft_motion::cl::Move> {
@@ -163,13 +170,13 @@ fn in_part(q: Point3, n: usize, phi: f64, d: f64, span: Option<(f64, f64)>, z0: 
     q.z > z0 && q.z < z1 && deep_inside(&sect, q, 0.05)
 }
 
-/// Every placement of a D-flat clear of the wrap's seam wraps: a flat
-/// ground through both ends (r5.8) and one closed over the middle
-/// stations (r5), at three azimuths; the closed one's channel is roughed
-/// under the round's skin, and no cut tip stands inside the part. The
-/// placement ACROSS the seam is refused by name before the wrap (on main
-/// it read "the mesh is open: 4 dangling chord ends"; PR #210's first
-/// round wrapped it and gouged - see the review probe below).
+/// Every placement of a D-flat wraps: a flat ground through both ends
+/// (r5.8) and one closed over the middle stations (r5), at four azimuths,
+/// the default seam's own included (#226: refused by name before, the
+/// wrap now turns its seam clear of the flat). The closed one's channel
+/// is roughed under the round's skin AT THE FLAT'S AZIMUTH (the turned
+/// seam moves where the development splits, never where metal is cut),
+/// and no cut tip stands inside the part.
 #[test]
 fn a_d_flat_bar_wraps_in_every_placement() {
     let st = stock(6.5, -20.0, 20.0);
@@ -177,12 +184,7 @@ fn a_d_flat_bar_wraps_in_every_placement() {
     for (name, d, span) in [("through", 5.8, None), ("closed", 5.0, Some((-8.0, 8.0)))] {
         for phi in PHIS {
             let f = dflat_bar(64, -20.0, 20.0, phi, d, span);
-            let t = match rotary_offset_in(&f, Some(&st), &p, &control()) {
-                Ok(t) => t,
-                Err(e) if phi == SEAM_PHI && e.to_string().contains(SEAM_REFUSAL) => continue,
-                Err(e) => panic!("{name} flat at phi {phi}: {e}"),
-            };
-            assert!(phi != SEAM_PHI, "{name} flat across the seam wrapped instead of being refused");
+            let t = rotary_offset_in(&f, Some(&st), &p, &control()).unwrap_or_else(|e| panic!("{name} flat at phi {phi}: {e}"));
             assert!(t.all_finite(), "{name} flat at phi {phi}: a non-finite move");
             let cuts = feeds(&t).count();
             assert!(cuts > 50, "{name} flat at phi {phi}: only {cuts} cut moves");
@@ -196,6 +198,14 @@ fn a_d_flat_bar_wraps_in_every_placement() {
             let low = feeds(&t).map(|m| m.to.x.hypot(m.to.y)).fold(f64::INFINITY, f64::min);
             if span.is_some() {
                 assert!(low < 5.6, "{name} flat at phi {phi}: the flat's channel is not roughed (lowest tip r{low:.3})");
+                // Every tip down in the channel stands over the flat: its
+                // posted azimuth is the flat's true one, not a seam turn off.
+                let half = (d / RAD).acos();
+                for m in feeds(&t).filter(|m| m.to.x.hypot(m.to.y) < 5.6) {
+                    let off = (m.to.y.atan2(m.to.x) - phi).rem_euclid(TAU);
+                    let off = off.min(TAU - off);
+                    assert!(off < half, "{name} flat at phi {phi}: a channel tip at {:?} stands {off:.3} rad off the flat", m.to);
+                }
             }
         }
     }
@@ -225,18 +235,45 @@ fn a_bar_with_a_hole_in_its_skin_is_still_refused_by_name() {
 }
 
 /// The seam case #9 round 2 wanted end to end (a flat's channel across
-/// the seam under Adaptive) is refused by name before the wrap, under
-/// Adaptive and Offset rings alike: the seam's ends would read the metal
-/// another lap holds as air. #9's seam law itself stays pinned by its unit
-/// test (`machining3d::hsm::tests::the_seam_cuts_an_area_at_a_cover_end_short_of_a_lap`).
+/// the default seam, under Adaptive and Offset rings) was refused by name
+/// before the wrap; since #226 the seam turns clear of the flat and both
+/// strategies develop it, the channel cut below the round's skin. #9's
+/// seam law itself stays pinned by its unit test
+/// (`machining3d::hsm::tests::the_seam_cuts_an_area_at_a_cover_end_short_of_a_lap`).
 #[test]
-fn a_flat_channel_across_the_seam_is_refused_by_name_before_the_wrap() {
+fn a_flat_channel_across_the_default_seam_develops_under_adaptive_and_rings() {
     let f = dflat_bar(64, -40.0, 40.0, SEAM_PHI, 4.0, Some((-8.0, 8.0)));
     for strategy in [PocketStrategy::Adaptive, PocketStrategy::OffsetRings] {
         let p = Pocket3DParams { stepdown: 1.0, ..params(strategy, 4.0, 5.0) };
-        match rotary_offset_developed(&f, None, &p) {
-            Ok(_) => panic!("{strategy:?}: the flat across the seam was developed"),
-            Err(e) => assert!(e.to_string().contains(SEAM_REFUSAL), "{strategy:?}: refused, but not by name: {e}"),
+        let t = rotary_offset_developed(&f, None, &p).unwrap_or_else(|e| panic!("{strategy:?}: {e}"));
+        let low = feeds(&t).map(|m| m.to.z).fold(f64::INFINITY, f64::min);
+        assert!(low < 5.5, "{strategy:?}: the channel is not developed (lowest level r{low:.3})");
+    }
+}
+
+/// #226: a bar with a flat at every azimuth - four short flats a quarter
+/// turn apart, each over its own band of stations, their spans
+/// overlapping (short, so the bar still fits its axis) - is
+/// a feature all the way round: no seam angle stands on a turned column
+/// pair, and the wrap refuses it by name.
+#[test]
+fn a_feature_all_the_way_round_is_still_refused_by_name() {
+    let n = 64;
+    let mut rings = vec![ring(n, -40.0, None)];
+    for k in 0..4 {
+        let phi = 0.1 + std::f64::consts::FRAC_PI_2 * k as f64;
+        let (z0, z1) = (-30.0 + 18.0 * k as f64, -26.0 + 18.0 * k as f64);
+        let fl = Some((phi, 4.0));
+        rings.extend([ring(n, z0, None), ring(n, z0, fl), ring(n, z1, fl), ring(n, z1, None)]);
+    }
+    rings.push(ring(n, 40.0, None));
+    let f = prism(&rings);
+    let p = params(PocketStrategy::OffsetRings, 2.0, 12.0);
+    match rotary_offset_in(&f, Some(&stock(6.5, -40.0, 40.0)), &p, &control()) {
+        Ok(_) => panic!("a bar flatted all the way round wrapped"),
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains(SEAM_REFUSAL) && msg.contains("all the way round"), "refused, but not by name: {msg}");
         }
     }
 }
@@ -253,13 +290,14 @@ fn deep_inside(ring: &[Point3], q: Point3, margin: f64) -> bool {
     })
 }
 
-/// PR #210's review probe (issue #54): a 3.5 deep flat across the seam,
-/// on and off its centre line (and midway between two vertices). The
-/// first round wrapped them and the cover's ends read other laps' metal
-/// as air: 12 to 1606 cut tips inside the part, down to the axis (and a
-/// whole-lap band at the flat's end stations, even centred). Every such
-/// placement is now refused by name; the placements clear of the seam
-/// rough with no tip inside the TRUE cross-section of their station.
+/// PR #210's review probe (issue #54): a 3.5 deep flat across the default
+/// seam, on and off its centre line (and midway between two vertices).
+/// The first round wrapped them on that seam and the cover's ends read
+/// other laps' metal as air: 12 to 1606 cut tips inside the part, down to
+/// the axis (and a whole-lap band at the flat's end stations, even
+/// centred). #210 refused every such placement by name; since #226 the
+/// wrap turns its seam clear of the flat, and EVERY placement roughs with
+/// no tip inside the TRUE cross-section of its station.
 #[test]
 fn an_off_centre_flat_across_the_seam_never_puts_a_tip_in_the_part() {
     let st = stock(6.5, -40.0, 40.0);
@@ -270,23 +308,101 @@ fn an_off_centre_flat_across_the_seam_never_puts_a_tip_in_the_part() {
             let p = params(PocketStrategy::OffsetRings, tool, 12.0);
             for phi in [-half - 0.4, -half + 0.4, -half - 0.7, -half + 0.7, -half, -half + std::f64::consts::PI / n as f64, 0.0, half, 2.3] {
                 let f = dflat_bar(n, -40.0, 40.0, phi, 3.5, Some((-8.0, 8.0)));
-                let t = match rotary_offset_in(&f, Some(&st), &p, &control()) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        let msg = e.to_string();
-                        println!("n {n} D{tool} phi {phi:.3}: refused - {msg}");
-                        assert!(msg.contains(SEAM_REFUSAL), "n {n} D{tool} phi {phi:.3}: refused, but not by the seam's name: {msg}");
-                        continue;
-                    }
-                };
+                let t = rotary_offset_in(&f, Some(&st), &p, &control()).unwrap_or_else(|e| panic!("n {n} D{tool} phi {phi:.3}: {e}"));
                 let inside = feeds(&t).filter(|m| in_part(m.to, n, phi, 3.5, Some((-8.0, 8.0)), -40.0, 40.0)).count();
                 println!("n {n} D{tool} phi {phi:.3}: {} cut moves, {inside} tips inside", feeds(&t).count());
                 assert_eq!(inside, 0, "n {n} D{tool} phi {phi:.3}: cut tips inside the part");
-                if tool > 1.0 {
-                    wrapped += 1;
-                }
+                wrapped += 1;
             }
         }
     }
-    assert!(wrapped >= 6, "the 2 mm tool roughs the placements clear of the seam: {wrapped}");
+    assert_eq!(wrapped, 36, "every placement, either tool, either column count, roughs");
+}
+
+/// [`ring`] turned `rot` radians about the axis.
+fn turned(ring: Vec<Point3>, rot: f64) -> Vec<Point3> {
+    let (c, s) = (rot.cos(), rot.sin());
+    ring.into_iter().map(|q| Point3::new(q.x * c - q.y * s, q.x * s + q.y * c, q.z)).collect()
+}
+
+/// The ring counts and turns #228's review refused a plain bar at: at
+/// turn 0 one ring vertex stands on the wrap's +-pi branch.
+const PLAIN_CASES: [(usize, f64); 4] = [(16, 0.0), (16, 0.3), (64, 0.0), (64, 0.3)];
+
+/// #228: a plain bar meshed as two rings (long side facets, axis-fan
+/// caps, the way CAD exports a cylinder) fits its true axis exactly.
+/// Every side facet anchors its normal line at the bar's mid-station,
+/// so no line sees a tilt about it, and the refinement used to pick one
+/// by rounding (26 microradians at n 16).
+#[test]
+fn a_two_ring_bar_fits_its_true_axis() {
+    for (n, rot) in PLAIN_CASES {
+        let f = prism(&[turned(ring(n, -40.0, None), rot), turned(ring(n, 40.0, None), rot)]);
+        let ax = axis::fit(&f).expect("a revolve");
+        let tilt = ax.dir.x.hypot(ax.dir.y);
+        assert!(tilt < 1e-12, "n {n} turn {rot}: the axis leans {tilt:e} rad: {ax:?}");
+    }
+}
+
+/// #228: the same plain bar wraps in every one of those orientations,
+/// with no cut tip inside the part (main refused all but one, naming a
+/// feature the bar does not have).
+#[test]
+fn a_plain_two_ring_bar_wraps_in_every_orientation() {
+    let st = stock(6.5, -40.0, 40.0);
+    let p = params(PocketStrategy::OffsetRings, 2.0, 12.0);
+    for (n, rot) in PLAIN_CASES {
+        let f = prism(&[turned(ring(n, -40.0, None), rot), turned(ring(n, 40.0, None), rot)]);
+        let t = rotary_offset_in(&f, Some(&st), &p, &control()).unwrap_or_else(|e| panic!("n {n} turn {rot}: {e}"));
+        assert!(t.all_finite(), "n {n} turn {rot}: a non-finite move");
+        let sect = turned(ring(n, 0.0, None), rot);
+        let inside = feeds(&t).filter(|m| m.to.z.abs() < 40.0 && deep_inside(&sect, m.to, 0.05)).count();
+        assert!(feeds(&t).count() > 50, "n {n} turn {rot}: too few cuts");
+        assert_eq!(inside, 0, "n {n} turn {rot}: cut tips inside the part");
+    }
+}
+
+/// #228's other case: a stepped shaft whose two diameters were meshed
+/// with different column counts (16 on the neck, 64 on the body) puts
+/// more than two columns on the seam. It is refused, and the refusal
+/// names the tessellation, not only a feature the shaft does not have
+/// (wrapping it would also answer the issue, but nothing here pins what
+/// such a wrap cuts, so the refusal is what is pinned).
+#[test]
+fn a_shaft_meshed_with_mixed_column_counts_is_refused_naming_the_tessellation() {
+    let neck = |z: f64| ring(16, z, None).into_iter().map(|q| Point3::new(q.x * 4.0 / RAD, q.y * 4.0 / RAD, z)).collect::<Vec<_>>();
+    let (n0, n1) = (neck(-40.0), neck(0.0));
+    let (b0, b1) = (ring(64, 0.0, None), ring(64, 40.0, None));
+    let mut f = Vec::new();
+    for (a, b) in [(&n0, &n1), (&b0, &b1)] {
+        let n = a.len();
+        for j in 0..n {
+            let k = (j + 1) % n;
+            tri(&mut f, a[j], a[k], b[k]);
+            tri(&mut f, a[j], b[k], b[j]);
+        }
+    }
+    // The shoulder at Z 0: four body columns to each neck column, zipped
+    // as a fan from each neck vertex over its quarter of the body ring
+    // and one triangle across to the next neck vertex.
+    for j in 0..16 {
+        let k = (j + 1) % 16;
+        for m in 0..4 {
+            let (b, c) = (4 * j + m, (4 * j + m + 1) % 64);
+            tri(&mut f, n1[j], b0[c], b0[b]);
+        }
+        tri(&mut f, n1[j], n1[k], b0[(4 * j + 4) % 64]);
+    }
+    let (c0, c1) = (Point3::new(0.0, 0.0, -40.0), Point3::new(0.0, 0.0, 40.0));
+    for j in 0..16 {
+        tri(&mut f, c0, n0[(j + 1) % 16], n0[j]);
+    }
+    for j in 0..64 {
+        tri(&mut f, c1, b1[j], b1[(j + 1) % 64]);
+    }
+    let p = params(PocketStrategy::OffsetRings, 2.0, 12.0);
+    match rotary_offset_in(&f, Some(&stock(6.5, -40.0, 40.0)), &p, &control()) {
+        Ok(_) => panic!("the mixed-count shaft wrapped: pin what it cuts before accepting that"),
+        Err(e) => assert!(e.to_string().contains("different column counts"), "refused, but not naming the tessellation: {e}"),
+    }
 }

@@ -15,12 +15,29 @@ text, assets or post processors were used.
 > cannot be proven safe is refused by name. Still, check every program in
 > your machine's own simulation and dry-run it before cutting metal.
 
+> **Experimental work in progress - use with caution.** CamCraft is under
+> heavy, fast-moving development. Features land daily, some are half-built
+> on purpose, and a release can change behaviour you relied on yesterday.
+> Treat every posted program as a first draft: simulate it, dry-run it with
+> the spindle off and the Z raised, and keep a hand on the feed hold. Our
+> unofficial testing philosophy, borrowed from a certain tiny lord with a
+> very large castle:
+>
+> *"Some of you may die, but it's a sacrifice I am willing to make."*
+>
+> Please don't let that be your spindle, your vise or your fingers. Report
+> anything odd as an issue - a crash, a toolpath that looks wrong, or a
+> refusal you think is mistaken - so the next person doesn't find it the
+> hard way.
+
 ## What it does
 
 - **Import** STL, OBJ and STEP models; repair meshes (weld vertices, fill
   holes).
 - **Set up** stock, work offsets (G54–G59), fixtures and machines (mill,
-  5-axis, lathe, mill-turn).
+  5-axis, lathe, mill-turn, and the Tormach 770MX, 770MX (ML), 770M,
+  1100M, 1100MX, 1500MX, PCNC 440, PCNC 770 (earlier and Series 3) and
+  PCNC 1100 (Series I, II and 3) mills).
 - **2D milling:** face, contour (with G41/G42 compensation), pocket,
   adaptive clearing, slot, trace, engrave, chamfer, circular, bore and
   thread milling.
@@ -37,9 +54,11 @@ text, assets or post processors were used.
   has an area.
 - **Verify and simulate:** a solid-law verifier (gouge, rest, rapid and
   fixture checks), stock simulation with playback, and a deviation view.
-- **Post:** Fanuc, Haas, Mazak, Sinumerik, Heidenhain and Fanuc Lathe,
-  written as scriptable `.cps` post processors. The setup sheet and tool
-  list print alongside.
+- **Post:** Fanuc, Haas, Mazak, Sinumerik, Heidenhain, Tormach PathPilot
+  and Fanuc Lathe, written as scriptable `.cps` post processors.
+- **Setup sheets:** the Setups page lists each setup's tools in change
+  order with cut and rapid lengths and estimated time, and **Export setup
+  sheets…** writes one text page per setup. Posting does not write them.
 
 ## Download
 
@@ -82,12 +101,26 @@ makepkg -si
 ```
 
 The recipe installs the desktop app, command-line tools, and assets together.
-Publishing the recipe to the AUR is a separate step after its Arch build is
-validated.
+The release workflow builds and checks the Arch package after its Linux job
+and attaches the package to tagged releases. Publishing the recipe to the
+AUR is a separate step after its Arch build is validated.
 
-Windows, Linux, and macOS desktop releases are built on GitHub. The core
-crates also build and test on macOS, and the post engine compiles for
-`wasm32-unknown-unknown`.
+### FreeBSD package
+
+On FreeBSD amd64, build the desktop app and command-line tools, then package
+them with their assets:
+
+```sh
+cargo build --locked --release -p camcraft-ui -p camcraft-app -p camcraft-post
+scripts/package-freebsd.sh
+```
+
+The release workflow runs this in a FreeBSD VM. Manual workflow runs upload
+the `freebsd-amd64.tar.gz` archive as an artifact; tagged runs attach it to
+the release.
+
+Windows, Linux, macOS, and FreeBSD desktop releases are built on GitHub.
+The core crates also build and test on macOS.
 
 ## Workspace layout
 
@@ -127,6 +160,8 @@ Actions runs only on a pushed release tag; the CI and nightly workflows in
   (`git show v0.14.0:ROADMAP.md`).
 - `RECOMMENDED.md`: the decision ledger, with what was chosen, why, and
   what was dropped.
+- [Machine onboarding](docs/MACHINE-ONBOARDING.md): source facts, registration,
+  software-test seams, and current limitations for machine definitions/posts.
 - `AGENTS.md`: engineering rules (clean-room protocol, the never-crash /
   never-gouge directive, layering, testing).
 - `RELEASE_NOTES.md`, `TESTING.md`: the current release.
@@ -179,6 +214,12 @@ Work is the open GitHub issues, picked by priority: `P0` (wrong output,
 gouge, crash, data loss), then `P1` (wrong behaviour a user hits), then `P2`
 (owed polish), oldest first. Each issue carries one `P*` label and one or
 more `area:*` labels. Issues opened by an agent also carry `source:agent`.
+
+**`P?` means paused.** The maintainer puts `P?` on an issue (in place of
+`P0`/`P1`/`P2`) to hold it: nobody picks it up, claims it or changes its
+priority until the maintainer swaps `P?` for a real priority or closes it.
+Comments with relevant facts (a duplicate, a related fix) are still
+welcome.
 
 **`needs-research` issues are not work items yet.** The label marks a large
 idea with open questions (a new machine type, a documentation site, a new
@@ -259,6 +300,7 @@ re-tested, and only then is flagged ready again.
 | `merge-ready` (green) | clean review and mergeable | waits for the maintainer's merge |
 | `needs-rework` (red) | review found blockers | a maintainer PR goes back to draft; fix, push, flag ready again (a fork PR stays as its contributor set it; the review comment says what to fix) |
 | `conflicts` (orange) | no longer merges with `main` | a maintainer PR goes back to draft; merge `main`, re-test, flag ready again (a fork PR: the contributor merges `main`) |
+| `needs-maintainer` (yellow) | reviewed with no blockers, but it adds a dependency or changes `build.rs`, scripts or `.github`, so it was read, not built | waits for the maintainer's decision |
 
 When a PR comes back from draft with a new head, that head gets a fresh
 review; the marker `<!-- pr-reviewer: <head sha> -->` in the review comment
@@ -301,5 +343,12 @@ be resolved; only merge commits are allowed.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). Third-party notices are in
-`assets/ui/LICENSES.md`.
+Apache License 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+The copyright belongs to the CamCraft contributors, each holding the
+rights to their own contributions, and not to any one person. By opening a
+pull request you license your contribution under Apache-2.0 (section 5 of
+the license). Code contributed while CamCraft was MIT-licensed is
+redistributed under Apache-2.0, which MIT permits.
+
+Third-party notices are in `assets/ui/LICENSES.md`.

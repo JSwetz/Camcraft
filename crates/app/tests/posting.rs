@@ -14,8 +14,8 @@
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SelectPost,
-    SetStock, SetWcsOrigin,
+    AddTool, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel, LoadMachine,
+    SelectPost, SetSetupWorkOffset, SetStock, SetWcsOrigin,
 };
 use camcraft_app::drilling::CycleChoice;
 use camcraft_app::geo2d::Point2;
@@ -531,7 +531,6 @@ fn a_moved_wcs_origin_moves_the_posted_numbers() {
         &world,
         SetWcsOrigin::new(
             &world,
-            "G54",
             Location {
                 pos: Point3::new(10.0, 5.0, 1.0),
                 rot: IDENTITY_Q,
@@ -552,23 +551,26 @@ fn a_moved_wcs_origin_moves_the_posted_numbers() {
 
 #[test]
 fn a_non_g54_slot_is_what_the_script_writes() {
-    // The WorkOffset PARAM is grammar-driven: an op whose heights
-    // reference slot G55 posts its motions under G55.
+    // The WorkOffset PARAM is grammar-driven: an op of a setup that
+    // is labelled G55 (#196, #342) - its heights measured from the setup's
+    // one WCS (#329) - posts its motions under G55.
     let world = new_world();
     let mut history = History::default();
     box_stock(&world, &mut history, 60.0, 60.0, 20.0);
     add_tool(&world, &mut history, "EM-0400-2FL");
-    // A heights-referenced slot must be placed before it can be measured
+    // A heights-referenced WCS must be placed before it can be measured
     // from (the same law the panels enforce by refusing to resolve).
+    history.execute(&world, CreateSetup::new(&world, None, None).expect("materialize Setup1"));
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G55", Location::default()).expect("place G55"),
+        SetWcsOrigin::new(&world, Location::default()).expect("place the WCS"),
     );
+    history.execute(&world, SetSetupWorkOffset::new(&world, "Setup1", Some(1)).expect("pick G55"));
     let params = OpParams::Face { holes: Default::default(), blend_turns: false,
         tilt: None,
         stepover: 3.0,
-        clearance_z: Height::of(HeightReference::WorkOffset(1), 25.0),
-        cut_z: Height::of(HeightReference::WorkOffset(1), 19.5),
+        clearance_z: Height::of(HeightReference::WorkOffset, 25.0),
+        cut_z: Height::of(HeightReference::WorkOffset, 19.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,

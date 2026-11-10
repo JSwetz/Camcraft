@@ -13,7 +13,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::probing::{probe_cycle, ProbeParams};
 use crate::tools::{Tool, ToolKind};
-use crate::verify::Warning;
+use crate::verify::{solid_hits, Cutter, SolidLaw, Warning};
 
 use super::types::OpParams;
 
@@ -21,6 +21,31 @@ use super::types::OpParams;
 /// before the law convicts: the touch itself is tangent (exactly r),
 /// so this is the facet lattice's numeric slack, not a cut allowance.
 pub const STYLUS_SLACK: f64 = 0.01;
+
+/// The deepest search past the expected contact a stylus is trusted to
+/// take without a word (#570). Touch-probe styli are rated for a few
+/// millimetres of overtravel at most; past this, a missing feature drives
+/// the stylus toward the end of its travel before the control alarms.
+pub const SEARCH_LIMIT_MM: f64 = 2.0;
+
+/// A new probe op's search limit for a `tolerance` (#570): twice the
+/// tolerance, never under 1 mm - far enough that a feature inside the
+/// tolerance always trips, short enough that a missing one alarms early.
+#[must_use]
+pub fn default_overtravel(tolerance: f64) -> f64 {
+    (2.0 * tolerance).max(1.0)
+}
+
+/// The advisory for a search limit past [`SEARCH_LIMIT_MM`]: one, at the
+/// first seek, naming the distance - never blocking.
+#[must_use]
+pub fn search_advisory(path: &Toolpath, overtravel: f64) -> Option<Warning> {
+    if overtravel <= SEARCH_LIMIT_MM {
+        return None;
+    }
+    let at = path.probes.first().map_or(0, |t| t.index);
+    Some(Warning::ProbeSearch { at, mm: overtravel, limit_mm: SEARCH_LIMIT_MM })
+}
 
 /// The cycle's numbers from the op's, with the resolved safe plane.
 pub(super) fn probe_params(params: &OpParams, tool: &Tool, clearance_z: f64) -> Result<ProbeParams, GenError> {
@@ -83,7 +108,9 @@ pub(super) fn generate_probe(
 ) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let p = probe_params(params, tool, clearance_z)?;
     let path = probe_cycle(&p)?;
-    let warns = stylus_hits(&path, tool.diameter * 0.5, facets);
+    let mut warns = stylus_hits(&path, tool.diameter * 0.5, facets);
+    warns.extend(stylus_reach_hits(&path, tool, facets, &warns));
+    warns.extend(search_advisory(&path, p.overtravel));
     Ok((path, warns))
 }
 
@@ -105,5 +132,52 @@ pub fn stylus_hits(path: &Toolpath, ball_r: f64, facets: &[Triangle]) -> Vec<War
                 .any(|t| crate::stock_sim::dist_seg_tri(centre(m.from), centre(m.to), t) < floor)
         })
         .map(|(at, _)| Warning::Gouge { at })
+        .collect()
+}
+
+/// The probe stack as the solid law reads it (#172): the ball is the
+/// whole cutting atom (`flute_len` = its radius), the stylus stem above
+/// it the shank band (the ball's radius - `Tool` states no thinner stem,
+/// so never smaller than the real one) up to the stylus length, and the
+/// probe body with whatever holder rides above it one band, at the wider
+/// of the two radii over both lengths - never smaller than the real pair.
+#[must_use]
+pub fn stylus_cutter(tool: &Tool) -> Cutter {
+    let r = tool.diameter * 0.5;
+    let g = tool.geom();
+    let body_len = g.shank_len.max(0.0) + g.holder_len.max(0.0);
+    let body_r = if g.holder_len > 0.0 { g.shank_radius.max(g.holder_radius) } else { g.shank_radius };
+    Cutter {
+        radius: r,
+        corner_r: r,
+        tip_angle: 0.0,
+        flute_len: r,
+        shank_radius: r,
+        shank_len: (g.flute_len - r).max(0.0),
+        holder_radius: body_r,
+        holder_len: body_len,
+    }
+}
+
+/// The reach half of the protected-move law (#172): every move swept
+/// with the stem and body bands against the model's solid
+/// ([`solid_hits`]). The ball's own verdict is [`stylus_hits`]'s
+/// (`ball` holds it), so a move it convicted is not reported twice;
+/// what the bands meet is a [`Warning::ShankHit`] on the part, a rapid
+/// that meets anything a [`Warning::RapidInStock`]. The expected
+/// contact excuses nothing here: only the ball ever touches, so a stem
+/// or body meeting the part at any point of any move is refused. A
+/// ball conviction the distance law missed (a ball wholly inside the
+/// solid) is kept as the gouge it is.
+#[must_use]
+pub fn stylus_reach_hits(path: &Toolpath, tool: &Tool, facets: &[Triangle], ball: &[Warning]) -> Vec<Warning> {
+    let law = SolidLaw { step: 0.5, allow: STYLUS_SLACK, hole_walls: false };
+    let convicted = |at: usize| ball.iter().any(|w| matches!(*w, Warning::Gouge { at: b } if b == at));
+    solid_hits(path, facets, &stylus_cutter(tool), &law)
+        .into_iter()
+        .filter(|w| match *w {
+            Warning::Gouge { at } | Warning::RapidInStock { at } | Warning::ShankHit { at, .. } => !convicted(at),
+            _ => true,
+        })
         .collect()
 }

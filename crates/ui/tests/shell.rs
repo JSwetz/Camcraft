@@ -299,9 +299,14 @@ fn cylinder_fit_keeps_the_cylinder_choice() {
         panic!("cylinder fit must produce cylinder stock");
     };
     let bounds = model::solid_world_aabb(&state.world).expect("model extent");
-    let diag = ((bounds.max.x - bounds.min.x) + 4.0).hypot((bounds.max.y - bounds.min.y) + 4.0);
     let eps = 1e-9;
-    assert!(diameter >= diag - eps, "{diameter} must reach the padded diagonal");
+    // #230: snug - the models' largest radius from the fit's axis (a cube's
+    // half-diagonal) plus the 2 mm margin, which still contains every corner.
+    let c = [(bounds.min.x + bounds.max.x) * 0.5, (bounds.min.y + bounds.max.y) * 0.5];
+    let r_max = model::solid_world_radius_about(&state.world, c).expect("model radius");
+    let half_diag = 0.5 * (bounds.max.x - bounds.min.x).hypot(bounds.max.y - bounds.min.y);
+    assert!((r_max - half_diag).abs() < 1e-6, "a cube's farthest corner: {r_max} vs {half_diag}");
+    assert!((diameter - 2.0 * (r_max + 2.0)).abs() < eps, "{diameter} is the radius plus the margin, twice");
     assert!(
         height >= (bounds.max.z - bounds.min.z) + 4.0 - eps,
         "{height}"
@@ -386,21 +391,21 @@ fn stock_fit_without_models_is_a_polite_status() {
 }
 
 #[test]
-fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
+fn set_wcs_creates_the_wcs_undo_removes_and_a_bad_rotation_refuses() {
     use camcraft_app::model;
     use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G55".into(),
         pos: [10.0, 5.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,
         yaw_deg: 90.0,
     });
     state.drain_actions();
-    assert_eq!(state.status, "G55 origin set");
-    let g55 = model::find_by_name(&state.world, "G55").expect("offset entity");
+    assert_eq!(state.status, "WCS (G54) origin set");
+    // #342: one WCS - a document without setups keeps the legacy name.
+    let g55 = model::find_by_name(&state.world, "G54").expect("the WCS entity");
     assert!(model::is_wcs(&state.world, &g55));
     assert_eq!(model::facets_of(&state.world, &g55), None, "offsets are not solids");
     let loc = model::transform_of(&state.world, &g55).expect("location");
@@ -408,18 +413,18 @@ fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
 
     state.pending.push_back(CommandKind::Undo);
     state.drain_actions();
-    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert!(model::find_by_name(&state.world, "G54").is_none());
 
-    // Not a machine slot on this control: refused, and nothing was deleted.
+    // A rotation that is not a number: refused, and nothing was created.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G53".into(),
         pos: [0.0, 0.0, 0.0],
-        roll_deg: 0.0,
+        roll_deg: f64::INFINITY,
         pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
-    assert!(state.status.starts_with("offset not set"), "{:?}", state.status);
+    assert!(state.status.starts_with("WCS not set"), "{:?}", state.status);
+    assert!(model::find_by_name(&state.world, "G54").is_none());
 }
 
 #[test]
@@ -473,7 +478,6 @@ fn anchor_grid_places_origin_on_the_stock_box() {
     // "NE / Top": max X, max Y, max Z of the stock box.
     let p = model::anchor_point(&b, [2, 2, 2]);
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: p,
         roll_deg: 0.0,
         pitch_deg: 0.0,
@@ -500,9 +504,7 @@ fn origin_undo_leaves_no_stale_readout() {
     use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
-    state.wcs_ui.slot = 1; // G55
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G55".into(),
         pos: [12.0, 3.0, -1.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,
@@ -517,7 +519,7 @@ fn origin_undo_leaves_no_stale_readout() {
     state.pending.push_back(CommandKind::Undo);
     state.drain_actions();
     state.sync_setup_ui();
-    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert!(model::find_by_name(&state.world, "G54").is_none());
     assert_eq!(
         (state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z),
         (0.0, 0.0, 0.0),
@@ -534,14 +536,13 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
     let mut state = State::new();
     // A spindle that points along world -Y is a +90 roll about X.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: [10.0, 0.0, 0.0],
         roll_deg: 90.0,
         pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
-    assert_eq!(state.status, "G54 origin set");
+    assert_eq!(state.status, "WCS (G54) origin set");
     let g54 = model::find_by_name(&state.world, "G54").expect("origin");
     let loc = model::transform_of(&state.world, &g54).expect("location");
     let tip = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
@@ -557,7 +558,6 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
 
     // A second tilt replaces the first; undo returns exactly to it.
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: [10.0, 0.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 90.0,
@@ -572,15 +572,14 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
 
     // A NaN angle is refused visibly and creates nothing (Prime Directive).
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G55".into(),
         pos: [0.0, 0.0, 0.0],
         roll_deg: f64::NAN,
         pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
-    assert!(state.status.starts_with("offset not set"), "{:?}", state.status);
-    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert!(state.status.starts_with("WCS not set"), "{:?}", state.status);
+    assert_eq!(model::transform_of(&state.world, &g54), Some(loc), "the WCS did not move");
 }
 
 #[test]
@@ -598,7 +597,6 @@ fn setup_furniture_stays_out_of_the_model_list() {
         [0.0, 0.0, 0.0],
     ));
     state.pending.push_back(CommandKind::SetWcs {
-        slot: "G54".into(),
         pos: [0.0, 0.0, 0.0],
         roll_deg: 0.0,
         pitch_deg: 0.0,
@@ -612,4 +610,27 @@ fn setup_furniture_stays_out_of_the_model_list() {
         .collect();
     assert!(listed.is_empty(), "{listed:?} must not list Stock or G54");
     assert_eq!(model::named_entities(&state.world).len(), 2, "both still in the world");
+}
+
+/// #230: a round part's fitted bar is R + the allowance - its revolved max
+/// radius about the fit's axis - not the footprint's diagonal (1.41 R).
+#[test]
+fn a_cylinder_fit_round_a_turned_part_is_snug() {
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
+    let mut state = State::new();
+    let bar = camcraft_app::geometry::cylinder(20.0, 40.0, 64);
+    state.history.execute(&state.world, camcraft_app::commands::ImportModel::from_mesh("bar", bar));
+    state.doc_version += 1;
+    state.pending.push_back(CommandKind::StockFit { margin: 2.0, shape: 1 });
+    state.drain_actions();
+    assert_eq!(state.status, "stock fitted to models");
+    let stock = model::find_by_name(&state.world, STOCK_NAME).expect("stock");
+    let Some(StockShape::Cylinder { diameter, height }) = model::stock_def_of(&state.world, &stock) else {
+        panic!("cylinder fit must produce cylinder stock");
+    };
+    assert!((diameter - 24.0).abs() < 1e-9, "R 10 + 2 allowance = 24 mm, got {diameter}");
+    assert!((height - 44.0).abs() < 1e-9, "{height}");
 }

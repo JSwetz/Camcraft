@@ -154,6 +154,8 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
         cands.push(Point3::new(vecs[0][2], vecs[1][2], vecs[2][2]));
     }
     let poles = super::axis_poles::candidates(&data, a_total);
+    // The directions the consensus pass retries when none passes (#113).
+    let dirs: Vec<Point3> = if iso { Vec::new() } else { cands.iter().chain(&poles).copied().collect() };
     let tries = cands.into_iter().map(|c| try_axis(&data, c, a_total).map(|s| (s, false)));
     let tries = tries.chain(poles.into_iter().map(|c| super::axis_poles::try_pole(&data, c, a_total, iso).map(|s| (s, true))));
     let mut best: Option<((f64, Axis), bool)> = None;
@@ -165,11 +167,12 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
     // The eigen direction is exact only on an even tessellation; the
     // concurrency rows refine it (axis_refine.rs) and the refined line
     // replaces it only past the noise floor and when the fit's own
-    // residual does not grow - an even revolve keeps its bits. On an
+    // residual does not grow - an even revolve keeps its bits, and an
+    // eigen line already concurrent to rounding is not refined (#228). On an
     // isotropic part a pole axis IS its face normal (the moment names
     // no direction to refine toward), and is never tilted off it (#208).
     let best = best.map(|((r, ax), pole)| {
-        if pole && iso {
+        if (pole && iso) || !super::axis_refine::worth_refining(&data, ax, r, a_total) {
             return (r, ax);
         }
         let Some(v) = super::axis_refine::refine_dir(&data, ax.dir, ax.origin) else {
@@ -184,15 +187,22 @@ pub fn fit_report(facets: &[Triangle]) -> Result<Fit, GenError> {
             _ => (r, ax),
         }
     });
+    // No plain line earned the gate: a large keyway or flat may have
+    // dragged it, so the consensus pass reads the gate about the line
+    // the revolved surface agrees on (axis_consensus.rs, #113).
     match best {
-        Some((_, ax)) => Ok(super::axis_robust::reweigh(&data, ax, a_total)),
-        None if iso => Err(GenError::Invalid(
-            "every axis fits this model equally - it curves the same the world around; domed ground is 5-Axis Contour or Parallel work".into(),
-        )),
-        None => Err(GenError::Invalid(
-            "the model's normals share no rotation axis - a turned workpiece is rotary work; finish a freeform with the 5-Axis kinds".into(),
-        )),
+        Some((_, ax)) => Ok(super::axis_robust::reweigh(&data, ax, a_total, OK_SHARE)),
+        None => super::axis_consensus::fit(&data, &dirs, a_total).map_or_else(|| refusal(iso), Ok),
     }
+}
+
+/// The refusal when no axis is earned: the sphere's, or the freeform's.
+fn refusal(iso: bool) -> Result<Fit, GenError> {
+    Err(GenError::Invalid(if iso {
+        "every axis fits this model equally - it curves the same the world around; domed ground is 5-Axis Contour or Parallel work".into()
+    } else {
+        "the model's normals share no rotation axis - a turned workpiece is rotary work; finish a freeform with the 5-Axis kinds".into()
+    }))
 }
 
 /// Fit the axis LINE about the candidate direction `u`; `None` when
@@ -289,6 +299,12 @@ pub(super) fn line(data: &[Datum], u0: Point3, a_total: f64) -> Option<(Axis, f6
 /// share and the coarseness gate; the area-weighted RMS residual when
 /// it passes as a surface of revolution, `None` when it does not.
 pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<f64> {
+    judge_at(data, ax, rho, a_total, OK_SHARE)
+}
+
+/// [`judge`] with the concurrency share `ok_share` asked in place of
+/// [`OK_SHARE`] (the consensus gate of `axis_consensus.rs`).
+pub(super) fn judge_at(data: &[Datum], ax: Axis, rho: f64, a_total: f64, ok_share: f64) -> Option<f64> {
     let (u, o) = (ax.dir, ax.origin);
     let tol = (REL_TOL * rho).max(1e-9);
     let (mut sq, mut area_ok, mut area_ans) = (0.0, 0.0, 0.0);
@@ -310,7 +326,7 @@ pub(super) fn judge(data: &[Datum], ax: Axis, rho: f64, a_total: f64) -> Option<
         }
         sq += d.a * dist * dist;
     }
-    if area_ans <= 0.0 || area_ok < OK_SHARE * area_ans {
+    if area_ans <= 0.0 || area_ok < ok_share * area_ans {
         return None;
     }
     // The coarseness gate: the widest empty skip between facet

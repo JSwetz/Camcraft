@@ -7,12 +7,17 @@
 pub mod cutting_data;
 pub mod delete_entity;
 pub mod fixture;
+pub mod import_fixture;
 pub mod import_model;
+// #339 slice 6: a fixture library entry placed into a setup.
+pub mod insert_fixture;
 pub mod load_machine;
 pub mod move_model;
 pub mod operation;
 pub mod post;
 pub mod post_options;
+// #155: Pause / Home entries of the operation list.
+pub mod program_entry;
 // M13.11: mesh repair (weld + fill holes) as one undo unit over UpdateModel.
 pub mod repair_model;
 // Issue #143: ribbon pins are saved with the project, so they are a command.
@@ -20,6 +25,16 @@ pub mod ribbon_pins;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
+pub mod setup_delete;
+// #196: a setup's picked program offset.
+pub mod setup_align;
+pub mod setup_wcs;
+// #343: a setup's own machine and post.
+pub mod setup_mount;
+// #316: a setup placed relative to another (flip / turn presets).
+pub mod setup_relative;
+// #320: a setup's stock source.
+pub mod setup_stock;
 pub mod set_units;
 // M6.1 C: the document's theme choice, `SelectPost`'s twin.
 pub mod theme;
@@ -27,6 +42,10 @@ pub mod theme;
 pub mod color_vision;
 pub mod set_wcs;
 pub mod tool;
+// #368: a tool's modelled body.
+pub mod tool_body;
+// #300: a tool library file imported as one undo unit.
+pub mod tool_import;
 // #221: a tool's controller number.
 pub mod tool_number;
 pub mod update_model;
@@ -38,7 +57,9 @@ pub use delete_entity::DeleteEntity;
 pub use fixture::{
     AddFixtureModel, DeleteFixture, MoveFixture, SetFixtureFixed, TagFixture, UntagFixture,
 };
+pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
+pub use insert_fixture::InsertFixture;
 pub use load_machine::LoadMachine;
 pub use move_model::MoveModel;
 pub use operation::{
@@ -48,16 +69,24 @@ pub use operation::{
 };
 pub use post::SelectPost;
 pub use post_options::SetPostOptions;
+pub use program_entry::{AddProgramEntry, EditProgramEntry};
 pub use repair_model::RepairModel;
 pub use ribbon_pins::SetRibbonPins;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
+pub use setup_align::AlignPartToSetup;
+pub use setup_wcs::SetSetupWorkOffset;
+pub use setup_mount::{SetSetupMachine, SetSetupPost};
+pub use setup_relative::SetSetupRelative;
+pub use setup_stock::SetSetupStockSource;
 pub use set_units::SetUnits;
 pub use theme::{theme_of, theme_set, SetTheme};
 pub use color_vision::{color_vision_of, color_vision_set, SetColorVision};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
+pub use tool_body::{LatheBodySpec, SetToolBody, ToolBodySpec};
+pub use tool_import::{ImportReport, ImportTools};
 pub use tool_number::SetToolNumber;
 pub use update_model::UpdateModel;
 
@@ -107,6 +136,7 @@ impl Default for History {
 
 impl History {
     pub fn execute(&mut self, world: &World, command: impl Command + 'static) {
+        tracing::debug!(command = command_name(&command), "execute");
         if self.saved.is_some_and(|depth| depth > self.done.len()) {
             self.saved = None;
         }
@@ -118,6 +148,7 @@ impl History {
     pub fn undo(&mut self, world: &World) -> bool {
         match self.done.pop() {
             Some(command) => {
+                tracing::debug!("undo");
                 command.invert(world);
                 self.redo.push(command);
                 true
@@ -174,4 +205,11 @@ impl History {
     pub fn is_empty(&self) -> bool {
         self.done.is_empty() && self.redo.is_empty()
     }
+}
+
+/// A command's short type name for the dispatch log (#163):
+/// `camcraft_app::commands::set_wcs::SetWcsOrigin` reads `SetWcsOrigin`.
+fn command_name<T>(_: &T) -> &'static str {
+    let full = std::any::type_name::<T>();
+    full.rsplit("::").next().unwrap_or(full)
 }

@@ -138,7 +138,7 @@ fn a_strip_narrower_than_the_tool_between_two_holes_is_refused_by_name() {
     // the strip would stay unfaced - refused, never faced short.
     let region = plate(&[(-7.0, 0.0), (7.0, 0.0)]);
     let err = face(&region, &p(FaceHoles::Lift)).expect_err("refused").to_string();
-    assert!(err.contains("4.00 mm apart") && err.contains("narrower than the 6.000 mm tool"), "{err}");
+    assert!(err.contains("4.00 mm apart") && err.contains("no wider than the 6.000 mm tool"), "{err}");
     // Far enough apart, both are bridged and the strip between is faced.
     let ok = face(&plate(&[(-12.0, 0.0), (12.0, 0.0)]), &p(FaceHoles::Lift)).expect("two holes bridged");
     assert!(plunges(&ok) > 1);

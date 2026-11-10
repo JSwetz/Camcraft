@@ -29,7 +29,7 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 fn mv(from: Point3, to: Point3, axis: Option<V3>) -> Move {
-    Move { kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis }
+    Move { rotary: None, kind: MoveKind::Feed, from, to, feed: Some(500.0), arc: None, axis }
 }
 
 fn seg2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
@@ -261,6 +261,7 @@ fn parity(a: &Deviation, b: &Deviation, h: f64, label: &str) {
 
 fn programs() -> Vec<(&'static str, Vec<Move>, f64)> {
     let arc = Move {
+        rotary: None,
         kind: MoveKind::Feed,
         from: p(9.0, 6.0, 3.0),
         to: p(3.0, 6.0, 2.0),
@@ -282,8 +283,10 @@ fn both_engines_cut_a_bull_nose_alike() {
         let (c, f) = both(&moves, 2.0, Some(0.75));
         let dc = c.deviate(&plate(plate_z), DEV_TOL).expect("column deviate");
         let df = f.deviate(&plate(plate_z), DEV_TOL).expect("field deviate");
-        parity(&dc, &df, 1e-5, label);
         assert!(dc.gouge_cells + dc.rest_cells > 0, "{label}: the fixture judges something");
+        // #413: the field engine sweeps the helix arc on the true
+        // circle too, so arcs hold the straight moves' parity.
+        parity(&dc, &df, 1e-5, label);
     }
 }
 
@@ -350,3 +353,4 @@ fn bull_refusals_say_the_same_words_either_way() {
         assert!(a.contains("corner") || a.contains("no tool is both"), "{what}: {a}");
     }
 }
+

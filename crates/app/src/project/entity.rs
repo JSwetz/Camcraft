@@ -21,6 +21,12 @@ pub struct MoveDto {
     /// pre-seam self, and the field skips serialization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis: Option<[f64; 3]>,
+    /// Added with issue #33 (no version bump - the axis-v22 additive
+    /// precedent): the spindle's stated C angle, unwrapped degrees on
+    /// the lattice. Absent on every move but a C-axis live-tool cut,
+    /// so every document without one saves byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotary: Option<f64>,
 }
 
 /// An arc move's center with direction. `kind` stays the motion class
@@ -111,6 +117,10 @@ pub struct PathDto {
     /// cache no longer matches: see `to_cache`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<super::touch_dto::ProbeTouchDto>,
+    /// The declared edge breaks (#303, `crate::cl::EdgeBreak`): the
+    /// same additive law - absent is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<super::break_dto::EdgeBreakDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -242,18 +252,89 @@ impl CycleDto {
 }
 
 /// A setup as files hold it (M3.2 A): the furniture it owns, by name.
-/// `wcs` is indexed by [`WCS_SLOTS`]; an entry may name an entity the
-/// file does not contain - that slot is simply not placed in this setup,
-/// exactly what a missing `G55` entity has always meant. `datum_from` is
+/// `wcs` names the setup's one WCS entity (v54, #342); it may name an
+/// entity the file does not contain - the WCS is simply not placed yet.
+/// Older files held a list indexed by [`WCS_SLOTS`] (see [`WcsDto`]).
+/// `datum_from` is
 /// clone provenance for the setup sheet (stage D); every stamp ignores
 /// it, so it defaults and rides along for the reader, not the machinery.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct SetupDto {
     pub stock: String,
     #[serde(default)]
-    pub wcs: Vec<String>,
+    pub wcs: WcsDto,
     #[serde(default)]
     pub datum_from: String,
+    /// v51 (#196): the setup's picked program offset as its G-word
+    /// (`"G55"`). Absent - every older file, and a setup never picked -
+    /// is the inferred per-operation law, so the key is the migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_offset: Option<String>,
+    /// v53 (#326): how the part sits in this setup, document -> setup
+    /// frame. Absent - every older file, and a setup holding the part as
+    /// modelled - is the identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_alignment: Option<AlignmentDto>,
+    /// v55 (#343): the setup's own machine. Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<SetupMachineDto>,
+    /// v55 (#343): the setup's own post. Absent follows the document's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<SetupPostDto>,
+    /// v56 (#316): the setup this one is placed relative to. Absent -
+    /// every older file - links nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_to: Option<String>,
+    /// v57 (#320): where the setup's stock comes from (`"own"` |
+    /// `"from_previous"`). Absent - every older file, and a setup never
+    /// picked - is #317's implicit rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_source: Option<String>,
+}
+
+/// A setup's WCS as files hold it. v54 (#342) writes one entity name
+/// (`"wcs": "Setup2/WCS"`); v21-v53 wrote one name per `G54`..`G59` slot
+/// (`"wcs": ["Setup2/G54", ...]`), which only the v53 -> v54 rung reads
+/// (`project::wcs_one`). Absent is an empty name: the default entity.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum WcsDto {
+    One(String),
+    Slots(Vec<String>),
+}
+
+impl Default for WcsDto {
+    fn default() -> Self {
+        WcsDto::One(String::new())
+    }
+}
+
+/// A setup's part alignment as files hold it (#326): the same
+/// translation + unit quaternion (x, y, z, w) an entity's placement uses.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AlignmentDto {
+    pub translation: [f64; 3],
+    pub rotation: [f64; 4],
+}
+
+impl AlignmentDto {
+    #[must_use]
+    pub fn from_location(l: &crate::schema::Location) -> Self {
+        AlignmentDto { translation: [l.pos.x, l.pos.y, l.pos.z], rotation: l.rot }
+    }
+
+    /// The stored transform, or `None` when it is not rigid (a non-finite
+    /// number, a quaternion off unit length by more than float noise).
+    #[must_use]
+    pub fn to_location(&self) -> Option<crate::schema::Location> {
+        let [x, y, z] = self.translation;
+        let q = self.rotation;
+        let n2 = q.iter().map(|v| v * v).sum::<f64>();
+        if !(x.is_finite() && y.is_finite() && z.is_finite()) || !n2.is_finite() || (n2 - 1.0).abs() > 1e-9 {
+            return None;
+        }
+        Some(crate::schema::Location { pos: crate::geometry::Point3::new(x, y, z), rot: q })
+    }
 }
 
 /// The fixture marker as files hold it (M3.2 stage B): a tag on a model
@@ -311,6 +392,13 @@ pub struct OperationDto {
     /// with no version bump (the `area` precedent).
     #[serde(default, skip_serializing_if = "crate::operation::CoolantMode::is_default")]
     pub coolant: crate::operation::CoolantMode,
+    /// The op's after-action (#110), `optional-stop` / `program-stop` /
+    /// `go-home`; absent reads none (carry on), the coolant's law.
+    #[serde(default, skip_serializing_if = "crate::operation::AfterOperation::is_default")]
+    pub after: crate::operation::AfterOperation,
+    /// Left out of the posted program (#110); absent reads false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
 }
 
 impl MoveDto {
@@ -346,6 +434,7 @@ impl MoveDto {
             axis: m
                 .axis
                 .map(|a| [lattice(a[0]), lattice(a[1]), lattice(a[2])]),
+            rotary: m.rotary.map(lattice),
         }
     }
 
@@ -372,7 +461,10 @@ impl MoveDto {
         // re-normalizing on load would move a saved axis by bits and
         // break the save-load-save byte identity (the lattice snap in
         // from_move is already the normalization gate at write time).
-        m.attach_axis(self.axis)
+        let mut m = m.attach_axis(self.axis);
+        // Verbatim too: the stored angle is already on the lattice.
+        m.rotary = self.rotary.filter(|c| c.is_finite());
+        m
     }
 }
 
@@ -386,6 +478,7 @@ impl PathDto {
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
             threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
             probes: t.path.probes.iter().map(super::touch_dto::ProbeTouchDto::from_touch).collect(),
+            breaks: t.path.breaks.iter().map(super::break_dto::EdgeBreakDto::from_break).collect(),
         }
     }
 
@@ -409,6 +502,7 @@ impl PathDto {
             .collect();
         path.probes = super::touch_dto::load(&self.probes, &path.moves);
         path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
+        path.breaks = super::break_dto::load(&self.breaks);
         ToolpathCache::new(path, self.warnings.clone())
     }
 }
@@ -453,4 +547,8 @@ pub struct EntityDto {
     /// of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixture: Option<FixtureDto>,
+    /// A Pause / Home entry (#155); present exactly when
+    /// `kind == Some(Entry)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<super::program_entry_dto::ProgramEntryDto>,
 }

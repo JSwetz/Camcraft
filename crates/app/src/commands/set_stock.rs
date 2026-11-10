@@ -43,8 +43,11 @@ impl SetStock {
             )));
         }
         if !shape.is_bounded() {
+            let u = crate::units::of(world);
             return Err(CommandError::Invalid(format!(
-                "stock dimensions exceed {MAX_STOCK_DIM:e} mm"
+                "stock dimensions exceed {} {}",
+                crate::units::len(MAX_STOCK_DIM, u, 0),
+                u.suffix()
             )));
         }
         let mut location = location;
@@ -75,8 +78,10 @@ impl SetStock {
                         CommandError::Invalid(format!("'{source}' has no geometry for stock"))
                     })?;
                 if location == Location::default() {
-                    // Copy the source's placement too: same facets, same spot.
-                    location = model::transform_of(world, &entity).unwrap_or_default();
+                    // Copy the source's placement too: same facets, same spot -
+                    // the spot the setup holds it at (#326's part alignment).
+                    location = crate::setup_align::pose_in(world, &entity, active.as_deref())
+                        .unwrap_or_default();
                 }
                 tris
             }

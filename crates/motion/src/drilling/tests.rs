@@ -69,6 +69,7 @@ pub(super) fn drill_tool(d: f64) -> Tool {
         feed: 120.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 

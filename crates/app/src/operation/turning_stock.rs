@@ -1,4 +1,4 @@
-//! Issue #130: the setup stock read as the turning kernels' revolved envelope - the bar's widest radius about the part's own fitted axis, the reading the meridian rapid law (#103) judges against; the shop rule that a lathe tool approaches clear of the bar's OD (machine-tool handbooks); our own design, no vendor material consulted.
+//! Issue #130: the setup stock read as the turning kernels' revolved envelope - the bar's widest radius about the part's own fitted axis (and, #229, its far end along that axis), the reading the meridian rapid law (#103) judges against; the shop rule that a lathe tool approaches clear of the bar's OD (machine-tool handbooks); our own design, no vendor material consulted.
 
 use crate::cl::Toolpath;
 use crate::geometry::Triangle;
@@ -13,7 +13,7 @@ use super::OpParams;
 pub(super) const STOCK_CLEARANCE: f64 = 1.0;
 
 /// Does `params` name a kernel that approaches from the stock (#130)?
-/// Facing (#122) and the contour rides keep their own approach.
+/// Facing (#122) keeps its own approach; contour rides also read stock (#323).
 fn reads_stock(params: &OpParams) -> bool {
     matches!(
         params,
@@ -24,6 +24,9 @@ fn reads_stock(params: &OpParams) -> bool {
             | OpParams::Part { .. }
             | OpParams::Threading { .. }
             | OpParams::FormTurning { .. }
+            | OpParams::Chamfering { .. }
+            | OpParams::TaperTurning { .. }
+            | OpParams::MultiPassTurning { .. }
     )
 }
 
@@ -37,8 +40,11 @@ pub(super) fn read(params: &OpParams, part: &[Triangle], stock: Option<&[Triangl
     }
     let env = stock.filter(|s| !s.is_empty()).and_then(|s| {
         let f = Frame::about(part).ok()?;
-        let r = profile_of(s, &f).ok()?.r_max;
-        (r.is_finite() && r > 0.0).then_some(StockEnv { r_out: r, clearance: STOCK_CLEARANCE })
+        // The stock read in the PART's frame - the one the kernel walks
+        // - so its far end (#229) is a station the kernel's windows share.
+        let sp = profile_of(s, &f).ok()?;
+        let r = sp.r_max;
+        (r.is_finite() && r > 0.0).then_some(StockEnv { r_out: r, clearance: STOCK_CLEARANCE, s_top: sp.z_top })
     });
     match env {
         Some(e) => (Some(e), None),

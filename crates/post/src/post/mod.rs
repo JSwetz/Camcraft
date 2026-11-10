@@ -26,15 +26,19 @@
 //! `COMP` record arrives - the one way a compensated stream could post
 //! as an undersize part.
 
+mod after_op;
 pub mod cnc;
 pub mod cnc_thread;
 mod coolant;
 pub mod engine;
+pub mod invert;
 pub mod js;
 pub mod machine;
+pub mod nose_tip;
 pub mod probe_rec;
 mod program;
 
+pub use after_op::AfterOperation;
 pub use coolant::CoolantMode;
 pub use engine::{LineInfo, PostOutput, TraceBlock};
 
@@ -53,6 +57,10 @@ pub enum PostError {
     Json(#[from] serde_json::Error),
     #[error("post script: {0}")]
     Script(String),
+    /// A refusal by name before any script runs (#374: an inverted axis
+    /// the post cannot translate). Nothing is posted.
+    #[error("{0}")]
+    Refused(String),
 }
 
 /// Post a stream text with one script (the CLI's whole job, and the
@@ -72,6 +80,17 @@ pub struct Dump<'a> {
     pub tool_number: u32,
     pub tool_name: &'a str,
     pub tool_diameter: f64,
+    /// Commentary only (#257): the op's kind, its setup's name, the
+    /// tool's kind and corner radius - read by the scripts' program
+    /// comments, never by motion. Empty / 0 writes no PARAM.
+    pub op_kind: &'a str,
+    pub setup_name: &'a str,
+    pub tool_kind: &'a str,
+    pub tool_corner_r: f64,
+    /// Commentary too (#630): the lathe tool orientation the section's
+    /// moves were converted for ([`nose_tip`]) - the code the operator
+    /// touches the tool off by. None writes no PARAM.
+    pub tool_orientation: Option<u8>,
     pub rpm: f64,
     pub clearance_z: f64,
     pub retract_z: f64,
@@ -111,6 +130,10 @@ pub struct Dump<'a> {
     /// The cutting fluid the op asks for (#112). Flood is the stream's
     /// silent default; any other ask rides a `PARAM Coolant`.
     pub coolant: CoolantMode,
+    /// What the machine does once this op is done (#110). Carrying on
+    /// is the stream's silent default; any other choice rides a
+    /// `PARAM AfterOperation`.
+    pub after: AfterOperation,
     /// The probing result (#108): `Some` for a Probe op, whose path
     /// carries touches - the stream then closes the section with a
     /// `FOUND` record built from the touches. None for every cutting op.
@@ -124,6 +147,11 @@ impl<'a> Default for Dump<'a> {
             tool_number: 0,
             tool_name: "",
             tool_diameter: 0.0,
+            op_kind: "",
+            setup_name: "",
+            tool_kind: "",
+            tool_corner_r: 0.0,
+            tool_orientation: None,
             rpm: 0.0,
             clearance_z: 0.0,
             retract_z: 0.0,
@@ -138,6 +166,7 @@ impl<'a> Default for Dump<'a> {
             part_transfer: false,
             probe_tol: None,
             coolant: CoolantMode::Flood,
+            after: AfterOperation::None,
             probe_result: None,
         }
     }
@@ -158,6 +187,7 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     out.push(Record::Param { name: "OperationName".into(), value: json!(d.op_name) });
     out.push(Record::Param { name: "ToolDiameter".into(), value: json!(d.tool_diameter) });
+    comment_params(d, &mut out);
     out.push(Record::Param { name: "SpindleSpeed".into(), value: json!(d.rpm) });
     out.push(Record::Param { name: "WorkOffset".into(), value: json!(d.wcs) });
     out.push(Record::Param { name: "OriginX".into(), value: json!(d.origin[0]) });
@@ -173,6 +203,23 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     out.push(Record::Param { name: "StockZTop".into(), value: json!(d.stock_top_z) });
     if let Some(word) = d.coolant.param_word() {
         out.push(Record::Param { name: "Coolant".into(), value: json!(word) });
+    }
+    if let Some(word) = d.after.param_word() {
+        out.push(Record::Param { name: "AfterOperation".into(), value: json!(word) });
+    }
+    // A path stating spindle C angles (issue #33) is live-tool work on
+    // a C turn: the section says so before it opens, so a script can
+    // engage C and the live spindle in its preamble - and the engine
+    // refuses, by name, a script that does not declare `liveTooling`.
+    if t.moves.iter().any(|m| m.rotary.is_some()) {
+        out.push(Record::Param { name: "LiveTool".into(), value: json!("radial") });
+    }
+    // A thread whose passes need the spindle reversed (#629): the
+    // record states hand and direction, and the tool lays its arcs
+    // about the part only under M04. Said before the section opens,
+    // so the spindle starts the right way; forward (M03) is silent.
+    if t.threads.iter().any(|c| c.is_sane(&t.moves) && c.reverse_spindle()) {
+        out.push(Record::Param { name: "SpindleDirection".into(), value: json!("reverse") });
     }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
@@ -293,12 +340,33 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             }));
             continue;
         }
-        let abc = match m.axis {
-            Some(a) if !crate::cl::is_vertical(&a) => {
+        // The positioning feeds of a probe path (#174) are protected
+        // moves: stop on an unexpected contact and alarm.
+        if !touches.is_empty() {
+            match probe_rec::guard_of(m) {
+                Ok(Some(g)) => {
+                    out.push(Record::Guard(g));
+                    continue;
+                }
+                Ok(None) => {}
+                Err(text) => out.push(Record::Warn { text }),
+            }
+        }
+        // A C-axis live-tool move (issue #33) commands its stated
+        // spindle angle and nothing else: the tool axis is the
+        // station's, fixed in the machine, so A/B hold zero. The C law
+        // (`cl::stamp_c`) is section-scoped - the post disengages C at
+        // the section's end - so no modal lean is left standing.
+        let abc = match (m.rotary, m.axis) {
+            (Some(c), _) => {
+                tilted = false;
+                Some([0.0, 0.0, c])
+            }
+            (None, Some(a)) if !crate::cl::is_vertical(&a) => {
                 tilted = true;
                 Some(crate::cl::axis_to_angles(a))
             }
-            Some(_) if tilted => {
+            (None, Some(_)) if tilted => {
                 tilted = false;
                 Some([0.0, 0.0, 0.0])
             }
@@ -366,6 +434,24 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     out.push(Record::Section { begin: false });
     out
+}
+
+/// The commentary PARAMs (#257): optional, each written only when
+/// stated, so a stream without them reads exactly as before and a
+/// script that does not know them ignores them.
+fn comment_params(d: &Dump, out: &mut Vec<Record>) {
+    let texts = [("OperationKind", d.op_kind), ("SetupName", d.setup_name), ("ToolKind", d.tool_kind)];
+    for (name, v) in texts {
+        if !v.is_empty() {
+            out.push(Record::Param { name: name.into(), value: json!(v) });
+        }
+    }
+    if d.tool_corner_r.is_finite() && d.tool_corner_r > 0.0 {
+        out.push(Record::Param { name: "ToolCornerRadius".into(), value: json!(d.tool_corner_r) });
+    }
+    if let Some(q) = d.tool_orientation {
+        out.push(Record::Param { name: "ToolOrientation".into(), value: json!(q) });
+    }
 }
 
 /// The exclusive move index at which cycle `ci`'s chain group ends:

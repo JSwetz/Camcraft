@@ -55,6 +55,36 @@ impl EditOperationParams {
         Ok(EditOperationParams { name: name.to_string(), prev, next })
     }
 
+    /// Change only the after-operation action (#110): one undo unit,
+    /// the stamp survives (a stop or a trip home is post output, not
+    /// geometry - the coolant's law).
+    pub fn with_after(
+        world: &World,
+        name: &str,
+        after: operation::AfterOperation,
+    ) -> Result<Self, CommandError> {
+        let prev = Self::current(world, name)?;
+        let next = Operation { after, ..prev.clone() };
+        Ok(EditOperationParams { name: name.to_string(), prev, next })
+    }
+
+    /// Suppress the operation, or bring it back (#110): one undo unit.
+    /// The toolpath and the stamp stay - a suppressed op still
+    /// generates and is simply left out of the posted program.
+    pub fn with_suppressed(world: &World, name: &str, suppressed: bool) -> Result<Self, CommandError> {
+        let prev = Self::current(world, name)?;
+        let next = Operation { suppressed, ..prev.clone() };
+        Ok(EditOperationParams { name: name.to_string(), prev, next })
+    }
+
+    fn current(world: &World, name: &str) -> Result<Operation, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        model::operation_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))
+    }
+
     fn edit(
         world: &World,
         name: &str,
@@ -161,7 +191,7 @@ impl ChangeOperationKind {
                 prev.params.kind()
             )));
         }
-        family_gate(world, &params)?;
+        family_gate(world, prev.setup.as_deref(), &params)?;
         if !params.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "operation parameters are not usable for a {} operation",

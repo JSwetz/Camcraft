@@ -1,9 +1,9 @@
 //! M7.2 B3b: the traced stock lands in the 3D pass. The composite
 //! paints where the field was hit, replaces the translucent sheet, and
 //! its written depth sorts against the meshes both ways - a model in
-//! front of the stock hides it, a model behind it is hidden. On a
-//! machine with no usable adapter the suite skips (green with a note),
-//! the `gpu_render` precedent.
+//! front of the stock hides it, a model behind it is hidden. Adapter and
+//! skip policy: the `gpu_render` precedent (`headless_gpu`, #615 - loud
+//! SKIP, `CAMCRAFT_REQUIRE_GPU=1` fails).
 //! Provenance: our own test rig; nothing from vendor binaries.
 //!
 //! Gate map (M4.4): covers ui::trace::{eye, composite} and
@@ -24,15 +24,13 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const W: u32 = 96;
 const H: u32 = 72;
 
+/// Software adapter first, else the hardware one (#615); no adapter at
+/// all prints a loud SKIP, and `CAMCRAFT_REQUIRE_GPU=1` fails instead.
 fn device_and_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let options = wgpu::RequestAdapterOptions {
-        force_fallback_adapter: true,
-        compatible_surface: None,
-        ..Default::default()
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    match camcraft_ui::headless_gpu::device_for_test("trace_composite") {
+        Ok(gpu) => gpu.map(|g| (g.device, g.queue)),
+        Err(err) => panic!("{err}"),
+    }
 }
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -73,7 +71,7 @@ fn centre(dev: &wgpu::Device, q: &wgpu::Queue, parts: &[GpuPart], traced: bool) 
 fn centre_with(dev: &wgpu::Device, q: &wgpu::Queue, parts: &[GpuPart], traced: bool, cpu: bool) -> [u8; 4] {
     let mut view = View3D::new(dev, FORMAT, W, H);
     view.set_document(dev, q, parts);
-    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0 };
+    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0, ..Camera::default() };
     let mvp = cam.mvp(f64::from(W) / f64::from(H));
     let mut eye = StockEye::new(dev, FORMAT).unwrap();
     if cpu {
@@ -147,7 +145,7 @@ fn the_cpu_fallback_marches_off_the_ui_thread_and_the_picture_arrives() {
         eprintln!("trace_composite: no adapter - skipped");
         return;
     };
-    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0 };
+    let cam = Camera { target: [5.0, 5.0, 2.5], yaw: 0.9, pitch: 0.9, dist: 30.0, ..Camera::default() };
     let mvp = cam.mvp(f64::from(W) / f64::from(H));
     let mut eye = StockEye::new(&dev, FORMAT).unwrap().cpu_only();
     let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -164,7 +162,7 @@ fn the_cpu_fallback_marches_off_the_ui_thread_and_the_picture_arrives() {
     let second = eye.prepare(&dev, &q, &mut enc, Some(&fv), &cam, &mvp, big).unwrap();
     assert!(second, "the finished picture is bound on the next frame");
     // A moved camera keeps the last picture up while the next marches.
-    let moved = Camera { target: [5.0, 5.0, 2.5], yaw: 1.2, pitch: 0.7, dist: 28.0 };
+    let moved = Camera { target: [5.0, 5.0, 2.5], yaw: 1.2, pitch: 0.7, dist: 28.0, ..Camera::default() };
     let mvp2 = moved.mvp(f64::from(W) / f64::from(H));
     let t1 = std::time::Instant::now();
     let kept = eye.prepare(&dev, &q, &mut enc, Some(&fv), &moved, &mvp2, big).unwrap();

@@ -38,9 +38,9 @@ mod gizmo_tests {
     use super::*;
     use crate::state::CommandKind;
 
-    fn set_origin(state: &mut State, slot: &str, pos: [f64; 3], yaw_deg: f64) {
+    /// Place the active setup's one WCS (#342).
+    fn set_origin(state: &mut State, pos: [f64; 3], yaw_deg: f64) {
         state.pending.push_back(CommandKind::SetWcs {
-            slot: slot.to_string(),
             pos,
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -78,7 +78,7 @@ mod gizmo_tests {
     #[test]
     fn an_origin_placed_at_machine_zero_does_not_duplicate_the_gizmo() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [0.0, 0.0, 0.0], 0.0);
         let lines = collect_overlay(&state);
         assert_eq!(lines.len(), 6, "the triad replaces the world axes");
         assert!(lines[0][3] > 0.5, "the single gizmo is the bright triad");
@@ -93,7 +93,7 @@ mod gizmo_tests {
     #[test]
     fn a_moved_origin_shows_axes_and_triad_together() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         assert_eq!(collect_overlay(&state).len(), 12, "both gizmos");
         let labels = overlay_labels(&state, 1.0);
         assert_eq!(labels.len(), 6, "three tips per gizmo, both gizmos");
@@ -111,7 +111,7 @@ mod gizmo_tests {
     #[test]
     fn moved_work_offset_letters_follow_their_axis_tips() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         let lines = collect_overlay(&state);
         let labels = overlay_labels(&state, 1.0);
         for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -137,13 +137,18 @@ mod gizmo_tests {
     #[test]
     fn hidden_work_offset_removes_only_its_gizmo() {
         let mut state = State::new();
-        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 0.0);
-        set_origin(&mut state, "G55", [50.0, 0.0, 0.0], 0.0);
+        // #342: one WCS per setup - two setups, two gizmos.
+        state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        state.drain_actions();
+        set_origin(&mut state, [0.0, 0.0, 0.0], 0.0);
+        state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        state.drain_actions();
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         assert_eq!(collect_overlay(&state).len(), 12);
         State::toggle_visibility(&mut state.hidden_offsets, "G54");
-        assert_eq!(collect_overlay(&state).len(), 12, "G55 and world axes remain");
+        assert_eq!(collect_overlay(&state).len(), 12, "Setup2's WCS and world axes remain");
         assert!(model::find_by_name(&state.world, "G54").is_some());
-        State::toggle_visibility(&mut state.hidden_offsets, "G55");
+        State::toggle_visibility(&mut state.hidden_offsets, "Setup2/WCS");
         assert_eq!(collect_overlay(&state).len(), 6, "only world axes remain");
     }
 
@@ -152,7 +157,7 @@ mod gizmo_tests {
         // Yaw 90 moves the triad axes off X/Y/Z - the coincidence was about
         // lines, not just the origin point.
         let mut state = State::new();
-        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 90.0);
+        set_origin(&mut state, [0.0, 0.0, 0.0], 90.0);
         assert_eq!(collect_overlay(&state).len(), 12, "the triad no longer claims the axes");
     }
 
@@ -162,7 +167,7 @@ mod gizmo_tests {
         state.show_world_axes = false;
         assert!(collect_overlay(&state).is_empty(), "nothing but hidden furniture");
         assert!(overlay_labels(&state, 1.0).is_empty(), "and no labels for it");
-        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        set_origin(&mut state, [50.0, 0.0, 0.0], 0.0);
         assert_eq!(collect_overlay(&state).len(), 6, "the work offset still shows");
         assert_eq!(overlay_labels(&state, 1.0).len(), 3);
         assert!(
@@ -282,7 +287,6 @@ mod anchor_tests {
         let (_, pos) = anchor_hit(&state, [uv[0] * 800.0, uv[1] * 600.0], 8.0).expect("hit SE");
         assert_eq!(pos, [40.0, -25.0, 20.0]);
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".to_string(),
             pos,
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1590,7 +1594,7 @@ mod height_plane_tests {
             clearance_z: Height::of(HeightReference::TopOfStock, 5.0),
             retract_z: Height::fixed(15.0),
             top_z: Height::fixed(10.0),
-            bottom_z: Height::of(HeightReference::WorkOffset(0), -1.0),
+            bottom_z: Height::of(HeightReference::WorkOffset, -1.0),
             stepdown: 2.0,
             feed: 800.0,
             plunge_feed: 200.0,
@@ -1609,7 +1613,6 @@ mod height_plane_tests {
         let mut state = state_with("C1", params);
         // G54 at z 3.0: stock top (20) + 5 = 25, G54 - 1 = 2.
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".into(),
             pos: [0.0, 0.0, 3.0],
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1622,7 +1625,7 @@ mod height_plane_tests {
             .collect();
         for want in [
             "C1 · Clearance 25.00 (stock top +5.00)",
-            "C1 · Bottom 2.00 (G54 -1.00)",
+            "C1 · Bottom 2.00 (WCS G54 -1.00)",
             "C1 · Top 10.00",
         ] {
             assert!(texts.iter().any(|t| t == want), "{want} among {texts:?}");
@@ -1630,7 +1633,6 @@ mod height_plane_tests {
         // Slide G54 up: the plane, and the number on it, track the source
         // with no edit to the operation.
         state.pending.push_back(CommandKind::SetWcs {
-            slot: "G54".into(),
             pos: [0.0, 0.0, 6.0],
             roll_deg: 0.0,
             pitch_deg: 0.0,
@@ -1642,7 +1644,7 @@ mod height_plane_tests {
             .map(|(_, _, t)| t)
             .collect();
         assert!(
-            texts.iter().any(|t| t == "C1 · Bottom 5.00 (G54 -1.00)"),
+            texts.iter().any(|t| t == "C1 · Bottom 5.00 (WCS G54 -1.00)"),
             "the chip tracks its source: {texts:?}"
         );
     }
@@ -1657,7 +1659,7 @@ mod height_plane_tests {
             clearance_z: Height::fixed(25.0),
             retract_z: Height::fixed(15.0),
             top_z: Height::fixed(10.0),
-            bottom_z: Height::of(HeightReference::WorkOffset(0), -1.0),
+            bottom_z: Height::of(HeightReference::WorkOffset, -1.0),
             stepdown: 2.0,
             feed: 800.0,
             plunge_feed: 200.0,
@@ -1728,11 +1730,27 @@ mod view_cube_tests {
             yaw: 0.7,
             pitch: 0.2,
             dist: 55.0,
+            ..Camera::default()
         };
         let top = cam.toward([0.0, 0.0, 1.0]);
         assert_eq!((top.target, top.dist), (cam.target, cam.dist));
         assert!((top.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
-        assert!(top.yaw.abs() < 1e-12, "atan2(0, 0) must read 0, not NaN");
+        // At a pole the vanishing atan2 takes the roll from the pre-click
+        // yaw snapped to the nearest quarter turn (#622), never NaN. This
+        // start yaw (0.7) is nearer 0 than pi/2, so it still reads 0.
+        assert!(top.yaw.abs() < 1e-12);
+        let top = cam.oriented(2.0, 0.2).toward([0.0, 0.0, 1.0]);
+        assert!(
+            (top.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+            "a pole click keeps the pre-click yaw's quarter turn: {}",
+            top.yaw
+        );
+        let bottom = cam.oriented(-2.3, 0.2).toward([0.0, 0.0, -1.0]);
+        assert!(
+            (bottom.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+            "the south pole snaps the same way: {}",
+            bottom.yaw
+        );
         let front = cam.toward([0.0, -1.0, 0.0]);
         assert!((front.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12);
         assert!(front.pitch.abs() < 1e-12);
@@ -1748,9 +1766,12 @@ mod view_cube_tests {
 
     #[test]
     fn pole_views_hold_a_stable_roll() {
-        // Straight up and straight down are the basis degeneracies; the
-        // zero-guard in basis_right pins screen-right to +X and
-        // basis_up follows, whatever the yaw atan2 picked.
+        // Straight up and straight down are the basis degeneracies; there
+        // the quarter turn `toward` snapped the yaw to (#622) decides the
+        // roll: screen-right rides the guard frame (-sin y, cos y, 0) that
+        // is continuous with every near-pole view, and basis_up follows.
+        // Views whose pre-click yaw shared a quarter turn roll alike.
+        let snap = |y: f64| (y / std::f64::consts::FRAC_PI_2).round() * std::f64::consts::FRAC_PI_2;
         for d in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
             for yaw0 in [0.0, 0.9, -2.3] {
                 let cam = Camera {
@@ -1758,17 +1779,65 @@ mod view_cube_tests {
                     yaw: yaw0,
                     pitch: 0.0,
                     dist: 80.0,
+                    ..Camera::default()
                 }
                 .toward(d);
                 let (r, u, _) = cam.view_basis();
                 let (r, u): ([f64; 3], [f64; 3]) = (r.into(), u.into());
-                assert!(near(r, [1.0, 0.0, 0.0]), "screen right at the {d:?} pole: {r:?}");
-                assert!(
-                    u[0].abs() < 1e-9 && u[2].abs() < 1e-9,
-                    "screen up must ride a world axis at the {d:?} pole: {u:?}"
-                );
+                let (rs, cs) = (snap(yaw0).sin(), snap(yaw0).cos());
+                let want_r = [-rs, cs, 0.0];
+                let want_u = if d[2] > 0.0 { [-cs, -rs, 0.0] } else { [cs, rs, 0.0] };
+                assert!(near(r, want_r), "screen right at the {d:?} pole: {r:?}");
+                assert!(near(u, want_u), "screen up at the {d:?} pole: {u:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_pole_click_keeps_the_roll_the_view_had() {
+        // The #622 complaint: a TOP click from a near-top view swung the
+        // screen frame up to half a turn (the old +X pin ignored the yaw
+        // the orbit had put there). The snap law bounds the swing to a
+        // half-quarter - 45 degrees.
+        let cam = Camera {
+            yaw: 1.0,
+            pitch: 1.5,
+            dist: 80.0,
+            ..Camera::default()
+        };
+        let (_, u0, _) = cam.view_basis();
+        let u0: [f64; 3] = u0.into();
+        let top = cam.toward([0.0, 0.0, 1.0]);
+        let (_, u1, _) = top.view_basis();
+        let u1: [f64; 3] = u1.into();
+        let dot: f64 = (0..3).map(|i| u0[i] * u1[i]).sum();
+        assert!(
+            dot > std::f64::consts::FRAC_1_SQRT_2,
+            "a pole click may not turn the screen up more than 45 degrees: {u0:?} -> {u1:?}"
+        );
+    }
+
+    #[test]
+    fn a_second_pole_click_lands_the_same_view() {
+        // The reported repro was clicking TOP twice and watching the model
+        // twitch: under the snap law the second click's yaw is already a
+        // quarter turn, so it changes nothing.
+        let cam = Camera {
+            yaw: 1.0,
+            pitch: 1.5,
+            dist: 80.0,
+            ..Camera::default()
+        };
+        let once = cam.toward([0.0, 0.0, 1.0]);
+        let twice = once.toward([0.0, 0.0, 1.0]);
+        assert_eq!(twice.target, once.target);
+        assert_eq!(twice.dist, once.dist);
+        assert!(
+            (twice.yaw - once.yaw).abs() < 1e-12 && (twice.pitch - once.pitch).abs() < 1e-12,
+            "the second click moved the camera: {:?} -> {:?}",
+            (once.yaw, once.pitch),
+            (twice.yaw, twice.pitch)
+        );
     }
 
     #[test]
@@ -1842,6 +1911,7 @@ mod view_cube_tests {
                 yaw,
                 pitch,
                 dist: 80.0,
+                ..Camera::default()
             };
             let corner = egui::pos2(h.cube.min.x + 0.5, h.cube.min.y + 0.5);
             assert_eq!(
@@ -1871,5 +1941,212 @@ mod view_cube_tests {
         assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(120.0, 800.0))).is_none());
         assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 250.0))).is_none());
         assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(130.0, 260.0))).is_some());
+    }
+}
+
+mod projection_tests {
+    //! The #434 orthographic laws: an affine matrix (clip.w is 1, so
+    //! every screen-space consumer that divides by w lands cleanly),
+    //! parallel pick rays that close against the same matrix, sizes that
+    //! ignore depth, a mode switch that never jumps the framing at the
+    //! target plane, and a dolly that holds the point under the cursor.
+
+    use crate::viewport::{Camera, ProjectionMode};
+
+    const ASPECT: f64 = 16.0 / 9.0;
+
+    fn ortho() -> Camera {
+        Camera { projection: ProjectionMode::Orthographic, ..Camera::default() }
+    }
+
+    /// The column-major point (x, y, z, 1) through an mvp, returned as
+    /// (ndc_x, ndc_y, clip_w) - the divide the rasterizer does.
+    fn project(m: &[[f32; 4]; 4], p: [f64; 3]) -> (f32, f32, f32) {
+        let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+        let mut out = [0.0f32; 4];
+        for c in 0..4 {
+            for r in 0..4 {
+                out[r] += v[c] * m[c][r];
+            }
+        }
+        (out[0] / out[3], out[1] / out[3], out[3])
+    }
+
+    fn shifted(p: [f64; 3], d: (f64, f64, f64), k: f64) -> [f64; 3] {
+        [p[0] + k * d.0, p[1] + k * d.1, p[2] + k * d.2]
+    }
+
+    /// clip z over clip w - the depth the rasterizer compares, which
+    /// WebGPU requires inside [0, 1] alongside -1 <= x, y <= 1 (#600).
+    fn z_ndc(m: &[[f32; 4]; 4], p: [f64; 3]) -> f32 {
+        let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+        let mut z = 0.0f32;
+        let mut w = 0.0f32;
+        for c in 0..4 {
+            z += v[c] * m[c][2];
+            w += v[c] * m[c][3];
+        }
+        z / w
+    }
+
+    #[test]
+    fn the_ortho_depth_spans_zero_to_one_between_the_planes() {
+        // The OpenGL ortho convention spans NDC z over [-1, +1], but
+        // WebGPU clips on 0 <= z <= w, and ortho keeps clip.w at 1 -
+        // so every point nearer than (near + far) / 2 was clipped away
+        // and the viewport went blank (#600). The planes themselves
+        // must land on 0 and 1, and depth must climb between them.
+        let cam = ortho();
+        let m = cam.mvp(ASPECT);
+        let eye = cam.eye();
+        let look = [
+            cam.target[0] - eye[0],
+            cam.target[1] - eye[1],
+            cam.target[2] - eye[2],
+        ];
+        let len = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        let at = |d: f64| {
+            z_ndc(
+                &m,
+                [
+                    eye[0] + look[0] / len * d,
+                    eye[1] + look[1] / len * d,
+                    eye[2] + look[2] / len * d,
+                ],
+            )
+        };
+        let near = 0.1f64;
+        let far = (cam.dist * 40.0).max(1000.0);
+        assert!((at(near) - 0.0).abs() < 1e-3, "the near plane sits at {}", at(near));
+        assert!((at(far) - 1.0).abs() < 1e-3, "the far plane sits at {}", at(far));
+        let mut last = at(near);
+        for d in [cam.dist, (near + far) / 2.0, far * 0.9] {
+            let z = at(d);
+            assert!(z > 0.0 && z < 1.0, "depth at {d} mm is {z}, outside the clip volume");
+            assert!(z > last, "depth at {d} mm is {z}, not deeper than {last}");
+            last = z;
+        }
+    }
+
+    #[test]
+    fn the_ortho_matrix_is_affine_and_perspective_is_not() {
+        let o = ortho().mvp(ASPECT);
+        for (c, col) in o.iter().take(3).enumerate() {
+            assert_eq!(col[3], 0.0, "ortho mvp column {c} must not touch w");
+        }
+        assert_eq!(o[3][3], 1.0);
+        // Perspective keeps its converging row: without it the house
+        // default would have silently turned parallel.
+        assert_ne!(Camera::default().mvp(ASPECT)[2][3], 0.0);
+    }
+
+    #[test]
+    fn ortho_rays_are_parallel_and_the_cursor_closes_through_the_matrix() {
+        let cam = ortho();
+        let (o1, d1) = cam.ray_through([0.4, -0.3], ASPECT).expect("ortho ray");
+        let (o2, d2) = cam.ray_through([-0.7, 0.55], ASPECT).expect("ortho ray");
+        for k in 0..3 {
+            assert!((d1[k] - d2[k]).abs() < 1e-9, "ortho rays must be parallel");
+        }
+        let off = [o2[0] - o1[0], o2[1] - o1[1], o2[2] - o1[2]];
+        assert!(
+            off[0].abs() + off[1].abs() + off[2].abs() > 1e-6,
+            "parallel rays from different cursors must not be one and the same ray"
+        );
+        // The cursor ray's point on the target plane must project back
+        // to the very NDC the ray was cast from: pick and draw agree.
+        let hit = [
+            o1[0] + d1[0] * cam.dist,
+            o1[1] + d1[1] * cam.dist,
+            o1[2] + d1[2] * cam.dist,
+        ];
+        let (x, y, w) = project(&cam.mvp(ASPECT), hit);
+        assert!((x - 0.4).abs() < 1e-3 && (y + 0.3).abs() < 1e-3, "cursor closure: {x}, {y}");
+        assert!((w - 1.0).abs() < 1e-3, "ortho clip.w is 1 everywhere");
+    }
+
+    #[test]
+    fn ortho_sizes_ignore_depth_where_perspective_shrinks_them() {
+        for cam in [ortho(), Camera::default()] {
+            let m = cam.mvp(ASPECT);
+            let (r, _, f) = cam.view_basis();
+            // A unit segment along screen-right, at the target plane and
+            // pushed 35% of the way toward the eye.
+            let far_end = project(&m, shifted(cam.target, r, 0.5));
+            let far_mid = project(&m, cam.target);
+            let near_center = shifted(cam.target, f, -0.35 * cam.dist);
+            let near_end = project(&m, shifted(near_center, r, 0.5));
+            let near_mid = project(&m, near_center);
+            let far_w = ((far_end.0 - far_mid.0).powi(2) + (far_end.1 - far_mid.1).powi(2)).sqrt();
+            let near_w = ((near_end.0 - near_mid.0).powi(2) + (near_end.1 - near_mid.1).powi(2)).sqrt();
+            if cam.projection == ProjectionMode::Orthographic {
+                assert!(
+                    (far_w - near_w).abs() < 1e-3 * far_w,
+                    "ortho must not shrink with depth: {far_w} vs {near_w}"
+                );
+                // Same screen x,y at both depths (no lateral parallax).
+                assert!((far_mid.0 - near_mid.0).abs() < 1e-3);
+                assert!((far_mid.1 - near_mid.1).abs() < 1e-3);
+            } else {
+                assert!(near_w > 1.1 * far_w, "perspective must shrink: {far_w} vs {near_w}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_mode_switch_never_jumps_the_framing_at_the_target_plane() {
+        let o = ortho();
+        let p = Camera { projection: ProjectionMode::Perspective, ..o };
+        let mo = o.mvp(ASPECT);
+        let mp = p.mvp(ASPECT);
+        for (nx, ny) in [(-0.9, -0.9), (-0.3, 0.2), (0.0, 0.0), (0.6, 0.85)] {
+            let (origin, dir) = o.ray_through([nx, ny], ASPECT).expect("ortho ray");
+            let hit = [
+                origin[0] + dir[0] * o.dist,
+                origin[1] + dir[1] * o.dist,
+                origin[2] + dir[2] * o.dist,
+            ];
+            let a = project(&mo, hit);
+            let b = project(&mp, hit);
+            assert!(
+                (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3,
+                "switch moves the target plane: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ortho_dolly_holds_the_point_under_the_cursor() {
+        let ndc = [0.6f32, -0.25];
+        let o = ortho();
+        let (origin, dir) = o.ray_through(ndc, 1.5).expect("ortho ray");
+        let point = [
+            origin[0] + dir[0] * o.dist,
+            origin[1] + dir[1] * o.dist,
+            origin[2] + dir[2] * o.dist,
+        ];
+        let mut cam = o;
+        cam.dolly_cursor(ndc, 1.5, 1.0).expect("ortho dolly");
+        assert_ne!(cam.dist, o.dist, "the dolly must actually zoom");
+        assert_ne!(cam.target, o.target, "and must actually move the target");
+        let (x, y, _) = project(&cam.mvp(1.5), point);
+        assert!(
+            (x - ndc[0]).abs() < 1e-3 && (y - ndc[1]).abs() < 1e-3,
+            "the point under the cursor slid to {x}, {y}"
+        );
+    }
+
+    #[test]
+    fn camera_transforms_carry_the_projection_mode() {
+        assert_eq!(Camera::default().projection, ProjectionMode::Perspective);
+        let o = ortho();
+        assert_eq!(Camera::frame([1.0, 2.0, 3.0], 5.0).projection, ProjectionMode::Perspective);
+        assert_eq!(o.toward([1.0, 0.0, 0.0]).projection, ProjectionMode::Orthographic);
+        assert_eq!(o.oriented(0.3, 0.2).projection, ProjectionMode::Orthographic);
+        let mut cam = o;
+        cam.orbit(1.0, 1.0);
+        cam.pan(1.0, 1.0);
+        cam.zoom(1.0);
+        assert_eq!(cam.projection, ProjectionMode::Orthographic, "nav keeps the mode");
     }
 }

@@ -14,7 +14,9 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             dto.name
         )));
     }
+    super::program_entry_dto::validate(dto, kind)?; // #155
     match kind {
+        EntityKind::Entry => {}
         EntityKind::Model => {
             if dto.stock.is_some()
                 || dto.tool.is_some()
@@ -79,18 +81,18 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             }
         }
         EntityKind::Wcs => {
-            // v21: the slot may live under a setup's private name; the
-            // word it posts is still the G-number in the last segment.
-            let slot_ok = WCS_SLOTS.contains(&dto.name.as_str())
-                || dto
-                    .name
-                    .rsplit_once('/')
-                    .is_some_and(|(_, slot)| WCS_SLOTS.contains(&slot));
-            if !slot_ok {
+            // v21: a setup's WCS lives under a private name; v54 (#342)
+            // names it `<setup>/WCS`, older setups kept their slot's
+            // name (`G54`, `<setup>/G55`). The word it posts is the
+            // setup's label, never this name.
+            let name_ok = WCS_SLOTS.contains(&dto.name.as_str())
+                || dto.name.rsplit_once('/').is_some_and(|(_, last)| {
+                    WCS_SLOTS.contains(&last) || last == crate::setup::WCS_SUFFIX
+                });
+            if !name_ok {
                 return Err(corrupt(format!(
-                    "'{}' is not a work offset slot (expected one of {}, or a setup's \"<setup>/<slot>\")",
-                    dto.name,
-                    WCS_SLOTS.join(", ")
+                    "'{}' is not a WCS name (expected G54, a setup's \"<setup>/WCS\", or an older \"<setup>/<slot>\")",
+                    dto.name
                 )));
             }
             if dto.facets.is_some()
@@ -100,6 +102,18 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
                 || dto.setup.is_some()
             {
                 return Err(corrupt(format!("'{}' is an offset, not a solid", dto.name)));
+            }
+            // #327: the loader's transform write turns a zero-norm
+            // rotation into the identity, which for an offset would post
+            // a rotated frame as unrotated - refuse it by name instead.
+            if !dto.translation.iter().all(|v| v.is_finite())
+                || !dto.rotation.iter().all(|v| v.is_finite())
+                || crate::geometry::normalize_quat(dto.rotation).is_none()
+            {
+                return Err(corrupt(format!(
+                    "WCS '{}' has a non-finite or degenerate placement (origin or rotation)",
+                    dto.name
+                )));
             }
         }
         EntityKind::Tool => {
@@ -134,6 +148,13 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
                     dto.name,
                     crate::tool_numbers::RANGE_TEXT
                 )));
+            }
+            // #368: a body is a body this build's envelope law accepts,
+            // on a tool it fits - or the file refuses by name.
+            if let Some(b) = &tool.body {
+                let body = b.to_body(&dto.name).map_err(corrupt)?;
+                crate::tool_body::fits(&tool.to_tool(), &body)
+                    .map_err(|e| corrupt(format!("tool '{}': {e}", dto.name)))?;
             }
         }
         EntityKind::Operation => {
@@ -238,11 +259,15 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             let Some(s) = &dto.setup else {
                 return Err(corrupt("setup entity without a definition"));
             };
-            // A setup always owns a stock name; WCS entries may name
-            // entities the file does not hold - that slot is simply not
-            // placed in this setup (the schema's own law) - but an empty
-            // string names nothing at all.
-            if s.stock.is_empty() || s.wcs.iter().any(String::is_empty) {
+            // A setup always owns a stock and a WCS name; the WCS may
+            // name an entity the file does not hold - it is simply not
+            // placed yet (the schema's own law) - but an empty string
+            // names nothing at all. The rungs left one name (#342).
+            let wcs_empty = match &s.wcs {
+                WcsDto::One(w) => w.is_empty(),
+                WcsDto::Slots(l) => l.iter().any(String::is_empty),
+            };
+            if s.stock.is_empty() || wcs_empty {
                 return Err(corrupt(format!(
                     "'{}' has an empty furniture name",
                     dto.name

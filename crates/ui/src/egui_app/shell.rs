@@ -36,12 +36,14 @@ use crate::viewport::View3D;
 use super::icons;
 use super::layout;
 use super::machine_editor;
+use super::machines_pane;
 use super::unsaved_prompt;
 use super::frame_watch::FrameWatch;
 use super::gpu;
 use super::gpu_init;
 use super::pages;
 use super::panes;
+use super::post_refusal;
 use super::theme;
 use super::viewcube;
 use super::world;
@@ -59,7 +61,7 @@ const STATUS_H: f32 = 22.0;
 
 /// The windowed shell (the `--ui egui` entry without `--headless`); returns
 /// the process exit code.
-pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
+pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>, mcp_port: Option<u16>) -> i32 {
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(err) => {
@@ -68,7 +70,30 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
         }
     };
     event_loop.set_control_flow(ControlFlow::Wait);
+    // #144: macOS's terminate path (Cmd+Q, the app menu's Quit) asks
+    // through the guarded Quit instead of ending the process.
+    let _ = super::os_quit::install();
     let mut shell = Shell::new(pick, want);
+    // #183: the opt-in live MCP server. Its waker posts an empty user
+    // event, which wakes the idle loop for a frame that answers the call.
+    if let Some(port) = mcp_port {
+        let proxy = event_loop.create_proxy();
+        let wake: camcraft_app::mcp::Wake = Box::new(move || {
+            let _ = proxy.send_event(());
+        });
+        match camcraft_app::mcp::Inbox::listen(port, wake) {
+            Ok(inbox) => {
+                if let Some(addr) = inbox.addr() {
+                    eprintln!("mcp: listening on {addr} (connect with: camcraft-cli mcp --connect {addr})");
+                }
+                shell.state.mcp = Some(inbox);
+            }
+            Err(err) => {
+                eprintln!("mcp: cannot listen on 127.0.0.1:{port}: {err}");
+                shell.state.status = format!("MCP server not started: 127.0.0.1:{port}: {err}");
+            }
+        }
+    }
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
         Err(err) => {
@@ -144,6 +169,7 @@ pub(crate) enum Tab {
     Viewport,
     Browser,
     Properties,
+    Machines,
 }
 
 impl Tab {
@@ -152,6 +178,7 @@ impl Tab {
             Tab::Viewport => "viewport",
             Tab::Browser => "browser",
             Tab::Properties => "properties",
+            Tab::Machines => "machines",
         }
     }
 }
@@ -168,7 +195,9 @@ impl Shell {
         // File work is the real thing: New/Model/Project/Save/Save As on the ribbon
         // queue the shared command kinds, rfd picks the path, State::run
         // does the work - the machinery was never egui's to rebuild.
-        let state = State::new();
+        let mut state = State::new();
+        // #662: the user's recent projects and models, read once.
+        state.load_recent();
         let dock_state = build_dock();
         Self {
             window: None,
@@ -247,7 +276,9 @@ impl Shell {
                     return;
                 }
             };
-        println!("{}", gpu::describe(&adapter).log_line());
+        let gpu_line = gpu::describe(&adapter).log_line();
+        println!("{gpu_line}");
+        self.state.gpu_line = Some(gpu_line);
 
         let mut renderer = Renderer::new(&device, config.format, RendererOptions::default());
         let scene = world::collect(&self.state);
@@ -615,8 +646,21 @@ pub(crate) fn shell_layout(
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panes::status(ui, &mut *state, &pal);
+            panes::status(ui, &mut *state, &pal, icons);
         });
+    // #667: the Setups page pick sweep runs here, once a frame, whatever
+    // the dock shows. Viewport clicks route inside the dock (egui_dock
+    // draws leaves breadth-first, so in the default layout the viewport
+    // draws before the properties leaf), so the sweep brackets it:
+    // a properties pane that will not draw this frame - closed, or behind
+    // another tab in its leaf - disarms every pick BEFORE the dock, and a
+    // drawn pane's rows mark their setups during it, the rest disarmed
+    // AFTER it. A pick left armed at a frame's end therefore had its rows
+    // on screen that frame, and the next frame's click sees the result:
+    // no frame where a hidden draft takes a click.
+    if !layout::is_shown(dock, &Tab::Properties) {
+        crate::axis_pick::disarm_all(state);
+    }
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
             .style(DockStyle::from_egui(ui.style().as_ref()))
@@ -631,6 +675,7 @@ pub(crate) fn shell_layout(
                 left_press,
             });
     });
+    crate::axis_pick::disarm_hidden(state); // #664/#667: undrawn rows' picks stop
     // Last, so it floats over the dock: the M1.4 graphical tool editor.
     // An in-app egui::Window - this is the shell's only kind of extra
     // surface; the single-OS-window law stands. Closed by default
@@ -642,10 +687,18 @@ pub(crate) fn shell_layout(
     // stands). None on a fresh State, closed by ✖, reopened by the next
     // successful post, so the snapshot never moves until a post happens.
     pages::gcode_window(ui.ctx(), state);
+    // #265: a refused post's reason, kept on screen past the status
+    // line's next write. None on a fresh State, so no snapshot moves.
+    post_refusal::window(ui.ctx(), state);
     // M3.3 stage C: the machine editor - same window law as both above
     // (in-app egui::Window over the dock, None on a fresh State, so
     // snapshots never move until the Setup pane opens it).
     machine_editor::window(ui.ctx(), state);
+    // #157: the Debug info window - same window law (closed on a fresh
+    // State, opened from the status strip's bug button).
+    super::debug_info::window(ui.ctx(), state);
+    // #339 slice 6: the fixture library dialogs (None on a fresh State).
+    super::fixture_library_dialog::window(ui.ctx(), state);
     // #107: the unsaved-changes prompt, last so it sits over everything.
     unsaved_prompt::window(ui.ctx(), state);
 }
@@ -686,6 +739,13 @@ impl winit::application::ApplicationHandler for Shell {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
+        }
+    }
+
+    /// #183: the MCP listener's wake-up - draw a frame, which answers it.
+    fn user_event(&mut self, _el: &ActiveEventLoop, _event: ()) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -763,6 +823,19 @@ impl winit::application::ApplicationHandler for Shell {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // #144: an OS quit (macOS Cmd+Q / app-menu Quit) is a Quit like
+        // the window X; the window comes forward so the prompt is seen.
+        if super::os_quit::route_pending(&mut self.state) {
+            if self.failed {
+                el.exit();
+                return;
+            }
+            if let Some(window) = &self.window {
+                window.set_minimized(false);
+                window.focus_window();
+                window.request_redraw();
+            }
+        }
         if self.occluded {
             el.set_control_flow(ControlFlow::Wait);
             return;
@@ -851,6 +924,9 @@ impl Shell {
     fn shutdown(&mut self) {
         // Surface/renderer first, window last (see the field-order note);
         // `state` (and its world) drops after all GPU objects.
+        // #183: the MCP listener stops (and its thread is joined) first,
+        // so no wake-up reaches a closing loop.
+        self.state.mcp = None;
         self.renderer = None;
         self.view = None;
         self.surface = None;
@@ -917,6 +993,10 @@ impl TabViewer for ShellTabs<'_> {
             Tab::Properties => {
                 let pal = theme::current();
                 pages::properties(ui, self.state, &pal);
+            }
+            Tab::Machines => {
+                let pal = theme::current();
+                machines_pane::draw(ui, self.state, &pal);
             }
         }
     }
@@ -1023,7 +1103,7 @@ fn viewport_panel(
         let mut fly: Option<[f64; 3]> = None;
         let mut export = false;
         ui.horizontal(|ui| {
-            ui.label(crate::actions::deviate_readout(&ps.dev));
+            ui.label(crate::actions::deviate_readout(&ps.dev, state.units()));
             if ps.dev.rest_cells > 0
                 && let Some(q) = ps.dev.max_rest_at
                 && ui.button("Frame rest").on_hover_text("Look at the worst uncut cell").clicked()
@@ -1234,6 +1314,16 @@ fn viewport_panel(
                 ],
                 egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)),
             );
+        }
+        // The machined mesh's hovered facet (#25): the hover ink's yellow,
+        // a veil over the class colour and its outline.
+        if let Some(tri) = crate::machined::hover_facet_uv(state, aspect) {
+            let ink = egui::Color32::from_rgb(255, 217, 102);
+            ui.painter().add(egui::Shape::convex_polygon(
+                tri.iter().map(|uv| to_px(*uv)).collect(),
+                egui::Color32::from_rgba_unmultiplied(255, 217, 102, 90),
+                egui::Stroke::new(1.5, ink),
+            ));
         }
         // The Boundary group's marks (M11.5 UX): role-coloured picked
         // edges, the edge a click would take, chain ends, machined side.
@@ -1486,8 +1576,8 @@ fn parr(p: egui::Pos2) -> [f32; 2] {
 }
 
 /// Headless proof (the M-a gate, graduated from the spike's S2 gate): no
-/// window, no surface - the fallback adapter (the same deterministic choice
-/// as tests/gpu_render.rs), View3D on the shell's Rgba8Unorm offscreen
+/// window, no surface - `headless_gpu::device()` (software adapter first,
+/// else hardware; the same choice as tests/gpu_render.rs), View3D on the shell's Rgba8Unorm offscreen
 /// format, the SEEDED document rendered (block + stock + region + cached
 /// path through set_overlay), and the readback showing a solid footprint of
 /// changed pixels. The second half of the proof is the world itself:
@@ -1518,17 +1608,11 @@ pub(crate) mod headless {
             ));
         }
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            force_fallback_adapter: true,
-            compatible_surface: None,
-            ..Default::default()
-        }))
-        .map_err(|err| err.to_string())?;
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor::default(),
-        ))
-        .map_err(|err| format!("device: {err}"))?;
+        // Software adapter first, else the hardware one (#615: macOS's
+        // Metal has no software fallback).
+        let gpu = crate::headless_gpu::device()?;
+        println!("headless: {} adapter {}", gpu.kind.label(), gpu.name);
+        let (device, queue) = (gpu.device, gpu.queue);
 
         let mut view = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             View3D::new(&device, VIEW3D_FORMAT, 320, 240)
@@ -1544,6 +1628,7 @@ pub(crate) mod headless {
             yaw: 0.9,
             pitch: 0.5,
             dist: 160.0,
+            ..Camera::default()
         };
         let (w, h) = view.extent();
         let mvp = cam.mvp(f64::from(w.max(1)) / f64::from(h.max(1)));

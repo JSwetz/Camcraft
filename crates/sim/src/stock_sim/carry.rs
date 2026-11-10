@@ -1,0 +1,345 @@
+//! The machined body carried from one setup into the next (#317): a
+//! two-sided column body (top and floor per column) moved through the
+//! rigid transform between two setups by re-indexing its lattice.
+//!
+//! Provenance: our own design after #308's research note - one
+//! workpiece kept on one lattice and viewed through each setup's
+//! transform instead of re-sampled onto a new grid (Stifter 1995 on
+//! dexel resampling error; Museth 2013 on keeping a sparse grid apart
+//! from its transform). The column model is the classic Z-map with a
+//! second (floor) height per column. No vendor material consulted.
+//!
+//! ## The laws here
+//!
+//! - **Re-index, never re-sample.** A turn that keeps the tool axis on
+//!   the column axis (flip over X or Y, quarter turns about Z, and
+//!   their products: the eight signed permutations that keep Z on +-Z)
+//!   maps every column centre onto a column centre of an image lattice
+//!   exactly. Such a carry moves numbers between cells and loses
+//!   nothing; every other rotation (a side-on turn, 30 degrees about Z)
+//!   would need a re-sample at the grid pitch, and is refused by name
+//!   ([`CARRY_TURN_REFUSAL`]), never guessed.
+//! - **Two sides.** A column holds material from its floor up to its
+//!   top. Upright cuts only lower tops; a flip swaps the sides
+//!   (`top' = tz - floor`, `floor' = tz - top`). A column cut through
+//!   (`top < floor`) stays cut through on either side, so its damage
+//!   cannot be flipped out of sight.
+//! - **The floor is judged once it has faced a tool.** After a flip the
+//!   floor is the face an earlier setup machined: the verdict then
+//!   measures the floor against the part's bottom as well as the top
+//!   against its top. A body never flipped is judged exactly as the
+//!   one-sided column verdict always was (single-setup verdicts do not
+//!   move).
+
+use super::deviate::{Deviation, deviate};
+use super::dexel::Dexel;
+use super::kernel::{StockError, part_surface};
+
+use crate::geometry::{Point3, Triangle};
+
+/// The refusal for a turn the lattice cannot carry exactly.
+pub const CARRY_TURN_REFUSAL: &str = "the program sim carries the machined body only through flips over X or Y and quarter turns about Z (the turns that keep the tool axis vertical); this turn would re-sample the body at the grid pitch";
+
+/// How close a rotation entry must sit to -1, 0 or 1 to be read as one.
+const UNIT_EPS: f64 = 1e-9;
+
+/// A rigid transform whose rotation keeps Z on +-Z and maps the XY
+/// axes onto +-X / +-Y: `xy' = m * xy + t.xy`, `z' = s * z + t.z`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LatticeTurn {
+    m: [[i8; 2]; 2],
+    s: i8,
+    t: [f64; 3],
+}
+
+fn unit(v: f64) -> Option<i8> {
+    if (v - 1.0).abs() <= UNIT_EPS {
+        Some(1)
+    } else if (v + 1.0).abs() <= UNIT_EPS {
+        Some(-1)
+    } else if v.abs() <= UNIT_EPS {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+impl LatticeTurn {
+    /// The identity: carries a body onto itself.
+    pub const IDENTITY: LatticeTurn = LatticeTurn { m: [[1, 0], [0, 1]], s: 1, t: [0.0; 3] };
+
+    /// Read a rotation matrix (row-major, `p' = r * p + t`) as a lattice
+    /// turn, or refuse by name.
+    ///
+    /// # Errors
+    /// A non-finite transform, a rotation that is not a signed
+    /// permutation keeping Z vertical, or one that mirrors.
+    pub fn from_matrix(r: [[f64; 3]; 3], t: [f64; 3]) -> Result<Self, String> {
+        if r.iter().flatten().chain(t.iter()).any(|v| !v.is_finite()) {
+            return Err("the transform between the setups is not finite".into());
+        }
+        let mut q = [[0i8; 3]; 3];
+        for (i, row) in r.iter().enumerate() {
+            for (j, v) in row.iter().enumerate() {
+                q[i][j] = unit(*v).ok_or(CARRY_TURN_REFUSAL)?;
+            }
+        }
+        let vertical = q[2][0] == 0 && q[2][1] == 0 && q[0][2] == 0 && q[1][2] == 0 && q[2][2] != 0;
+        let m = [[q[0][0], q[0][1]], [q[1][0], q[1][1]]];
+        let row_ok = |a: [i8; 2]| (a[0] == 0) != (a[1] == 0);
+        let col_ok = (m[0][0] == 0) != (m[1][0] == 0) && (m[0][1] == 0) != (m[1][1] == 0);
+        if !(vertical && row_ok(m[0]) && row_ok(m[1]) && col_ok) {
+            return Err(CARRY_TURN_REFUSAL.into());
+        }
+        let det = i32::from(m[0][0]) * i32::from(m[1][1]) - i32::from(m[0][1]) * i32::from(m[1][0]);
+        if det * i32::from(q[2][2]) != 1 {
+            return Err("the transform between the setups mirrors the part - no rigid re-clamp does that".into());
+        }
+        Ok(LatticeTurn { m, s: q[2][2], t })
+    }
+
+    /// Does this turn put the part upside down?
+    #[must_use]
+    pub fn flips(&self) -> bool {
+        self.s < 0
+    }
+
+    /// Does it swap the X and Y axes (a quarter turn)?
+    #[must_use]
+    pub fn swaps_xy(&self) -> bool {
+        self.m[0][0] == 0
+    }
+
+    /// Map a point.
+    #[must_use]
+    pub fn apply(&self, p: Point3) -> Point3 {
+        let (m, t) = (self.m, self.t);
+        Point3::new(
+            f64::from(m[0][0]) * p.x + f64::from(m[0][1]) * p.y + t[0],
+            f64::from(m[1][0]) * p.x + f64::from(m[1][1]) * p.y + t[1],
+            f64::from(self.s) * p.z + t[2],
+        )
+    }
+
+    /// The XY pre-image of an image point: `m` is orthogonal, so its
+    /// inverse is its transpose.
+    fn back_xy(&self, x: f64, y: f64) -> (f64, f64) {
+        let (m, t) = (self.m, self.t);
+        let (u, v) = (x - t[0], y - t[1]);
+        (f64::from(m[0][0]) * u + f64::from(m[1][0]) * v, f64::from(m[0][1]) * u + f64::from(m[1][1]) * v)
+    }
+}
+
+/// The machined body: the column grid's tops plus a floor per column
+/// (`+inf` where the column holds no material at all).
+#[derive(Clone, Debug)]
+pub struct Body {
+    pub dex: Dexel,
+    floor: Vec<f64>,
+    floor_judged: bool,
+}
+
+impl Body {
+    /// A body whose every material column stands on one floor height
+    /// (the box and cylinder stocks).
+    #[must_use]
+    pub fn on_floor(dex: Dexel, z: f64) -> Self {
+        let floor = (0..dex.nx * dex.ny).map(|k| if dex.top_at(k).is_finite() { z } else { f64::INFINITY }).collect();
+        Body { dex, floor, floor_judged: false }
+    }
+
+    /// A body whose floor is the lowest surface of a stock mesh (the
+    /// from-model stock): the mesh read from below.
+    #[must_use]
+    pub fn on_mesh(dex: Dexel, facets: &[Triangle]) -> Self {
+        let floor = bottom_surface(facets, &dex).into_iter().map(|b| if b.is_finite() { b } else { f64::INFINITY }).collect();
+        Body { dex, floor, floor_judged: false }
+    }
+
+    /// The floor under column `k` (`+inf`: no material).
+    #[must_use]
+    pub fn floor_at(&self, k: usize) -> f64 {
+        self.floor.get(k).copied().unwrap_or(f64::INFINITY)
+    }
+
+    /// Has the floor faced a tool, so the verdict judges it?
+    #[must_use]
+    pub fn floor_judged(&self) -> bool {
+        self.floor_judged
+    }
+
+    /// Is column `k` material-free (air, or cut through)?
+    #[must_use]
+    pub fn empty_at(&self, k: usize) -> bool {
+        let (t, f) = (self.dex.top_at(k), self.floor_at(k));
+        !(t.is_finite() && f.is_finite()) || t < f
+    }
+
+    /// The material volume standing in the body.
+    #[must_use]
+    pub fn volume(&self) -> f64 {
+        let a = self.dex.cell * self.dex.cell;
+        (0..self.dex.nx * self.dex.ny)
+            .filter(|&k| !self.empty_at(k))
+            .map(|k| (self.dex.top_at(k) - self.floor_at(k)) * a)
+            .sum()
+    }
+
+    /// The bounds of the material standing, `None` if there is none.
+    #[must_use]
+    pub fn bounds(&self) -> Option<(Point3, Point3)> {
+        let h = self.dex.cell * 0.5;
+        let mut lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut hi = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for iy in 0..self.dex.ny {
+            for ix in 0..self.dex.nx {
+                let k = ix + iy * self.dex.nx;
+                if self.empty_at(k) {
+                    continue;
+                }
+                let c = self.dex.center(ix, iy);
+                lo = Point3::new(lo.x.min(c.x - h), lo.y.min(c.y - h), lo.z.min(self.floor_at(k)));
+                hi = Point3::new(hi.x.max(c.x + h), hi.y.max(c.y + h), hi.z.max(self.dex.top_at(k)));
+            }
+        }
+        (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+    }
+
+    /// The same body seen through `turn`: its lattice re-indexed onto
+    /// the image lattice, heights mapped (and swapped by a flip). No
+    /// value is interpolated.
+    ///
+    /// # Errors
+    /// A lattice the image cannot hold (never for a well-formed body).
+    pub fn carry(&self, turn: &LatticeTurn) -> Result<Body, String> {
+        let d = &self.dex;
+        let (w, h) = (d.nx as f64 * d.cell, d.ny as f64 * d.cell);
+        let corners = [(d.x0, d.y0), (d.x0 + w, d.y0), (d.x0, d.y0 + h), (d.x0 + w, d.y0 + h)];
+        let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
+        for (x, y) in corners {
+            let p = turn.apply(Point3::new(x, y, 0.0));
+            x0 = x0.min(p.x);
+            y0 = y0.min(p.y);
+        }
+        let (nx, ny) = if turn.swaps_xy() { (d.ny, d.nx) } else { (d.nx, d.ny) };
+        let (s, tz) = (f64::from(turn.s), turn.t[2]);
+        let mut top = vec![f64::NEG_INFINITY; nx * ny];
+        let mut floor = vec![f64::INFINITY; nx * ny];
+        for jy in 0..ny {
+            for jx in 0..nx {
+                let cx = x0 + (jx as f64 + 0.5) * d.cell;
+                let cy = y0 + (jy as f64 + 0.5) * d.cell;
+                let (px, py) = turn.back_xy(cx, cy);
+                let (ix, iy) = (((px - d.x0) / d.cell).floor(), ((py - d.y0) / d.cell).floor());
+                if !(ix >= 0.0 && iy >= 0.0 && ix < d.nx as f64 && iy < d.ny as f64) {
+                    return Err(format!("the carried lattice lost column ({jx}, {jy}) - refused rather than guessed"));
+                }
+                let k = ix as usize + iy as usize * d.nx;
+                let (t, f) = (d.top_at(k), self.floor_at(k));
+                let j = jx + jy * nx;
+                if s > 0.0 {
+                    top[j] = t + tz;
+                    floor[j] = f + tz;
+                } else {
+                    top[j] = tz - f;
+                    floor[j] = tz - t;
+                }
+            }
+        }
+        let stock_z = top.iter().copied().filter(|v| v.is_finite()).fold(f64::NEG_INFINITY, f64::max);
+        let stock_z = if stock_z.is_finite() { stock_z } else { 0.0 };
+        let dex = Dexel::from_grid(x0, y0, d.cell, nx, ny, stock_z, top);
+        Ok(Body { dex, floor, floor_judged: self.floor_judged || turn.flips() })
+    }
+
+    /// The verdict against the part, in the body's frame: the top
+    /// against the part's top as the column verdict always read it, and,
+    /// once the floor has faced a tool, the floor against the part's
+    /// bottom. Per column the worse of the two stands (a gouge before
+    /// rest); the aggregates add up.
+    ///
+    /// # Errors
+    /// A non-finite tolerance.
+    pub fn deviate(&self, facets: &[Triangle], tol: f64) -> Result<Deviation, StockError> {
+        let top = deviate(&self.dex, facets, tol)?;
+        if !self.floor_judged {
+            return Ok(top);
+        }
+        let d = &self.dex;
+        let neg: Vec<f64> = self.floor.iter().map(|f| -f).collect();
+        let mirror = Dexel::from_grid(d.x0, d.y0, d.cell, d.nx, d.ny, -d.stock_z, neg);
+        let flipped: Vec<Triangle> = facets.iter().map(mirror_z).collect();
+        let mut bot = deviate(&mirror, &flipped, tol)?;
+        let back = |p: Option<Point3>| p.map(|p| Point3::new(p.x, p.y, -p.z));
+        bot.max_rest_at = back(bot.max_rest_at);
+        bot.max_gouge_at = back(bot.max_gouge_at);
+        Ok(merge(top, bot))
+    }
+
+    /// The tops as the eye should draw them: a column with no material
+    /// (cut through on either side) is air, not a sheet at its last top.
+    #[must_use]
+    pub fn display(&self) -> Dexel {
+        if !self.floor_judged {
+            return self.dex.clone();
+        }
+        let mut d = self.dex.clone();
+        for k in 0..d.nx * d.ny {
+            if self.empty_at(k) {
+                d.set(k, f64::NEG_INFINITY);
+            }
+        }
+        d
+    }
+}
+
+fn mirror_z(t: &Triangle) -> Triangle {
+    let m = |p: Point3| Point3::new(p.x, p.y, -p.z);
+    Triangle::new(m(t.a), m(t.c), m(t.b))
+}
+
+/// The lowest facet surface over each column of `dex`'s lattice
+/// (`-inf` from `part_surface`'s law is mapped back to `+inf` by the
+/// callers: no surface, no floor).
+fn bottom_surface(facets: &[Triangle], dex: &Dexel) -> Vec<f64> {
+    let flipped: Vec<Triangle> = facets.iter().map(mirror_z).collect();
+    part_surface(&flipped, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny).into_iter().map(|z| -z).collect()
+}
+
+fn merge(top: Deviation, bot: Deviation) -> Deviation {
+    let tol = top.tol;
+    let dev = top
+        .dev
+        .iter()
+        .zip(&bot.dev)
+        .map(|(&a, &b)| match (a.is_nan(), b.is_nan()) {
+            (true, true) => f64::NAN,
+            (true, false) => b,
+            (false, true) => a,
+            (false, false) if a < -tol || b < -tol => a.min(b),
+            (false, false) => a.max(b),
+        })
+        .collect();
+    let (max_rest, max_rest_at) =
+        if bot.max_rest > top.max_rest { (bot.max_rest, bot.max_rest_at) } else { (top.max_rest, top.max_rest_at) };
+    let (max_gouge, max_gouge_at) = if bot.max_gouge > top.max_gouge {
+        (bot.max_gouge, bot.max_gouge_at)
+    } else {
+        (top.max_gouge, top.max_gouge_at)
+    };
+    Deviation {
+        cells_x: top.cells_x,
+        cells_y: top.cells_y,
+        cell: top.cell,
+        tol,
+        dev,
+        rest_cells: top.rest_cells + bot.rest_cells,
+        gouge_cells: top.gouge_cells + bot.gouge_cells,
+        rest_volume: top.rest_volume + bot.rest_volume,
+        gouge_volume: top.gouge_volume + bot.gouge_volume,
+        max_rest,
+        max_gouge,
+        max_rest_at,
+        max_gouge_at,
+    }
+}

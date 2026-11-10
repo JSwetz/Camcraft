@@ -40,7 +40,44 @@ use super::*;
 /// before (the arrival law).
 /// v50: operation labels and within-setup order become persisted. An old
 /// reader must refuse the file rather than silently post in name order.
-pub const PROJECT_VERSION: u32 = 50;
+/// v51 (#196): a setup may carry its picked program offset
+/// (`work_offset`, a G-word). Absent reads as the inferred law every v50
+/// file posted with; an old reader must refuse the file rather than
+/// silently post a picked G55 setup at G54.
+/// v52 (#329): a work-offset height names no slot of its own - it reads
+/// its setup's. Older files' per-height slots move onto their setup when
+/// the setup agreed and refuse by name when not (`wcs_migrate`); an old
+/// reader must refuse a v52 file rather than read `{"work_offset": {}}`.
+/// v53 (#326): a setup may hold the part turned (`part_alignment`, a
+/// rigid transform document -> setup frame). Absent reads as "as
+/// modelled", so every v52 file loads unchanged; an old reader must
+/// refuse a v53 file rather than machine a flipped setup unflipped.
+/// v54 (#342): one WCS per setup - a setup names one WCS entity
+/// (`"wcs": "<name>"`), and `work_offset` is only the word the post
+/// writes for it. Each older setup keeps the origin of the slot it
+/// posted; slots no setup posted are dropped with a load note
+/// (`wcs_one`). An old reader must refuse a v54 file rather than read a
+/// string where it expects a slot list.
+/// v55 (#343): a setup may own its machine and post (`SetupDto::machine`
+/// / `SetupDto::post`); absent follows the document's, so a v54 file
+/// steps up unchanged. An old reader must refuse a v55 file rather than
+/// post every setup on the document's machine.
+/// v56 (#316): a setup may be placed relative to another
+/// (`SetupDto::relative_to`), so a change of that setup's part alignment
+/// carries into it. Absent links nothing, so a v55 file steps up
+/// unchanged; a link naming no setup, or a loop of links, is corrupt. An
+/// old reader must refuse a v56 file rather than let an edit of one
+/// setup leave its re-clamp behind.
+/// v57 (#320): a setup may pick where its stock comes from
+/// (`SetupDto::stock_source`: its own, or what the setup before leaves).
+/// Absent reads as #317's implicit rule, so a v56 file steps up and
+/// simulates unchanged; an unknown word is corrupt. An old reader must
+/// refuse a v57 file rather than sim a setup from the wrong stock.
+/// v58 (#368): a tool may carry a modelled body (`body` on the tool,
+/// `tool_body_wire`). Absent is the holder cylinder every v57 file
+/// judged; an old reader must refuse a v58 file rather than drop the
+/// body and judge the smaller cylinder in its place.
+pub const PROJECT_VERSION: u32 = 58;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -50,6 +87,15 @@ pub enum ProjectError {
     UnsupportedVersion(u32),
     #[error("malformed project file: {0}")]
     Corrupt(String),
+    /// #329: an older file whose operations measured from different work
+    /// offsets inside one setup - opening it would re-point a zero.
+    #[error(
+        "work offsets disagree - since project v52 a setup's work offset is program zero for \
+         every operation in it, and opening this file would silently re-point an operation. \
+         Make each setup's operations measure from one offset (in the release that wrote the \
+         file), then reopen:\n{0}"
+    )]
+    WorkOffsetConflict(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,6 +166,14 @@ pub struct ProjectFile {
     /// a check could read; an unknown word refuses the file by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// "Skip pauses and homes" at post (#110), additive (no version
+    /// step): an absent key is off - what every older document posted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_stops: bool,
+    /// "One file per operation" at post (#111), additive like
+    /// `skip_stops`: an absent key is one combined program.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_op_files: bool,
     pub entities: Vec<EntityDto>,
 }
 
@@ -141,6 +195,10 @@ pub struct PostOptionsDto {
     /// `"g76"` for the cycle; absent is the G32 passes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threading: Option<String>,
+    /// `"inch"` / `"mm"`: the unit the program ends in (#596), additive
+    /// (no version step); absent leaves the program's unit modal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_units: Option<String>,
 }
 
 /// The file mirror of the `PostRef` singleton (M3.3): exactly the two
@@ -175,6 +233,8 @@ pub enum EntityKind {
     Tool,
     Operation,
     Setup,
+    /// A Pause / Home entry of the operation list (#155).
+    Entry,
 }
 
 /// The file mirror of `StockShape`, kept separate so the domain enum can
@@ -270,6 +330,18 @@ pub struct ToolDto {
     /// absent means "post by list position", what every older tool did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
+    /// #368 (v58): the tool's modelled body. Absent is none - the
+    /// holder cylinder, what every older tool judged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<super::tool_body_wire::ToolBodyDto>,
+    /// #630 addition, additive (no version step): the lathe tool
+    /// orientation (LinuxCNC 1-9). Absent from every older file and
+    /// written only when stated; absent reads as the kind's default
+    /// (`orientation::default_for`) - 2 for a turning insert, 3 for a
+    /// boring bar. An out-of-range code is refused at read by the
+    /// tool sanity law (`validate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<u8>,
 }
 
 fn centre_cutting() -> bool {
@@ -365,6 +437,8 @@ impl ToolDto {
             flutes: t.flutes,
             center_cutting: t.center_cutting,
             number: None,
+            body: None,
+            orientation: t.orientation,
         }
     }
 
@@ -404,6 +478,7 @@ impl ToolDto {
             }),
             flutes: self.flutes,
             center_cutting: self.center_cutting,
+            orientation: self.orientation,
         }
     }
 }

@@ -18,7 +18,10 @@
 //! gesture tests drive `crate::interact::pick_at` and the camera arms
 //! through egui's own pointer events - click-and-pick, the travel
 //! threshold, MMB/RMB, wheel, the Face radio and anchor picking. The
-//! snapshot is the churn gate for the per-panel migration steps. M1.4's
+//! snapshot was the churn gate for the per-panel migration steps; since
+//! #255 the pixel goldens ride the release lane (`#[ignore]`, run and
+//! regenerated only at a cut) and `tests/structural.rs` asserts their
+//! intent as text in the default suite. M1.4's
 //! graphical tool editor adds the first floating surface: the flow test
 //! drives the window (Edit opens, drag stages, Apply lands, Delete
 //! ghost-closes) and `tool_editor_snapshot` pins its pixels beside the
@@ -76,10 +79,36 @@ fn empty_egui_meshes_are_filtered_before_gpu_submission() {
 }
 
 mod face_origin;
+mod spindle_row;
 mod stock_size;
 mod stock_fit_sides;
 mod layout;
+mod machines_pane;
+mod machines_edit;
 mod unsaved;
+mod post_refusal;
+mod gcode_viewer;
+mod first_setup;
+mod structural;
+// #554: the plane row's click takes the face, an axis row's the edge.
+mod plane_face_pick;
+// #664: a left Setups page disarms its picks.
+mod setup_picks_disarm;
+mod one_wcs;
+// #343: the per-setup browser tree.
+mod setup_tree;
+mod mcp_live;
+// #155: Pause / Home entries in the operation list.
+mod program_entry;
+// #371: the tool editor's Body section.
+mod tool_body;
+// #93: the tool editor's spun-profile (Profile) section.
+mod tool_profile;
+// #441: the Theme ribbon door; the Stock page shows stock only.
+mod theme_door;
+mod recent_door;
+// #509: the Fixtures page rows fit the pane.
+mod fixture_rows;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
@@ -309,6 +338,26 @@ fn click_toggles_view_state() {
     harness.run();
     assert_eq!(harness.state().state.display, crate::state::DisplayMode::Wireframe);
     assert!(harness.state().state.pending.is_empty(), "a view toggle queues nothing");
+}
+
+/// #434: the Projection radios flip the viewport's projection mode -
+/// view state on the same law as the Solids radios (never a command,
+/// never the undo stack), reached through a real pointer event.
+#[test]
+fn projection_radios_flip_the_viewport_mode() {
+    let mut harness = shell_harness();
+    assert_eq!(
+        harness.state().state.cam.projection,
+        crate::viewport::ProjectionMode::Perspective,
+        "the house default stays perspective"
+    );
+    harness.get_by_label("Ortho").click();
+    harness.run();
+    assert_eq!(harness.state().state.cam.projection, crate::viewport::ProjectionMode::Orthographic);
+    harness.get_by_label("Perspective").click();
+    harness.run();
+    assert_eq!(harness.state().state.cam.projection, crate::viewport::ProjectionMode::Perspective);
+    assert!(harness.state().state.pending.is_empty(), "a mode switch queues nothing");
 }
 
 #[test]
@@ -1622,7 +1671,7 @@ fn anchor_click_queues_setwcs() {
 #[test]
 fn origin_page_shows_the_anchor_grid_and_arms_pick_mode() {
     let mut harness = shell_harness();
-    harness.state_mut().state.ui_target = UiTarget::WcsSlot(0);
+    harness.state_mut().state.ui_target = UiTarget::Wcs;
     harness.run();
     // The draft default highlight is center (anchor_xy 4), so that cell
     // already reads bracketed - imgui's law, pinned here too.
@@ -1674,10 +1723,12 @@ fn headless_run_succeeds() {
 
 /// The churn gate for the migration: one rendered frame of the whole shell,
 /// compared to `tests/snapshots/egui_app.png` (relative to this crate).
-/// Regenerate deliberately with `UPDATE_SNAPSHOTS=1`; a failure writes
-/// `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
+/// Release lane since #255: PRs never change the PNG; it is regenerated
+/// once at a cut with `UPDATE_SNAPSHOTS=1` (with `--ignored`, CWD
+/// crates/ui); a failure writes `.new.png`/`.diff.png` beside it for eyes. Two Windows-refreshed goldens
 /// below use a Linux-only threshold for isolated antialiasing differences.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn egui_shell_snapshot() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1688,9 +1739,11 @@ fn egui_shell_snapshot() {
 /// The pixels are process-global: `theme::current()` is ONE live table
 /// for the whole test binary, and the light golden flips it for its
 /// frames (the sync law is the shipping code, not a test-local poke).
-/// The dark snapshot tests read that same table through their frames,
-/// so all three share this lock - without it a parallel dark frame
+/// The dark snapshot tests (and their structural twins) read that same
+/// table through their frames, so all of them share this lock - without it a parallel dark frame
 /// could catch the light table and fail its own golden, and vice versa.
+/// Any other test whose frames move the world's theme (the Theme door's
+/// switch, #605) writes that table too and must take this lock as well.
 static SNAPSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn snapshot_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -1705,6 +1758,7 @@ fn snapshot_guard() -> std::sync::MutexGuard<'static, ()> {
 /// UPDATE_SNAPSHOTS=1; the restore at the end leaves the house look
 /// every other frame expects.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn egui_shell_snapshot_light() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1808,6 +1862,7 @@ fn tool_editor_window_edits_live_and_stages_through_commands() {
 /// keep its "window closed by default" law: fields left, banded to-scale
 /// profile right, floating over the dock. Regenerate with UPDATE_SNAPSHOTS=1.
 #[test]
+#[ignore = "release lane (#255): pixel snapshot golden, run and regenerated only at minor/major cuts (gate -Tier release); structural twin in tests/structural.rs"]
 fn tool_editor_snapshot() {
     let _g = snapshot_guard();
     let mut harness = shell_harness();
@@ -1921,6 +1976,44 @@ fn file_keys_queue_their_commands() {
         typing.state().pending.is_empty(),
         "Ctrl+O armed a dialog over a focused text field: {:?}",
         typing.state().pending
+    );
+}
+
+/// #434: bare P flips perspective/ortho in place - a viewport-layer
+/// key like F, view state through `actions`, so it arms no command,
+/// and Ctrl+P keeps its post dialog exactly as `file_keys_queue_their_commands`
+/// proves. The typing gate applies to it the same way.
+#[test]
+fn bare_p_flips_projection_without_a_command() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(400.0, 200.0))
+        .build_ui_state(shortcuts_only, State::new());
+    harness.run();
+    let press_p = |h: &mut Harness<'static, State>, mods: Modifiers| {
+        h.input_mut().events.push(Event::ModifiersChanged(mods));
+        h.input_mut().events.push(Event::Key {
+            key: Key::P,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: mods,
+        });
+        h.run();
+    };
+    let mode = |h: &Harness<'static, State>| h.state().cam.projection;
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective);
+    press_p(&mut harness, Modifiers::NONE);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Orthographic, "P to ortho");
+    press_p(&mut harness, Modifiers::NONE);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective, "P back to perspective");
+    assert!(harness.state().pending.is_empty(), "the flip armed a command");
+    // Ctrl+P stays on the post lane: the key splits, the flip stays out.
+    press_p(&mut harness, Modifiers::COMMAND);
+    assert_eq!(mode(&harness), crate::viewport::ProjectionMode::Perspective, "Ctrl+P must not flip");
+    assert!(
+        harness.state().pending.iter().any(|c| matches!(c, CommandKind::PostProgramDialog)),
+        "Ctrl+P lost its post: {:?}",
+        harness.state().pending
     );
 }
 
@@ -2549,6 +2642,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Save, "Save the project\tCtrl+S"),
         (Cmd::SaveAs, "Save the project under a new name\tCtrl+Shift+S"),
         (Cmd::Post, "Post NC program (validation gate), then review it\tCtrl+P"),
+        (Cmd::Setups, "Setups: create, activate and delete the document's setups"),
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),
@@ -2566,8 +2660,9 @@ fn tips_match_the_imgui_table() {
         (Cmd::Deviate, "Judge the program's stock against the model (deviation map)"),
         (
             Cmd::View,
-            "Show or hide the browser and properties panes, or reset the layout",
+            "Show or hide the browser, properties and machines panes, or reset the layout",
         ),
+        (Cmd::Theme, "Pick the document's theme and colour-vision mode (undoable)"),
     ];
     for (c, want) in rows {
         assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");
@@ -3992,6 +4087,7 @@ fn simulate_cell_arms_transport_and_stop_disarms() {
 #[test]
 fn deviate_readout_sentences_each_truth() {
     use camcraft_app::geometry::Point3;
+    use camcraft_app::units::Unit;
     let d = |rest_cells, gouge_cells, max_rest, max_gouge, tol| {
         camcraft_app::stock_sim::Deviation {
             cells_x: 8,
@@ -4009,23 +4105,23 @@ fn deviate_readout_sentences_each_truth() {
             max_gouge_at: (gouge_cells > 0).then(|| Point3::new(-20.0, 5.5, 16.0)),
         }
     };
-    let clean = crate::actions::deviate_readout(&d(0, 0, 0.0, 0.005, 0.01));
+    let clean = crate::actions::deviate_readout(&d(0, 0, 0.0, 0.005, 0.01), Unit::Millimeters);
     assert_eq!(clean, "deviate: clean - the program meets the model everywhere");
     // A within-tolerance worst is still the clean sentence - the
     // display tolerance IS the verdict, per DEV_TOL's law.
     assert_eq!(
-        crate::actions::deviate_readout(&d(3, 0, 0.004, 0.0, 0.01)),
+        crate::actions::deviate_readout(&d(3, 0, 0.004, 0.0, 0.01), Unit::Millimeters),
         clean,
         "rest thinner than tolerance must not shout"
     );
-    let rest = crate::actions::deviate_readout(&d(40, 0, 2.0, 0.0, 0.01));
+    let rest = crate::actions::deviate_readout(&d(40, 0, 2.0, 0.0, 0.01), Unit::Millimeters);
     assert!(
         rest.starts_with("deviate: REST 40 cells (80.00")
             && rest.contains("worst 2.00 mm at (1.25, -0.75, z 18.00)"),
         "the rest sentence: {rest}"
     );
     assert!(!rest.contains("GOUGE"), "no gouge, no gouge clause: {rest}");
-    let both = crate::actions::deviate_readout(&d(1, 7, 0.5, 1.25, 0.01));
+    let both = crate::actions::deviate_readout(&d(1, 7, 0.5, 1.25, 0.01), Unit::Millimeters);
     assert!(both.contains("REST") && both.contains("GOUGE"), "two truths, one line: {both}");
     assert!(both.contains("(-20.00, 5.50, z 16.00)"), "the gouge locates too: {both}");
     // A located aggregate whose point is gone prints "?" - an honest
@@ -4033,12 +4129,46 @@ fn deviate_readout_sentences_each_truth() {
     let mut lost = d(0, 4, 0.0, 0.9, 0.01);
     lost.max_gouge_at = None;
     assert!(
-        crate::actions::deviate_readout(&lost).contains("GOUGE 4 cells") && both_needs_question(&lost),
+        crate::actions::deviate_readout(&lost, Unit::Millimeters).contains("GOUGE 4 cells") && both_needs_question(&lost),
         "the missing WHERE must show as '?'"
     );
     fn both_needs_question(d: &camcraft_app::stock_sim::Deviation) -> bool {
-        crate::actions::deviate_readout(d).ends_with("mm?)")
+        crate::actions::deviate_readout(d, camcraft_app::units::Unit::Millimeters).ends_with("mm?)")
     }
+}
+
+/// The same verdict told through the inch lens: every number divides by
+/// 25.4 with two extra decimals (the `len` law), volumes a third more,
+/// and the suffix words ride along - the `sim_readout` sibling, the
+/// same rule. The mm sentences above are pinned byte-identical.
+#[test]
+fn deviate_readout_rides_the_units_lens() {
+    use camcraft_app::geometry::Point3;
+    use camcraft_app::units::Unit;
+    let dev = camcraft_app::stock_sim::Deviation {
+        cells_x: 8,
+        cells_y: 8,
+        cell: 1.0,
+        tol: 0.01,
+        dev: Vec::new(),
+        rest_cells: 40,
+        gouge_cells: 7,
+        rest_volume: 80.0,
+        gouge_volume: 8.75,
+        max_rest: 2.0,
+        max_gouge: 1.25,
+        max_rest_at: Some(Point3::new(1.25, -0.75, 18.0)),
+        max_gouge_at: Some(Point3::new(-20.0, 5.5, 16.0)),
+    };
+    let s = crate::actions::deviate_readout(&dev, Unit::Inches);
+    assert!(
+        s.contains("REST 40 cells (0.00488 in³, worst 0.0787 in at (0.0492, -0.0295, z 0.7087))"),
+        "the rest sentence in inches: {s}"
+    );
+    assert!(
+        s.contains("GOUGE 7 cells (0.00053 in³, worst 0.0492 in at (-0.7874, 0.2165, z 0.6299))"),
+        "the gouge sentence in inches: {s}"
+    );
 }
 
 /// The Deviate ribbon cell is Simulate's sibling under the same laws:
@@ -4076,7 +4206,7 @@ fn deviate_cell_stores_the_verdict_as_view_state() {
     {
         let st = &harness.state().state;
         let ps = st.program_sim.as_ref().expect("the cell must arm the verdict");
-        assert_eq!(st.status, crate::actions::deviate_readout(&ps.dev));
+        assert_eq!(st.status, crate::actions::deviate_readout(&ps.dev, st.units()));
         assert!(!st.status.contains("refused"), "the seed judges: {}", st.status);
         assert!(panes::toggled(Cmd::Deviate, st));
         // The command law: judging the program writes no world state.
@@ -4340,8 +4470,8 @@ fn stock_eye_hides_the_viewport_stock_without_removing_it_from_the_document() {
     harness.run_steps(2);
     let stock_name = camcraft_app::setup::stock_entity_name(&harness.state().state.world, None);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
-    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock)).expect("stock row");
-    let eye = egui::pos2(216.0, 179.0 + (row as f32 + 0.5) * theme::current().row_height);
+    let row = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Stock(_))).expect("stock row");
+    let eye = egui::pos2(216.0, 200.0 + (row as f32 + 0.5) * theme::current().row_height);
     assert!(world::collect(&harness.state().state).parts.iter().any(|part| part.stock));
 
     set_pos(&mut harness, eye);
@@ -4456,18 +4586,20 @@ fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
 }
 
 #[test]
-fn setup_navigation_is_conditional_and_operations_keep_a_flat_browser() {
+fn setup_navigation_is_always_reachable_and_operations_keep_a_flat_browser() {
     let plan = panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]);
     let setup_group = plan.iter().find(|group| group.title == "Setup").expect("setup group");
     assert_eq!(
         setup_group.cells.as_slice(),
-        &[Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
-        "the Setup toolbar matches its original cells"
+        &[Cmd::Setups, Cmd::Stock, Cmd::Origin, Cmd::Tools, Cmd::Machine],
+        "the Setup toolbar opens on the Setups door (#322)"
     );
 
+    // #322: a fresh document shows the manager too - its page is where
+    // the first setup is created.
     let blank = State::new();
     let (rows, leaves) = panes::browser_rows(&blank);
-    assert!(!leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
+    assert!(leaves.iter().any(|leaf| matches!(leaf, panes::Leaf::Setups)));
     assert!(!rows.iter().any(|row| row.label == "Global Setup"));
     assert!(rows.iter().any(|row| row.label == "Operations"));
 
@@ -4489,7 +4621,7 @@ fn setup_navigation_is_conditional_and_operations_keep_a_flat_browser() {
     let op = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour1"))
         .expect("stable operation key in browser");
     assert_eq!(rows[op].label, "Finish contour");
-    assert_eq!(rows[op].depth, 1, "operation sits directly beneath Operations");
+    assert_eq!(rows[op].depth, 2, "operation sits beneath its setup's Operations (#343)");
     assert!(!rows.iter().any(|row| row.label == "Global Setup"));
 
     let source = model::find_by_name(&seeded.state.world, "Contour1").expect("seed op");
@@ -4532,12 +4664,13 @@ fn dragging_an_operation_row_reorders_within_global_setup() {
     let second = leaves.iter().position(|leaf| matches!(leaf, panes::Leaf::Op(name) if name == "Contour2"))
         .expect("second row");
     assert_eq!(second, first + 1);
-    // The browser tree begins at y=179 below its view controls in the
+    // The browser tree begins at y=200 below its view controls (the
+    // projection radios joined them for #434) in the
     // 1280x720 shell. The row indices come from the current flat browser,
     // so the drag follows the rows after setup nesting was removed.
     let row_h = theme::current().row_height;
-    let from = egui::pos2(120.0, 179.0 + (second as f32 + 0.5) * row_h);
-    let to = egui::pos2(120.0, 179.0 + (first as f32 + 0.25) * row_h);
+    let from = egui::pos2(120.0, 200.0 + (second as f32 + 0.5) * row_h);
+    let to = egui::pos2(120.0, 200.0 + (first as f32 + 0.25) * row_h);
     set_pos(&mut harness, from);
     button_at(&mut harness, egui::PointerButton::Primary, from, true);
     set_pos(&mut harness, to);
@@ -4629,7 +4762,7 @@ fn close_property_editors_keep_stock_offsets_models_and_tools() {
     let mut harness = shell_harness();
     let targets = [
         UiTarget::Stock,
-        UiTarget::WcsSlot(0),
+        UiTarget::Wcs,
         UiTarget::Model("Block".into()),
         UiTarget::Tool("EM-0600-4FL".into()),
     ];
@@ -4676,17 +4809,17 @@ fn operations_heading_menu_pastes_the_copied_operation() {
     harness.run_steps(2);
     let (_, leaves) = panes::browser_rows(&harness.state().state);
     let row = leaves.iter().position(|leaf| matches!(leaf,
-        panes::Leaf::Parent(panes::BrowserSection::Operations)))
+        panes::Leaf::SetupOps(_)))
         .expect("Operations heading");
     let row_height = theme::current().row_height;
-    let heading = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let heading = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     set_pos(&mut harness, heading);
     button_at(&mut harness, egui::PointerButton::Secondary, heading, true);
     button_at(&mut harness, egui::PointerButton::Secondary, heading, false);
     assert_eq!(harness.state().state.tree_menu, Some(TreeMenuTarget::Operations));
 
     let paste = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 1.5 * row_height);
     set_pos(&mut harness, paste);
     button_at(&mut harness, egui::PointerButton::Primary, paste, true);
     button_at(&mut harness, egui::PointerButton::Primary, paste, false);
@@ -4703,16 +4836,17 @@ fn operation_type_menu_requires_confirmation() {
         panes::Leaf::Op(name) if name == "Contour1"))
         .expect("operation row");
     let row_height = theme::current().row_height;
-    let operation = egui::pos2(90.0, 179.0 + (row as f32 + 0.5) * row_height);
+    let operation = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
     set_pos(&mut harness, operation);
     button_at(&mut harness, egui::PointerButton::Secondary, operation, true);
     button_at(&mut harness, egui::PointerButton::Secondary, operation, false);
     assert_eq!(harness.state().state.tree_menu,
         Some(TreeMenuTarget::Operation("Contour1".into())));
 
-    // Operation, Rename, Copy, Paste, Clear, Delete, section header, Face.
+    // Operation, Rename, Copy, Paste, Clear, Delete, Suppress, After
+    // (#110), add pause / home / optional stop (#155), section header, Face.
     let face = egui::pos2(90.0,
-        179.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 7.5 * row_height);
+        200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + 12.5 * row_height);
     set_pos(&mut harness, face);
     button_at(&mut harness, egui::PointerButton::Primary, face, true);
     button_at(&mut harness, egui::PointerButton::Primary, face, false);
@@ -4728,6 +4862,47 @@ fn operation_type_menu_requires_confirmation() {
     let entity = model::find_by_name(&harness.state().state.world, "Contour1").unwrap();
     assert_eq!(model::operation_of(&harness.state().state.world, &entity).unwrap().params.kind(),
         camcraft_app::operation::OpType::Face);
+}
+
+/// #110: the op menu's Suppress row and an after-action row each queue
+/// their one undoable command.
+#[test]
+fn operation_menu_suppresses_and_sets_the_after_action() {
+    let mut harness = shell_harness();
+    harness.run_steps(2);
+    let (_, leaves) = panes::browser_rows(&harness.state().state);
+    let row = leaves.iter().position(|leaf| matches!(leaf,
+        panes::Leaf::Op(name) if name == "Contour1"))
+        .expect("operation row");
+    let row_height = theme::current().row_height;
+    let operation = egui::pos2(90.0, 200.0 + (row as f32 + 0.5) * row_height);
+    let open_menu = |harness: &mut Harness<'static, ShellUi>| {
+        set_pos(harness, operation);
+        button_at(harness, egui::PointerButton::Secondary, operation, true);
+        button_at(harness, egui::PointerButton::Secondary, operation, false);
+    };
+    let click_row = |harness: &mut Harness<'static, ShellUi>, k: f32| {
+        let at = egui::pos2(90.0, 200.0 + (row as f32 + 1.0) * row_height + panes::DROP_GAP + k * row_height);
+        set_pos(harness, at);
+        button_at(harness, egui::PointerButton::Primary, at, true);
+        button_at(harness, egui::PointerButton::Primary, at, false);
+        harness.run_steps(2);
+    };
+    let op = |harness: &Harness<'static, ShellUi>| {
+        let world = &harness.state().state.world;
+        model::find_by_name(world, "Contour1").and_then(|e| model::operation_of(world, &e)).expect("op")
+    };
+    // Operation, Rename, Copy, Paste, Clear, Delete, then Suppress.
+    open_menu(&mut harness);
+    click_row(&mut harness, 6.5);
+    assert!(op(&harness).suppressed, "the Suppress row suppresses");
+    // ... then the After row, which steps Continue -> Optional -> Program stop.
+    open_menu(&mut harness);
+    click_row(&mut harness, 7.5);
+    assert_eq!(op(&harness).after, camcraft_app::operation::AfterOperation::OptionalStop);
+    open_menu(&mut harness);
+    click_row(&mut harness, 7.5);
+    assert_eq!(op(&harness).after, camcraft_app::operation::AfterOperation::ProgramStop);
 }
 
 #[test]
@@ -4841,7 +5016,8 @@ fn vertex_mode_hover_and_click_pick_a_corner() {
 
 // ------------------------------------------------ M13.5 B: the post offer
 
-/// The Setup pane's post offer (M13.5 B): a lathe mounted over a
+/// The Post node's post offer (M13.5 B; on the setup's Post node since
+/// #441): a lathe mounted over a
 /// document holding a mill post gets one warning line naming the
 /// registry's lathe post, never a switch on the mount itself; the
 /// button queues the same `SelectPost` the combo queues, so the post
@@ -4853,7 +5029,18 @@ fn a_lathe_over_a_mill_post_offers_the_lathe_post_and_rides_undo() {
     use camcraft_app::posting;
     use camcraft_app::schema::PostRef;
     let mut harness = shell_harness();
-    harness.state_mut().state.ui_target = UiTarget::Stock;
+    // #441: the post group lives on the setup's Post node, not the
+    // Stock page.
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.run_steps(2);
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Post),
+    );
     harness.run();
     assert!(
         harness.query_by_label_contains("the current post serves").is_none(),
@@ -4877,9 +5064,8 @@ fn a_lathe_over_a_mill_post_offers_the_lathe_post_and_rides_undo() {
         "the offer names the lathe post (status: {})",
         harness.state().state.status
     );
-    // The post group sits low on the Stock page: bring the button
-    // into the scroll area's view before the press, as the pane's
-    // other deep rows are pressed.
+    // Bring the button into the scroll area's view before the press,
+    // as the pane's other deep rows are pressed.
     harness.get_by_label("Switch post").scroll_to_me();
     harness.run();
     harness.get_by_label("Switch post").click();

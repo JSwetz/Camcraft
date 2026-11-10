@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[build-dependencies]
+chrono = "0.4"
+
 [dependencies]
 camcraft-app = { workspace = true }
 flecs_ecs = { workspace = true }
@@ -23,6 +26,10 @@ egui_dock = { workspace = true }
 # Values directly - every refusal names the key it tripped on, which a
 # derived deserializer's error soup cannot promise.
 serde_json = { workspace = true }
+
+# #144: the Cmd+Q terminate hook (egui_app/os_quit.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
 
 [dev-dependencies]
 # egui's own test harness, for the frame tests in the lib (egui_app) -

@@ -54,7 +54,32 @@ unstated capability into existence.
     coordinates, absolute world, not joint-local (the checker's
     traverse bands and collision sweep read these directly). Linear:
     mm (unit-scaled); rotary: DEGREES, never unit-scaled. Must be
-    finite with `max > min` or the field is dropped.
+    finite with `max > min` or the field is dropped. The file cannot
+    know the work offset, so a linear slide of stroke L is written
+    `-L..L` - the FULL stroke each way, never the machine-frame band
+    (`-500..0` for a 500 mm column refuses every retract above the
+    work origin, #457; the Tormach files follow the same rule).
+  - linear only: `direction` `1` | `-1` (#373) - which way the slide
+    moves for a + command; absent or null is `1`, and anything else
+    refuses the file NAMING the axis. The program frame stays standard
+    (ISO 841); the stated `travel` is the machine's own stroke, so an
+    inverted axis is judged as `-v` against it. The post (#374) writes
+    an inverted X / Y mirrored (sign, I/J/K, G2/G3, G41/G42) through a
+    script that declares `axisInversion = true` (probing too only when it
+    also declares `probeAxisInversion = true`, #392); an inverted Z or any
+    other letter refuses posting by name. A rotary part's numeric `-1` refuses (a reversed
+    rotary is not supported).
+  - linear Z only: `safe_retract` (#495) - the Z, in MACHINE
+    coordinates (the file's length unit, scaled like travel), a post
+    rapids to with `G53 G0 Z..` before a tool change and at program
+    end. Zero is a statement here, not "unstated": `0.0` says machine
+    Z0 is the top of travel (every shipped Tormach file, `vmc.mch`,
+    `tilthead.mch`; the mirror-form default `3axis-vmc.mch` states
+    `"safeRetractZ": 0.0`). Absent or null is unstated, and the
+    Tormach post refuses a non-Tormach machine that states none (the
+    Siemens 840D post, #503, any machine that states none); a
+    non-number, or the key on any other axis, refuses the file naming
+    the axis. The mirror carries it as `safeRetractZ` (mm).
   - rotary only: `axis` `[x,y,z]` — the rotation direction; three
     finite numbers or the file refuses NAMING the axis (a garbled
     tilt vector must never read as "no tilt": the RTCP judgment rides
@@ -71,6 +96,14 @@ unstated capability into existence.
     second station on a one-spindle machine is a named refusal at the
     program gate). A file stating no spindle keeps `None`: the
     unstated-limit law again, never a guessed `Some(1)`.
+  - `live_tool` (issue #33), on the tool station: `{ "c_axis_on",
+    "c_axis_off", "spindle_on", "spindle_off" }` - the builder's words
+    that engage the spindle as a positioned C axis, release it, start
+    the live tool (the post appends `S<rpm>`) and stop it. No public
+    standard fixes them, so a post never guesses: all four non-empty,
+    or the machine states none and a C-axis live-tool section is
+    refused by name. The mirror carries them as
+    `head.liveTool { cAxisOn, cAxisOff, spindleOn, spindleOff }`.
   - `coolants`: entries are `{ "name": "Flood", "mCode": "M8" }` (the
     M-code is the machine's own word — string `"M8"` or bare number
     `8`, both normalized to `M8`; `mcode` spelling reads too) or a
@@ -137,7 +170,9 @@ record is refused instead.
    mirror) and asserts declared kind == inferred kind, so a
    half-registered or self-contradictory definition fails the suite,
    not the shop.
-4. Gate: `cargo test -p camcraft-app --test machine --test posting`,
+4. Gate: `cargo test -p camcraft-app --test machine --test posting
+   --test machine_library` (the last runs the Machines pane's validator,
+   `app::machine::validate`, over every library entry - #287),
    plus a CLI smoke — `post.exe --machine <name>.mch <post>.cps
    <file>.cnc out.nc` over a committed golden stream (a 5-axis
    definition should drive the refusal path in fanuc.cps's `tilt()`

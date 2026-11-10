@@ -1,4 +1,5 @@
-//! LoadMachine: set the document's machine definition (M2.3 stage C).
+//! LoadMachine: set the document's machine definition (M2.3 stage C) -
+//! what every setup that owns no machine mounts (#343).
 //!
 //! Setup furniture, like `SetUnits`: no geometry changes, the command
 //! writes only the world singleton and its inverse writes the previous
@@ -29,7 +30,7 @@ impl LoadMachine {
                 "machine states a limit that cannot be meant".to_owned(),
             ));
         }
-        let prev = machine::of(world);
+        let prev = machine::document_of(world);
         if prev.0 == path && prev.1 == machine {
             return Err(CommandError::Invalid(if machine.is_none() {
                 "no machine is loaded".to_owned()
@@ -67,6 +68,19 @@ impl LoadMachine {
             }
         };
         Self::new(world, crate::posting::builtin_path(name), Some(m))
+    }
+
+    /// Mount a machine picked in the Machines pane's catalogue (#384)
+    /// onto the DOCUMENT: read and validated again here
+    /// (`library::read_for_assign`), so a refused file is refused at the
+    /// front door by its first refusal. The ui routes the same read
+    /// through the active setup's own machine when it owns one.
+    pub fn from_catalogue(
+        world: &World,
+        source: &crate::machine::library::MachineSource,
+    ) -> Result<Self, CommandError> {
+        let (path, m) = crate::machine::library::read_for_assign(source).map_err(CommandError::Invalid)?;
+        Self::new(world, path, Some(m))
     }
 }
 

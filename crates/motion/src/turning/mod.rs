@@ -49,7 +49,7 @@ pub use blade::{
 };
 pub use bore::{bar_spans, bore, centred_nose, BoreParams};
 pub use contour::{
-    chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
+    chamfer, chamfer_in, multi_pass, multi_pass_in, taper, taper_in, ChamferParams, MultiPassParams, TaperParams,
 };
 pub use face::{facing, FacingParams};
 pub use form::{form, form_in, form_warnings, FormParams};
@@ -61,4 +61,4 @@ pub use prof::{
 pub use profile::{profile_of, silhouette, Profile};
 pub use revolve::{blade_program_warnings, blade_warnings, BladeLeg, BandMove, Floor};
 pub use stock::StockEnv;
-pub use thread::{thread, thread_in, thread_warnings, ThreadParams};
+pub use thread::{thread, thread_in, thread_hand_warnings, thread_warnings, ThreadParams};

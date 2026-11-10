@@ -144,14 +144,43 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
             .collect();
         head.insert("toolStation".to_owned(), json!({ "coolants": cs }));
     }
-    json!({
+    if let Some(lt) = &m.live_tool {
+        // Issue #33: the builder's C-axis / live-spindle words.
+        head.insert(
+            "liveTool".to_owned(),
+            json!({
+                "cAxisOn": lt.c_axis_on,
+                "cAxisOff": lt.c_axis_off,
+                "spindleOn": lt.spindle_on,
+                "spindleOff": lt.spindle_off,
+            }),
+        );
+    }
+    let mut out = json!({
         "name": m.model,
         "kinematics": { "static": { "axes": axes, "rotaries": rotaries, "head": Value::Object(head) } },
         "rapidRate": rapid,
         "feedRateMax": feed,
         // #131: the unit the machine is programmed in (numbers stay mm).
         "units": m.units.as_deref().unwrap_or("mm"),
-    })
+    });
+    // #374: the inverted linear axes, which the engine mirrors the stream
+    // in (`post::invert`). Absent for a standard machine, so every
+    // standard mirror is byte-identical to the one before #374.
+    // #495: the safe Z retract, machine coordinates (mm), only when the
+    // file states it - an unstated machine's mirror is unchanged.
+    if let Some(z) = m.safe_retract_z
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("safeRetractZ".to_owned(), json!(z));
+    }
+    let inverted = m.inverted_axes();
+    if !inverted.is_empty()
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("invertedAxes".to_owned(), json!(inverted));
+    }
+    out
 }
 
 /// Walk a path of object keys; `None` on any missing or mismatched hop.
@@ -283,11 +312,46 @@ pub fn script_props(m: &Value) -> Value {
             .filter(|v| v.is_array())
             .cloned()
             .unwrap_or_else(|| json!([])),
+        // Issue #33: the builder's C-axis live-tool words, or null.
+        "liveTool": get(m, &["kinematics", "static", "head", "liveTool"])
+            .or(get(m, &["liveTool"]))
+            .filter(|v| v.is_object())
+            .cloned()
+            .unwrap_or(Value::Null),
         "rigidTapping": get(m, &["kinematics", "static", "head", "rigidTapping"])
             .or(get(m, &["rigidTapping"]))
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        // #495: the machine-coordinate Z a post retracts to (mm), or
+        // null when the machine does not state one; `model` is the
+        // machine's model name through either door (the mirror's
+        // `name`, or a raw file's `general.model`), for the posts that
+        // judge an unstated retract by whose machine it is.
+        "safeRetractZ": safe_retract_z(m).map_or(Value::Null, |z| json!(z)),
+        "model": get(m, &["name"])
+            .and_then(Value::as_str)
+            .filter(|n| !n.is_empty())
+            .or_else(|| get(m, &["general", "model"]).and_then(Value::as_str))
+            .unwrap_or(""),
+        // #375: the inverted linear axes, for the header comment a post
+        // that translates them writes ([] for every standard machine). A
+        // statement the reader refuses was refused before the script ran.
+        "invertedAxes": super::invert::stated(m).map(|(_, l)| l).unwrap_or_default(),
     })
+}
+
+/// The stated safe Z retract (#495), mm: the mirror's `safeRetractZ`,
+/// or - through the raw door - the file form's Z part, read by the
+/// same parser the app mounts with (so units scale the same way). A
+/// raw file the parser refuses states no retract.
+fn safe_retract_z(m: &Value) -> Option<f64> {
+    if let Some(z) = get(m, &["safeRetractZ"]).and_then(Value::as_f64) {
+        return z.is_finite().then_some(z);
+    }
+    if get(m, &["kinematics", "default", "parts"]).is_some() {
+        return crate::machine::parse_mch(&m.to_string()).ok()?.safe_retract_z;
+    }
+    None
 }
 
 /// Whether the machine is programmed in inches (#131): the mirror's

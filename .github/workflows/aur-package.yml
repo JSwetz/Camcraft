@@ -1,8 +1,8 @@
-# Validate the AUR source recipe on Arch Linux when manually dispatched.
+# Build the Arch package after the Linux release job.
 # Provenance: Arch's makepkg and Rust packaging guidelines.
 name: AUR package
 on:
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,22 +15,43 @@ jobs:
       - name: Install Arch build dependencies
         run: |
           pacman -Syu --noconfirm --needed base-devel git rust pkgconf \
-            libxkbcommon libxkbcommon-x11 libx11 wayland vulkan-icd-loader libglvnd
+            curl libxkbcommon libxkbcommon-x11 libx11 wayland vulkan-icd-loader libglvnd
       - uses: actions/checkout@v4
+      - name: Use the release tag as the package source
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          curl -LfsS -o /tmp/camcraft-source.tar.gz \
+            "https://github.com/NeoTech/Camcraft/archive/refs/tags/v$version.tar.gz"
+          source_sha=$(sha256sum /tmp/camcraft-source.tar.gz | cut -d' ' -f1)
+          sed -i "s/^pkgver=.*/pkgver=$version/" aur/PKGBUILD
+          sed -i "s/^sha256sums=('[^']*'/sha256sums=('$source_sha'/" aur/PKGBUILD
       - name: Check AUR metadata
         run: |
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c "cd '$GITHUB_WORKSPACE/aur' && makepkg --printsrcinfo" > /tmp/camcraft.srcinfo
-          diff -u aur/.SRCINFO /tmp/camcraft.srcinfo
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            cp /tmp/camcraft.srcinfo aur/.SRCINFO
+          else
+            # Field order can change across makepkg versions; values and
+            # repeated dependencies must still match the tracked recipe.
+            LC_ALL=C sort aur/.SRCINFO > /tmp/camcraft.expected.srcinfo
+            LC_ALL=C sort /tmp/camcraft.srcinfo > /tmp/camcraft.actual.srcinfo
+            diff -u /tmp/camcraft.expected.srcinfo /tmp/camcraft.actual.srcinfo
+          fi
       - name: Build and test Arch package
         run: su builder -c "cd '$GITHUB_WORKSPACE/aur' && makepkg --noconfirm"
       - name: Check package contents
         run: |
-          bsdtar -tf aur/camcraft-*.pkg.tar.zst | grep -E '(^|/)usr/lib/camcraft/camcraft-ui$'
-          bsdtar -tf aur/camcraft-*.pkg.tar.zst | grep -E '(^|/)usr/share/applications/camcraft.desktop$'
+          set -- aur/camcraft-[0-9]*.pkg.tar.zst
+          [ "$#" -eq 1 ] && [ -f "$1" ]
+          bsdtar -tf "$1" | grep -E '(^|/)usr/lib/camcraft/camcraft-ui$'
+          bsdtar -tf "$1" | grep -E '(^|/)usr/share/applications/camcraft.desktop$'
+          mkdir -p dist
+          cp "$1" dist/
       - uses: actions/upload-artifact@v4
         with:
           name: arch-package
-          path: aur/camcraft-*.pkg.tar.zst
+          path: dist/*.pkg.tar.zst
           if-no-files-found: error

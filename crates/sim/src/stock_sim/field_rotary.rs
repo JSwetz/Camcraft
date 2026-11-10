@@ -258,7 +258,7 @@ pub fn rotary_chords_law(moves: &[Move], ax: &RotaryAxis, law: &ChordLaw) -> Res
                 p0 = shift(p0, a0, a_mid, r);
                 p1 = shift(p1, a1, a_mid, r);
             }
-            out.push(Move { kind: m.kind, from: p0, to: p1, feed: m.feed, arc: None, axis: Some(a_mid) });
+            out.push(Move { rotary: None, kind: m.kind, from: p0, to: p1, feed: m.feed, arc: None, axis: Some(a_mid) });
         }
     }
     Ok((out, stats))

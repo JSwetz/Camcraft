@@ -26,11 +26,19 @@ var LINE = "";
 var properties = {};
 var W = properties;
 var currentPosition = { X: 0, Y: 0, Z: 0 };
+// The program's number (#111): 1 for a whole-job program; one file
+// per operation counts 1, 2, 3... in program order. A dialect that
+// writes an O-word reads it at onOpen.
+var programNumber = 1;
 var postOptions = {};
-var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm", spindleRanges: [], rigidTapping: true };
+var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [], rotaries: [], rtcp: false, units: "mm", spindleRanges: [], rigidTapping: true, safeRetractZ: null, model: "" };
 function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
 function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
 function write(s) { if (s !== undefined) LINE += String(s); }
+// Lines written so far, a pending partial line included (#504): a
+// script marks where a block ended and later asks whether anything
+// followed it.
+function linesWritten() { _flushLine(); return OUT.length; }
 function writeBlock() {
   _flushLine();
   var parts = [];
@@ -46,7 +54,13 @@ function writeAddress(letter, value, dp) {
   if (value === undefined || value === null) return;
   write(String(letter) + formatUnit(Number(value), dp));
 }
-function writeComment(s) { writeln("(" + String(s) + ")"); }
+// #594: the default comment is the RS-274 / ISO 6983 `( )` form, so
+// its text loses every parenthesis (one would end or nest the comment)
+// and every control character (one would end the block).
+function writeComment(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  writeln("(" + t.replace(/[()]/g, " ").replace(/[\x00-\x1F\x7F]/g, " ") + ")");
+}
 function writeBlankLine() { _flushLine(); OUT.push(""); }
 function writeOutput(s) { write(s); }
 function message(s) { MESSAGES.push(String(s)); }
@@ -131,6 +145,7 @@ pub const HOOKS: &[&str] = &[
     "onProbe",
     "onProbeMove",
     "onProbeRetreat",
+    "onProbeGuard",
     "onProbeResult",
     "onComment",
     "onClose",
@@ -143,6 +158,30 @@ pub struct Script {
     /// The `coolantModes = true` manifest flag (#150): the script reads
     /// `PARAM Coolant`. Without it a non-Flood ask is refused by name.
     coolant_modes: bool,
+    /// The `liveTooling = true` manifest flag (issue #33): the script
+    /// voices C-axis live-tool sections. Without it a `PARAM LiveTool`
+    /// section is refused by name.
+    live_tooling: bool,
+    /// The `afterModes = true` manifest flag (#110): the script reads
+    /// `PARAM AfterOperation`. Without it a section asking a stop or a
+    /// trip home is refused by name - the script would run straight on.
+    after_modes: bool,
+    /// The `axisInversion = true` manifest flag (#374): the script's
+    /// output is verified (goldens + the equivalence test) on the
+    /// engine's mirrored stream for an inverted X / Y axis. Without it a
+    /// machine with an inverted axis is refused by name.
+    axis_inversion: bool,
+    /// The `probeAxisInversion = true` manifest flag (#392): the script's
+    /// probing blocks (skip move, trip read, back-off, deviation, work
+    /// offset write) are verified on the mirrored stream by a macro
+    /// interpreter on a simulated inverted machine. Without it probing
+    /// on an inverted axis is refused by name.
+    probe_axis_inversion: bool,
+    /// The `threadHands = true` manifest flag (issue #629): the script
+    /// reads `PARAM SpindleDirection` and states the thread's hand.
+    /// Without it a thread that needs the spindle reversed is refused
+    /// by name - the script would cut it the other hand under M03.
+    thread_hands: bool,
 }
 
 impl Script {
@@ -158,6 +197,11 @@ impl Script {
             ctx,
             present: Vec::new(),
             coolant_modes: false,
+            live_tooling: false,
+            after_modes: false,
+            axis_inversion: false,
+            probe_axis_inversion: false,
+            thread_hands: false,
         };
         let mut present = Vec::new();
         for h in HOOKS {
@@ -170,6 +214,26 @@ impl Script {
         s.present = present;
         s.coolant_modes = s
             .eval("typeof coolantModes !== \"undefined\" && coolantModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.live_tooling = s
+            .eval("typeof liveTooling !== \"undefined\" && liveTooling === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.after_modes = s
+            .eval("typeof afterModes !== \"undefined\" && afterModes === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.thread_hands = s
+            .eval("typeof threadHands !== \"undefined\" && threadHands === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.axis_inversion = s
+            .eval("typeof axisInversion !== \"undefined\" && axisInversion === true")
+            .map(|v| is_true(&v))
+            .unwrap_or(false);
+        s.probe_axis_inversion = s
+            .eval("typeof probeAxisInversion !== \"undefined\" && probeAxisInversion === true")
             .map(|v| is_true(&v))
             .unwrap_or(false);
         Ok(s)
@@ -189,6 +253,19 @@ impl Script {
     pub fn set_machine(&mut self, m: &Value) -> Result<(), PostError> {
         self.eval(&format!("machine = {m};"))?;
         Ok(())
+    }
+
+    /// Publish the program's number (#111) before `onOpen` reads it.
+    pub fn set_program_number(&mut self, n: u32) -> Result<(), PostError> {
+        self.eval(&format!("programNumber = {n};"))?;
+        Ok(())
+    }
+
+    /// A top-level string the script states (a manifest entry such as
+    /// `extension`), or `None` when it states none.
+    pub fn string_global(&mut self, name: &str) -> Result<Option<String>, PostError> {
+        let v = self.eval(&format!("(typeof {name} === \"string\") ? {name} : null"))?;
+        Ok(v.as_string().map(|s| s.to_std_string_escaped()))
     }
 
     /// Publish the document's post options once (issue #34).
@@ -238,6 +315,36 @@ impl Script {
     /// the section's `PARAM Coolant` (#150).
     pub fn reads_coolant(&self) -> bool {
         self.coolant_modes
+    }
+
+    /// True when the script declares `threadHands = true` - it reads
+    /// `PARAM SpindleDirection` and voices a thread's hand (#629).
+    pub fn voices_thread_hands(&self) -> bool {
+        self.thread_hands
+    }
+
+    /// True when the script declares `liveTooling = true` - it voices
+    /// a C-axis live-tool section (issue #33).
+    pub fn voices_live_tooling(&self) -> bool {
+        self.live_tooling
+    }
+
+    /// True when the script declares `afterModes = true` - it reads
+    /// `PARAM AfterOperation` and writes the stop or home (#110).
+    pub fn reads_after_operation(&self) -> bool {
+        self.after_modes
+    }
+
+    /// True when the script declares `axisInversion = true` - verified
+    /// on the engine's mirrored stream for an inverted axis (#374).
+    pub fn translates_inverted_axes(&self) -> bool {
+        self.axis_inversion
+    }
+
+    /// True when the script declares `probeAxisInversion = true` - its
+    /// probing blocks are verified on the mirrored stream (#392).
+    pub fn translates_inverted_probing(&self) -> bool {
+        self.probe_axis_inversion
     }
 
     /// Lines flushed so far (the driver's section boundary marker).

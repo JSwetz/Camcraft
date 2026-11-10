@@ -5,7 +5,8 @@
 //!
 //! Provenance: standard screen-space point picking (project every
 //! candidate through the view-projection, nearest within a pixel radius,
-//! then an occlusion ray) - our own code from general graphics practice;
+//! then an occlusion ray - from the eye, or in orthographic back along
+//! the parallel view direction) - our own code from general graphics practice;
 //! no vendor material consulted.
 
 use camcraft_app::geometry::feature::{self, VertexId};
@@ -14,9 +15,9 @@ use camcraft_app::operation::{FeatureSel, GeoSel};
 use camcraft_app::{model, pick};
 
 use crate::interact::{Mods, project_uv, queue_feature_pick};
-use camcraft_app::schema::WCS_SLOTS;
 
 use crate::state::{CommandKind, HoverHit, State};
+use crate::viewport::{Camera, ProjectionMode};
 
 /// How close a corner must draw to the cursor to be pickable, logical px.
 pub(crate) const PICK_VERTEX_PX: f32 = 8.0;
@@ -54,6 +55,22 @@ pub fn nearest_vertex(
     near.into_iter().map(|(_, i)| i).find(|&i| visible(i))
 }
 
+/// Where the occlusion ray toward world point `q` starts: the eye in
+/// perspective; in orthographic (#610) `q`'s own point on the eye plane,
+/// so the ray runs back along the parallel view direction as
+/// `Camera::ray_through` casts it. `None` for a point at or behind the
+/// eye plane (nothing on screen to test) or degenerate math.
+pub(crate) fn sight_origin(cam: &Camera, q: [f64; 3]) -> Option<[f64; 3]> {
+    let eye = cam.eye();
+    if cam.projection == ProjectionMode::Perspective {
+        return Some(eye);
+    }
+    let (_, _, f) = cam.view_basis();
+    let depth = (q[0] - eye[0]) * f.0 + (q[1] - eye[1]) * f.1 + (q[2] - eye[2]) * f.2;
+    let o = [q[0] - f.0 * depth, q[1] - f.1 * depth, q[2] - f.2 * depth];
+    (depth.is_finite() && depth > 1e-9 && o.iter().all(|v| v.is_finite())).then_some(o)
+}
+
 /// Depth tolerance for the occlusion ray: the facets meeting AT a corner
 /// hit at its own distance; this absorbs their float noise.
 fn depth_tol(dist: f64) -> f64 {
@@ -70,7 +87,6 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
         return None;
     }
     let mvp = state.cam.mvp(f64::from(w / h));
-    let eye = state.cam.eye();
     let hidden = |name: &str| state.hidden_in_view(name);
     let mut entities: Vec<(String, flecs_ecs::prelude::Entity)> =
         model::model_entities(&state.world).into_iter().filter(|(n, _)| !hidden(n)).collect();
@@ -90,7 +106,7 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
         let Some(features) = model::features_of(&state.world, entity) else {
             continue;
         };
-        let loc = model::transform_of(&state.world, entity).unwrap_or_default();
+        let loc = camcraft_app::setup_align::view_pose(&state.world, entity).unwrap_or_default(); // #326
         for vi in feature::corner_verts(&features) {
             let (Some(v), Some(id)) = (features.verts.get(vi as usize), feature::vertex_id(&features, vi)) else {
                 continue;
@@ -102,8 +118,9 @@ pub(crate) fn vertex_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<
     }
     let best = nearest_vertex(&pts, &mvp, state.viewport_rect, p, radius, |i| {
         let q = pts[i];
-        let dist = ((q[0] - eye[0]).powi(2) + (q[1] - eye[1]).powi(2) + (q[2] - eye[2]).powi(2)).sqrt();
-        pick::point_visible(&state.world, eye, q, depth_tol(dist), hidden)
+        let Some(o) = sight_origin(&state.cam, q) else { return false };
+        let dist = ((q[0] - o[0]).powi(2) + (q[1] - o[1]).powi(2) + (q[2] - o[2]).powi(2)).sqrt();
+        pick::point_visible(&state.world, o, q, depth_tol(dist), hidden)
     })?;
     let (k, id) = *tags.get(best)?;
     Some((entities.get(k)?.0.clone(), id))
@@ -115,7 +132,7 @@ pub(crate) fn vertex_world(state: &State, entity: &str, id: VertexId) -> Option<
     let features = model::features_of(&state.world, &found)?;
     let vi = feature::resolve_vertex(&features, id)?;
     let v = features.verts.get(vi as usize)?;
-    let loc = model::transform_of(&state.world, &found).unwrap_or_default();
+    let loc = camcraft_app::setup_align::view_pose(&state.world, &found).unwrap_or_default(); // #326
     let w = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
     Some([w.x, w.y, w.z])
 }
@@ -141,6 +158,17 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity: hit.entity, feature: sel };
+    if crate::axis_pick::collecting(state) {
+        crate::axis_pick::take(state, pick); // #557: a point of an axis
+        return;
+    }
+    if crate::plane_pick::collecting(state) {
+        crate::plane_pick::take(state, pick); // #554: a point sets no plane, refused by name
+        return;
+    }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
+    }
     if state.boundary_pick.is_some() {
         // A point bounds nothing: refused by name, never drafted.
         state.status = format!("{} of '{}' is a point - a boundary takes faces or edges", pick.feature, pick.entity);
@@ -149,18 +177,15 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
     queue_feature_pick(state, pick, mods.ctrl || mods.shift);
 }
 
-/// Queue the work origin onto a picked vertex: the WCS pane's slot and
-/// angles, the vertex's world position, through the one `SetWcs` command
+/// Queue the work origin onto a picked vertex: the WCS pane's angles, the vertex's world position, through the one `SetWcs` command
 /// the anchor grid also queues (undoable like any origin move).
 pub fn queue_origin_at_vertex(state: &mut State, entity: &str, id: VertexId) {
     let Some(pos) = vertex_world(state, entity, id) else {
         state.status = format!("the picked vertex of '{entity}' is no longer in the model");
         return;
     };
-    let slot = WCS_SLOTS.get(state.wcs_ui.slot).or(WCS_SLOTS.first()).copied().unwrap_or("G54");
-    state.status = format!("{slot} origin set at a vertex of '{entity}'");
+    state.status = format!("WCS origin set at a vertex of '{entity}'");
     state.pending.push_back(CommandKind::SetWcs {
-        slot: slot.to_string(),
         pos,
         roll_deg: state.wcs_ui.roll_deg,
         pitch_deg: state.wcs_ui.pitch_deg,
@@ -171,7 +196,7 @@ pub fn queue_origin_at_vertex(state: &mut State, entity: &str, id: VertexId) {
 /// Queue the work origin onto a picked face (M13.4): its area-weighted
 /// centroid, or - `z_only`, horizontal planar faces only - the pane's
 /// current XY at the face's plane height. Same `SetWcs` command, same
-/// slot and angles as the vertex chip; the targets come from the app.
+/// angles as the vertex chip; the targets come from the app.
 pub fn queue_origin_at_face(state: &mut State, entity: &str, sel: FeatureSel, z_only: bool) {
     let target = match pick::face_origin(&state.world, entity, sel) {
         Ok(t) => t,
@@ -185,10 +210,10 @@ pub fn queue_origin_at_face(state: &mut State, entity: &str, sel: FeatureSel, z_
             state.status = String::from("origin not set: Z only needs a horizontal planar face");
             return;
         };
-        // The slot's placed origin is "the current XY"; an unplaced slot
+        // The WCS's placed origin is "the current XY"; an unplaced WCS
         // falls back to the pane's draft numbers.
         let active = camcraft_app::setup::active(&state.world);
-        let placed = camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), state.wcs_ui.slot)
+        let placed = camcraft_app::setup::wcs_entity(&state.world, active.as_deref())
             .and_then(|e| model::transform_of(&state.world, &e));
         match placed {
             Some(loc) => [loc.pos.x, loc.pos.y, z],
@@ -197,10 +222,8 @@ pub fn queue_origin_at_face(state: &mut State, entity: &str, sel: FeatureSel, z_
     } else {
         target.centroid
     };
-    let slot = WCS_SLOTS.get(state.wcs_ui.slot).or(WCS_SLOTS.first()).copied().unwrap_or("G54");
-    state.status = format!("{slot} origin set on a face of '{entity}'");
+    state.status = format!("WCS origin set on a face of '{entity}'");
     state.pending.push_back(CommandKind::SetWcs {
-        slot: slot.to_string(),
         pos,
         roll_deg: state.wcs_ui.roll_deg,
         pitch_deg: state.wcs_ui.pitch_deg,
@@ -209,7 +232,7 @@ pub fn queue_origin_at_face(state: &mut State, entity: &str, sel: FeatureSel, z_
 }
 
 /// Queue the 3-2-1 alignment (#187) of the open operation's picks onto the
-/// WCS pane's slot: position and angles both from the app's frame, through
+/// active setup's WCS: position and angles both from the app's frame, through
 /// the same undoable `SetWcs` command as the origin chips.
 pub fn queue_wcs_321(state: &mut State) {
     let a = match camcraft_app::pick::align_321(&state.world, &state.op_ui.geo) {
@@ -219,10 +242,8 @@ pub fn queue_wcs_321(state: &mut State) {
             return;
         }
     };
-    let slot = WCS_SLOTS.get(state.wcs_ui.slot).or(WCS_SLOTS.first()).copied().unwrap_or("G54");
-    state.status = format!("{slot} aligned 3-2-1 to the picked face, edge and origin");
+    state.status = String::from("WCS aligned 3-2-1 to the picked face, edge and origin");
     state.pending.push_back(CommandKind::SetWcs {
-        slot: slot.to_string(),
         pos: a.pos,
         roll_deg: a.roll_deg,
         pitch_deg: a.pitch_deg,

@@ -4,7 +4,7 @@ members = ["crates/app", "crates/cl", "crates/motion", "crates/post", "crates/si
   "crates/tools", "crates/ui", "crates/geometry", "crates/kernel"]
 
 [workspace.package]
-version = "0.14.0"
+version = "0.16.0"
 edition = "2024"
 rust-version = "1.90"
 
@@ -31,6 +31,12 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # Apache-2.0; pure Rust (its deps included), no build scripts of concern.
 rayon = "1"
 
+# Diagnostics to the launching terminal (#163): `tracing` events at the
+# app's seams, printed by `tracing-subscriber`'s fmt layer on stderr and
+# filtered by CAMCRAFT_LOG / RUST_LOG. Both MIT, pure Rust.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi", "std", "tracing-log"] }
+
 # The JS engine - one in the tree (M5.3 F): the post's sandbox (post/js.rs)
 # and the job-script host (app/script) run the same hard-pinned boa.
 boa_engine = "0.21.1"
@@ -42,6 +48,10 @@ boa_engine = "0.21.1"
 winit = "0.30"
 rfd = "0.15"
 pollster = "0.4"
+# macOS only (#144): the Objective-C runtime binding winit itself uses
+# (same 0.5 line, already in the lock - no new crate), to give winit's
+# app delegate an applicationShouldTerminate: so Cmd+Q asks first. MIT.
+objc2 = "0.5"
 
 # The shell (M1.4.2 graduation; was the M1.4.1 spike, decision in
 # docs/spike-egui-go-no-go.md): egui stack, MIT OR Apache-2.0 (egui_dock: MIT) - notices in
@@ -59,6 +69,9 @@ egui_kittest = { version = "=0.36.2", features = ["wgpu", "snapshot"] }
 # PNG decode for the UI icon set (assets/ui/*.png -> egui_app/icons.rs).
 # Png only: everything else (formats, headers of other codecs) stays off.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# PNG encode for the headless stock render (#182, app/src/raster.rs): the
+# same png crate `image` already builds on, so no new crate in the tree.
+png = "0.18"
 
 # STEP reading - truck geometry stack (ricosjp), pure Rust, Apache-2.0. The
 # Sept-2024 mutual version set; hard-pinned because the crates are alpha.

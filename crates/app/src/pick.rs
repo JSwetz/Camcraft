@@ -5,9 +5,14 @@
 //! no third-party code.
 
 pub mod align;
+pub mod axis;
 pub mod face;
+pub mod plane;
+pub mod winding;
 
 pub use align::{Alignment, align_321};
+pub use axis::{AxisPick, InPlaneAxes, InPlaneAxis, in_plane_turn_deg, pick_coords, turn_in_plane};
+pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
 
 use flecs_ecs::prelude::World;
@@ -64,7 +69,8 @@ pub fn first_hit_f(
         // One inverse rigid transform of the ray per entity, instead of one
         // shift per triangle. Rotations are unit quats, so distances along
         // the local ray equal world distances: depths stay comparable.
-        let loc = model::transform_of(world, &entity).unwrap_or_default();
+        // #326: rays land on the part where the active setup holds it.
+        let loc = crate::setup_align::view_pose(world, &entity).unwrap_or_default();
         let o_local = transform_inverse_point(o, loc.pos, loc.rot);
         let d_local = quat_rotate_point(quat_conjugate(loc.rot), d);
         if !(o_local.is_finite() && d_local.is_finite()) {

@@ -14,7 +14,10 @@ pub fn generate(
     op: &Operation,
     op_name: &str,
 ) -> Result<(Toolpath, Vec<Warning>), GenError> {
-    run_job(collect_job(world, op, op_name)?)
+    let job = collect_job(world, op, op_name).inspect_err(|e| {
+        tracing::warn!(op = op_name, kind = %op.params.kind(), "generation refused before it ran: {e}");
+    })?;
+    run_job(job)
 }
 
 /// Run a fully-collected job: every world read happened in
@@ -28,11 +31,27 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // path whichever arm cut it: a note, never a warning - the post
     // is not held for features the op honestly leaves standing.
     let note = job.spindle_note.take();
-    let (mut path, warns) = run_job_arms(job)?;
-    if let Some(n) = note
-        && !path.notes.contains(&n)
-    {
-        path.notes.push(n);
+    let carried = job.carried_overhang.take();
+    let tool_r = job.tool.diameter * 0.5;
+    let kind = job.params.kind();
+    let _span = tracing::info_span!("generate", op = %job.op_name).entered();
+    let started = std::time::Instant::now();
+    tracing::debug!(kind = %kind, "generation started");
+    let (mut path, warns) = run_job_arms(job).inspect_err(|e| {
+        tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
+    })?;
+    tracing::info!(
+        kind = %kind,
+        moves = path.moves.len(),
+        warnings = warns.len(),
+        ms = crate::logging::elapsed_ms(started),
+        "generated"
+    );
+    let carried = carried.map(|o| o.note(&path, tool_r));
+    for n in note.into_iter().chain(carried) {
+        if !path.notes.contains(&n) {
+            path.notes.push(n);
+        }
     }
     Ok((path, warns))
 }
@@ -41,6 +60,8 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let GenJob {
         tool,
+        body,
+        lathe_body,
         tool_name,
         params,
         src,
@@ -64,11 +85,14 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         spindle,
         fixtures,
         workholding,
+        fixture_meshes,
         rotary_axis,
         part_solid,
         area,
         wcs_origin,
         spindle_note: _,
+        carried_overhang: _,
+        op_name: _,
     } = job;
     // The probe (#108) cuts nothing: its own protected-move law judges
     // the stylus against the model, and no cutting law or region applies.
@@ -77,6 +101,12 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     }
     // The program ahead, cut only when a law asks (#89, #96 review).
     let mut verify_prior = super::drill_prior::PriorCell::new(verify_prior);
+    // #339: the mesh law reads the tool as an upright rotating stack -
+    // a mill's cutter. A lathe's insert, blade or gauge keeps the box
+    // verdict (its body is not that stack).
+    use crate::tools::ToolKind as K;
+    let mesh_steel: &[crate::fixture::MeshedFixture] =
+        if is_mill && !matches!(tool.kind, K::Turning | K::Groove | K::Thread | K::Form) { &fixture_meshes } else { &[] };
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;
 
@@ -1156,11 +1186,14 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let kind = if is_contour { "Rotary Contour" } else { "Rotary Parallel" };
             // M13.5 B: the letter is the machine's. The fitted line
             // the kernel will turn about must be a rotary the mounted
-            // machine states (A/B on a table; C is pinned by name).
-            rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, kind)?;
+            // machine states (A/B on a table, or the spindle's C -
+            // issue #33 - whose angle the path then states).
+            let spindle_c = rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, kind)?;
             let path = super::plunge_solid::guard_posed(
                 kind, tool.center_cutting, tool.kind == crate::tools::ToolKind::BallNose, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
+            // Issue #33: on the spindle's C the path states its angle.
+            let path = super::rotary_gate::stamp_spindle_c(path, spindle_c, *tolerance, kind)?;
             (region, path)
         }
         // M5.1 stage E2: the rotary rough. The pocket ladder runs in
@@ -1233,7 +1266,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let _ = tolerance;
             // M13.5 B: the machine's letter for the line the ladder
             // wraps about, or the refusal by name.
-            rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, "Rotary Offset")?;
+            let spindle_c = rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, "Rotary Offset")?;
             // M13.8: the ladder peels from the setup STOCK's outer
             // radius about the fitted axis (the part's skin when no
             // separate stock is set, or when the stock sits inside it).
@@ -1243,6 +1276,10 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &pp,
                 &axis,
             )?;
+            // Issue #33: on the spindle's C the path states its angle,
+            // split to the verify budget so the machine's C-linear
+            // motion is the chord the laws judge.
+            let path = super::rotary_gate::stamp_spindle_c(path, spindle_c, *tolerance, "Rotary Offset")?;
             // M11.3 owed (2): the wrap-space entry guard judged the
             // ladder before the wrap posed it; the law judges the FINAL
             // posed path. Solid is the true bar (#16): the stock
@@ -2234,6 +2271,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             feed,
             plunge_feed,
             tolerance,
+            hand,
             ..
         } => {
             if tool.kind != crate::tools::ToolKind::Thread {
@@ -2264,6 +2302,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     plunge_feed: *plunge_feed,
                     insert_width: tool.width,
                     form_angle: tool.tip_angle,
+                    hand: *hand,
                 },
                 turn_stock,
             )?;
@@ -2296,7 +2335,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::chamfer(
+            let path = crate::turning::chamfer_in(
                 &material.facets,
                 &crate::turning::ChamferParams {
                     clearance_z: hl.clearance,
@@ -2308,6 +2347,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2333,7 +2373,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::taper(
+            let path = crate::turning::taper_in(
                 &material.facets,
                 &crate::turning::TaperParams {
                     clearance_z: hl.clearance,
@@ -2346,6 +2386,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2375,7 +2416,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
-            let path = crate::turning::multi_pass(
+            let path = crate::turning::multi_pass_in(
                 &material.facets,
                 &crate::turning::MultiPassParams {
                     clearance_z: hl.clearance,
@@ -2389,6 +2430,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     nose_radius: tool.nose_radius,
                     tolerance: *tolerance,
                 },
+                turn_stock,
             )?;
             (region, path)
         }
@@ -2481,6 +2523,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         }
     };
     let path = super::turning_stock::noted(path, turn_note);
+    // #369: a turning steel with no lathe body says its holder went unjudged.
+    let path = super::turning_holder::noted(path, &params, &tool, lathe_body.is_some());
 
     // M3.2 stage B: what the program clamps to. The op's setup context
     // decides - user fixtures bound to it (tagged models, implicit-
@@ -2490,6 +2534,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // unstated-limit law means a file that names no spindle body adds
     // no band, exactly as it adds no feed or travel check.
     let geom = tool.geom();
+    // #368: what the fixture laws sweep above the shank.
+    let holder = crate::tool_body::stack(&geom, body.as_ref());
     let fixture_boxes = fixtures;
     let stl = match &params {
         OpParams::Face { .. }
@@ -2751,7 +2797,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. }))
                 && let Some(dex) = verify_prior.get()
             {
-                verify::acquit_by_prior(&path, dex, geom.radius, Z_TOL, &mut warns);
+                let prior = crate::stock_sim::Columns::of_grid(dex);
+                verify::acquit_by_prior(&path, &prior, geom.radius, Z_TOL, &mut warns);
             }
             // A turned path's axial rapids are judged in the meridian
             // plane, not by the column (#96, #103): the revolved stock
@@ -2799,7 +2846,11 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // ...and a boring bar's head and shank on its FEEDS (#146),
             // against the same revolved material at each instant.
             super::turning_feeds::judge_bar_feeds(&params, &path, &meridian, &mut verify_prior, &mut warns);
-            warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
+            // ...and a modelled lathe holder on every move (#369), against
+            // the revolved stock standing at each instant.
+            super::turning_holder::judge(&params, &path, &meridian, lathe_body.as_deref(), &tool, &mut verify_prior, &mut warns)
+                .map_err(GenError::Invalid)?;
+            warns.extend(workholding_warnings(&path, (&geom, &holder), &fixture_boxes, &workholding, rotary_axis, spindle, mesh_steel));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
             // - a grooved part is undercut BY DESIGN, material
@@ -2839,7 +2890,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // the tool's V, not a boxcar, says what stands between
             // the turns. The insert's crest width and included
             // angle ride from the tool, the blade's law again.
-            if let OpParams::Threading { tolerance, .. } = &params {
+            if let OpParams::Threading { tolerance, hand, .. } = &params {
                 warns.extend(crate::turning::thread_warnings(
                     &material.facets,
                     &path,
@@ -2847,6 +2898,9 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     tool.tip_angle,
                     *tolerance,
                 ));
+                // The hand verdict (#629): every half-turn winds the
+                // way the operation asked, or the post is refused.
+                warns.extend(crate::turning::thread_hand_warnings(&path, *hand));
             }
             // The crown verdict (M5.2 E2): the same meridian scan the
             // blade and the wave ride, read with the CROWN floor - the
@@ -2991,11 +3045,12 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             }
             warns.extend(workholding_warnings(
                 &path_world,
-                &geom,
+                (&geom, &holder),
                 &fixture_boxes,
                 &workholding,
                 rotary_axis,
                 spindle,
+                mesh_steel,
             ));
             Ok((path_world, warns))
         }
@@ -3006,16 +3061,18 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
 /// turn the part about, fitted from the same facets it reads, held
 /// against the mounted machine's rotary inventory. A fit that fails
 /// here is left to the kernel, which refuses it by its own name; a
-/// line no stated rotary holds, or the spindle's C, refuses here.
+/// line no stated rotary holds refuses here. The spindle's C answers
+/// the fitted line (issue #33) - the path is then stamped with its C.
 fn rotary_letter_gate(
     machine: Option<&(String, Vec<crate::machine::AxisLimits>)>,
     facets: &[Triangle],
     kind: &str,
-) -> Result<(), GenError> {
+) -> Result<Option<crate::multiaxis::axis::Axis>, GenError> {
     let Ok(ax) = crate::multiaxis::axis::fit(facets) else {
-        return Ok(());
+        return Ok(None);
     };
-    super::rotary_gate::rotary_letter(machine, [ax.dir.x, ax.dir.y, ax.dir.z], kind).map(|_| ())
+    let letter = super::rotary_gate::rotary_letter(machine, [ax.dir.x, ax.dir.y, ax.dir.z], kind)?;
+    Ok((letter == Some('C')).then_some(ax))
 }
 
 /// The fixture laws (c2)/(d2) at generation, exactly as the post gate
@@ -3025,21 +3082,33 @@ fn rotary_letter_gate(
 /// could strike at all (the machine-derived table included), and the
 /// spindle band is never tested on its own. A fixed box loses a hit only
 /// where the machine frame proves the move clear; the turning boxes keep
-/// the path-frame verdict untouched.
+/// the path-frame verdict untouched. #339: `meshes` (the tagged models'
+/// closed meshes, empty for a lathe's tool) then acquit the moves
+/// (upright, posed or turned) a box flagged and its real steel does not meet
+/// (`verify::mesh_refined` - the mesh never adds a hit).
+#[allow(clippy::too_many_arguments)] // the gate's inputs + the meshes
 fn workholding_warnings(
     path: &Toolpath,
-    geom: &crate::tools::ToolGeom,
+    (geom, holder): (&crate::tools::ToolGeom, &camcraft_tools::holder_profile::HolderStack),
     all: &[crate::fixture::FixtureBox],
     (turning, fixed): &(Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
     axis: Option<verify::RotaryAxis>,
     spindle: Option<(f64, f64)>,
+    meshes: &[crate::fixture::MeshedFixture],
 ) -> Vec<Warning> {
     if all.is_empty() {
         return Vec::new();
     }
     let wh = verify::Workholding { turning, fixed, axis };
-    let mut warns = verify::bands_vs_workholding(path, geom, &wh, spindle, GOUGE_TOL);
-    warns.extend(verify::rapids_vs_workholding(path, geom, &wh, spindle));
+    let stack = verify::steel_stack(geom, holder, spindle);
+    let steel = verify::MeshSteel { fixtures: meshes, stack: &stack, chord_tol: GOUGE_TOL };
+    let mut warns = verify::mesh_refined(path, &wh, &steel, false, |w| {
+        verify::bands_vs_workholding_held(path, geom, holder, w, spindle, GOUGE_TOL)
+    });
+    warns.extend(verify::mesh_refined(path, &wh, &steel, true, |w| {
+        verify::rapids_vs_workholding_held(path, geom, holder, w, spindle)
+    }));
+    crate::fixture::log_mesh_refusals(meshes);
     warns
 }
 

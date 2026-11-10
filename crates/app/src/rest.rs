@@ -15,12 +15,13 @@
 //!   known wart (an operation named `Operation10` sorts before
 //!   `Operation2` inside one setup) is shared so re-machining and the
 //!   machine can never disagree.
-//! - **Rest is same-setup.** A predecessor machines in the CONSUMER's
-//!   setup or it cut a differently-placed block: cross-setup masks
-//!   would need the flip transform (M3.3's orientation law), so an
-//!   operation from another setup is simply not ahead here. Within one
-//!   setup this is physically exact; across setups a later setup
-//!   re-cuts conservatively - air, never a gouge (the mask law).
+//! - **Rest crosses setups where the body is carried (#318).** A
+//!   predecessor in an earlier setup is ahead exactly when the program
+//!   sim carries the machined body from its setup into the consumer's
+//!   (#317, `across`): the rest grid is then the origin block cut and
+//!   carried through every boundary. A setup entered by the clip (same
+//!   hold, not linked) starts from its own block - the side that never
+//!   assumes material gone; a refused carry refuses the rest by name.
 //! - **The mask only removes cuts, never adds them.** The rest state is
 //!   the stock grid with every earlier operation's CACHED moves
 //!   subtracted; a consumer's level targets are intersected with it, so
@@ -53,8 +54,16 @@
 //!   moves and it goes Stale - the same one-way ratchet the whole
 //!   associativity chain runs on.
 
+mod across;
 mod ahead;
+mod carried_cache;
+mod pilots;
 
+pub use pilots::{drills_ahead, turned_ahead, DrillAhead, TurnedAhead};
+
+pub use across::{REST_CARRY_REFUSAL, carried_digest, carried_stock_block, carried_stock_body, entered_body};
+pub use carried_cache::{CAP as CARRIED_CACHE_CAP, clear as clear_carried_cache, computes as carried_body_computes};
+use across::{carried_grid, chain_of};
 use ahead::{ahead_of, digest_of, Ahead};
 use crate::cl::Move;
 use crate::machining2d::GenError;
@@ -78,8 +87,60 @@ pub struct PriorState {
 /// `status_of` can ask every frame (M3.1 C's live-questions law).
 #[must_use]
 pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u64> {
-    let ahead = ahead_of(world, name, setup, false);
-    (!ahead.is_empty()).then(|| digest_of(&ahead))
+    use std::hash::Hasher;
+    let chain = match chain_of(world, name, setup, false) {
+        Ok(c) => c,
+        // A refused carry digests its reason: generation refuses it by
+        // name, and the stamp moves the moment the refusal does.
+        Err(e) => {
+            let mut h = std::hash::DefaultHasher::new();
+            h.write(b"camcraft-rest-refused");
+            h.write(e.as_bytes());
+            return Some(h.finish());
+        }
+    };
+    if !chain.crosses() {
+        let ahead = chain.into_ops();
+        return (!ahead.is_empty()).then(|| digest_of(&ahead));
+    }
+    let mut h = std::hash::DefaultHasher::new();
+    chain.term(world, &mut h);
+    let ahead: Vec<Ahead> = chain.into_ops();
+    h.write_u64(digest_of(&ahead));
+    Some(h.finish())
+}
+
+/// The refusal a rest reading of `name` meets (#318): `Some` when the
+/// stock its setup starts from has to be carried across a boundary the
+/// carry refuses. Generation refuses every op of that setup (#319).
+#[must_use]
+pub fn carry_refusal(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
+    chain_of(world, name, setup, false).err()
+}
+
+/// The suppressed operations (#110) ahead of `name` in its setup that
+/// cut something: the program `name` was generated against holds their
+/// cut (this walk has no suppressed filter - by design, the mask is
+/// what WAS planned), so posting `name` without them would rapid and
+/// slot into stock nothing judged. Never-cutting ones (never
+/// generated, an empty path, a probe) are not named: they removed no
+/// material `name` could have assumed gone.
+#[must_use]
+pub fn suppressed_cuts_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<String> {
+    // Across every carried setup boundary too (#318); a refused carry
+    // refuses generation, so the same-setup walk is what stands then.
+    chain_of(world, name, setup, false)
+        .map(across::Chain::into_ops)
+        .unwrap_or_else(|_| ahead_of(world, name, setup, false))
+        .into_iter()
+        .filter(|a| a.cut)
+        .filter(|a| {
+            crate::model::find_by_name(world, &a.name)
+                .and_then(|e| crate::model::operation_of(world, &e))
+                .is_some_and(|op| op.suppressed)
+        })
+        .map(|a| a.name)
+        .collect()
 }
 
 /// The grid the previous operations leave standing, and the digest it
@@ -94,7 +155,17 @@ pub fn prior_state(
     setup: Option<&str>,
     tool_r: f64,
 ) -> Result<PriorState, GenError> {
-    let ahead = ahead_of(world, name, setup, true);
+    let chain = chain_of(world, name, setup, true).map_err(GenError::Invalid)?;
+    if chain.crosses() {
+        // The stock this setup starts from is what the earlier setups
+        // left, carried (#318) - a mask even when nothing ahead cut.
+        let digest = prior_digest(world, name, setup);
+        let min_r = chain.ops().filter(|a| a.cut && a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
+        let grid = carried_grid(world, &chain, min_r, true)
+            .map_err(|e| GenError::Invalid(format!("rest from previous setups: {e}")))?;
+        return Ok(PriorState { grid: Some(grid), digest });
+    }
+    let ahead = chain.into_ops();
     if ahead.is_empty() {
         return Ok(PriorState {
             grid: None,
@@ -145,6 +216,13 @@ pub fn prior_state(
 pub struct PriorPlan {
     grid: Dexel,
     ahead: Vec<Ahead>,
+    /// #318: the setups the body is carried through after `ahead` is
+    /// cut - each turn and the cut operations of that setup. Empty for a
+    /// same-setup plan, whose `grid` is then a plain column grid; a
+    /// crossing plan's `grid` is the origin body's tops and `floor` its
+    /// floor.
+    carried: Vec<(crate::stock_sim::LatticeTurn, Vec<Ahead>)>,
+    floor: Option<crate::stock_sim::Body>,
 }
 
 impl PriorPlan {
@@ -152,11 +230,26 @@ impl PriorPlan {
     /// posed predecessor the column grid cannot cut) is the caller's
     /// "prior unknown" - the raw stock, never an acquittal.
     pub fn simulate(self) -> Result<Dexel, String> {
-        let mut dex = self.grid;
+        let Some(mut body) = self.floor else {
+            let mut dex = self.grid;
+            sweep(&mut dex, &self.ahead)?;
+            return Ok(dex);
+        };
+        sweep(&mut body.dex, &self.ahead)?;
+        for (turn, ops) in &self.carried {
+            body = body.carry(turn)?;
+            sweep(&mut body.dex, ops)?;
+        }
+        Ok(body.dex)
+    }
+}
+
+/// Cut `ahead` into `dex`, each through its own atom.
+fn sweep(dex: &mut Dexel, ahead: &[Ahead]) -> Result<(), String> {
+    {
         // A turning insert cuts with its nose: the centre path lowered
         // to the tip, swept as a ball (issue #89).
-        let tips: Vec<Vec<Move>> = self
-            .ahead
+        let tips: Vec<Vec<Move>> = ahead
             .iter()
             .map(|a| match a.nose {
                 Some(n) => a
@@ -175,8 +268,7 @@ impl PriorPlan {
                 None => Vec::new(),
             })
             .collect();
-        let ops: Vec<SimOp> = self
-            .ahead
+        let ops: Vec<SimOp> = ahead
             .iter()
             .zip(&tips)
             .map(|(a, tip)| match a.nose {
@@ -184,8 +276,8 @@ impl PriorPlan {
                 None => SimOp { moves: &a.moves, radius: a.radius, ball: a.ball, cone: a.cone, corner: a.corner },
             })
             .collect();
-        stock_sim::simulate(&mut dex, &ops).map_err(|e| e.to_string())?;
-        Ok(dex)
+        stock_sim::simulate(dex, &ops).map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 
@@ -194,10 +286,21 @@ impl PriorPlan {
 /// IS the prior), an error when the stock grid cannot be built (the
 /// caller treats that as an unknown prior - raw stock).
 pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -> Result<Option<PriorPlan>, String> {
-    let ahead: Vec<Ahead> = ahead_of(world, name, setup, true).into_iter().filter(|a| a.cut).collect();
-    if ahead.is_empty() {
+    let chain = chain_of(world, name, setup, true)?;
+    let crosses = chain.crosses();
+    let origin = crate::setup::effective(world, chain.origin());
+    let mut segs = chain.segments.into_iter();
+    let first: Vec<Ahead> = segs.next().map(|s| s.ops).unwrap_or_default().into_iter().filter(|a| a.cut).collect();
+    let carried: Vec<(crate::stock_sim::LatticeTurn, Vec<Ahead>)> = segs
+        .filter_map(|s| s.turn.map(|t| (t, s.ops.into_iter().filter(|a| a.cut).collect())))
+        .collect();
+    let every = || first.iter().chain(carried.iter().flat_map(|(_, o)| o.iter()));
+    // A crossing plan is read even when nothing cut: the carried block
+    // is not the consumer's own (#318).
+    if !crosses && first.is_empty() {
         return Ok(None);
     }
+    let ahead: Vec<&Ahead> = every().collect();
     // #89 review (B1/B2): on a lathe the column grid credits a turning
     // move under standing material (a parting kerf, an ID groove behind
     // a lip) with everything above it, and a bar or blade cut as a full
@@ -206,7 +309,7 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     // The same holds for a turning kind on a mill-turn: the column grid
     // reads its undercuts the same way, so outside a lathe every turning
     // kind but nose-cut Facing ahead is unknown too.
-    let lathe = crate::machine::kind_of(world) == crate::machine::Kind::Lathe;
+    let lathe = crate::machine::kind_of_setup(world, setup) == crate::machine::Kind::Lathe;
     let facing = |a: &Ahead| a.kind == crate::operation::OpType::Facing && a.nose.is_some();
     let turning = |a: &Ahead| a.kind.info().family() == crate::operation::Family::Turn;
     if let Some(a) = ahead.iter().find(|a| !facing(a) && (lathe || turning(a))) {
@@ -216,8 +319,13 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
         ));
     }
     let min_r = ahead.iter().map(|a| a.nose.unwrap_or(a.radius)).filter(|r| *r > 0.0).fold(tool_r, f64::min);
-    let grid = stock_sim::stock_grid(world, setup, min_r)?;
-    Ok(Some(PriorPlan { grid, ahead }))
+    if !crosses {
+        let grid = stock_sim::stock_grid(world, setup, min_r)?;
+        return Ok(Some(PriorPlan { grid, ahead: first, carried, floor: None }));
+    }
+    let grid = stock_sim::stock_grid(world, origin.as_deref(), min_r)?;
+    let body = stock_sim::carry::first_body(world, origin.as_deref(), grid.clone())?;
+    Ok(Some(PriorPlan { grid, ahead: first, carried, floor: Some(body) }))
 }
 
 /// The staleness story re-machining adds to `stale_reason`'s list of
@@ -232,60 +340,25 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
 /// not run). The order law above is what makes "ahead" mean what the
 /// machine means.
 pub fn prior_stale(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
-    ahead_of(world, name, setup, false)
-        .into_iter()
-        .find(|a| a.cut)
-        .map(|a| {
-            format!(
-                "operation '{}' ahead of it in the program changed - regenerate the program in order",
-                a.name
-            )
-        })
-}
-
-/// A twist drill ahead in the setup, as the turned family's rapid law
-/// credits it (#103): its cut moves, the drill's radius and the cot of
-/// its point's half-angle. A drill that states no point (tip angle 0 or
-/// 180) is read as the standard 118-degree point: a flat point would
-/// credit the full radius down to the tip - MORE removed (review S3).
-pub struct DrillAhead {
-    pub radius: f64,
-    pub cone: Option<f64>,
-    pub moves: Vec<Move>,
-}
-
-/// A turning op ahead in the setup, as the turned family's rapid law
-/// credits it (#159): its moves (nose centres) and its insert's nose
-/// radius - a blade or gauge states none and credits its centre line
-/// alone (less removed, never more).
-pub struct TurnedAhead {
-    pub nose: f64,
-    pub moves: Vec<Move>,
-}
-
-/// Every turning-family op ahead of `name` in its setup that has cut.
-/// Read in the meridian, so a kerf to the axis credits exactly its
-/// swept nose - the column grid's undercut objection (#89 review) does
-/// not arise.
-pub fn turned_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<TurnedAhead> {
-    ahead_of(world, name, setup, true)
-        .into_iter()
-        .filter(|a| a.cut && a.kind.info().family() == crate::operation::Family::Turn)
-        .map(|a| TurnedAhead { nose: a.nose.unwrap_or(0.0), moves: a.moves })
-        .collect()
-}
-
-/// cot(59 deg): the 118-degree twist drill point (machine-tool handbooks).
-const STANDARD_POINT_COT: f64 = 0.600_860_619_027_560_4;
-
-/// Every Drill operation ahead of `name` in its setup that has cut. Read
-/// on a lathe too - the axial hole is a cylinder about the spindle, so
-/// the meridian law reads it without the column grid (the prior plan's
-/// facing-only rule is unchanged).
-pub fn drills_ahead(world: &World, name: &str, setup: Option<&str>) -> Vec<DrillAhead> {
-    ahead_of(world, name, setup, true)
-        .into_iter()
-        .filter(|a| a.cut && a.kind == crate::operation::OpType::Drill && a.radius > 0.0)
-        .map(|a| DrillAhead { radius: a.radius, cone: a.cone.or(Some(STANDARD_POINT_COT)), moves: a.moves })
-        .collect()
+    let chain = match chain_of(world, name, setup, false) {
+        Ok(c) => c,
+        Err(e) => return Some(e),
+    };
+    let crosses = chain.crosses();
+    let origin = chain.origin().map(str::to_owned);
+    match chain.into_ops().into_iter().find(|a| a.cut) {
+        Some(a) if crosses => Some(format!(
+            "operation '{}' ahead of it in the program, or a setup the stock is carried through, changed - regenerate the program in order",
+            a.name
+        )),
+        Some(a) => Some(format!(
+            "operation '{}' ahead of it in the program changed - regenerate the program in order",
+            a.name
+        )),
+        None if crosses => Some(format!(
+            "the stock carried from setup '{}' changed - regenerate the program in order",
+            origin.unwrap_or_default()
+        )),
+        None => None,
+    }
 }
