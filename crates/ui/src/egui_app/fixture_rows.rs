@@ -1,6 +1,6 @@
 //! One fixture's row on the Fixtures page (#509): drawn to fit a
 //! default-width properties pane - the name and its position wrap on
-//! one line, the verbs (Place, Unmark, Delete) stand on the next, the
+//! one line, the verbs (Place, Locate part, Unmark, Delete) stand on the next, the
 //! Fixed caption wraps instead of truncating, and the place draft is a
 //! labelled X / Y / Z / yaw form one click from every row. Every edit
 //! still lands through the same commands (`MoveFixture`,
@@ -61,6 +61,8 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, name: &str, loc: &Location, fi
         {
             state.fixture_ui = if is_draft { FixtureUi::default() } else { draft_of(name, loc) };
         }
+        // #561: put the part in this fixture by mates.
+        super::locate_form::arm_button(ui, state, "Locate part…", name, None);
         if ui.small_button("Unmark").clicked() {
             state.pending.push_back(CommandKind::UntagFixture(name.to_owned()));
         }
@@ -70,6 +72,9 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, name: &str, loc: &Location, fi
     });
     if is_draft {
         place_form(ui, state, name);
+    }
+    if super::locate_form::armed_for(state, name, None) {
+        super::locate_form::form(ui, state);
     }
     // #339 slice 4: how the gate judges this steel, and why a box.
     if let Some(m) = state.fixture_mesh_state(name) {

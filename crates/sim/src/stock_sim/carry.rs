@@ -121,6 +121,33 @@ impl LatticeTurn {
         )
     }
 
+    /// This turn, then `next` (#637): `then(next).apply(p) ==
+    /// next.apply(self.apply(p))`. Signed permutations compose into
+    /// signed permutations, so the result is a lattice turn again.
+    #[must_use]
+    pub fn then(&self, next: LatticeTurn) -> LatticeTurn {
+        let (a, b) = (self.m, next.m);
+        let mul = |i: usize, j: usize| b[i][0] * a[0][j] + b[i][1] * a[1][j];
+        let m = [[mul(0, 0), mul(0, 1)], [mul(1, 0), mul(1, 1)]];
+        let t = [
+            f64::from(b[0][0]) * self.t[0] + f64::from(b[0][1]) * self.t[1] + next.t[0],
+            f64::from(b[1][0]) * self.t[0] + f64::from(b[1][1]) * self.t[1] + next.t[1],
+            f64::from(next.s) * self.t[2] + next.t[2],
+        ];
+        LatticeTurn { m, s: self.s * next.s, t }
+    }
+
+    /// The pre-image of an image point: the inverse map (#637), exact -
+    /// the XY part is the orthogonal `m`'s transpose and Z's sign is
+    /// its own inverse. `unapply(apply(p)) == p` to rounding - exactly
+    /// for integer shifts, within an ulp of a fractional one (review of
+    /// #646).
+    #[must_use]
+    pub fn unapply(&self, p: Point3) -> Point3 {
+        let (x, y) = self.back_xy(p.x, p.y);
+        Point3::new(x, y, f64::from(self.s) * (p.z - self.t[2]))
+    }
+
     /// The XY pre-image of an image point: `m` is orthogonal, so its
     /// inverse is its transpose.
     fn back_xy(&self, x: f64, y: f64) -> (f64, f64) {
@@ -203,6 +230,16 @@ impl Body {
             }
         }
         (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+    }
+
+    /// A body from per-column tops (in `dex`) and floors, as another
+    /// engine read them (#637 step D: a carried field read back onto a
+    /// lattice). `floor.len()` must match the lattice.
+    pub(crate) fn from_parts(dex: Dexel, floor: Vec<f64>, floor_judged: bool) -> Result<Self, String> {
+        if floor.len() != dex.nx * dex.ny {
+            return Err(format!("a body of {} floors on a {}x{} lattice", floor.len(), dex.nx, dex.ny));
+        }
+        Ok(Body { dex, floor, floor_judged })
     }
 
     /// The same body seen through `turn`: its lattice re-indexed onto

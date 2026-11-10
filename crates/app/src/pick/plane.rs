@@ -10,6 +10,9 @@
 //! two-edge mode is gone and an edge pick is refused by name; edges set
 //! an in-plane axis instead (#557, [`super::axis`]).
 //!
+//! #555: three picked points lay through the same [`lay_datum`]
+//! ([`super::points`]), so a face and three corners of it agree.
+//!
 //! Provenance: our own design over plain fixture practice (lay a datum
 //! face on the table); the shortest-arc quaternion between two unit
 //! vectors is textbook rigid-body algebra (Shoemake, "Animating rotation with quaternion
@@ -56,7 +59,7 @@ pub fn plane_label(plane: ArcPlane) -> &'static str {
 
 /// (first axis, normal axis index): the plane's first in-plane axis and
 /// the axis its normal runs along.
-fn axes_of(plane: ArcPlane) -> ([f64; 3], usize) {
+pub(super) fn axes_of(plane: ArcPlane) -> ([f64; 3], usize) {
     match plane {
         ArcPlane::Xy => ([1.0, 0.0, 0.0], 2),
         ArcPlane::Xz => ([1.0, 0.0, 0.0], 1),
@@ -74,10 +77,12 @@ pub fn target_normal(lay: PlaneLay) -> [f64; 3] {
 }
 
 /// What the pick fixes: a source normal and the point that goes to the
-/// plane's level.
-struct Datum {
-    normal: [f64; 3],
-    anchor: [f64; 3],
+/// plane's level. A face gives its outward normal and centroid; three
+/// points (#555) give their plane's away-from-the-material normal and
+/// point 1 - both laid by the one [`lay_datum`].
+pub(super) struct Datum {
+    pub(super) normal: [f64; 3],
+    pub(super) anchor: [f64; 3],
 }
 
 /// The part alignment (document frame -> setup frame) that lays the
@@ -86,7 +91,14 @@ struct Datum {
 /// re-pick. The identity comes back as an identity `Location`; the
 /// command stores it as "as modelled".
 pub fn lay_on_plane(world: &World, picks: &[GeoSel], lay: PlaneLay) -> Result<Location, String> {
-    let datum = datum_of(world, picks)?;
+    lay_datum(world, &datum_of(world, picks)?, lay)
+}
+
+/// The one apply path (#330, #555): turn `datum`'s normal onto `lay`'s
+/// axis about the parts' centre, then (with `place`) set its anchor on
+/// the plane's level. A face and three points both land here, so the two
+/// modes cannot disagree on the same plane.
+pub(super) fn lay_datum(world: &World, datum: &Datum, lay: PlaneLay) -> Result<Location, String> {
     let t3 = target_normal(lay);
     let rot = shortest_arc(datum.normal, t3, lay.plane).ok_or("the picks do not make a usable turn - re-pick them")?;
     // Prove the landing: a turn that misses the axis is refused, never
@@ -194,7 +206,7 @@ pub fn plane_side(world: &World, picks: &[GeoSel]) -> Result<String, String> {
 }
 
 /// A unit direction as "+Z" when it runs along an axis, else its parts.
-fn axis_words(n: [f64; 3]) -> String {
+pub(super) fn axis_words(n: [f64; 3]) -> String {
     for (k, name) in ["X", "Y", "Z"].iter().enumerate() {
         let v = n.get(k).copied().unwrap_or(0.0);
         if (v.abs() - 1.0).abs() <= 1e-9 {
