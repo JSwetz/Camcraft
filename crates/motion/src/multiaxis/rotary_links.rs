@@ -94,6 +94,7 @@ pub(super) fn radial_relink(
 ) -> Result<Toolpath, GenError> {
     for (name, v) in [("clearance", clear), ("retract", hop)] {
         if !(v.is_finite() && v > rho_part + ARC_FIT_TOL) {
+            // #677: names no spot - a height (a radius about the bar), not a place.
             return Err(GenError::Invalid(format!(
                 "Rotary Parallel reads its {name} height as a radius about the bar's axis: {v:.3} mm does not clear the work's {rho_part:.3} mm radius - raise it"
             )));

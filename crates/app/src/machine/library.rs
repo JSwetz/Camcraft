@@ -8,9 +8,10 @@
 //! library or its layout was consulted.
 //!
 //! Reading only. Nothing here writes a file or touches the document:
-//! assigning a machine stays the `LoadMachine` command's job, and the
-//! catalogue is rebuilt on demand (the pane caches it), never stored.
-//! Writing a machine file is `draft` / `store`'s job (#383).
+//! assigning a machine stays the `LoadMachine` command's job
+//! (`LoadMachine::from_catalogue`, issue #384), and the catalogue is
+//! rebuilt on demand (the pane caches it), never stored. Writing a
+//! machine file is `draft` / `store`'s job (#383).
 
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,17 @@ impl MachineSource {
     pub fn label(&self) -> String {
         match self {
             MachineSource::Builtin(_) => "built-in".to_owned(),
+            MachineSource::File(p) => p.display().to_string(),
+        }
+    }
+
+    /// The path the document records when this machine is mounted -
+    /// the same string `machine::of` answers afterwards, so "is this
+    /// the setup's machine?" is one comparison.
+    #[must_use]
+    pub fn mount_path(&self) -> String {
+        match self {
+            MachineSource::Builtin(n) => posting::builtin_path(n),
             MachineSource::File(p) => p.display().to_string(),
         }
     }
@@ -72,6 +84,25 @@ impl MachineEntry {
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.refusals.is_empty()
+    }
+
+    /// Why this entry cannot be made the setup's machine right now, in
+    /// words for the pane's disabled button (issue #384); `None` = it
+    /// can. A refused file names its first refusal; the machine already
+    /// mounted names that (assigning it again would be a no-op command).
+    #[must_use]
+    pub fn assign_block(&self, world: &World) -> Option<String> {
+        if let Some(first) = self.refusals.first() {
+            let more = match self.refusals.len() {
+                1 => String::new(),
+                n => format!(" (and {} more)", n - 1),
+            };
+            return Some(format!("fails validation - {first}{more}"));
+        }
+        if super::of(world).0 == self.source.mount_path() {
+            return Some("it is already this setup's machine".to_owned());
+        }
+        None
     }
 
     /// Build an entry from a file's text. Never panics: a file that
@@ -120,6 +151,31 @@ impl MachineEntry {
             }
         }
     }
+}
+
+/// Read and VALIDATE a catalogue machine for assignment (#384): the
+/// path the document records and the parsed machine, or why not - the
+/// file cannot be read, a library name is stale, or the first
+/// validation refusal. Read fresh, never trusted from a cached entry:
+/// the forgiving reader would otherwise mount a machine whose stated
+/// limits it quietly dropped. The commands' `from_catalogue` doors and
+/// the ui's routed mount share it.
+pub fn read_for_assign(source: &MachineSource) -> Result<(String, super::Machine), String> {
+    let text: String = match source {
+        MachineSource::Builtin(name) => posting::MACHINES
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, t)| (*t).to_owned())
+            .ok_or_else(|| format!("machine {name} is not in the built-in library"))?,
+        MachineSource::File(path) => {
+            std::fs::read_to_string(path).map_err(|e| format!("machine file {}: {e}", path.display()))?
+        }
+    };
+    if let Some(first) = validate_text(&text).first() {
+        return Err(format!("{} fails validation - {first}", source.mount_path()));
+    }
+    let m = parse_mch(&text)?;
+    Ok((source.mount_path(), m))
 }
 
 /// The shipped library, in `posting::MACHINES` order.

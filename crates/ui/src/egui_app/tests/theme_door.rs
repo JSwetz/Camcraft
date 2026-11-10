@@ -52,6 +52,11 @@ fn the_theme_door_sits_right_of_panels() {
 
 #[test]
 fn the_theme_door_switches_the_theme_and_undo_restores_it() {
+    // #605: the pick lands through the frame-edge sync, which writes the
+    // ONE process-wide live table (`theme::current()`); the structural
+    // and snapshot tests assert on that table, so this test shares their
+    // lock or a parallel run flips their look mid-frame.
+    let _g = snapshot_guard();
     let mut harness = shell_harness();
     harness.run();
     assert_eq!(theme_of(&harness.state().state.world), ThemeRef::Dark);

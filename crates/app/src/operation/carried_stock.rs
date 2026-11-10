@@ -163,7 +163,7 @@ impl Overhang {
                     return false;
                 }
                 match &self.grid {
-                    Some(g) => self.columns_reach(g, (x0, x1, y0, y1), tip),
+                    Some(g) => self.columns_reach(&crate::stock_sim::Columns::of_grid(g), (x0, x1, y0, y1), tip),
                     None => x0 < d0.x - TOL || y0 < d0.y - TOL || x1 > d1.x + TOL || y1 > d1.y + TOL || above,
                 }
             });
@@ -175,20 +175,21 @@ impl Overhang {
     /// where the declared stock does not hold it - beside the declared box,
     /// or above its top? A column cut through still reads its top (more
     /// material, never less); a column that cannot be read reaches.
-    fn columns_reach(&self, g: &crate::stock_sim::Dexel, (x0, x1, y0, y1): (f64, f64, f64, f64), tip: f64) -> bool {
+    fn columns_reach(&self, g: &crate::stock_sim::Columns<'_>, (x0, x1, y0, y1): (f64, f64, f64, f64), tip: f64) -> bool {
         let (d0, d1) = self.declared;
-        if !(g.cell > 0.0 && g.cell.is_finite()) {
+        let (cell, o) = (g.cell(), g.origin());
+        if !(cell > 0.0 && cell.is_finite()) {
             return true;
         }
-        let h = g.cell * 0.5;
+        let h = cell * 0.5;
         let span = |lo: f64, hi: f64, o: f64, n: usize| {
-            let a = ((lo - o) / g.cell).floor().max(0.0).min(n as f64) as usize;
-            let b = ((hi - o) / g.cell).ceil().max(0.0).min(n as f64) as usize;
+            let a = ((lo - o) / cell).floor().max(0.0).min(n as f64) as usize;
+            let b = ((hi - o) / cell).ceil().max(0.0).min(n as f64) as usize;
             a..b
         };
-        for iy in span(y0, y1, g.y0, g.ny) {
-            for ix in span(x0, x1, g.x0, g.nx) {
-                let t = g.top_at(ix + iy * g.nx);
+        for iy in span(y0, y1, o.y, g.ny()) {
+            for ix in span(x0, x1, o.x, g.nx()) {
+                let t = g.top_at(ix, iy);
                 if t.is_nan() {
                     return true;
                 }
