@@ -2,9 +2,10 @@
 
 - **Chosen:** while a setup's settings page is open (`UiTarget::SetupNode(name,
   Settings)`) and its effective stock source is "What <previous setup> leaves
-  behind", the scene carries one extra stock-slot part: the incoming body's
-  sheet (`Body::display().surface(&[])`), painted by `fs_stock` with a new
-  class value 4 - a fixed teal (0.12, 0.66, 0.74) at alpha 0.45. The
+  behind", the scene carries one extra stock-slot part: the incoming body
+  as a closed block (`setup_stock_shell::floor_and_walls`: its floor and
+  walls plus the top sheet), painted by `fs_stock` with a new class value
+  4 - a fixed teal (0.12, 0.66, 0.74) at alpha 0.45. The
   setup's own Stock node keeps drawing in its steel tint beside it.
 - **Why:** the stock-slot path already draws translucent sheets with
   per-vertex classes (the Deviate sheet, the machined mesh); one more class
@@ -35,11 +36,18 @@
   operation's area); a palette (colour-vision) token for the tint (the
   shader uniform's layout would change for one preview colour - can follow
   if a user asks); keeping the mesh until the next document change after
-  the page closes (a leak by the issue's own law); a closed outer shell
-  (the issue asks for the display sheet).
-- **Known limit:** when the traced stock eye paints the stock slot (a
-  whole-program sim view on screen), it replaces every stock-slot part,
-  so the preview hides under it like the Stock node does; wireframe mode
-  shows only its wire, like any stock part.
+  the page closes (a leak by the issue's own law); the display sheet alone
+  (the first version drew only `Body::display().surface(&[])`: on a part
+  that fills the stock's footprint the sheet sat inside the part and
+  nothing teal showed - the user's GUI check of 2026-11-09 found it, so the
+  preview became a closed block).
+- **Drawn after the traced stock** (the same GUI check): the traced
+  whole-program stock view replaces the stock slot, so the preview is an
+  overlay part (`viewport::is_overlay`) that `viewport::draw_order` sorts
+  after the parts the traced view replaces - it stays visible over it.
+  Wireframe mode shows only its wire, like any stock part.
+- **Hand check:** passed 2026-11-10 (build from 1ab3fc88): the teal block
+  stands from Z -2 to 12 on `test-519-520.camproj`, and goes away with the
+  page or with the setup's own stock.
 - **Cost to change later:** the tint is one shader line; moving it to the
   palette is a uniform field plus one token.
