@@ -10,6 +10,7 @@ use std::process::{Command, Stdio};
 
 use crate::decisions::valid_version;
 use crate::exec::{self, git};
+use crate::package::{self, PackageArgs};
 use crate::release_bump as bump;
 use crate::release_pack::{self as pack, Os};
 
@@ -296,23 +297,15 @@ impl Cut {
     fn package(&mut self, v: &str) -> Result<(), String> {
         let bin = pack::bin_dir(&self.root, self.os);
         let Some(script) = self.os.packager() else {
+            // The same staging and zip as `cargo xtask package` and release.yml's Windows job (#752).
             self.banner(8, "assemble zip");
-            let stage = self.dist().join(pack::stage_name(v));
-            let zip = self.dist().join(format!("{}.zip", pack::stage_name(v)));
-            let list = pack::stage_list(&self.root, &bin, self.os)?;
-            if self.a.dry {
-                let roots = "exes (camcraft-ui, camcraft-cli, post), assets/{posts,machines,ui,scripts,themes}, RELEASE_NOTES.md, TESTING.md, LICENSE, NOTICE";
-                self.say(format!("[dry-run] stage {} : {roots} ({} files)", stage.display(), list.len()));
-            } else {
-                let n = pack::stage(&list, &stage)?;
-                self.say(format!("staged {n} files in {}", stage.display()));
+            let a = PackageArgs { version: Some(v.to_string()), out: Some(self.dist()), bin_dir: Some(bin), dry: self.a.dry };
+            let mut lines = Vec::new();
+            let packed = package::package(&self.root, &a, self.os, &mut |l| lines.push(l));
+            for l in lines {
+                self.say(l);
             }
-            let cmd = format!(
-                "Compress-Archive -Path '{}' -DestinationPath '{}' -Force",
-                stage.display().to_string().replace('\'', "''"),
-                zip.display().to_string().replace('\'', "''")
-            );
-            return self.run("powershell", &["-NoProfile".into(), "-Command".into(), cmd], &[]);
+            return packed.map(|_| ());
         };
         self.banner(8, &format!("package ({script})"));
         let bash_args = [self.root.join(script).display().to_string()];

@@ -1,11 +1,12 @@
 //! `cargo xtask`: the workspace's process tooling, one implementation for Windows, macOS and Linux -
-//! the gate tiers (`gate quick|batch|release|test`), the decision collection (`decisions`) and the
-//! release cut (`release`).
+//! the gate tiers (`gate quick|batch|release|test`), the decision collection (`decisions`), the
+//! Windows portable zip (`package`) and the release cut (`release`).
 //! Provenance: our own build and process law (AGENTS.md "Three gate tiers", "Test the change",
 //! release step 2), replacing the scripts/gate.*, collect-decisions.* and release.ps1 twins (#748, #749).
 
 mod decisions;
 mod exec;
+mod package;
 mod plan;
 mod quick;
 mod release;
@@ -30,7 +31,11 @@ usage:
       any gate: --dry-run (or --plan) prints the plan without running it. Logs: gate-logs/<tier>-<timestamp>/.
   cargo xtask decisions --version X.Y.Z            gather docs/decisions/*.md into RECOMMENDED.md
   cargo xtask release --version X.Y.Z --no-tag [--title T] [--skip-gate] [--skip-build] [--installer] [--dry-run]
-                                                   the release cut on release/vX.Y.Z (scripts/release.ps1's phases)";
+                                                   the release cut on release/vX.Y.Z (scripts/release.ps1's phases)
+  cargo xtask package [--version X.Y.Z] [--out dist] [--bin-dir target/release] [--dry-run]
+                                                   stage the Windows portable tree and write camcraft-<ver>-win-x64.zip
+                                                   (no bump/commit/build; version defaults to post.exe --version;
+                                                   reports version/stage/zip to $GITHUB_OUTPUT when set)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -111,9 +116,12 @@ fn run(args: &[String]) -> Result<i32, String> {
             println!("{}", decisions::collect(&root(), &version)?);
             Ok(0)
         }
+        Some("package") => {
+            let a = package::parse(&args[1..]).map_err(|e| format!("{e}\n{USAGE}"))?;
+            Ok(package::run(&root(), &a))
+        }
         Some("release") => {
-            let a = release::parse(&args[1..]).map_err(|e| format!("{e}
-{USAGE}"))?;
+            let a = release::parse(&args[1..]).map_err(|e| format!("{e}\n{USAGE}"))?;
             Ok(release::release(&root(), a))
         }
         Some("-h" | "--help" | "help") | None => {
