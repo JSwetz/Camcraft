@@ -4,22 +4,23 @@
 //! document's (`None` - every file before v55), so an untouched document
 //! mounts and posts byte for byte as before.
 //!
-//! ## The one-mount law (this slice)
+//! ## Every op on its own mount (#388)
 //!
-//! The whole app reads ONE mounted machine and ONE post at a time - the
-//! ACTIVE setup's ([`crate::machine::of`], [`crate::posting::post_of`]):
-//! the ribbon, the kind gates, generation, the limit checker and the
-//! post all see the same steel. Work that would cross mounts is refused
-//! by name instead of being judged against the wrong machine:
+//! The ACTIVE setup's mount ([`crate::machine::of`],
+//! [`crate::posting::post_of`]) is what the ribbon, the Setup pane and
+//! the new-op door read - a new op joins the active setup. Every law
+//! that judges an EXISTING operation reads that operation's own setup
+//! instead ([`machine_of`], [`crate::machine::kind_of_setup`],
+//! [`crate::posting::post_of_setup`]): generation, the spindle law, the
+//! rest reading, the fixture table, the limit check. So an inactive
+//! setup's op is generated against its own machine without activating
+//! it - never against whatever steel happens to be active.
 //!
-//! - generating an operation whose setup mounts another machine or post
-//!   than the active one ([`generation_problem`]) - activate its setup;
-//! - posting a program with an operation in such a setup
-//!   ([`program_problems`]) - a program is written by one post for one
-//!   machine; setups with different mounts post one at a time (one file
-//!   per post is a follow-up).
-//!
-//! With no setup owning a mount (the default) neither refusal can fire.
+//! A program whose setups mount different machines or posts posts as
+//! one file per [`Mount`] ([`program_mounts`];
+//! `posting::post_mounts`), each through its own post for its own
+//! machine; with one mount (the default) the post is one file, byte for
+//! byte as before.
 //!
 //! Provenance: our own design; a setup being one clamping on one
 //! machine, posted by that machine's post, is general machine-shop
@@ -65,6 +66,20 @@ pub fn post_of(world: &World, declared: Option<&str>) -> PostRef {
     own_post(world, declared).unwrap_or_else(|| document_post(world))
 }
 
+/// The kind of the machine a declared setup context mounts (#388) -
+/// what every law judging one operation reads, so an inactive setup's
+/// op is judged on its own steel (`crate::machine::kind_of_setup`).
+/// Reads the singleton without a clone unless the setup owns its machine.
+#[must_use]
+pub fn kind_of_setup(world: &World, declared: Option<&str>) -> crate::machine::Kind {
+    if let Some(own) = own_machine(world, declared) {
+        return crate::machine::kind(own.machine.as_ref());
+    }
+    world
+        .try_get::<&MachineDef>(|d| crate::machine::kind(d.machine.as_ref()))
+        .unwrap_or(crate::machine::Kind::Mill)
+}
+
 /// The setup's own machine, `None` when it follows the document.
 #[must_use]
 pub fn own_machine(world: &World, declared: Option<&str>) -> Option<MachineDef> {
@@ -91,49 +106,42 @@ pub fn machine_label(m: &(String, Option<Machine>)) -> String {
     }
 }
 
-/// Why a declared setup context cannot be worked while the active setup
-/// is mounted: it mounts another machine or post. `None` when they agree
-/// (always, unless a setup owns its mount).
-#[must_use]
-pub fn mount_problem(world: &World, declared: Option<&str>) -> Option<String> {
-    let here = setup::effective(world, declared)?;
-    let active = setup::active(world)?;
-    if here == active {
-        return None;
-    }
-    let (m_here, m_active) = (machine_of(world, Some(&here)), machine_of(world, Some(&active)));
-    if m_here != m_active {
-        return Some(format!(
-            "setup '{here}' is machined on {} but the active setup '{active}' mounts {} - activate '{here}' first",
-            machine_label(&m_here),
-            machine_label(&m_active),
-        ));
-    }
-    let (p_here, p_active) = (post_of(world, Some(&here)), post_of(world, Some(&active)));
-    if p_here != p_active {
-        return Some(format!(
-            "setup '{here}' posts with {} but the active setup '{active}' posts with {} - activate '{here}' first",
-            crate::posting::post_ref_label(&p_here),
-            crate::posting::post_ref_label(&p_active),
-        ));
-    }
-    None
+/// One mount of the program (#388): the setups (program order) that
+/// share one machine and one post - what one NC file is written by.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Mount {
+    /// Effective setup names, program order; `""` for the implicit
+    /// setup of a document that declares none.
+    pub setups: Vec<String>,
+    pub machine: (String, Option<Machine>),
+    pub post: PostRef,
 }
 
-/// The generation door's mount clause: an operation is generated against
-/// the mounted (active) machine only when its own setup mounts it too.
-#[must_use]
-pub fn generation_problem(world: &World, op: &crate::schema::Operation) -> Option<String> {
-    mount_problem(world, op.setup.as_deref())
+impl Mount {
+    /// The mount as a refusal or a status line names it.
+    #[must_use]
+    pub fn label(&self) -> String {
+        let names = if self.setups.iter().all(String::is_empty) {
+            "the setup".to_owned()
+        } else {
+            self.setups.join(", ")
+        };
+        format!(
+            "{names} ({}, {})",
+            machine_label(&self.machine),
+            crate::posting::post_ref_label(&self.post)
+        )
+    }
 }
 
-/// The post's mount clause: one program, one post, one machine. Every
-/// unsuppressed operation's setup must mount what the active setup
-/// mounts; each disagreeing setup is named once.
+/// The program's mounts in program order of first use: every
+/// unsuppressed operation's setup, grouped with the setups that mount
+/// the same machine and - when `by_post` - the same post (a caller
+/// overriding the post groups by machine alone). One entry for every
+/// document whose setups own no mount; empty when nothing would post.
 #[must_use]
-pub fn program_problems(world: &World) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
+pub fn program_mounts(world: &World, by_post: bool) -> Vec<Mount> {
+    let mut out: Vec<Mount> = Vec::new();
     for (_, e) in setup::operation_order(world) {
         let Some(op) = model::operation_of(world, &e) else {
             continue;
@@ -141,16 +149,20 @@ pub fn program_problems(world: &World) -> Vec<String> {
         if op.suppressed {
             continue;
         }
-        let Some(here) = setup::effective(world, op.setup.as_deref()) else {
-            continue;
-        };
-        if seen.contains(&here) {
+        let here = setup::effective(world, op.setup.as_deref());
+        let name = here.clone().unwrap_or_default();
+        if out.iter().any(|m| m.setups.contains(&name)) {
             continue;
         }
-        if let Some(why) = mount_problem(world, Some(&here)) {
-            out.push(format!("{why} (one program is written by one post for one machine)"));
+        let machine = machine_of(world, here.as_deref());
+        let post = post_of(world, here.as_deref());
+        match out
+            .iter_mut()
+            .find(|m| m.machine == machine && (!by_post || m.post == post))
+        {
+            Some(m) => m.setups.push(name),
+            None => out.push(Mount { setups: vec![name], machine, post }),
         }
-        seen.push(here);
     }
     out
 }

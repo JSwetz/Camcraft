@@ -14,7 +14,9 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             dto.name
         )));
     }
+    super::program_entry_dto::validate(dto, kind)?; // #155
     match kind {
+        EntityKind::Entry => {}
         EntityKind::Model => {
             if dto.stock.is_some()
                 || dto.tool.is_some()
@@ -146,6 +148,13 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
                     dto.name,
                     crate::tool_numbers::RANGE_TEXT
                 )));
+            }
+            // #368: a body is a body this build's envelope law accepts,
+            // on a tool it fits - or the file refuses by name.
+            if let Some(b) = &tool.body {
+                let body = b.to_body(&dto.name).map_err(corrupt)?;
+                crate::tool_body::fits(&tool.to_tool(), &body)
+                    .map_err(|e| corrupt(format!("tool '{}': {e}", dto.name)))?;
             }
         }
         EntityKind::Operation => {

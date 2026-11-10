@@ -50,8 +50,8 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, RichText, ScrollArea, Sense,
-    Shape, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Layout, Pos2, RichText, ScrollArea,
+    Sense, Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
@@ -59,8 +59,7 @@ use camcraft_app::machine;
 use camcraft_app::model;
 use camcraft_app::operation::SrcRef;
 use camcraft_app::posting;
-use camcraft_app::commands::theme_of;
-use camcraft_app::schema::{PostRef, ThemeRef};
+use camcraft_app::schema::PostRef;
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools;
 use camcraft_app::units::{self, Unit};
@@ -69,7 +68,7 @@ use crate::actions;
 use crate::interact;
 use crate::state::{CommandKind, ErrorScope, FixtureUi, ModelUi, PostView, State, UiTarget, quat_yaw_deg};
 
-use super::layout::{check_row, hint};
+use super::layout::hint;
 use super::panes::kind_name;
 use super::theme::Tokens;
 
@@ -321,65 +320,6 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
                 .push_back(CommandKind::DeleteByName(stock_name.clone()));
         }
     });
-    ui.add_space(10.0);
-    ui.separator();
-    machine_section(ui, state);
-    ui.add_space(10.0);
-    ui.separator();
-    post_section(ui, state);
-    ui.add_space(10.0);
-    ui.separator();
-    theme_section(ui, state);
-}
-
-/// The document's theme (M6.1 C): setup furniture, read live off the
-/// world singleton like the machine and post sections beside it - no
-/// mirror to go stale, the label is exactly the reference the command
-/// wrote. The combo offers the two built-ins and the discovered
-/// `assets/themes/*.json` files BY NAME (the `post_registry` law: an
-/// index into a file list would silently re-point the document when a
-/// file arrives), and "Load theme" reaches any `.json` through the
-/// file-pick law. The look itself lands on the next frame edge, in
-/// `State::sync_theme` - the click writes the reference, never a
-/// table - so undo puts the previous theme back exactly.
-fn theme_section(ui: &mut Ui, state: &mut State) {
-    let current = theme_of(&state.world);
-    ui.label("Theme");
-    ui.label(crate::state::theme_label(&state.world));
-    ui.horizontal(|ui| {
-        let mut pick: Option<CommandKind> = None;
-        egui::ComboBox::from_id_salt("theme_switcher")
-            .selected_text(state.theme_selection_text())
-            .show_ui(ui, |ui| {
-                for (label, cmd) in state.theme_options() {
-                    let on = match (&cmd, &current) {
-                        (CommandKind::SelectTheme(ThemeRef::Dark), ThemeRef::Dark) => true,
-                        (
-                            CommandKind::SelectTheme(ThemeRef::Named(n)),
-                            ThemeRef::Named(m),
-                        ) => n == m,
-                        (
-                            CommandKind::SelectTheme(ThemeRef::File(p)),
-                            ThemeRef::File(q),
-                        ) => p == q,
-                        _ => false,
-                    };
-                    if ui.selectable_label(on, &label).clicked() {
-                        pick = Some(cmd);
-                    }
-                }
-            });
-        if let Some(cmd) = pick {
-            state.pending.push_back(cmd);
-        }
-        if matches!(current, ThemeRef::File(_)) && ui.button("Built-in").clicked() {
-            state
-                .pending
-                .push_back(CommandKind::SelectTheme(ThemeRef::Dark));
-        }
-    });
-    // M13.4: the viewer's colour-vision remap rides beside the theme.
-    super::colorvision::picker(ui, state);
 }
 
 /// The document's post script (M3.3 A/B): setup furniture, read live
@@ -898,7 +838,7 @@ pub(super) fn sheet_footer(ui: &mut Ui, state: &mut State) {
 pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
     let fixtures = camcraft_app::fixture::tagged(&state.world, ctx);
-    let table = camcraft_app::fixture::table_box(&state.world);
+    let table = camcraft_app::fixture::table_box(&state.world, ctx);
     // A draft whose row vanished (deleted or untagged, here or via
     // undo) retires with it - the pane never edits a ghost.
     if !state.fixture_ui.name.is_empty()
@@ -913,67 +853,8 @@ pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>
     });
     for (name, entity) in fixtures {
         let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
-        let is_draft = state.fixture_ui.name == name;
-        ui.horizontal(|ui| {
-            if ui.selectable_label(is_draft, &name).clicked() {
-                state.fixture_ui = FixtureUi {
-                    name: name.clone(),
-                    x: loc.pos.x,
-                    y: loc.pos.y,
-                    z: loc.pos.z,
-                    yaw_deg: quat_yaw_deg(loc.rot),
-                };
-            }
-            ui.label(format!(
-                "{}, {}, {}  yaw {:.1}",
-                units::len(loc.pos.x, u, 2),
-                units::len(loc.pos.y, u, 2),
-                units::len(loc.pos.z, u, 2),
-                quat_yaw_deg(loc.rot)
-            ));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Delete").clicked() {
-                    state
-                        .pending
-                        .push_back(CommandKind::DeleteFixture(name.clone()));
-                }
-                if ui.small_button("Unmark").clicked() {
-                    state
-                        .pending
-                        .push_back(CommandKind::UntagFixture(name.clone()));
-                }
-            });
-        });
-        // Whether the steel turns with the part (M13.8 (2)): a chuck
-        // rides the rotary, a tailstock or a table stands still and is
-        // judged in the machine frame. The box edits a copy - the flag
-        // lands through `SetFixtureFixed`, one undo unit, never a poke.
-        let mut fixed = camcraft_app::fixture::def_of(&state.world, &entity).is_some_and(|d| d.fixed);
-        if check_row(ui, "Fixed (does not turn with the part)", &mut fixed).changed() {
-            state.pending.push_back(CommandKind::SetFixtureFixed { name: name.clone(), fixed });
-        }
-        hint(
-            ui,
-            "On: a table or tailstock - it stands still while a rotary turns the part, \
-             so it is collision-checked in the machine frame. Off: a chuck, turning with the part.",
-        );
-        if is_draft {
-            ui.horizontal(|ui| {
-                ui.label("    place");
-                num(ui, u, &mut state.fixture_ui.x);
-                num(ui, u, &mut state.fixture_ui.y);
-                num(ui, u, &mut state.fixture_ui.z);
-                ui.label("yaw");
-                num_plain(ui, &mut state.fixture_ui.yaw_deg);
-                if ui.small_button("Apply").clicked() {
-                    state.pending.push_back(CommandKind::MoveFixture {
-                        name: name.clone(),
-                        pos: [state.fixture_ui.x, state.fixture_ui.y, state.fixture_ui.z],
-                        yaw_deg: state.fixture_ui.yaw_deg,
-                    });
-                }
-            });
-        }
+        let fixed = camcraft_app::fixture::def_of(&state.world, &entity).is_some_and(|d| d.fixed);
+        super::fixture_rows::row(ui, state, &name, &loc, fixed);
     }
     if let Some(t) = table {
         ui.label(format!(
@@ -983,7 +864,7 @@ pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>
             units::len(t.max.z, u, 2),
         ));
     }
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui.button("Import fixture…").clicked() {
             state.pending.push_back(CommandKind::ImportFixtureDialog);
         }
@@ -1066,8 +947,29 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         ui.heading("Tool library");
         ui.label("Pick a tool in the browser, or open the editor to create one.");
     }
-    if ui.button("New tool…").clicked() {
+    // Wrapped: the pane is narrow, and a clipped button is a hidden one.
+    let (new, export, import) = ui
+        .horizontal_wrapped(|ui| {
+            let new = ui.button("New tool…").clicked();
+            let export = ui
+                .button("Export library…")
+                .on_hover_text("write the document's tools to a CamCraft tool library file")
+                .clicked();
+            let import = ui
+                .button("Import library…")
+                .on_hover_text("add the tools of a CamCraft tool library file (one undo step; taken names are never overwritten)")
+                .clicked();
+            (new, export, import)
+        })
+        .inner;
+    if new {
         actions::open_tool_editor(state, "");
+    }
+    if export {
+        state.export_tool_library_dialog();
+    }
+    if import {
+        state.import_tool_library_dialog();
     }
     if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
         ui.colored_label(super::colorvision::text_inks(ui, &state.world).error, msg);
@@ -1292,10 +1194,23 @@ fn gcode_listing(
                 {
                     rt = rt.weak();
                 }
-                // add_sized pins every row to exactly row_h, so the
-                // cursor arithmetic above stays exact over a long
-                // program instead of drifting a row.
-                let resp = ui.add_sized([width, row_h], Label::new(rt).selectable(false));
+                // Every row is a left-to-right box exactly `width` by
+                // `row_h`, so the text starts at the left edge (#256:
+                // `add_sized` centred it) and the cursor arithmetic
+                // above stays exact over a long program instead of
+                // drifting a row. `truncate` keeps a line wider than
+                // the window on its one row (egui shows the whole line
+                // on hover) rather than wrapping it onto a second.
+                let resp = ui
+                    .allocate_ui_with_layout(
+                        Vec2::new(width, row_h),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_size(Vec2::new(width, row_h));
+                            ui.add(Label::new(rt).selectable(false).truncate())
+                        },
+                    )
+                    .inner;
                 if jump.get() == Some(i) {
                     resp.scroll_to_me(Some(Align::Center));
                     jump.set(None);
@@ -1323,8 +1238,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
+        // #371 widened the window by the Body column (~270 px); its
+        // default anchor moved left by as much, so it stays centred.
         .default_pos([
-            ctx.viewport_rect().center().x - 270.0,
+            ctx.viewport_rect().center().x - 520.0,
             ctx.viewport_rect().center().y - 210.0,
         ])
         .show(ctx, |ui| {
@@ -1515,7 +1432,14 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     ui.add(egui::DragValue::new(&mut state.tool_ui.number).range(0..=camcraft_app::tool_numbers::MAX));
                 });
                 ui.vertical(|ui| {
-                    draw_tool_preview(ui, &preview_tool, u);
+                    // #371: the placed body's envelope rides the profile.
+                    let body = if exists { super::tool_body_page::envelope(state) } else { None };
+                    draw_tool_preview(ui, &preview_tool, u, body.as_deref());
+                });
+                ui.vertical(|ui| {
+                    ui.set_width(260.0);
+                    // #93: Body / Profile tabs for a milling tool.
+                    super::tool_profile_page::third_column(ui, state, exists, u);
                 });
             });
             ui.separator();
@@ -1577,7 +1501,7 @@ fn push_number_if_changed(state: &mut State, name: &str) {
 /// the fields beside it are editing. Tip at the bottom (z = 0 upward),
 /// equal aspect both axes - "to scale" means to scale. A half-typed draft
 /// renders a stub and a word, never a NaN.
-fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
+fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit, body: Option<&[(f64, f64, f64)]>) {
     const SIDE: f32 = 260.0;
     const PAD: f32 = 18.0;
     let (resp, painter) = ui.allocate_painter(Vec2::splat(SIDE), Sense::hover());
@@ -1585,8 +1509,10 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
     let axis_x = rect.center().x;
     painter.rect_filled(rect, 4.0, Color32::from_rgb(24, 26, 31));
     let outline = t.profile();
-    let r_max = outline.iter().map(|q| q.1).fold(0.0f64, f64::max);
-    let z_max = outline.iter().map(|q| q.0).fold(0.0f64, f64::max);
+    // #371: a body's bands (above, len, r) widen the frame to hold them.
+    let bands = body.unwrap_or_default();
+    let r_max = outline.iter().map(|q| q.1).chain(bands.iter().map(|b| b.2)).fold(0.0f64, f64::max);
+    let z_max = outline.iter().map(|q| q.0).chain(bands.iter().map(|b| b.0 + b.1)).fold(0.0f64, f64::max);
     if r_max <= 0.0 || z_max <= 0.0 || !r_max.is_finite() || !z_max.is_finite() {
         painter.line_segment(
             [
@@ -1643,6 +1569,20 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
             steel[band],
             Stroke::NONE,
         ));
+    }
+    // #371: the modelled body's revolved envelope, translucent amber over
+    // the cylinders it replaces in the judging laws.
+    for &(above, len, r) in bands {
+        if !(above.is_finite() && len.is_finite() && r.is_finite()) || len <= 0.0 || r <= 0.0 {
+            continue;
+        }
+        painter.rect(
+            egui::Rect::from_two_pos(at(above, -r), at(above + len, r)),
+            0.0,
+            Color32::from_rgba_unmultiplied(230, 160, 60, 70),
+            Stroke::new(1.0, Color32::from_rgb(230, 160, 60)),
+            egui::StrokeKind::Inside,
+        );
     }
     // The outline as one closed polyline (a stroke has no convexity rule):
     // right side up, then the mirrored left side back down. Axis points

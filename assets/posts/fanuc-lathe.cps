@@ -90,6 +90,7 @@ var sectionOpen = false;
 var coolant = "";
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var homedAt = -1;          // linesWritten() just after a trip home (#504): onClose skips its own home when nothing followed
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (world -> program)
 var clampDone = false;     // G50 once per program
@@ -348,6 +349,7 @@ function afterOp() {
   if (ask === "home") {
     block(["G28", "U0"]);         // X clear of the part first, then Z
     block(["G28", "W0"]);
+    homedAt = linesWritten();
     return;
   }
   msg(coolantWho() + "unknown after-operation ask " + ask);
@@ -613,7 +615,11 @@ function onCycle() {
 // ------------------------------------------------------------ footer
 function onClose() {
   endPreamble();
-  block(["G28", "U0", "W0"]);
+  // #504: a trip home with nothing written after it (a trailing Go
+  // home) already is the program-end home - written once, not twice.
+  if (linesWritten() !== homedAt) {
+    block(["G28", "U0", "W0"]);
+  }
   block(["M30"]);
   writeln("%");
 }

@@ -27,6 +27,13 @@ pub struct GenJob {
     /// a preview with no entity.
     pub(super) op_name: String,
     pub(super) tool: crate::tools::Tool,
+    /// The tool's modelled body (#368): its envelope, for the fixture
+    /// laws' band stack. `tool` already carries the cylinder enclosing
+    /// it, for every law that reads one; None is no body.
+    pub(super) body: Option<camcraft_tools::holder_profile::HolderProfile>,
+    /// The tool's lathe body (#369): its clearance bands, judged against
+    /// the revolved stock on every move of a turning op; None is none.
+    pub(super) lathe_body: Option<std::sync::Arc<camcraft_tools::lathe_holder::LatheClearance>>,
     /// The op's tool NAME as the component stored it - the error
     /// strings of the tilted kinds quote it verbatim.
     pub(super) tool_name: String,
@@ -74,6 +81,9 @@ pub struct GenJob {
     /// own split (`fixture::workholding_for`), read here so generation
     /// and the gate speak one verdict.
     pub(super) workholding: (Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
+    /// The tagged models' meshes beside their boxes (#339): the mesh
+    /// law acquits what a box flagged and the real steel does not meet.
+    pub(super) fixture_meshes: Vec<crate::fixture::MeshedFixture>,
     /// The rotary axis line a rotary kind turns its part about, in the
     /// world frame; None stands the machine-frame judgement down and the
     /// fixed steel keeps the path-frame verdict (the conservative one).
@@ -95,6 +105,10 @@ pub struct GenJob {
     /// share of the turned surface the axis fit set aside, which the
     /// op does not turn. Carried onto the path's notes by `run_job`.
     pub(super) spindle_note: Option<String>,
+    /// #319: carried material outside the declared stock, said by name on
+    /// the path once it exists (`carried_stock::Overhang::note`) - the post
+    /// gate refuses when a feed move reaches it.
+    pub(super) carried_overhang: Option<super::carried_stock::Overhang>,
 }
 
 /// The tripwire phrase for a stored precompute whose arm never collected
@@ -118,6 +132,18 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let Some(tool) = model::tool_of(world, &tool_entity) else {
         return Err(GenError::Invalid(format!("'{}' is not a tool", op.tool)));
     };
+    let (tool, body) = crate::tool_body::judged(world, &tool_entity, tool)
+        .map_err(|e| GenError::Invalid(format!("tool '{}': {e}", op.tool)))?;
+    // #369: a lathe body is judged only by the turning family's
+    // revolved-stock law; on any other op no law could read it, so the
+    // op is refused by name rather than cut with it unjudged.
+    let lathe_body = crate::tool_body_lathe::clearance_of(world, &tool_entity);
+    if lathe_body.is_some() && op.params.kind().info().family() != super::Family::Turn {
+        return Err(GenError::Invalid(format!(
+            "tool '{}' carries a lathe-frame body, which only a turning operation judges - clear it or place a spindle body for this op",
+            op.tool
+        )));
+    }
     let setup = op.setup.as_deref();
     // #326: an op this slice has not verified in an aligned setup is
     // refused by name here, at the one door every generation passes -
@@ -125,25 +151,19 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     if let Some(why) = crate::setup_align::generation_problem(world, op) {
         return Err(GenError::Invalid(why));
     }
-    // #343: the mounted machine and post are the active setup's - an op
-    // of a setup mounting other steel is refused by name, never cut
-    // against the wrong machine.
-    if let Some(why) = crate::setup_mount::generation_problem(world, op) {
-        return Err(GenError::Invalid(why));
-    }
     let material = material_of(world, setup, &op.src)?;
     let part_solid = part_solid_of(world, setup, &op.src, &material);
     // Setup stock, when it is not the source itself: the swarf column
     // around a smaller model (the head read at `generate` - same call).
-    let stock_facets = match &op.src {
+    let mut stock_facets = match &op.src {
         SrcRef::Stock => None,
         SrcRef::Entity(_) | SrcRef::Selection(_) => {
             model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
                 .and_then(|e| model::world_facets(world, &e))
         }
     };
-    let stock_aabb = model::stock_world_aabb_for(world, setup).map(|b| (b.min, b.max));
-    let analytic_stock = model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
+    let mut stock_aabb = model::stock_world_aabb_for(world, setup).map(|b| (b.min, b.max));
+    let mut analytic_stock = model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
         .and_then(|e| model::stock_def_of(world, &e))
         .is_some_and(|s| matches!(s, crate::stock::StockShape::Box { .. } | crate::stock::StockShape::Cylinder { .. }));
 
@@ -208,15 +228,22 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         OpParams::MultiAxisContour { .. } => Some(drive_chains_of(world, op)),
         _ => None,
     };
-    // #318: an op that reads the program ahead in a setup whose incoming
-    // stock must be carried across a boundary the carry refuses has no
-    // known stock to judge against - refused by name, never read as the
-    // setup's own fresh block.
-    if super::drill_prior::reads_prior(&op.params)
-        && let Some(why) = crate::rest::carry_refusal(world, op_name, setup)
-    {
+    // #318: an op in a setup whose incoming stock must be carried across
+    // a boundary the carry refuses has no known stock to judge against -
+    // refused by name, never read as the setup's own fresh block (#319:
+    // every op, the posed ones included - their verdicts read it too).
+    if let Some(why) = crate::rest::carry_refusal(world, op_name, setup) {
         return Err(GenError::Invalid(format!("{op_name}: {why}")));
     }
+    // #319: where the carried body stands outside the declared stock,
+    // every stock-reading law judges the box enclosing both.
+    let carried = super::carried_stock::judged(world, op_name, setup, tool.diameter * 0.5)?;
+    if let Some((facets, aabb)) = carried.stock {
+        stock_facets = Some(facets);
+        stock_aabb = Some(aabb);
+        analytic_stock = true;
+    }
+    let carried_overhang = carried.overhang;
     let prior = match &op.params {
         OpParams::Pocket3D { .. } | OpParams::MultiAxisRough { .. } => {
             // The mask the rest laws stand on, resolved NOW on the
@@ -224,6 +251,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
             // height field (Dexel is big, and borrowed anyway).
             Some(
                 crate::rest::prior_state(world, op_name, setup, tool.diameter * 0.5)
+                    // #319: declared material past the carried grid is
+                    // present - no mask, the declared stock is cut.
+                    .map(|p| if carried.distrust_prior { crate::rest::PriorState { grid: None, ..p } } else { p })
                     .map(Arc::new),
             )
         }
@@ -234,7 +264,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // grid is logged and read as the raw stock - convictions stand.
     // The turned family reads it too (#103): its axial rapids are judged
     // against the stock the program ahead faced.
-    let verify_prior = if frame.is_none() {
+    let verify_prior = if frame.is_none() && !carried.distrust_prior {
         match crate::rest::prior_plan(world, op_name, setup, tool.diameter * 0.5) {
             Ok(p) => p,
             Err(e) => {
@@ -251,7 +281,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let drills_ahead = if turned { crate::rest::drills_ahead(world, op_name, setup) } else { Vec::new() };
     let turned_ahead = if turned { crate::rest::turned_ahead(world, op_name, setup) } else { Vec::new() };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
-    let machine_kind = crate::machine::kind_of(world);
+    // #388: the op's own setup's machine, active or not.
+    let machine_kind = crate::machine::kind_of_setup(world, setup);
     // The lathe spindle law (issue #62): every kind that turns about the
     // fitted axis - the turning family, and the lathe's axial Drill -
     // must have that axis ON the spindle the post programs (world Z
@@ -261,7 +292,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // The mill-turn's cross drill joins it (issue #67): its standoffs
     // are measured about that same line.
     let (slot, wcs_origin) = crate::posting::wcs_context(world, setup);
-    let spindle_note = if super::spindle_law::turns(world, &op.params) {
+    let spindle_note = if super::spindle_law::turns(world, setup, &op.params) {
         super::spindle_law::check(&material.facets, wcs_origin, slot)?
     } else {
         None
@@ -269,8 +300,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);
+    let fixture_meshes = crate::fixture::meshes_for(world, setup);
     let rotary_axis = crate::fixture::rotary_axis_of(world, op);
-    let mounted = crate::machine::of(world).1;
+    let mounted = crate::machine::of_setup(world, setup).1;
     let spindle = mounted
         .as_ref()
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
@@ -283,6 +315,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     Ok(GenJob {
         op_name: op_name.to_owned(),
         tool,
+        body,
+        lathe_body,
         tool_name: op.tool.clone(),
         params: op.params.clone(),
         src: op.src.clone(),
@@ -306,11 +340,13 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         spindle,
         fixtures,
         workholding,
+        fixture_meshes,
         rotary_axis,
         part_solid,
         area,
         wcs_origin,
         spindle_note,
+        carried_overhang,
     })
 }
 

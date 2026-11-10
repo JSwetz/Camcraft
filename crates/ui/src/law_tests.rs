@@ -1730,6 +1730,7 @@ mod view_cube_tests {
             yaw: 0.7,
             pitch: 0.2,
             dist: 55.0,
+            ..Camera::default()
         };
         let top = cam.toward([0.0, 0.0, 1.0]);
         assert_eq!((top.target, top.dist), (cam.target, cam.dist));
@@ -1760,6 +1761,7 @@ mod view_cube_tests {
                     yaw: yaw0,
                     pitch: 0.0,
                     dist: 80.0,
+                    ..Camera::default()
                 }
                 .toward(d);
                 let (r, u, _) = cam.view_basis();
@@ -1844,6 +1846,7 @@ mod view_cube_tests {
                 yaw,
                 pitch,
                 dist: 80.0,
+                ..Camera::default()
             };
             let corner = egui::pos2(h.cube.min.x + 0.5, h.cube.min.y + 0.5);
             assert_eq!(
@@ -1873,5 +1876,160 @@ mod view_cube_tests {
         assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(120.0, 800.0))).is_none());
         assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 250.0))).is_none());
         assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(130.0, 260.0))).is_some());
+    }
+}
+
+mod projection_tests {
+    //! The #434 orthographic laws: an affine matrix (clip.w is 1, so
+    //! every screen-space consumer that divides by w lands cleanly),
+    //! parallel pick rays that close against the same matrix, sizes that
+    //! ignore depth, a mode switch that never jumps the framing at the
+    //! target plane, and a dolly that holds the point under the cursor.
+
+    use crate::viewport::{Camera, ProjectionMode};
+
+    const ASPECT: f64 = 16.0 / 9.0;
+
+    fn ortho() -> Camera {
+        Camera { projection: ProjectionMode::Orthographic, ..Camera::default() }
+    }
+
+    /// The column-major point (x, y, z, 1) through an mvp, returned as
+    /// (ndc_x, ndc_y, clip_w) - the divide the rasterizer does.
+    fn project(m: &[[f32; 4]; 4], p: [f64; 3]) -> (f32, f32, f32) {
+        let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+        let mut out = [0.0f32; 4];
+        for c in 0..4 {
+            for r in 0..4 {
+                out[r] += v[c] * m[c][r];
+            }
+        }
+        (out[0] / out[3], out[1] / out[3], out[3])
+    }
+
+    fn shifted(p: [f64; 3], d: (f64, f64, f64), k: f64) -> [f64; 3] {
+        [p[0] + k * d.0, p[1] + k * d.1, p[2] + k * d.2]
+    }
+
+    #[test]
+    fn the_ortho_matrix_is_affine_and_perspective_is_not() {
+        let o = ortho().mvp(ASPECT);
+        for (c, col) in o.iter().take(3).enumerate() {
+            assert_eq!(col[3], 0.0, "ortho mvp column {c} must not touch w");
+        }
+        assert_eq!(o[3][3], 1.0);
+        // Perspective keeps its converging row: without it the house
+        // default would have silently turned parallel.
+        assert_ne!(Camera::default().mvp(ASPECT)[2][3], 0.0);
+    }
+
+    #[test]
+    fn ortho_rays_are_parallel_and_the_cursor_closes_through_the_matrix() {
+        let cam = ortho();
+        let (o1, d1) = cam.ray_through([0.4, -0.3], ASPECT).expect("ortho ray");
+        let (o2, d2) = cam.ray_through([-0.7, 0.55], ASPECT).expect("ortho ray");
+        for k in 0..3 {
+            assert!((d1[k] - d2[k]).abs() < 1e-9, "ortho rays must be parallel");
+        }
+        let off = [o2[0] - o1[0], o2[1] - o1[1], o2[2] - o1[2]];
+        assert!(
+            off[0].abs() + off[1].abs() + off[2].abs() > 1e-6,
+            "parallel rays from different cursors must not be one and the same ray"
+        );
+        // The cursor ray's point on the target plane must project back
+        // to the very NDC the ray was cast from: pick and draw agree.
+        let hit = [
+            o1[0] + d1[0] * cam.dist,
+            o1[1] + d1[1] * cam.dist,
+            o1[2] + d1[2] * cam.dist,
+        ];
+        let (x, y, w) = project(&cam.mvp(ASPECT), hit);
+        assert!((x - 0.4).abs() < 1e-3 && (y + 0.3).abs() < 1e-3, "cursor closure: {x}, {y}");
+        assert!((w - 1.0).abs() < 1e-3, "ortho clip.w is 1 everywhere");
+    }
+
+    #[test]
+    fn ortho_sizes_ignore_depth_where_perspective_shrinks_them() {
+        for cam in [ortho(), Camera::default()] {
+            let m = cam.mvp(ASPECT);
+            let (r, _, f) = cam.view_basis();
+            // A unit segment along screen-right, at the target plane and
+            // pushed 35% of the way toward the eye.
+            let far_end = project(&m, shifted(cam.target, r, 0.5));
+            let far_mid = project(&m, cam.target);
+            let near_center = shifted(cam.target, f, -0.35 * cam.dist);
+            let near_end = project(&m, shifted(near_center, r, 0.5));
+            let near_mid = project(&m, near_center);
+            let far_w = ((far_end.0 - far_mid.0).powi(2) + (far_end.1 - far_mid.1).powi(2)).sqrt();
+            let near_w = ((near_end.0 - near_mid.0).powi(2) + (near_end.1 - near_mid.1).powi(2)).sqrt();
+            if cam.projection == ProjectionMode::Orthographic {
+                assert!(
+                    (far_w - near_w).abs() < 1e-3 * far_w,
+                    "ortho must not shrink with depth: {far_w} vs {near_w}"
+                );
+                // Same screen x,y at both depths (no lateral parallax).
+                assert!((far_mid.0 - near_mid.0).abs() < 1e-3);
+                assert!((far_mid.1 - near_mid.1).abs() < 1e-3);
+            } else {
+                assert!(near_w > 1.1 * far_w, "perspective must shrink: {far_w} vs {near_w}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_mode_switch_never_jumps_the_framing_at_the_target_plane() {
+        let o = ortho();
+        let p = Camera { projection: ProjectionMode::Perspective, ..o };
+        let mo = o.mvp(ASPECT);
+        let mp = p.mvp(ASPECT);
+        for (nx, ny) in [(-0.9, -0.9), (-0.3, 0.2), (0.0, 0.0), (0.6, 0.85)] {
+            let (origin, dir) = o.ray_through([nx, ny], ASPECT).expect("ortho ray");
+            let hit = [
+                origin[0] + dir[0] * o.dist,
+                origin[1] + dir[1] * o.dist,
+                origin[2] + dir[2] * o.dist,
+            ];
+            let a = project(&mo, hit);
+            let b = project(&mp, hit);
+            assert!(
+                (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3,
+                "switch moves the target plane: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ortho_dolly_holds_the_point_under_the_cursor() {
+        let ndc = [0.6f32, -0.25];
+        let o = ortho();
+        let (origin, dir) = o.ray_through(ndc, 1.5).expect("ortho ray");
+        let point = [
+            origin[0] + dir[0] * o.dist,
+            origin[1] + dir[1] * o.dist,
+            origin[2] + dir[2] * o.dist,
+        ];
+        let mut cam = o;
+        cam.dolly_cursor(ndc, 1.5, 1.0).expect("ortho dolly");
+        assert_ne!(cam.dist, o.dist, "the dolly must actually zoom");
+        assert_ne!(cam.target, o.target, "and must actually move the target");
+        let (x, y, _) = project(&cam.mvp(1.5), point);
+        assert!(
+            (x - ndc[0]).abs() < 1e-3 && (y - ndc[1]).abs() < 1e-3,
+            "the point under the cursor slid to {x}, {y}"
+        );
+    }
+
+    #[test]
+    fn camera_transforms_carry_the_projection_mode() {
+        assert_eq!(Camera::default().projection, ProjectionMode::Perspective);
+        let o = ortho();
+        assert_eq!(Camera::frame([1.0, 2.0, 3.0], 5.0).projection, ProjectionMode::Perspective);
+        assert_eq!(o.toward([1.0, 0.0, 0.0]).projection, ProjectionMode::Orthographic);
+        assert_eq!(o.oriented(0.3, 0.2).projection, ProjectionMode::Orthographic);
+        let mut cam = o;
+        cam.orbit(1.0, 1.0);
+        cam.pan(1.0, 1.0);
+        cam.zoom(1.0);
+        assert_eq!(cam.projection, ProjectionMode::Orthographic, "nav keeps the mode");
     }
 }

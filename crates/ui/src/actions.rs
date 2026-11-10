@@ -16,6 +16,7 @@ use camcraft_app::operation::SrcRef;
 
 use crate::operations::quick_params;
 use crate::state::{CommandKind, State, UiTarget};
+use crate::viewport::ProjectionMode;
 
 /// The ribbon's machine modes (the ribbon law): the workspace kind,
 /// the Title-case caption it wears on the bar, and the built-in
@@ -242,19 +243,26 @@ fn follow_playhead(state: &mut State, judged: bool) -> Result<(), String> {
 /// makes it gate. Pure, so the ui tests keep its shape without a window.
 #[must_use]
 pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
-    let m = camcraft_app::machine::of(world).1?;
-    Some(match camcraft_app::machine::check_document(world, &m) {
-        Ok(c) if c.is_ok() => String::from("; machine: within limits"),
-        Ok(c) => format!(
-            "; machine: {} limit problem(s){}",
-            c.problems.len(),
-            if c.more > 0 {
-                format!(" (+{})", c.more)
-            } else {
-                String::new()
+    // #388: each machine judges the ops its own setups run; the vote
+    // sums them (one machine - the common case - reads as it always did).
+    let checks = camcraft_app::posting::machine_checks(world);
+    if checks.is_empty() {
+        return None;
+    }
+    let (mut problems, mut more) = (0usize, 0usize);
+    for (_, check) in checks {
+        match check {
+            Ok(c) => {
+                problems += c.problems.len();
+                more += c.more;
             }
-        ),
-        Err(err) => format!("; machine: {err}"),
+            Err(err) => return Some(format!("; machine: {err}")),
+        }
+    }
+    Some(if problems == 0 {
+        String::from("; machine: within limits")
+    } else {
+        format!("; machine: {problems} limit problem(s){}", if more > 0 { format!(" (+{more})") } else { String::new() })
     })
 }
 
@@ -311,6 +319,22 @@ pub(crate) fn view_iso(state: &mut State) {
     state.cam = state.cam.oriented(0.9, 0.5);
 }
 
+/// View: flip perspective and orthographic (parallel) projection
+/// (#434) - a direct field flip on the camera like every other view
+/// toggle (ephemeral, never a command, never saved); `target`, `dist`
+/// and orientation survive, and the ortho half-height equals what
+/// perspective sees at the target plane, so the framing never jumps.
+pub(crate) fn toggle_projection(state: &mut State) {
+    state.cam.projection = match state.cam.projection {
+        ProjectionMode::Perspective => ProjectionMode::Orthographic,
+        ProjectionMode::Orthographic => ProjectionMode::Perspective,
+    };
+    state.status = match state.cam.projection {
+        ProjectionMode::Perspective => "perspective projection".to_owned(),
+        ProjectionMode::Orthographic => "orthographic projection".to_owned(),
+    };
+}
+
 /// Point the context panes at `t`. Pure view state: the panes read it
 /// through `State::pane_target`, which validates it against the world each
 /// frame. Surfaces that also change what the world highlights (tree nodes,
@@ -335,6 +359,9 @@ pub(crate) fn open_tool_editor(state: &mut State, name: &str) {
         state.sync_tool_ui();
     }
     state.tool_editor = Some(name.to_owned());
+    // #371: a fresh body draft per opening; it mirrors the tool's body.
+    state.tool_body_ui = crate::state::ToolBodyUi::default();
+    state.tool_profile_ui = crate::state::ToolProfileUi::default();
 }
 
 /// Quick-add an operation of `kind` (index into the registry the ribbon's

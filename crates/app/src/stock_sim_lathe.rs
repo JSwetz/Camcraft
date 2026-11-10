@@ -45,7 +45,8 @@
 //!   the holder are not
 //!   (unlike the mill field, which sweeps the shank above the flute),
 //!   so a flank or holder rub is the revolved verdict's at generation
-//!   to refuse, not the picture's to show.
+//!   to refuse (a modelled lathe holder: `operation::turning_holder`,
+//!   #369), not the picture's to show.
 //! - **The eye cuts; the verdict refuses.** The column verdict
 //!   (`simulate_document`) reads Z heights from above: a parting kerf
 //!   reads as a plunge and an undercut groove as nothing - so a lathe
@@ -101,8 +102,8 @@ impl LathePlan {
 }
 
 /// The footprint `tool` cuts with: `None` for a tool that is no
-/// turning steel.
-fn profile_of(tool: &Tool) -> Option<LatheProfile> {
+/// turning steel. `pub(crate)`: #369's holder law credits the same cut.
+pub(crate) fn profile_of(tool: &Tool) -> Option<LatheProfile> {
     let height = tool.flute_len;
     Some(match tool.kind {
         ToolKind::Turning | ToolKind::Bore => LatheProfile::Nose { radius: tool.nose_radius },

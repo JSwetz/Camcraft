@@ -82,6 +82,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb::new("load", 1, api::v_load, "load(path: string): DocumentInfo"),
     Verb::new("save", -1, api::v_save, "save(path?: string): { path: string }"),
     Verb::new("import", -1, api::v_import, "import(path: string, name?: string): { model: string; facets: number }"),
+    Verb::new("exportTools", 1, api::v_export_tools, "exportTools(path: string): { path: string; tools: number }"),
+    Verb::new("importTools", 1, api::v_import_tools, "importTools(path: string): { path: string; added: string[]; renamed: { from: string; to: string }[]; skipped: string[]; summary: string }"),
     Verb::new("operations", 0, api::v_operations, "operations(): OperationInfo[]"),
     Verb::new("generate", -1, api::v_generate, "generate(...names: string[]): OperationInfo[]"),
     Verb::new("verify", -1, api::v_verify, "verify(...names: string[]): VerifyReport"),
@@ -344,6 +346,19 @@ interface PostOptions {
 
 interface PostResult {
   path: string;
+  ops: number;
+  lines: number;
+  program?: string;
+  /** Setups on different machines or posts: every file written, one per mount. */
+  files?: string[];
+  mounts?: PostedMountInfo[];
+}
+
+interface PostedMountInfo {
+  path: string;
+  setups: string[];
+  machine: string;
+  post: string;
   ops: number;
   lines: number;
   program?: string;

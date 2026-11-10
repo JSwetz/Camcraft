@@ -327,6 +327,18 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             }));
             continue;
         }
+        // The positioning feeds of a probe path (#174) are protected
+        // moves: stop on an unexpected contact and alarm.
+        if !touches.is_empty() {
+            match probe_rec::guard_of(m) {
+                Ok(Some(g)) => {
+                    out.push(Record::Guard(g));
+                    continue;
+                }
+                Ok(None) => {}
+                Err(text) => out.push(Record::Warn { text }),
+            }
+        }
         // A C-axis live-tool move (issue #33) commands its stated
         // spindle angle and nothing else: the tool axis is the
         // station's, fixed in the machine, so A/B hold zero. The C law
