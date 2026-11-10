@@ -1366,7 +1366,7 @@ impl Camera {
     /// same `dist` (#434). `dist` is clamped >= 0.5 by `zoom`, so this
     /// never vanishes.
     #[must_use]
-    fn ortho_half_height(&self) -> f64 {
+    pub(crate) fn ortho_half_height(&self) -> f64 {
         self.dist * (std::f64::consts::FRAC_PI_6).tan()
     }
 }

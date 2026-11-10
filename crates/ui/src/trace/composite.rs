@@ -7,7 +7,8 @@
 //! ## The laws here
 //!
 //! - **Same eye, same depth.** The fragment rebuilds its ray from the
-//!   viewport camera's own basis and field of view (`Camera`'s 60° law)
+//!   viewport camera's own basis and field of view (`Camera`'s 60° law;
+//!   in orthographic the parallel ray from the eye plane, #609)
 //!   and projects the hit through the very `mvp` the meshes use - the
 //!   traced surface can neither float over nor sink under a model.
 //! - **Opaque, and only where it hit.** Status 1 draws; a miss or a
@@ -36,6 +37,8 @@ pub struct FrameGeom {
     pub right: [f32; 3],
     pub up: [f32; 3],
     pub tan_half_fov: f32,
+    /// The orthographic view half height (#609); 0 for perspective.
+    pub ortho_half_height: f32,
     /// Viewport extent in pixels.
     pub view: (u32, u32),
     /// Viewport pixels per trace pixel (>= 1).
@@ -183,7 +186,7 @@ pub fn uniform_bytes(mvp: &[[f32; 4]; 4], g: &FrameGeom) -> Vec<u8> {
     v4(g.fwd, g.view.0 as f32);
     v4(g.right, g.view.1 as f32);
     v4(g.up, g.k as f32);
-    v4([g.trace.0 as f32, g.trace.1 as f32, 0.0], 0.0);
+    v4([g.trace.0 as f32, g.trace.1 as f32, g.ortho_half_height], 0.0);
     for c in g.verdict {
         v4(c, 1.0);
     }
@@ -202,6 +205,7 @@ mod tests {
             right: [1.0, 0.0, 0.0],
             up: [0.0, 1.0, 0.0],
             tan_half_fov: 0.5,
+            ortho_half_height: 7.5,
             view: (640, 480),
             k: 2,
             trace: (320, 240),
@@ -214,6 +218,7 @@ mod tests {
         assert_eq!(f(80 + 12), 640.0); // fwd.w = view width
         assert_eq!(f(112 + 12), 2.0); // up.w = k
         assert_eq!(f(128), 320.0); // frame.x
+        assert_eq!(f(128 + 8), 7.5); // frame.z = ortho half height (#609)
         assert_eq!(f(144 + 16 * 2 + 4), 0.8); // gouge.g
         assert_eq!(f(144 + 16 * 3 + 12), 1.0); // unjudged.w
     }
