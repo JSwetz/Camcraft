@@ -501,7 +501,8 @@ function onCycle() {
 // - #575: each axis's deviation (#190.., found - expected: the value the
 //   G10 L20 write subtracts) is reported, after its tolerance test and
 //   before the offset write (or the measure-only stop), as a
-//   (DEBUG, PROBE <axis> ERROR #19n) comment. The LinuxCNC G-code
+//   (DEBUG, PROBE <axis> ERROR #19n MM) comment - IN in a G20 program:
+//   the value is in the program's unit, and the line says which. The LinuxCNC G-code
 //   reference ("Messages" / "Comments" section): DEBUG shows its text like
 //   MSG - in the operator's status display, without stopping the program -
 //   with each #n / #<name> in it replaced by the parameter's value.
@@ -550,8 +551,10 @@ function onProbeResult() {
     block(["(MSG, PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
     block(["M2"]);
     block([o, "endif"]);
-    // #575: the deviation that passed is reported before it is written.
-    block(["(DEBUG, PROBE " + a.Axis + " ERROR #" + (dev + i) + ")"]);
+    // #575: the deviation that passed is reported before it is written,
+    // in the program's own unit (the G20/G21 onOpen wrote), named so the
+    // operator never reads an inch value as mm.
+    block(["(DEBUG, PROBE " + a.Axis + " ERROR #" + (dev + i) + (inch ? " IN" : " MM") + ")"]);
   }
   if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
     var words = ["G10", "L20", "P" + (Number(p.SetWorkOffset) + 1)];
