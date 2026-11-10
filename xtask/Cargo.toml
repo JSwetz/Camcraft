@@ -1,0 +1,12 @@
+[package]
+name = "xtask"
+description = "Process tooling for the camcraft workspace (gate tiers, decision collection): cargo xtask. Not shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# Already in the lock (tracing-subscriber's env-filter pulls it): no new crate in the tree. Ports the
+# gate scripts' .NET regexes (gate maps, #[test] fn spans, diff hunks) one-for-one.
+regex = "1"

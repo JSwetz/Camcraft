@@ -8,6 +8,7 @@ pub use camcraft_cl::cl;
 pub mod cli;
 pub mod commands;
 pub mod cutting;
+pub mod smoothing;
 pub use camcraft_motion::drilling;
 pub mod fixture;
 // #339 slice 6: the user fixture library file.
@@ -62,6 +63,10 @@ pub mod setup_post_options;
 pub mod setup_sheet;
 // #320: a setup's stock source - its own, or what the setup before leaves.
 pub mod setup_stock;
+// #406: the incoming stock's sheet for the viewport.
+pub mod setup_stock_view;
+// #406 (hand check of #519): the incoming stock closed into a block.
+pub mod setup_stock_shell;
 // #606: the pivot of a typed part-alignment turn.
 pub mod setup_turn;
 pub use camcraft_sim::solid_rest;

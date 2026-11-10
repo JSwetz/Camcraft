@@ -63,6 +63,7 @@ pub(crate) fn window(ctx: &egui::Context, state: &mut State) {
             draw_tooling(ui, u, &mut ed.machine);
             draw_coolants(ui, &mut ed.machine);
             ui.separator();
+            super::machine_grid::machine_grid(ui, "machine_editor_overview", &ed.machine, u, &[]);
             ui.horizontal(|ui| {
                 if ui.button("Apply").clicked() {
                     apply = true;
@@ -70,8 +71,6 @@ pub(crate) fn window(ctx: &egui::Context, state: &mut State) {
                 if ui.button("Revert to mounted").clicked() {
                     revert = true;
                 }
-                ui.label(machine::kind(Some(&ed.machine)).label());
-                ui.label(ed.machine.summary());
             });
         });
     if apply {

@@ -1,24 +1,39 @@
 # scripts
 
-## Gate tiers (`gate.ps1`)
+## Gate tiers (`cargo xtask gate`)
 
-`gate.ps1` runs the test gate in three tiers so a change never costs hours.
-Every step is one cargo command (`-j 6`, `--test-threads=6`), logged to
-`gate-logs/<tier>-<timestamp>/`; the run ends with a per-step pass/fail
+`cargo xtask gate` runs the test gate in three tiers so a change never costs
+hours - one Rust implementation (`xtask/`, #748) on Windows, macOS and
+Linux. Every step is one cargo command (`-j 6`, `--test-threads=6`), logged
+to `gate-logs/<tier>-<timestamp>/`; the run ends with a per-step pass/fail
 summary (failing binaries named) and a non-zero exit on any failure.
-`-DryRun` prints the plan without running anything.
+`--dry-run` (or `--plan`) prints the plan without running anything.
 
 | Tier | When | What |
 |---|---|---|
 | `quick` | every patch (agent / gate-runner), ~minutes | what the diff touches, in debug |
-| `batch` | before committing a batch; push/PR CI | every debug suite minus `SLOW_BINARIES`, ui (CWD `crates/ui`), clippy `-D warnings` |
-| `release` | at a cut; nightly CI (`nightly.yml`) | everything: all debug suites incl. slow and kernel, ui, clippy, then `--release -- --ignored` for motion and app |
+| `batch` | before committing a batch; `ci.yml` when run by hand | every debug suite minus `SLOW_BINARIES`, ui (CWD `crates/ui`), clippy `-D warnings` |
+| `release` | at a cut; `nightly.yml` when run by hand | everything: all debug suites incl. slow and kernel, ui, clippy, then `--release -- --ignored` for motion and app |
 
-    powershell -File scripts/gate.ps1 -Tier quick [-Base main] [-Heavy]
-    powershell -File scripts/gate.ps1 -Tier batch
-    powershell -File scripts/gate.ps1 -Tier release
+Both workflows are `workflow_dispatch` only (the Actions budget): nothing
+runs on push, PR or a schedule.
 
-**quick** diffs the working tree against `merge-base(<Base>, HEAD)`
+The command is the same on every OS:
+
+    cargo xtask gate quick [--base main] [--heavy]
+    cargo xtask gate batch
+    cargo xtask gate release
+
+from PowerShell or cmd on Windows, or a shell on macOS / Linux, e.g.
+
+    PS C:\src\camcraft> cargo xtask gate quick --dry-run
+    ~/src/camcraft$ cargo xtask gate quick --base origin/main
+
+The old entry points still work and forward to it: `scripts/gate.ps1`
+(`-Tier quick`, `-Test <name>`, ...) and `scripts/gate.sh` (`quick`,
+`test <name>`, ...).
+
+**quick** diffs the working tree against `merge-base(<base>, HEAD)`
 (committed + uncommitted + untracked) and prints what it chose before
 running it:
 
@@ -26,7 +41,7 @@ running it:
   fns whose lines the diff hunks touch (`--exact`); a change outside any test
   fn (header, helpers, `use`) or a new suite runs the whole binary. Changed
   `#[ignore]`d fns are heavy-lane: skipped (the binary is still compiled)
-  unless `-Heavy`, which runs them `--release -- --ignored`.
+  unless `--heavy`, which runs them `--release -- --ignored`.
 - a changed source file (`crates/<c>/src/<mod>/<sub>.rs`) runs the crate's
   lib tests plus the suites whose `Gate map` header names the module -
   narrowed to the suites naming `mod::sub` / `mod (.., sub, ..)` when any
@@ -36,37 +51,73 @@ running it:
 - a touch to a shared crate (`geometry`, `cl`) or the workspace manifest /
   lock falls back to `batch`.
 
-`SLOW_BINARIES` (top of the script) lists the debug binaries over ~40 s;
+`SLOW_BINARIES` (`xtask/src/plan.rs`) lists the debug binaries over ~40 s;
 batch skips them, release runs them. A test that takes more than ~60 s in
 debug belongs in the heavy lane (`#[ignore = "heavy lane: ..."]`), not here.
 
 ### Single tests
 
-    powershell -File scripts/gate.ps1 -Test <filter> [-Crate app] [-Binary operations] [-Exact]
+    cargo xtask gate test <filter> [--crate app] [--binary operations] [--exact]
 
 Runs exactly the matching `#[test]` fn(s) and nothing else. Without
-`-Binary` the binary is found by searching `fn <filter>` under
-`crates/*/tests` and `crates/*/src` (`-Crate` narrows it); a substring
-filter by default, the exact fn name with `-Exact`. A match that is
+`--binary` the binary is found by searching `fn <filter>` under
+`crates/*/tests` and `crates/*/src` (`--crate` narrows it); a substring
+filter by default, the exact fn name with `--exact`. A match that is
 `#[ignore]`d runs in release with `--ignored`; lib unit tests run via
 `--lib`; ui tests run from `crates/ui`. Example:
 
-    powershell -File scripts/gate.ps1 -Test an_open_level_holds_the_planner_laws -Exact
+    cargo xtask gate test an_open_level_holds_the_planner_laws --exact
+
+## Decisions
+
+`cargo xtask decisions --version X.Y.Z` gathers `docs/decisions/*.md` into
+`RECOMMENDED.md` at a cut (release step 2); `collect-decisions.ps1` /
+`.sh` forward to it.
 
 ## Release
 
-`release.ps1` cuts a release: preflight, gate, version bump, commits and tag
-(`-NoTag` on a `release/vX.Y.Z` branch: no tag - main is tagged after the
-release PR merges, AGENTS.md "A cut goes PR review"),
-release build, signing (if configured), the portable zip (same layout as
-`.github/workflows/release.yml`) and, on request, the installer.
+`cargo xtask release` cuts a release (xtask/src/release*.rs, #749):
+preflight, the release gate tier (in process), version bump, commits
+(`--no-tag` on a `release/vX.Y.Z` branch: no tag - main is tagged after the
+release PR merges, AGENTS.md "A cut goes PR review"), release build of the
+product packages, signing (Windows, if configured), the portable zip (the
+section below, `cargo xtask package`) and, on request, the installer
+(Windows). On Linux, macOS and FreeBSD the packaging phase runs that OS's
+`package-*.sh` instead, and `--installer` is refused by name.
+`release.ps1` is a thin wrapper forwarding its old switches.
 
-    powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.8.0 -Title "..."
+    cargo xtask release --version 0.8.0 --no-tag --title "..."
 
-Switches: `-SkipGate`, `-SkipBuild`, `-Installer`, `-DryRun` (prints every
-command, changes nothing).
-Update RELEASE_NOTES.md / TESTING.md first; the script commits them.
+Switches: `--skip-gate`, `--skip-build`, `--installer`, `--dry-run` (prints
+every command, changes nothing). The wrapper takes the old spelling
+(`-SkipGate`, `-SkipBuild`, `-Installer`, `-DryRun`).
+Update RELEASE_NOTES.md / TESTING.md first; the cut commits them.
 It never pushes; it prints the push command for you to run.
+
+## Portable zip (`cargo xtask package`)
+
+The Windows portable tree and its zip, and nothing else (no bump, no
+commit, no build). The layout lives once, in `xtask/src/release_pack.rs`:
+`cargo xtask release`'s zip phase and `release.yml`'s Windows job both call
+this, so the local cut and the published release cannot drift apart.
+
+    cargo xtask package [--version X.Y.Z] [--out dist] [--bin-dir target/release] [--dry-run]
+
+- Stages `<out>/camcraft-<ver>-win-x64/`: `camcraft-ui.exe`,
+  `camcraft-cli.exe`, `post.exe` from `--bin-dir`; `assets/{posts,machines,
+  ui,scripts,themes}`; `RELEASE_NOTES.md`, `TESTING.md`, `LICENSE`, `NOTICE`.
+  Then zips that folder to `<out>/camcraft-<ver>-win-x64.zip` with
+  PowerShell's `Compress-Archive` (`pwsh` when on PATH, else Windows
+  PowerShell). The Inno Setup installer is built from the same stage.
+- Without `--version` the version is read from `<bin-dir>/post.exe
+  --version` - the binary we ship is its one truth. Relative paths are
+  taken from the workspace root.
+- Under GitHub Actions it appends `version=`, `stage=` and `zip=` to
+  `$GITHUB_OUTPUT` and `CAMCRAFT_VERSION=` to `$GITHUB_ENV` (the installer
+  and publish steps read them).
+- The zip is the Windows package: a real run on macOS / Linux / FreeBSD is
+  refused by name (their packages come from `package-*.sh`); `--dry-run`
+  prints the file list on any host.
 
 ## Installer (M13.3)
 
@@ -75,7 +126,7 @@ installer is additive: `installer.ps1` compiles `installer/camcraft.iss`
 (Inno Setup 6) against the SAME staged tree the zip was made from and
 writes `dist/camcraft-<ver>-win-x64-setup.exe` beside the zip.
 
-    powershell -File scripts/release.ps1 -Version 0.8.0 -Installer   # as a phase of the cut
+    cargo xtask release --version 0.8.0 --no-tag --installer         # as a phase of the cut
     powershell -File scripts/installer.ps1 -Version 0.8.0            # on an existing dist/ stage
 
 - Per-user by default: no administrator prompt, installs under
@@ -95,8 +146,8 @@ writes `dist/camcraft-<ver>-win-x64-setup.exe` beside the zip.
 
 `sign.ps1` signs exes and the installer with `signtool` (SHA-256 digest,
 RFC-3161 timestamp so signatures outlive the certificate). It is called by
-`release.ps1` after the build and before the zip; `release.yml` does the
-same.
+`cargo xtask release` after the build and before the zip; `release.yml` does
+the same.
 
 The installer and the uninstaller Inno Setup embeds in it are signed by
 ISCC itself, through `sign.ps1`: when `sign.ps1 -Status` reports a

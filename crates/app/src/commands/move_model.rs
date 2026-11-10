@@ -216,6 +216,14 @@ impl MoveModel {
         self.warning.as_deref()
     }
 
+    /// The stock this move carries with the part (stock made from it, or
+    /// the stock of a one-part document), by name. The MCP `move_model`
+    /// tool (#716) reports them, because a part move that also moves the
+    /// stock is easy to miss from the part's own pose.
+    pub fn following_stock(&self) -> impl Iterator<Item = &str> {
+        self.stock.iter().map(|m| m.name.as_str())
+    }
+
     /// Each following stock's facets where the move leaves it (setup
     /// frame) - what the locate's interpenetration check reads.
     #[must_use]

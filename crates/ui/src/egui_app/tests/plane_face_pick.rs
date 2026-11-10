@@ -55,7 +55,15 @@ fn a_click_beside_an_edge_picks_the_face_for_the_plane_and_the_edge_for_an_axis(
     harness.run();
     let p = beside_an_edge(harness.state());
     assert!(
-        interact::edge_nearest(&harness.state().state, [p.x, p.y], interact::PICK_EDGE_PX).is_some(),
+        crate::feature_click::feature_at(
+            &harness.state().state,
+            [p.x, p.y],
+            crate::feature_click::Ask {
+                kinds: camcraft_app::pick::PickKinds::EDGES,
+                unit: camcraft_app::pick::EdgeUnit::Chain
+            },
+        )
+        .is_some(),
         "the pixel is inside the edge-snap radius - an Edge-mode click there would take the edge"
     );
     crate::plane_pick::arm(&mut harness.state_mut().state, "Setup1");

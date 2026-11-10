@@ -8,6 +8,7 @@ mod direction;
 mod kind;
 mod parse;
 mod plasma;
+mod rows;
 
 pub use def::*;
 pub use direction::{inverted_axis_line, inverted_motion, inverted_phrase, untranslated_inversion, AxisDirection};
