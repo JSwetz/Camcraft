@@ -233,7 +233,11 @@ pub(super) fn list_features(env: &mut Env, a: &Map<String, Value>) -> Result<Val
     let name = req_str(a, "model")?;
     let kinds = wanted_kinds(a)?;
     let limit = limit_of(a)?;
-    let e = req_model(env, name)?;
+    // #561: a fixture's faces are pickable too - `locate_part` mates them.
+    let e = match model::find_by_name(&env.world, name) {
+        Some(e) if model::is_fixture(&env.world, &e) => e,
+        _ => req_model(env, name)?,
+    };
     let w = &env.world;
     let f = model::features_of(w, &e).ok_or_else(|| format!("'{name}' has no geometry to pick from"))?;
     let loc = model::transform_of(w, &e).unwrap_or_default();

@@ -13,6 +13,9 @@ use super::touch::ProbeTouch;
 use super::moves::{lattice, Move, MoveKind};
 use super::plane::{z_extrema, ArcPlane};
 use super::cycle::Cycle;
+
+#[path = "path_approach.rs"]
+mod approach;
 use super::pose::{is_vertical, normalize_axis};
 
 /// A generated path: linked moves, plus — for drilling paths only — the
@@ -191,6 +194,9 @@ pub struct PathBuilder {
     cycles: Vec<Cycle>,
     notes: Vec<String>,
     comps: Vec<CompSpan>,
+    /// Set by [`approached`](Self::approached) until the first move: the
+    /// seed is on the clearance plane and the path must open with a rapid.
+    approach: bool,
 }
 
 impl PathBuilder {
@@ -203,6 +209,7 @@ impl PathBuilder {
             cycles: Vec::new(),
             notes: Vec::new(),
             comps: Vec::new(),
+            approach: false,
         }
     }
 
@@ -290,6 +297,7 @@ impl PathBuilder {
         if to.x == self.at.x && to.y == self.at.y && to.z == self.at.z && self.axis == self.at_pose {
             return;
         }
+        self.open(kind);
         self.moves.push(Move::new(kind, self.at, to, feed).attach_axis(self.axis));
         self.at = to;
         self.at_pose = self.axis;
@@ -324,6 +332,7 @@ impl PathBuilder {
             self.push(kind, to, feed);
             return;
         }
+        self.open(kind);
         self.moves
             .push(Move::new(kind, self.at, to, feed).with_arc(center, ccw).attach_axis(self.axis));
         self.at = to;
@@ -365,6 +374,7 @@ impl PathBuilder {
             self.push(kind, to, feed);
             return;
         };
+        self.open(kind);
         let from = self.at;
         for f in z_extrema(&arc, from, to) {
             if let Some(p) = arc.point_at(from, to, f) {

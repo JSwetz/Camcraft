@@ -244,7 +244,7 @@ pub fn deburr(facets: &[Triangle], p: &DeburrParams) -> Result<Toolpath, GenErro
     }
     runs.sort_by(|a, b| cmp_pt(a[0], b[0]));
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     if flips > 0 {
         b.note(format!("deburr: {flips} shared edges skipped for inconsistent winding"));
     }
