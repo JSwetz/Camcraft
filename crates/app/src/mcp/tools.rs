@@ -49,9 +49,15 @@ const TOOLS: &[Tool] = &[
     Tool { name: "render_stock", description: "Render the program's simulated stock as a PNG (an image content block), painted by deviation class (clean, rest, gouge, unjudged), optionally with the toolpath over it; plus rest and gouge volume and the bounds of the stock and the rest. Generate first.", schema: render::schema, run: render::render_stock },
 ];
 
-/// Every row: this table, then the setup furniture's (#181).
+/// Every row: this table, then the setup furniture's (#181), then the
+/// part placement (#716).
 fn all() -> impl Iterator<Item = &'static Tool> {
-    TOOLS.iter().chain(super::setup_tools::TOOLS).chain(super::fixture_tools::TOOLS).chain(super::align_tools::TOOLS)
+    TOOLS
+        .iter()
+        .chain(super::setup_tools::TOOLS)
+        .chain(super::fixture_tools::TOOLS)
+        .chain(super::align_tools::TOOLS)
+        .chain(super::model_tools::TOOLS)
 }
 
 /// The `tools/list` rows.
