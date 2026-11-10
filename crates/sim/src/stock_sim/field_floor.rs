@@ -6,7 +6,8 @@
 //! The down-march's exactness rests on `cut_ups` (a downward ray's entry
 //! into a cut); an upward read has no such companion yet, so this read is
 //! exact ONLY where no cut reaches the floor: there the floor is the
-//! shell's own lowest crossing on the column (a mesh plane, bit-exact).
+//! shell's own lowest crossing on the column (a mesh plane, exact to
+//! rounding).
 //! A column whose floor a cut has claimed is refused by name
 //! (`CutFromBelow`) - never a bracketed guess. A `cut_downs` companion
 //! (#637, option 1) can lift that refusal later.
@@ -19,7 +20,7 @@ use super::field::{cell_of, SdfField};
 /// One column's floor read.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FloorRead {
-    /// The lowest face of the stock under the column, exact.
+    /// The lowest face of the stock under the column, exact to rounding.
     Floor(f64),
     /// The column crosses no stock at all.
     NoMaterial,
@@ -43,15 +44,25 @@ impl SdfField {
         let Some(z) = cross.iter().copied().filter(|z| z.is_finite()).reduce(f64::min) else {
             return FloorRead::NoMaterial;
         };
-        // A cell the swept tool actually removed (claim > 0: inside the
-        // tool) at or next to the floor means a cut reached it. A band
-        // claim near the floor that removed nothing there does not (a
-        // shallow slot's band reaching down is not a cut floor).
+        // A cut reached the floor if the swept tool came within one cell
+        // of any cell centre in the 3x3x3 block around the floor point
+        // (a claim is -d_tool at a centre: claim > -cell means the tool
+        // passed within a cell of it). Every point of a cell lies within
+        // sqrt(3)/2 cell of its centre, so this catches a point inside a
+        // cut near its wall and a cut thinner than a cell (review of
+        // #649) - conservatively: a tool that passed close without
+        // reaching the floor is refused too, the safe direction. A cut a
+        // full cell or more above the floor (a shallow slot) is not.
         let (ix, iy) = (cell_of(x, self.cell), cell_of(y, self.cell));
         let iz = cell_of(z, self.cell);
         for dz in -1..=1 {
-            if self.cut_at([ix, iy, iz.saturating_add(dz)]) > 0.0 {
-                return FloorRead::CutFromBelow;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let key = [ix.saturating_add(dx), iy.saturating_add(dy), iz.saturating_add(dz)];
+                    if self.cut_at(key) > -self.cell {
+                        return FloorRead::CutFromBelow;
+                    }
+                }
             }
         }
         FloorRead::Floor(z)

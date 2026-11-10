@@ -47,3 +47,25 @@ fn a_floor_a_cut_reached_is_refused_by_name() {
     // Away from the slot the floor is still exact.
     assert_eq!(g.floor_at(10.25, 0.75), FloorRead::Floor(-6.0));
 }
+
+#[test]
+fn a_point_inside_a_cut_near_its_wall_is_refused_too() {
+    // Review of #649: a slot through the plate, r 2.2 at y 6 (y 3.8..8.2);
+    // a point inside the cut within half a cell of the wall used to read
+    // the shell floor. Every point inside the slot is refused now.
+    let mut s = Stock::Field(plate());
+    let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    let moves = [
+        Move::new(MoveKind::Rapid, p(-4.0, 6.0, 5.0), p(-4.0, 6.0, -7.0), None),
+        Move::new(MoveKind::Feed, p(-4.0, 6.0, -7.0), p(24.0, 6.0, -7.0), Some(500.0)),
+    ];
+    if let Err(e) = s.simulate(&[SimOp { moves: &moves, radius: 2.2, ball: false, cone: None, corner: None }]) {
+        panic!("cut: {e:?}");
+    }
+    let g = s.field().expect("a field").clone();
+    for y in [3.81, 3.9, 3.99, 4.01, 6.0, 8.1, 8.19] {
+        assert_eq!(g.floor_at(10.25, y), FloorRead::CutFromBelow, "y {y} is inside the slot");
+    }
+    // Well clear of the wall (more than a cell plus the band), exact again.
+    assert_eq!(g.floor_at(10.25, 0.75), FloorRead::Floor(-6.0));
+}
