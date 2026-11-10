@@ -1,9 +1,0 @@
-## #323 - Safe stock-aware exits for contour turning
-
-**What was decided.** Reuse the stock-aware `StockEnv` and `Exit::inside` model established for #229. Add stock-aware `_in` entry points for multipass, chamfer, and taper turning, while keeping the existing stock-agnostic entry points as compatibility wrappers. Have app generation read the current stock and dispatch all three operations through the stock-aware APIs. With stock supplied, keep axial rapid travel outside the stock OD and start the multipass roughing ladder at the stock top. An outward radial exit uses the plunge feed when the stock continues past the operation window's high end; otherwise retain the existing rapid exit. No verifier, postprocessor, schema, or dependency changes are part of this decision.
-
-**Why.** A contour can end inside a longer bar, so a rapid radial exit may cross retained, uncut stock. The operation already has the stock context needed to distinguish that case. Using it makes the exit a feed move only when stock remains in its path, while preserving existing paths when stock ends with the cut. Keeping the API additive avoids breaking callers that do not provide stock.
-
-**Considered and dropped.** Always feeding out was rejected because it adds time even when the contour reaches the stock end. Refusing generation could prevent an unsafe move, but safe stock-aware generation is preferable when stock is known. Axially backtracking before exiting was rejected because it adds moves rather than resolving the radial exit using the available stock geometry.
-
-**Cost to change later.** The safe exit can feed radially through air until full clearance, which is slower than a rapid. Callers that continue using the stock-agnostic compatibility APIs do not gain stock-aware exit handling; they must pass stock through the new APIs. The behavior adds API surface but no schema or serialized-operation change.

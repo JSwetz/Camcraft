@@ -1,3 +1,98 @@
+# CamCraft 0.16.0 (clean-room implementation)
+
+BREAKING: the project file format moved from v57 to v58 (PR #381: a tool can
+carry a modelled holder body). Files saved by 0.15.0 or earlier open here and
+are migrated when saved, but a v58 file saved by 0.16.0 is refused by older
+builds (save a copy first if you still need 0.15.0). Two post behaviours also
+tighten and can refuse a program that used to post: the Tormach posts now
+retract to the machine file's `safe_retract` and refuse a non-Tormach machine
+that states none, the Siemens 840D post refuses any machine that states none
+(#495, #503), and a probing post script must declare
+`onProbeGuard` or the Probe op is refused by name (#174). The built-in VMC,
+tilt-head, Lathe and Mill-turn machines now state their strokes in program
+coordinates (#457, #493), so programs they used to refuse now post.
+
+A minor release headlined by fixtures judged against their real mesh, tools
+that carry modelled holder bodies, one NC file per mount for multi-setup jobs,
+a Machines pane that edits machine files, and a much larger MCP surface. It
+also lands a long run of sim, gouge-gate and post fixes. Thanks to mkinney,
+seelesturm, austin62jake and tbrasselle for their contributions.
+
+## New
+- **One NC file per mount** (#388): setups on different machines or posts
+  generate on their own machine, and the post writes one NC file per
+  machine/post, each judged against its own machine; the program sim refuses
+  by name to carry stock between setups on different machines (#404).
+  Pause, optional stop and go-home entries can sit between operations (#155).
+- **Fixtures judged against their real mesh** (#339): the box stays the broad
+  phase, so a path between vise jaws no longer refuses the post; tilted,
+  rotary, spindle-C and XZ/YZ-arc moves are judged too, each arc chord padded
+  by its sagitta (#491), and spindle-C moves are judged at the station pose
+  (#486). An upright rapid checks the whole tool stack and a ramp each band
+  over its true height span (#424, #425). The fixture UX (PR #549, replacing
+  #482, mkinney): mark or import a fixture from the browser, see whether each
+  is judged by mesh or box and why, and see which fixture a warned move
+  strikes. The Fixtures page rows wrap and Place has labelled fields (#509).
+- **Tools with holder bodies**: a tool carries a modelled holder (STEP/STL/OBJ)
+  placed by axis and tip, judged by its revolved envelope (#368); import,
+  place and draw it in the tool editor and sim (#371); draw a milling holder
+  as a revolved outline (#93). Lathe tools carry a holder or boring-bar body
+  judged against the revolved stock (#369) with an optional insert zone
+  (#396). Export and import a `.camtools` library (#300, PR #487 replacing
+  #466).
+- **MCP server**: pick faces, edge chains and loops for an operation (#180);
+  `detect_holes` (#312, PR #456 replacing #314); `render_stock` PNG with rest
+  and gouge volume (#182); setups, work offsets, machines and fixtures (#181);
+  tool-library export/import (#355, PR #490 replacing #467); stdio hardening
+  against null ids, oversize and non-UTF-8 lines (#443).
+- **Machines pane** (View > Machines): browse and validate machine files
+  (#287), and create, edit and save `.mch` files with per-field validation
+  and atomic writes (#383). Machine files for the Tormach PCNC 770 and 1100
+  (#170).
+- **Probing**: seed a Probe op from a picked face, edge, vertex or round wall
+  (#171); positioning moves post as protected stop-on-contact moves (#174);
+  Fanuc probing on an inverted X/Y axis (#392).
+- **UI**: orthographic (parallel) projection with a Projection row and bare P
+  (#434, tbrasselle); warned toolpath moves are marked in the viewport and
+  framed from the op page (#261, PR #454 replacing #349); a refused post's
+  reason stays in a window (#265, PR #451 replacing #296); the Post dialog
+  opens where the document last posted (#258, austin62jake); the G-code
+  viewer lists from the left edge (#256, austin62jake); the Stock page and
+  Theme button split (#441, #442); macOS Cmd+Q asks about unsaved changes
+  (#144); the browser tree reads on the light theme (#506).
+- **Licence**: CamCraft is now Apache-2.0 (was MIT), copyright held by its
+  contributors (#452).
+
+## Fixed
+- **Post gate false gouges and misses**: XY arcs are cut on the true circle,
+  not inscribed chords, in the column engine (#402), the field engine and the
+  envelope scan (#413); a column within tolerance of a wall is judged against
+  the floor beside it (#299); a typed Slot's round ends no longer read as a
+  gouge (#510); a 2D Chamfer or Deburr is judged against its declared edge
+  break (#303); the scallop check reads to the ball diameter (#212).
+- **Crash**: an intermittent SIGSEGV/SIGABRT when threads created their first
+  world at once is gone (#379).
+- **Alignment** picks refuse by name on an inside-out, open or non-manifold
+  body instead of silently flipping the part (#366).
+- **Turning**: multi-pass, chamfer and taper turning exit a longer bar safely
+  (#323, seelesturm); the rotary wrap turns its seam clear of a D-flat or
+  keyway (#226); rotary Adaptive no longer sorts its leave-limit level by
+  float noise (#55); swarf raster lines keep their lying angle on rapids
+  (#48).
+- **Posts**: the Fanuc probe result no longer writes a doubled sign (#377); a
+  trailing Go home is written once (#504); the Tormach and Siemens 840D
+  retract from the machine file (#495, #503).
+
+## Known issues
+- **#554**: face picking on the setup page keeps snapping to an edge.
+- **#330**: Align by picking a face or two edges moves the part but does not
+  fully rotate it onto the chosen G17/G18/G19 plane.
+- **#558**: another setup's WCS can be drawn in the wrong place when the part
+  is aligned differently.
+- **#523**: posts start the spindle (S0 M3) on a probe tool.
+- **#74**: GPU selection can fail on hybrid Intel/NVIDIA laptops.
+
+---
 # CamCraft 0.15.0 (clean-room implementation)
 
 BREAKING: the project file format moved from v50 to v57, and two of those
