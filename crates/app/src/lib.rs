@@ -59,6 +59,8 @@ pub mod setup_post_options;
 pub mod setup_sheet;
 // #320: a setup's stock source - its own, or what the setup before leaves.
 pub mod setup_stock;
+// #606: the pivot of a typed part-alignment turn.
+pub mod setup_turn;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;

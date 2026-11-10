@@ -1,6 +1,7 @@
 //! The Setups page's "Lay on a plane - pick three points" row (#555): pick
 //! points 1, 2 and 3 in the viewport (model corners), choose G17 (XY),
-//! G18 (ZX) or G19 (YZ), flip it, optionally set point 1 onto the plane's
+//! G18 (ZX) or G19 (YZ), lay them down on it (the default, #606) or up,
+//! optionally set point 1 onto the plane's
 //! level, optionally take the 3-2-1 frame (point 1 the origin, 1 -> 2
 //! along +X), and Apply. Distinct from the face row above it (#554): that
 //! one takes a face, this one points. The draft is view state
@@ -33,7 +34,9 @@ struct Draft {
 
 impl Default for Draft {
     fn default() -> Self {
-        Draft { plane: ArcPlane::Xy, flip: false, place: true, frame: false }
+        // #606: points down by default, like the face row - the plane
+        // through them rests on the table. A view default only.
+        Draft { plane: ArcPlane::Xy, flip: true, place: true, frame: false }
     }
 }
 
@@ -74,8 +77,10 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     });
     ui.horizontal(|ui| {
         ui.label("     ");
-        ui.checkbox(&mut d.flip, "Flip points")
-            .on_hover_text("Face the points' outside the other way: down (-Z) for G17 rests them on the table.");
+        ui.checkbox(&mut d.flip, "Points down").on_hover_text(
+            "On: the points' outside faces down onto the plane (-Z for G17 rests them on the table). \
+             Off: it looks out along +Z / +Y / +X.",
+        );
         ui.checkbox(&mut d.place, "Point 1 to plane level")
             .on_hover_text("Set the points onto the plane (e.g. Z 0 for G17); off keeps the part where it is.");
     });
@@ -143,6 +148,6 @@ fn points_lines(ui: &mut Ui, state: &mut State, setup: &str, d: Draft) {
     };
     if !words.is_empty() {
         ui.label(RichText::new(format!("      {words}")).weak())
-            .on_hover_text("The side away from the part's material is the points' outside: it faces the plane's axis (or away, with Flip points).");
+            .on_hover_text("The side away from the part's material is the points' outside: it faces down onto the plane (or up, with Points down off).");
     }
 }

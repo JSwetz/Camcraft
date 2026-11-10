@@ -325,11 +325,13 @@ pub enum CommandKind {
         slot: Option<usize>,
     },
     /// Turn the part in a setup (#326): about X, then Y, then Z, degrees,
-    /// about the centre of the parts' bounds. All zero is "As modelled".
+    /// about `pivot` (#606: the setup's WCS origin, or the centre of the
+    /// parts' bounds - the presets'). All zero is "As modelled".
     /// Undoable (`AlignPartToSetup`). Never touches the work offset.
     AlignPart {
         setup: String,
         angles: [f64; 3],
+        pivot: camcraft_app::setup_turn::TurnPivot,
     },
     /// Place a setup relative to another (#316): `to` the setup it is a
     /// re-clamp of, turned by `angles` (about X, then Y, then Z, degrees)
@@ -3119,8 +3121,8 @@ impl State {
                     }
                 }
             }
-            CommandKind::AlignPart { setup, angles } => {
-                match AlignPartToSetup::angles(&self.world, &setup, angles) {
+            CommandKind::AlignPart { setup, angles, pivot } => {
+                match AlignPartToSetup::turn(&self.world, &setup, angles, pivot) {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
