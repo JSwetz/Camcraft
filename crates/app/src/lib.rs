@@ -55,6 +55,8 @@ pub mod setup_sheet;
 pub mod setup_stock;
 // #406: the incoming stock's sheet for the viewport.
 pub mod setup_stock_view;
+// #406 (hand check of #519): the incoming stock closed into a block.
+pub mod setup_stock_shell;
 pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;

@@ -68,6 +68,12 @@ pub fn incoming_shape(world: &World, setup: &str) -> Result<IncomingShape, Strin
             mesh.push(Triangle::new(a, b, c));
         }
     }
+    // The sheet is the top only; close it into a block (hand check of
+    // #519: the bare sheet lay buried inside the part).
+    for t in crate::setup_stock_shell::floor_and_walls(&body) {
+        let m = |p: Point3| transform_point(p, map.pos, map.rot);
+        mesh.push(Triangle::new(m(t.a), m(t.b), m(t.c)));
+    }
     if mesh.is_empty() {
         return Err(format!("the stock reaching setup '{setup}' has no surface to draw"));
     }

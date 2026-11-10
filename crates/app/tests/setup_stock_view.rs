@@ -77,6 +77,10 @@ fn the_sheet_stands_in_the_active_setups_frame() {
     assert!(is_identity_rot(t.rot) && t.pos == Point3::ZERO, "its own frame is the view's: {t:?}");
     let top = own.mesh.iter().flat_map(|t| [t.a.z, t.b.z, t.c.z]).fold(f64::MIN, f64::max);
     assert!((top - own.incoming.max[2]).abs() < 1e-9, "the sheet's top is the body's: {top} vs {:?}", own.incoming);
+    // Hand check of #519: the top sheet alone lay buried in the part; the
+    // mesh is a closed block, its floor at the body's bottom.
+    let floor = own.mesh.iter().flat_map(|t| [t.a.z, t.b.z, t.c.z]).fold(f64::MAX, f64::min);
+    assert!((floor - own.incoming.min[2]).abs() < 1e-9, "the block's floor is the body's: {floor} vs {:?}", own.incoming);
 
     h.execute(&world, ActivateSetup::new(&world, Some("Setup1")).expect("activate Setup1"));
     let back = incoming_shape(&world, "Setup2").expect("still measured");
@@ -90,11 +94,11 @@ fn the_sheet_stands_in_the_active_setups_frame() {
             assert!((m.x - q.x).abs() < 1e-9 && (m.y - q.y).abs() < 1e-9 && (m.z - q.z).abs() < 1e-9, "{m:?} vs {q:?}");
         }
     }
-    // Setup2's top is the block's uncut underside: seen as Setup1 holds
-    // the part, it lies back at the bottom of the stock, Z -2.
+    // Seen as Setup1 holds the part, the block stands back where Setup1
+    // left it: its uncut underside at Z -2, its faced top at Z 16.
     let zs: Vec<f64> = back.mesh.iter().flat_map(|t| [t.a.z, t.b.z, t.c.z]).collect();
     let (lo, hi) = zs.iter().fold((f64::MAX, f64::MIN), |(l, h), &z| (l.min(z), h.max(z)));
-    assert!((lo + 2.0).abs() < 1e-6 && (hi + 2.0).abs() < 1e-6, "the underside at Z -2, got {lo} .. {hi}");
+    assert!((lo + 2.0).abs() < 1e-6 && (hi - 16.0).abs() < 1e-6, "the block spans Z -2 .. 16, got {lo} .. {hi}");
 }
 
 #[test]
@@ -106,4 +110,23 @@ fn the_first_setup_draws_its_own_block_and_an_unknown_setup_is_named() {
     assert!((first.incoming.max[2] - 18.0).abs() < 1e-9, "{:?}", first.incoming);
     let err = incoming_shape(&world, "NoSuchSetup").expect_err("no such setup");
     assert!(!err.is_empty());
+}
+
+/// Hand check of #519: the incoming stock is drawn as a closed block -
+/// every edge of its mesh is shared by exactly two facets.
+#[test]
+fn the_incoming_stock_is_a_closed_block() {
+    let (world, _h) = flipped();
+    let shape = incoming_shape(&world, "Setup2").expect("Setup2 receives Setup1's body");
+    let key = |p: Point3| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64, (p.z * 1e6).round() as i64);
+    let mut edges = std::collections::HashMap::new();
+    for t in &shape.mesh {
+        let v = [key(t.a), key(t.b), key(t.c)];
+        for i in 0..3 {
+            let (a, b) = (v[i], v[(i + 1) % 3]);
+            *edges.entry(if a < b { (a, b) } else { (b, a) }).or_insert(0u32) += 1;
+        }
+    }
+    let open = edges.values().filter(|n| **n != 2).count();
+    assert_eq!(open, 0, "{open} of {} edges are not shared by two facets", edges.len());
 }
