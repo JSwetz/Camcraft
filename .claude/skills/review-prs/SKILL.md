@@ -162,6 +162,11 @@ merge ready").
   reads make the real cost lower). Main-session coordination isn't
   counted.
   ```
+- **Effort** (AGENTS.md "Every issue is weighted by effort"): under the
+  total, add `Effort: <label of the issue the PR fixes>` and, if the issue
+  escalated on the way, `(escalated from <label>)` - the data the effort
+  table is recalibrated from. A Fable run is priced from the `claude-api`
+  skill's model table.
 - A run whose token total isn't known (e.g. a review from another
   session) is listed as "not known" and left out of the sum.
 - No cost comment for `needs-rework`, `conflicts` or `needs-maintainer`
