@@ -20,6 +20,10 @@ use crate::state::{CommandKind, State};
 
 /// The rows of one setup.
 pub(super) fn rows(ui: &mut Ui, state: &mut State, setup: &str) {
+    state.axis_rows_shown = true;
+    if !state.setup_pick_rows.iter().any(|s| s == setup) {
+        state.setup_pick_rows.push(setup.to_owned()); // #664
+    }
     ui.label("    Axes in the plane - pick an edge or two points for +Y and/or +X");
     for axis in [InPlaneAxis::Y, InPlaneAxis::X] {
         axis_row(ui, state, setup, axis);
@@ -31,8 +35,17 @@ pub(super) fn rows(ui: &mut Ui, state: &mut State, setup: &str) {
     }
     // The command's own check: a refused pick, or one that gives the
     // alignment the setup already holds, greys Apply out with the why.
-    let check = AlignPartToSetup::check_turn(&state.world, setup, &axes).map_err(|e| e.to_string());
+    // Just applied, the same picks are a zero turn: say Flip re-applies
+    // rather than "already holds" (#557 hand check).
     let turn = pick::in_plane_turn_deg(&state.world, setup, &axes).ok();
+    let held = d.applied && turn.is_some_and(|deg| deg.abs() < 1e-9);
+    let check = AlignPartToSetup::check_turn(&state.world, setup, &axes).map_err(|e| {
+        if held {
+            "applied - tick Flip +Y / Flip +X and Apply again to turn the part the other way".to_owned()
+        } else {
+            e.to_string()
+        }
+    });
     ui.horizontal(|ui| {
         ui.label("      Primary");
         let mut primary = d.axes.primary;
@@ -91,10 +104,10 @@ fn axis_row(ui: &mut Ui, state: &mut State, setup: &str, axis: InPlaneAxis) {
         for (b, text) in [(AxisBy::Edge, "Edge"), (AxisBy::Points, "Two points")] {
             if ui
                 .selectable_label(by == b, format!("{name} by {text}"))
-                .on_hover_text(format!("Set {name} from {}.", b.noun()))
+                .on_hover_text(format!("Set {name} from {} - picks at once.", b.noun()))
                 .clicked()
-                && by != b
             {
+                // Choosing a mode arms its pick (#557 hand check).
                 axis_pick::set_by(state, setup, axis, b);
             }
         }
@@ -121,8 +134,9 @@ fn axis_row(ui: &mut Ui, state: &mut State, setup: &str, axis: InPlaneAxis) {
         {
             axis_pick::draft_for(state, setup).slot(axis).flip = flip;
         }
-        let words: Vec<String> = picks.iter().map(|g| format!("{} of '{}'", g.feature, g.entity)).collect();
-        let text = if words.is_empty() { "nothing picked".to_owned() } else { words.join(", ") };
-        ui.label(RichText::new(text).weak());
     });
+    // Its own line, so it is never cut short: what and where, in the
+    // document's units, never a feature id (#557 hand check).
+    let text = crate::axis_pick::picks_text(&state.world, &picks, camcraft_app::units::of(&state.world));
+    ui.label(RichText::new(format!("        {name}: {text}")).weak());
 }

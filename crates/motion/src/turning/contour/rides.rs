@@ -66,6 +66,7 @@ pub fn chamfer_in(facets: &[Triangle], p: &ChamferParams, stock: Option<StockEnv
         (w_hi, st_hi)
     };
     if dev > p.tolerance {
+        // #677: names no spot yet - the station is in the turning meridian, which has no world map.
         return Err(GenError::Invalid(format!(
             "the model is not a {:.1}-degree chamfer in this window - its skin stands \
              {dev:.3} off the authored cone at station {at:.3}. A chamfer op is a promise \
@@ -129,6 +130,7 @@ pub fn taper_in(facets: &[Triangle], p: &TaperParams, stock: Option<StockEnv>) -
     let line = |s: f64| r_a + (r_b - r_a) * (s - s_lo) / (s_hi - s_lo);
     let (dev, at) = door::worst_dev(&pts, win, &line);
     if dev > p.tolerance {
+        // #677: names no spot yet - the station is in the turning meridian, which has no world map.
         return Err(GenError::Invalid(format!(
             "the model is not the authored cone - its skin stands {dev:.3} off the \
              taper line at station {at:.3}. A taper op rides a MODELED taper; rough the \

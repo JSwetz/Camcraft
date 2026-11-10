@@ -11,7 +11,9 @@
 //! along the table's travel); no vendor material consulted.
 
 use camcraft_app::operation::{FeatureSel, GeoSel};
-use camcraft_app::pick::{AxisPick, InPlaneAxes, InPlaneAxis};
+use camcraft_app::pick::{self, AxisPick, InPlaneAxes, InPlaneAxis};
+use camcraft_app::units::{self, Unit};
+use flecs_ecs::prelude::World;
 
 use crate::state::{GeoPick, State};
 
@@ -47,6 +49,9 @@ pub struct AxisDraft {
     pub x_by: AxisBy,
     /// The picks and flips, per axis (an empty pick list is "not given").
     pub axes: InPlaneAxes,
+    /// These picks were just applied: they stay, so a Flip re-applies
+    /// (the turn composes onto what the setup now holds).
+    pub applied: bool,
 }
 
 impl AxisDraft {
@@ -118,24 +123,81 @@ pub fn disarm(state: &mut State) {
     }
 }
 
+/// Disarm every Setups page pick whose rows were not drawn this frame
+/// (#664): a page change, an operation opened, the section closed - an
+/// armed axis or plane pick must not feed a hidden draft. The shell
+/// calls it once a frame after the dock, whatever the dock shows (#667),
+/// and it consumes the frame's row marks; the picks themselves stay, so
+/// the page re-opens disarmed with them shown. Ephemeral view state, no
+/// command.
+pub fn disarm_hidden(state: &mut State) {
+    let shown = std::mem::take(&mut state.setup_pick_rows);
+    // #557's stray-click hint holds while the rows are on screen; the
+    // plane row and the axes rows draw together, so either mark counts.
+    state.axis_rows_shown = !shown.is_empty();
+    if let Some(d) = state.axis_pick.as_mut().filter(|d| !shown.contains(&d.setup)) {
+        d.picking = None;
+    }
+    if state.plane_pick.as_ref().is_some_and(|d| !shown.contains(&d.setup)) {
+        crate::plane_pick::pause(state);
+    }
+    // #555's three-points draft keeps the same law (merge with #664).
+    if state.points_pick.as_ref().is_some_and(|d| !shown.contains(&d.setup)) {
+        crate::points_pick::disarm(state);
+    }
+}
+
+/// Disarm every Setups page pick at once (#667): the shell calls it
+/// before the dock draws when the properties pane is closed or hidden
+/// behind another tab, so no viewport click that frame - the viewport
+/// draws inside the dock - can feed a draft whose rows are off screen.
+pub fn disarm_all(state: &mut State) {
+    state.setup_pick_rows.clear();
+    disarm_hidden(state);
+}
+
 /// Is a Setups page row collecting axis picks?
 #[must_use]
 pub fn collecting(state: &State) -> bool {
     state.axis_pick.as_ref().is_some_and(|d| d.picking.is_some())
 }
 
-/// Switch what `axis` is picked by; its picks are dropped (an edge and
-/// two points do not mix), and a live pick follows the new mode.
+/// Choose what `axis` is picked by, and arm its pick at once: choosing
+/// "by Edge" / "by Two points" means "I am about to pick". A changed
+/// mode drops the axis's picks (an edge and two points do not mix);
+/// re-choosing the current one keeps them.
 pub fn set_by(state: &mut State, setup: &str, axis: InPlaneAxis, by: AxisBy) {
     let d = draft_for(state, setup);
-    match axis {
-        InPlaneAxis::Y => d.y_by = by,
-        InPlaneAxis::X => d.x_by = by,
+    if d.by(axis) != by {
+        match axis {
+            InPlaneAxis::Y => d.y_by = by,
+            InPlaneAxis::X => d.x_by = by,
+        }
+        d.slot(axis).picks.clear();
+        d.applied = false;
     }
-    d.slot(axis).picks.clear();
-    if d.picking == Some(axis) {
-        state.geo_pick = mode_of(by);
+    arm(state, setup, axis);
+}
+
+/// A feature click while the axes rows are on screen but no axis is
+/// armed (and no lay-on-a-plane pick collects) would fall through to
+/// the operation pick - with no operation open on a Setups page. Say
+/// what to do instead and swallow the click. `true` when handled.
+pub fn hint_stray(state: &mut State) -> bool {
+    if !state.axis_rows_shown || collecting(state) || crate::plane_pick::collecting(state) {
+        return false;
     }
+    let (y, x) = state.axis_pick.as_ref().map_or((AxisBy::Edge, AxisBy::Edge), |d| (d.y_by, d.x_by));
+    let what = |b: AxisBy| match b {
+        AxisBy::Edge => "edge",
+        AxisBy::Points => "points",
+    };
+    state.status = format!(
+        "no axis is being picked - click Pick +Y {} or Pick +X {} first",
+        what(y),
+        what(x)
+    );
+    true
 }
 
 /// One viewport pick into the axis being collected. An edge replaces
@@ -144,6 +206,7 @@ pub fn set_by(state: &mut State, setup: &str, axis: InPlaneAxis, by: AxisBy) {
 pub fn take(state: &mut State, pick: GeoSel) {
     let Some(d) = state.axis_pick.as_mut() else { return };
     let Some(axis) = d.picking else { return };
+    d.applied = false;
     let by = d.by(axis);
     let setup = d.setup.clone();
     let words = format!("{} of '{}'", pick.feature, pick.entity);
@@ -165,4 +228,50 @@ pub fn take(state: &mut State, pick: GeoSel) {
         (AxisBy::Points, FeatureSel::Chain(_)) => refuse("an edge"),
     };
     state.status = status;
+}
+
+/// The picked row's words (#557 hand check): what was picked and where,
+/// in the document's units - never an internal feature id. Points read
+/// "1 of 2 points on 'block' (x, y, z) mm" / "2 points on 'block' (..)
+/// -> (..) mm"; an edge reads "edge on 'block', 50.000 mm long, along
+/// (dx, dy, dz)". Coordinates are the document frame (as modelled).
+#[must_use]
+pub fn picks_text(world: &World, picks: &[GeoSel], unit: Unit) -> String {
+    let Some(first) = picks.first() else { return "nothing picked".to_owned() };
+    let mut names: Vec<&str> = Vec::new();
+    for g in picks {
+        if !names.contains(&g.entity.as_str()) {
+            names.push(&g.entity);
+        }
+    }
+    let on = names.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(", ");
+    let at = |p: &[f64; 3]| {
+        let c: Vec<String> = p.iter().map(|v| units::len(*v, unit, 3)).collect();
+        format!("({})", c.join(", "))
+    };
+    let coords: Vec<Vec<[f64; 3]>> = picks.iter().filter_map(|g| pick::pick_coords(world, g)).collect();
+    let suffix = unit.suffix();
+    match first.feature {
+        FeatureSel::Chain(_) => match coords.first().map(Vec::as_slice) {
+            Some([a, b]) => {
+                let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                let dir = if l > 0.0 && l.is_finite() {
+                    format!(", along ({:.3}, {:.3}, {:.3})", d[0] / l, d[1] / l, d[2] / l)
+                } else {
+                    String::new()
+                };
+                format!("edge on {on}, {} {suffix} long{dir}", units::len(l, unit, 3))
+            }
+            _ => format!("edge on {on} (no longer straight or in the model - re-pick it)"),
+        },
+        _ => {
+            let pts: Vec<String> = coords.iter().filter_map(|c| c.first()).map(at).collect();
+            let head = match picks.len() {
+                1 => format!("1 of 2 points on {on}"),
+                n => format!("{n} points on {on}"),
+            };
+            if pts.is_empty() { head } else { format!("{head} {} {suffix}", pts.join(" -> ")) }
+        }
+    }
 }

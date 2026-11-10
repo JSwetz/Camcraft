@@ -452,7 +452,7 @@ pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Ge
     let r = p.tool_diameter * 0.5;
     let zs = levels(p, r, facets)?;
     let ds = dirs(r, p.tolerance);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut last: Option<f64> = None;
     if !emit_rings(&mut b, p, r, facets, &zs, &ds, &mut last)? {
         return Err(GenError::Empty(

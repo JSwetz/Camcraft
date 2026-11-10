@@ -22,6 +22,31 @@ use super::types::OpParams;
 /// so this is the facet lattice's numeric slack, not a cut allowance.
 pub const STYLUS_SLACK: f64 = 0.01;
 
+/// The deepest search past the expected contact a stylus is trusted to
+/// take without a word (#570). Touch-probe styli are rated for a few
+/// millimetres of overtravel at most; past this, a missing feature drives
+/// the stylus toward the end of its travel before the control alarms.
+pub const SEARCH_LIMIT_MM: f64 = 2.0;
+
+/// A new probe op's search limit for a `tolerance` (#570): twice the
+/// tolerance, never under 1 mm - far enough that a feature inside the
+/// tolerance always trips, short enough that a missing one alarms early.
+#[must_use]
+pub fn default_overtravel(tolerance: f64) -> f64 {
+    (2.0 * tolerance).max(1.0)
+}
+
+/// The advisory for a search limit past [`SEARCH_LIMIT_MM`]: one, at the
+/// first seek, naming the distance - never blocking.
+#[must_use]
+pub fn search_advisory(path: &Toolpath, overtravel: f64) -> Option<Warning> {
+    if overtravel <= SEARCH_LIMIT_MM {
+        return None;
+    }
+    let at = path.probes.first().map_or(0, |t| t.index);
+    Some(Warning::ProbeSearch { at, mm: overtravel, limit_mm: SEARCH_LIMIT_MM })
+}
+
 /// The cycle's numbers from the op's, with the resolved safe plane.
 pub(super) fn probe_params(params: &OpParams, tool: &Tool, clearance_z: f64) -> Result<ProbeParams, GenError> {
     let OpParams::Probe {
@@ -85,6 +110,7 @@ pub(super) fn generate_probe(
     let path = probe_cycle(&p)?;
     let mut warns = stylus_hits(&path, tool.diameter * 0.5, facets);
     warns.extend(stylus_reach_hits(&path, tool, facets, &warns));
+    warns.extend(search_advisory(&path, p.overtravel));
     Ok((path, warns))
 }
 

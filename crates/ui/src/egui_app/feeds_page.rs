@@ -101,7 +101,7 @@ fn body(ui: &mut Ui, state: &mut State, name: &str, op: &camcraft_app::schema::O
                 ui,
                 "Suggested",
                 &format!("{} ({}){thin}", s.material.label(), s.tool_material.label()),
-                |ui| ui.label(format!("Vc {:.0} m/min · fz {:.3} mm", s.vc, s.fz)),
+                |ui| ui.label(format!("Vc {:.0} m/min · fz {} {}", s.vc, units::len(s.fz, u, 3), u.suffix())),
             );
             let feed_now = cutting::feed_of(&op.params).unwrap_or(0.0);
             let rpm_now = model::find_by_name(&state.world, &tool_name)

@@ -31,6 +31,12 @@ fn three_clicked_top_corners_are_points_1_2_3_of_the_plane() {
         st.drain_actions();
     }
     let setup = camcraft_app::setup::active(&harness.state().state.world).expect("Setup1");
+    // The draft lives while its Setups page row is on screen (#664).
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode(setup.clone(), crate::state::SetupPage::Settings),
+    );
+    harness.run();
     crate::points_pick::arm(&mut harness.state_mut().state, &setup);
     assert_eq!(harness.state().state.geo_pick, GeoPick::Vertex, "the points row arms vertices");
     let geo_before = harness.state().state.op_ui.geo.clone();

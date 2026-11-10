@@ -34,6 +34,29 @@ afterwards - the work must not bother them.
   the roadmap is done (idle after a gate, waiting on nothing, end-of-turn
   with open items), spawn a continuation nudge subagent to remind the
   session to claim the next issue. A stall is a bug.
+- **Conflicted PRs are re-merged by their author; the maintainer
+  re-checks** (user, 2026-11-10: "a skill that is intended to recheck
+  current PR's with contributors name to deal with conflicts, usually
+  conflicts is a remerge from main or similar easy fix. Same skill should
+  also be used from a maintainers perspective to check if conflicts has
+  been resolved."). Merging moves `main`, so reviewed PRs keep turning
+  `conflicts` (orange). The skill `/resolve-conflicts` (`.claude/skills/
+  resolve-conflicts/`) handles both sides:
+  - **Contributor mode** (`/resolve-conflicts [login]`): for the author's
+    open conflicting PRs, merge main into each branch (never rebase or
+    force-push), keep both sides where both added lines, take main's
+    snapshot PNGs and changelog files, run the targeted gate, push, and
+    comment "ready for a re-check". If both sides changed the same logic,
+    or a safety rule could be dropped, stop and report the hunk instead
+    of guessing.
+  - **Maintainer mode** (`/resolve-conflicts check`): re-read every
+    `conflicts` PR. Still conflicting -> ask the author once. Clean again
+    -> drop `conflicts`, then restore `merge-ready` (head unchanged), send
+    it to a delta review (only a merge-of-main commit was added), or to a
+    full `/review-prs` review (new code).
+  Agents in a fork run contributor mode on their own PRs at the start of
+  each session, after the process-file sync; the maintainer runs `check`
+  after a batch of merges (e.g. after `/merge-ready`).
 - **Side work rides subagents.** All testing, documentation, and knowledge
   graphing (the graphify updates) are done by subagents dispatched as
   subtasks, never inline: their completion notification is what triggers
@@ -123,9 +146,38 @@ go to `CHANGELOG.md`.
   - Branch issue work from the fork's synced `main` as above. A PR into
     upstream still targets upstream's `main`; if it conflicts there, merge
     the conflicting upstream change into the branch (`git merge
-    upstream/main`) on that branch only, never into the fork's `main`, which
-    advances only at the next cut tag.
+    upstream/main`) on that branch only, never into the fork's `main`. The
+    fork's `main` takes upstream's code only at the next cut tag; process
+    files are the one exception (next point).
   - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0").
+  - **Process files sync on every session, not only at tags** (user,
+    2026-11-10: "we need a way to inform all forks that there is changes
+    to skills and agents"). The process - `AGENTS.md`, `.claude/agents/`,
+    `.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh` - changes
+    between releases, and a fork's agents must follow the current rules.
+    At the start of every session in a fork, before claiming work,
+    compare `git show upstream/main:.claude/PROCESS_VERSION` with the
+    local `.claude/PROCESS_VERSION`. If upstream's is higher, pull just
+    those files: `git checkout upstream/main -- AGENTS.md .claude/agents
+    .claude/skills .claude/PROCESS_VERSION scripts/gate.ps1
+    scripts/gate.sh`, commit as `chore(process): sync process files to
+    upstream PROCESS_VERSION <n>` on a `process-sync` branch, and merge
+    it into the fork's `main` (or open a PR there if the fork protects
+    main), then re-read AGENTS.md before going on. This is the one
+    exception to "sync only to a cut tag": process files don't change
+    product code, so the fork's code stays on the tag while its rules stay
+    current. What changed and why is in the pinned issue #681 ("Process
+    changes"); a fork maintainer subscribes there.
+- **Process changes bump `PROCESS_VERSION` and are announced** (same
+  request). Any PR that changes a process file (the list above) also
+  increments the single integer in `.claude/PROCESS_VERSION`, and when it
+  merges, the merging session adds a comment to the pinned issue #681:
+  `PROCESS_VERSION <n>` · PR #M · what changed · what a fork must do. The
+  reviewer treats a missing bump as a requested change. Two process PRs
+  open at once both bump to the same number; whichever merges second
+  takes the next number when it merges main. At a cut, the release notes
+  get a short "Process changes" section listing the versions since the
+  previous tag.
 - **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
@@ -325,6 +377,13 @@ operation property panel.
 
 Systems and UI never write these fields ad hoc; they only respond to commands.
 If a UI change has no command for it, that's a bug - add one.
+
+**Commands ship with an MCP tool** (#128, #356). The MCP server lets an AI agent
+drive CamCraft headlessly. A PR that adds a user-facing command also adds its
+MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a
+`source:agent` follow-up issue `MCP: <command>` and names it in the PR body. MCP
+tools call the same undoable commands the GUI uses, so undo/redo history and
+invariants hold headlessly.
 
 Components are auto-registered: declare them in `crates/app/src/schema.rs`
 and the startup hook (`flecs_bits::register_schema`) handles the rest, in every
@@ -604,7 +663,10 @@ a tag"):
    `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
    removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per
-   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows), commit as `docs: X.Y.Z release notes;
+   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows).
+   The release notes also get a short "Process changes" section listing
+   each `PROCESS_VERSION` since the previous tag (taken from the pinned
+   issue #681). Commit all of it as `docs: X.Y.Z release notes;
    changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
    - it runs the release gate tier on that tree (pass `-SkipGate` only if
    this exact tree already passed it), commits the version bump, builds
