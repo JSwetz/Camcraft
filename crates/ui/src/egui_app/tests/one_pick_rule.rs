@@ -311,3 +311,30 @@ fn locate_and_points_drafts_take_box_corners_as_points() {
     assert_eq!(picks(&harness).len(), 2, "the face is not drafted");
     assert!(harness.state().state.status.contains("is a face"), "{}", harness.state().state.status);
 }
+
+/// #709 hand check: "+Y by Two points" - after the SECOND real click both
+/// picked corners keep their purple marker, the overlay drawing each.
+#[test]
+fn both_clicked_points_of_an_axis_keep_their_markers() {
+    let mut harness = shell_harness();
+    arm_axis(&mut harness, "+Y by Two points");
+    // The two visible top corners nearest the eye, as real clicks.
+    let e = harness.state().state.cam.eye();
+    let mut tops: Vec<(f64, egui::Pos2)> = [[0.0, 0.0, 30.0], [60.0, 0.0, 30.0], [60.0, 60.0, 30.0], [0.0, 60.0, 30.0]]
+        .iter()
+        .filter_map(|c: &P| {
+            let d = (c[0] - e[0]).powi(2) + (c[1] - e[1]).powi(2) + (c[2] - e[2]).powi(2);
+            px_of(harness.state(), *c).map(|p| (d, p))
+        })
+        .collect();
+    tops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(tops.len() >= 2, "two top corners on screen");
+    click_viewport(&mut harness, tops[0].1);
+    let one = interact::selection_feature_lines(&harness.state().state).len();
+    assert_eq!(axis_y(&harness).len(), 1, "{}", harness.state().state.status);
+    assert!(one > 0, "the first point is marked");
+    click_viewport(&mut harness, tops[1].1);
+    assert_eq!(axis_y(&harness).len(), 2, "{}", harness.state().state.status);
+    let two = interact::selection_feature_lines(&harness.state().state).len();
+    assert_eq!(two, 2 * one, "both points marked: {:?}", axis_y(&harness));
+}

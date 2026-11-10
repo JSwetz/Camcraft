@@ -117,6 +117,8 @@ mod theme_door;
 mod recent_door;
 // #509: the Fixtures page rows fit the pane.
 mod fixture_rows;
+// #709 hand check: both points of a two-point axis stay marked.
+mod two_point_marks;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.

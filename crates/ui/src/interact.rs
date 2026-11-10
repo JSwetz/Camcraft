@@ -1432,43 +1432,43 @@ pub(crate) fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
 /// place while orbiting. A vanished pick - hidden model, deleted entity,
 /// stale id - draws nothing rather than a ghost, the hover rule again.
 pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
+    feature_lines(state, &shown_picks(state))
+}
+
+/// The picks shown: the collecting Setups page draft, else the open operation's.
+pub(crate) fn shown_picks(state: &State) -> Vec<GeoSel> {
     // #330: while the Setups page collects a lay-on-a-plane pick, its
     // draft picks are the ones drawn.
     // #561: the locate draft's mates and its waiting half.
     if let Some(d) = &state.locate_pick {
-        let picks: Vec<GeoSel> =
-            d.mates.iter().flat_map(|m| [m.part.clone(), m.fixture.clone()]).chain(d.half.clone()).collect();
-        return feature_lines(state, &picks);
+        return d.mates.iter().flat_map(|m| [m.part.clone(), m.fixture.clone()]).chain(d.half.clone()).collect();
     }
     if let Some(draft) = state.plane_pick.as_ref().filter(|d| d.picking) {
-        return feature_lines(state, &draft.picks);
+        return draft.picks.clone();
     }
     // #555: the three-points draft's picks.
     if let Some(d) = &state.points_pick {
-        return feature_lines(state, &d.picks);
+        return d.picks.clone();
     }
     // #557: the axes-in-the-plane draft's picks, while it collects.
     if let Some(d) = state.axis_pick.as_ref().filter(|d| d.picking.is_some()) {
-        let picks: Vec<GeoSel> = [&d.axes.y, &d.axes.x].into_iter().flatten().flat_map(|p| p.picks.clone()).collect();
-        return feature_lines(state, &picks);
+        return [&d.axes.y, &d.axes.x].into_iter().flatten().flat_map(|p| p.picks.clone()).collect();
     }
     if state.op_ui.name.is_empty() || state.hidden_paths.contains(&state.op_ui.name) {
         return Vec::new(); // nothing open: nothing picked to pin down
     }
-    let Some(op) = model::find_by_name(&state.world, &state.op_ui.name)
-        .and_then(|e| model::operation_of(&state.world, &e))
-    else {
-        return Vec::new();
-    };
-    let operation::SrcRef::Selection(items) = &op.src else {
-        return Vec::new();
-    };
-    feature_lines(state, items)
+    let op = model::find_by_name(&state.world, &state.op_ui.name).and_then(|e| model::operation_of(&state.world, &e));
+    match op.map(|o| o.src) {
+        Some(operation::SrcRef::Selection(items)) => items,
+        _ => Vec::new(),
+    }
 }
+
+/// The pick violet: the 3D outlines and the picked points' screen marks.
+pub(crate) const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
 
 /// The picks' outlines in 3D, violet (see [`selection_feature_lines`]).
 fn feature_lines(state: &State, items: &[GeoSel]) -> Vec<[f32; 6]> {
-    const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
     let mut out = Vec::new();
     for item in items {
         if state.hidden_in_view(&item.entity) {

@@ -102,6 +102,23 @@ pub fn queue_wcs_321(state: &mut State) {
     });
 }
 
+/// #709 hand check: every shown picked point's screen diamond (see
+/// [`vertex_marker`]), drawn violet over the image. The 3D cross of
+/// `interact::selection_feature_lines` is a ~1 mm, depth-tested 1 px
+/// line star half sunk in the corner it marks: at a framed part it
+/// spans ~3 px and z-fights the faces and wire it lies on, so a picked
+/// corner could vanish. This mark is never occluded and keeps its size
+/// at any zoom. Hidden models and stale ids draw nothing.
+pub(crate) fn picked_point_marks(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2])> {
+    let mut out = Vec::new();
+    for g in crate::interact::shown_picks(state) {
+        if matches!(g.feature, FeatureSel::Vertex(_)) {
+            crate::interact::feature_segments(state, &g.entity, g.feature, aspect, &mut out);
+        }
+    }
+    out
+}
+
 /// Screen-space marker for a vertex: a small diamond around its
 /// projection, as viewport-uv segment pairs like `feature_segments`.
 pub(crate) fn vertex_marker(
