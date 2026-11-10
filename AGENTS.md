@@ -126,6 +126,34 @@ go to `CHANGELOG.md`.
     upstream/main`) on that branch only, never into the fork's `main`, which
     advances only at the next cut tag.
   - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0").
+  - **Process files sync on every session, not only at tags** (user,
+    2026-11-10: "we need a way to inform all forks that there is changes
+    to skills and agents"). The process - `AGENTS.md`, `.claude/agents/`,
+    `.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh` - changes
+    between releases, and a fork's agents must follow the current rules.
+    At the start of every session in a fork, before claiming work,
+    compare `git show upstream/main:.claude/PROCESS_VERSION` with the
+    local `.claude/PROCESS_VERSION`. If upstream's is higher, pull just
+    those files: `git checkout upstream/main -- AGENTS.md .claude/agents
+    .claude/skills .claude/PROCESS_VERSION scripts/gate.ps1
+    scripts/gate.sh`, commit as `chore(process): sync process files to
+    upstream PROCESS_VERSION <n>` on a `process-sync` branch, and merge
+    it into the fork's `main` (or open a PR there if the fork protects
+    main), then re-read AGENTS.md before going on. This is the one
+    exception to "sync only to a cut tag": process files don't change
+    product code, so the fork's code stays on the tag while its rules stay
+    current. What changed and why is in the pinned issue #681 ("Process
+    changes"); a fork maintainer subscribes there.
+- **Process changes bump `PROCESS_VERSION` and are announced** (same
+  request). Any PR that changes a process file (the list above) also
+  increments the single integer in `.claude/PROCESS_VERSION`, and when it
+  merges, the merging session adds a comment to the pinned issue #681:
+  `PROCESS_VERSION <n>` · PR #M · what changed · what a fork must do. The
+  reviewer treats a missing bump as a requested change. Two process PRs
+  open at once both bump to the same number; whichever merges second
+  takes the next number when it merges main. At a cut, the release notes
+  get a short "Process changes" section listing the versions since the
+  previous tag.
 - **Overlapping issues stack.** Open PRs wait unmerged (a `feat` until its
   cut, a fix until it is reviewed), so an
   issue touching code an open PR changes branches off that PR's branch
@@ -604,7 +632,10 @@ a tag"):
    `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
    removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per
-   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows), commit as `docs: X.Y.Z release notes;
+   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows)
+   - the notes also get a short "Process changes" section listing each
+   `PROCESS_VERSION` since the previous tag (from the pinned issue #681) -
+   commit as `docs: X.Y.Z release notes;
    changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
    - it runs the release gate tier on that tree (pass `-SkipGate` only if
    this exact tree already passed it), commits the version bump, builds
