@@ -184,6 +184,7 @@ pub(super) fn finding(op: &str, w: &Warning) -> Value {
         Warning::Envelope { at, .. } => ("envelope", *at),
         Warning::RestUnjudged { at, .. } => ("rest_unjudged", *at),
         Warning::Scallop { at, .. } => ("scallop", *at),
+        Warning::ProbeSearch { at, .. } => ("probe_search", *at),
     };
     json!({
         "op": op,

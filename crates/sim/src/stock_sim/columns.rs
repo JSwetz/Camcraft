@@ -24,16 +24,25 @@
 //!   (`-inf`) says the same, so both arms abstain alike.
 
 use super::backend::Stock;
-use super::dexel::strip;
-use super::field::center_of;
+use super::dexel::{strip, Dexel};
+use super::field::{center_of, SdfField};
 use super::kernel::StockError;
 use super::march::{lattice_of, march, world, Read};
 
 use crate::geo2d::{Point2, Region};
 
+/// What a column reader reads: a column store, or a field (#585 -
+/// a bare `Dexel` the program-ahead rest grid still is, read through
+/// the same seam a `Stock` is, until M7.3 retires it).
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Grid(&'a Dexel),
+    Field(&'a SdfField),
+}
+
 /// A stock's columns, lattice resolved: see the module laws.
 pub struct Columns<'a> {
-    stock: &'a Stock,
+    stock: Source<'a>,
     x0: f64,
     y0: f64,
     cell: f64,
@@ -51,23 +60,12 @@ impl Stock {
     /// ceiling) - the same refusal `deviate` gives on that arm.
     pub fn columns(&self) -> Result<Columns<'_>, StockError> {
         match self {
-            Stock::Column(d) => Ok(Columns {
-                stock: self,
-                x0: d.x0,
-                y0: d.y0,
-                cell: d.cell,
-                nx: d.nx,
-                ny: d.ny,
-                i0: 0,
-                j0: 0,
-                z_hi: f64::NAN,
-                z_lo: f64::NAN,
-            }),
+            Stock::Column(d) => Ok(Columns::of_grid(d)),
             Stock::Field(f) => {
                 let lat = lattice_of(f)?;
                 let (z_hi, z_lo) = world(f);
                 Ok(Columns {
-                    stock: self,
+                    stock: Source::Field(f),
                     x0: lat.x0,
                     y0: lat.y0,
                     cell: lat.cell,
@@ -83,7 +81,47 @@ impl Stock {
     }
 }
 
+impl<'a> Columns<'a> {
+    /// The reader over a bare column store (#585): the prior stock the
+    /// operation layer still holds as a `Dexel`, read through the same
+    /// vocabulary as a `Stock` - so its consumers port off `Dexel` now
+    /// and take a field when the holder does (M7.3).
+    #[must_use]
+    pub fn of_grid(d: &'a Dexel) -> Self {
+        Columns {
+            stock: Source::Grid(d),
+            x0: d.x0,
+            y0: d.y0,
+            cell: d.cell,
+            nx: d.nx,
+            ny: d.ny,
+            i0: 0,
+            j0: 0,
+            z_hi: f64::NAN,
+            z_lo: f64::NAN,
+        }
+    }
+}
+
 impl Columns<'_> {
+    /// The lattice pitch (mm).
+    #[must_use]
+    pub fn cell(&self) -> f64 {
+        self.cell
+    }
+
+    /// The centre of column `(ix, iy)`, on the reader's own lattice.
+    #[must_use]
+    pub fn center(&self, ix: usize, iy: usize) -> Point2 {
+        Point2::new(self.x0 + (ix as f64 + 0.5) * self.cell, self.y0 + (iy as f64 + 0.5) * self.cell)
+    }
+
+    /// The lattice origin (the min corner of column (0, 0)).
+    #[must_use]
+    pub fn origin(&self) -> Point2 {
+        Point2::new(self.x0, self.y0)
+    }
+
     #[must_use]
     pub fn nx(&self) -> usize {
         self.nx
@@ -116,8 +154,8 @@ impl Columns<'_> {
             return f64::NAN;
         }
         match self.stock {
-            Stock::Column(d) => d.top_at(ix + iy * d.nx),
-            Stock::Field(f) => {
+            Source::Grid(d) => d.top_at(ix + iy * d.nx),
+            Source::Field(f) => {
                 let (x, y) = (
                     center_of(self.i0.saturating_add(ix as i32), self.cell),
                     center_of(self.j0.saturating_add(iy as i32), self.cell),
@@ -142,8 +180,8 @@ impl Columns<'_> {
     /// column's march and merges by the same strip law.
     pub fn above(&self, z: f64) -> Result<Region, StockError> {
         match self.stock {
-            Stock::Column(d) => d.above(z),
-            Stock::Field(_) => {
+            Source::Grid(d) => d.above(z),
+            Source::Field(_) => {
                 let mut tops = Vec::with_capacity(self.nx * self.ny);
                 for iy in 0..self.ny {
                     for ix in 0..self.nx {

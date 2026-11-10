@@ -18,7 +18,7 @@
 use crate::model;
 use crate::operation::{self, Height, OpStatus, OpParams};
 use crate::post::{self, cnc, engine, Dump};
-use crate::schema::{PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
+use crate::schema::{EndUnits, PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
 use flecs_ecs::prelude::*;
 use serde_json::Value;
 use std::path::Path;
@@ -139,6 +139,9 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
     ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
     ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
+    // #618: the M+ upgrade kits - the M's figures with the MX's axis speeds.
+    ("Tormach 770M+", include_str!("../../../assets/machines/tormach-770m-plus.mch")),
+    ("Tormach 1100M+", include_str!("../../../assets/machines/tormach-1100m-plus.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
@@ -181,6 +184,15 @@ pub fn document_post_of(world: &World) -> PostRef {
     crate::setup_mount::document_post(world)
 }
 
+/// The spindle speed a program commands for `tool`, rpm (#565): a touch
+/// probe is never spun (0 - its catalog `rpm` is never posted, and the
+/// posts start no spindle for it, #523); every cutter runs its own. The
+/// one answer the post and the machine's spindle-range check both read.
+#[must_use]
+pub fn posted_rpm(tool: &crate::tools::Tool) -> f64 {
+    if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm }
+}
+
 /// Write the singleton. For the `SelectPost` command and the project
 /// reader only.
 pub fn post_set(world: &World, next: &PostRef) {
@@ -201,14 +213,25 @@ pub fn post_options_set(world: &World, next: PostOptions) {
 }
 
 /// The options as the script's `postOptions` object: the words a
-/// script compares against (`Threading`: `"G32"` or `"G76"`).
+/// script compares against (`Threading`: `"G32"` or `"G76"`;
+/// `EndUnits`: `"inch"` or `"mm"`, absent when the program's unit is
+/// left modal, #596).
 #[must_use]
 pub fn options_value(o: PostOptions) -> Value {
     let threading = match o.threading {
         ThreadingOutput::G32Passes => "G32",
         ThreadingOutput::G76Cycle => "G76",
     };
-    serde_json::json!({ "Threading": threading })
+    let mut v = serde_json::json!({ "Threading": threading });
+    let end = match o.end_units {
+        EndUnits::Leave => None,
+        EndUnits::Inch => Some("inch"),
+        EndUnits::Millimeters => Some("mm"),
+    };
+    if let (Some(end), Some(map)) = (end, v.as_object_mut()) {
+        map.insert("EndUnits".to_owned(), Value::from(end));
+    }
+    v
 }
 
 /// The document's post for display: built-in name, or the file path
@@ -308,6 +331,8 @@ mod wcs_rotation;
 mod wcs_slot;
 #[path = "posting_mounts.rs"]
 mod mounts;
+#[path = "posting_nose.rs"]
+pub mod nose;
 pub(crate) use wcs_rotation::{offset_frame, OffsetFrame};
 pub use mounts::{
     machine_checks, machine_value_for, machine_value_of, post_mounts, post_mounts_script, post_of_setup, PostedMount,
@@ -689,13 +714,10 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
 
     // The T../H.. law (#221): a tool's own number when it has one, else
     // its 1-based position among the named tools in document order - and
-    // two tools of one program posting the same number refuse by name.
+    // two tools of one machine posting the same number refuse by name.
     let tool_numbers = crate::tool_numbers::numbers(world);
-    let used: Vec<String> = ops
-        .iter()
-        .filter_map(|(_, e)| model::operation_of(world, e).map(|op| op.tool))
-        .collect();
-    if let Some(msg) = crate::tool_numbers::clash(world, &used) {
+    // Judged per machine (#438): two machines are two tool tables.
+    if let Some(msg) = crate::tool_numbers::clash_per_machine(world, &ops) {
         return Err(msg);
     }
 
@@ -762,18 +784,24 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             }),
             _ => None,
         };
-        let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
+        let rpm = posted_rpm(&tool);
         // Commentary for the program (#257): kinds by their panel
         // labels, the setup by the resolution law (implicit members
         // name the first setup, as the setup sheet does).
         let op_kind = op.params.kind().to_string();
         let tool_kind = tool.kind.to_string();
         let setup_name = crate::setup::effective(world, setup).unwrap_or_default();
+        // #630: a nose-centre turning path posts as the tool's control
+        // point for its orientation (or is refused by name when the
+        // orientation cannot cut it); the cache stays the nose truth.
+        let (posted, tool_orientation) = nose::posted_path(&op.params, &op.tool, &tool, &cache.path, origin)
+            .map_err(|e| format!("{display_name}: {e}"))?;
         let d = Dump {
             op_kind: &op_kind,
             setup_name: &setup_name,
             tool_kind: &tool_kind,
             tool_corner_r: tool.corner_r,
+            tool_orientation,
             probe_result,
             op_name: &display_name,
             part_load,
@@ -805,7 +833,7 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
                 .map(|w| format!("{name}: {w}"))
                 .collect(),
         };
-        streams.push((name.clone(), post::dump(&cache.path, &d)));
+        streams.push((name.clone(), post::dump(&posted, &d)));
     }
     Ok(streams)
 }

@@ -1,9 +1,9 @@
 //! M7.2 B3b: the traced stock lands in the 3D pass. The composite
 //! paints where the field was hit, replaces the translucent sheet, and
 //! its written depth sorts against the meshes both ways - a model in
-//! front of the stock hides it, a model behind it is hidden. On a
-//! machine with no usable adapter the suite skips (green with a note),
-//! the `gpu_render` precedent.
+//! front of the stock hides it, a model behind it is hidden. Adapter and
+//! skip policy: the `gpu_render` precedent (`headless_gpu`, #615 - loud
+//! SKIP, `CAMCRAFT_REQUIRE_GPU=1` fails).
 //! Provenance: our own test rig; nothing from vendor binaries.
 //!
 //! Gate map (M4.4): covers ui::trace::{eye, composite} and
@@ -24,15 +24,13 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const W: u32 = 96;
 const H: u32 = 72;
 
+/// Software adapter first, else the hardware one (#615); no adapter at
+/// all prints a loud SKIP, and `CAMCRAFT_REQUIRE_GPU=1` fails instead.
 fn device_and_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let options = wgpu::RequestAdapterOptions {
-        force_fallback_adapter: true,
-        compatible_surface: None,
-        ..Default::default()
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    match camcraft_ui::headless_gpu::device_for_test("trace_composite") {
+        Ok(gpu) => gpu.map(|g| (g.device, g.queue)),
+        Err(err) => panic!("{err}"),
+    }
 }
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {

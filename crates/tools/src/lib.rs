@@ -19,4 +19,6 @@ pub mod spun;
 pub mod lathe_holder;
 // #396: the insert plate a lathe body's judge leaves out.
 pub mod lathe_insert_zone;
+// #630: the lathe tool orientation code and its control point.
+pub mod orientation;
 pub mod tools;

@@ -4,8 +4,8 @@
 //! pixels hit, how far, and what class - within f32 rounding of the
 //! lattice and the one stated difference (the GPU classes by the
 //! target's lattice, the CPU by its exact facets). Refusals name their
-//! reason. On a machine with no usable adapter the suite skips (green
-//! with a note), the `gpu_render` precedent.
+//! reason. Adapter and skip policy: the `gpu_render` precedent
+//! (`headless_gpu`, #615 - loud SKIP, `CAMCRAFT_REQUIRE_GPU=1` fails).
 //! Provenance: our own test rig over Hart's sphere tracing (SIGGRAPH
 //! 1996); nothing from vendor binaries.
 //!
@@ -19,15 +19,13 @@ use camcraft_app::stock_sim::preview::{pack_field, pack_target, Preview};
 use camcraft_app::stock_sim::{Backend, PreviewCamera, SimOp, Stock, DEV_TOL, FIELD_BAND};
 use camcraft_ui::trace::TracePass;
 
+/// Software adapter first, else the hardware one (#615); no adapter at
+/// all prints a loud SKIP, and `CAMCRAFT_REQUIRE_GPU=1` fails instead.
 fn device_and_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let options = wgpu::RequestAdapterOptions {
-        force_fallback_adapter: true,
-        compatible_surface: None,
-        ..Default::default()
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    match camcraft_ui::headless_gpu::device_for_test("trace_parity") {
+        Ok(gpu) => gpu.map(|g| (g.device, g.queue)),
+        Err(err) => panic!("{err}"),
+    }
 }
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -96,7 +94,7 @@ fn both_eyes(stock: &Stock, target: Option<&Stock>, cam: &PreviewCamera, w: u32,
         }
     };
     let cpu = stock.preview(target, cam, w, h, DEV_TOL).unwrap();
-    let mut pass = TracePass::new(&device).expect("the fallback adapter builds compute kernels");
+    let mut pass = TracePass::new(&device).expect("the adapter builds compute kernels");
     let lat = pack_field(stock.field().unwrap()).expect("the fixture packs");
     let tl = target.map(|t| pack_target(t.field().unwrap()).expect("the target packs"));
     pass.upload(&device, &lat, tl.as_ref()).unwrap();

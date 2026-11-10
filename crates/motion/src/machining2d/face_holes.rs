@@ -134,12 +134,14 @@ fn crossings(region: &Region, y: f64) -> Vec<(f64, usize)> {
 /// horizontal gap is no wider than the tool. A concave return in one
 /// hole can exclude a row at any width; it belongs to `uncut`'s swept-area
 /// account instead of the refusal about material between two holes.
+/// Returns `(row y, gap width, gap midpoint x)` - the midpoint is where
+/// the refusal points (#261 part 2).
 pub(super) fn narrow_gap(
     holes: &Region,
     rows: &[(f64, f64, f64)],
     pieces: &[Vec<(f64, f64)>],
     diameter: f64,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, f64)> {
     rows.iter().zip(pieces).find_map(|(&(y, _, _), ps)| {
         let xs = crossings(holes, y);
         // The material gaps between consecutive hole spans on the row.
@@ -153,7 +155,7 @@ pub(super) fn narrow_gap(
                     && b - a <= diameter
                     && !ps.iter().any(|&(p0, p1)| p0.min(p1) < b && p0.max(p1) > a)
             })
-            .map(|((a, _), (b, _))| (y, b - a))
+            .map(|((a, _), (b, _))| (y, b - a, 0.5 * (a + b)))
     })
 }
 

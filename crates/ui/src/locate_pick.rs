@@ -48,7 +48,17 @@ impl LocateDraft {
 /// plus "nothing would move" - the why greys Apply out.
 pub fn check(state: &State, d: &LocateDraft) -> Result<(), String> {
     let plan = fixture_locate::plan(&state.world, &d.spec())?;
-    if fixture_locate::is_still(plan.delta) { Err("nothing would move".to_owned()) } else { Ok(()) }
+    if fixture_locate::is_still(plan.delta) { Err(STILL.to_owned()) } else { Ok(()) }
+}
+
+/// The part already sits where the mates and the offset put it.
+pub const STILL: &str = "nothing would move";
+
+/// Is this draft's refusal only "it is already there" (a located draft
+/// waiting for an Offset or Turn edit)?
+#[must_use]
+pub fn is_located(d: &LocateDraft, check: &Result<(), String>) -> bool {
+    d.half.is_none() && !d.mates.is_empty() && matches!(check, Err(w) if w == STILL)
 }
 
 /// A unit normal's name in the setup frame: `+Z (top)`, `-Y (front)`;
@@ -125,6 +135,17 @@ pub fn disarm(state: &mut State) {
     state.locate_pick = None;
 }
 
+/// After the dock: a draft whose form was not drawn this frame (its page
+/// left, the active setup changed, the pane closed) is dropped, so a
+/// located draft kept for Offset / Turn edits never captures picks with
+/// no form on screen (review of #566). The shell resets
+/// `locate_form_drawn` before the dock.
+pub fn sweep(state: &mut State) {
+    if state.locate_pick.is_some() && !state.locate_form_drawn {
+        disarm(state);
+    }
+}
+
 /// Drop the waiting half pick, else the last mate.
 pub fn remove_last(state: &mut State) {
     let Some(d) = state.locate_pick.as_mut() else { return };
@@ -183,10 +204,15 @@ pub fn take(state: &mut State, pick: GeoSel) {
 pub fn next_hint(d: &LocateDraft, check: &Result<(), String>) -> String {
     match (d.half.as_ref(), d.mates.len(), check) {
         (Some(_), _, _) => format!("pick the {} face or point it sits on", d.fixture),
-        (None, 0, _) => "pick a part face or point (the floor mate first)".into(),
+        (None, 0, _) => "pick a part face or point in the viewport (the floor mate first)".into(),
+        (None, _, Err(w)) if w == STILL => {
+            "located - edit Offset or Turn to adjust (one more undo step), pick another mate, or Stop locating".into()
+        }
         (None, _, Err(why)) => format!("not yet - {why}; Remove last and re-pick"),
         (None, n, Ok(())) if n >= MAX_MATES => "the part is fully located - Apply".into(),
-        (None, 1, Ok(())) => "Apply, or pick the next mate (the fixed jaw)".into(),
+        (None, 1, Ok(())) => {
+            "Apply (one face mate sets height and tilt only), or pick the next mate (the fixed jaw) to place X / Y".into()
+        }
         (None, _, Ok(())) => "Apply, or pick the last mate (the stop)".into(),
     }
 }
