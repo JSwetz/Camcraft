@@ -74,6 +74,7 @@ mod field;
 mod field_arc;
 mod field_batch;
 mod field_box;
+mod field_carry;
 mod field_blade;
 mod field_bull;
 mod field_cut;
@@ -108,6 +109,7 @@ pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSur
 pub use dexel::{reach, Dexel};
 pub use edge_break::credit_breaks;
 pub use field::SdfField;
+pub use field_carry::CarriedField;
 pub use field_batch::CutStats;
 pub use field_blade::{LatheProfile, CROWN_SAG_TOL};
 pub use field_cut::SdfTool;
