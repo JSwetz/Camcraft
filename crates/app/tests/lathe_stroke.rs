@@ -13,6 +13,10 @@
 //! face-and-turn job with its clearance in front of the face passes on
 //! both built-ins, a facing pass's control point to centre fits the
 //! Lathe's band, and a genuine over-travel still refuses by name.
+//! Since #647 a lathe is judged on the POSTED path's meridian radius
+//! (the kernels put the radius on Y; the post writes the control
+//! point): a control point past the floor or an OD past the ceiling
+//! refuses by name, one on the band edge passes.
 //!
 //! Provenance: general lathe practice (Z0 on the finished face, the
 //! part in -Z, X from the centreline); every number is our own fixture.
@@ -78,12 +82,18 @@ fn generate(world: &World, history: &mut History, name: &str, params: OpParams) 
 /// Face and rough-turn the bar on the built-in `machine_name`, every
 /// clearance at `clearance` in front of the face.
 fn job_on(machine_name: &str, clearance: f64) -> World {
+    job_load(clearance, |w| LoadMachine::builtin(w, machine_name).expect("built-in machine"))
+}
+
+/// The face-and-turn job on the machine `load` mounts.
+fn job_load(clearance: f64, load: impl FnOnce(&World) -> LoadMachine) -> World {
     let world = camcraft_app::world::new_world();
     let mut h = History::default();
     let at = Location { pos: Point3::new(0.0, 0.0, -40.0), ..Location::default() };
     let stock = SetStock::new(&world, StockShape::Cylinder { diameter: 20.0, height: 41.0 }, at);
     h.execute(&world, stock.expect("bar stock"));
-    h.execute(&world, LoadMachine::builtin(&world, machine_name).expect("built-in machine"));
+    let cmd = load(&world);
+    h.execute(&world, cmd);
     let tool = catalog().into_iter().find(|(n, _)| *n == TOOL).map(|(_, t)| t).expect("catalog");
     h.execute(&world, AddTool::new(&world, TOOL, tool).expect("tool"));
     h.execute(&world, ImportModel::from_mesh("bar", revolve(&BAR)));
@@ -141,8 +151,12 @@ fn overtravel_refuses_by_name(name: &str, stroke: f64) {
     let m = mounted(&world, name);
     let c = check_document(&world, &m).expect("checks");
     let want = format!("in Z, the stroke is {:.3}..{:.3}", -stroke, stroke);
+    // A lathe judges the POSTED path (#647): the orientation-2 control
+    // point stands r = 0.8 below the rough pass's nose centre in Z. The
+    // Mill-turn keeps the cached (nose-centre) reading.
+    let reach = if name == "Lathe" { clearance - 0.8 } else { clearance };
     assert!(
-        c.problems.iter().any(|p| p.starts_with("Rough1:") && p.contains(&format!("reaches {clearance:.3}")) && p.contains(&want)),
+        c.problems.iter().any(|p| p.starts_with("Rough1:") && p.contains(&format!("reaches {reach:.3}")) && p.contains(&want)),
         "{name}: {:?}",
         c.problems
     );
@@ -176,7 +190,7 @@ fn a_clearance_past_the_millturn_quill_still_refuses_by_name() {
 }
 
 /// The built-in Lathe's X floor (#630), in the checker's reading of a
-/// lathe X: the cached nose-centre path's radius from the centreline.
+/// lathe X (#647): the posted path's signed radius from the centreline.
 /// -2.5 radius is -5 on diameter: room for the control point of a
 /// nose up to r2.5 faced to centre (the catalog's largest is r0.8).
 const LATHE_X_FLOOR: f64 = -2.5;
@@ -243,4 +257,69 @@ fn a_facing_pass_to_centre_fits_the_built_in_lathe_x_band() {
     }
     let c = check_document(&world, &m).expect("checks");
     assert!(c.is_ok(), "a facing pass to centre checks clean: {:?}", c.problems);
+}
+
+// #647: the stroke check judges the POSTED radius. The turning kernels
+// state their radius on the Y meridian, which world X never saw, and
+// the post writes the control point, not the cached nose centre.
+
+/// The built-in Lathe with its X band rewritten to `lo..hi`, mounted.
+fn lathe_with_x(lo: f64, hi: f64, clearance: f64) -> World {
+    let text = posting::MACHINES.iter().find(|(n, _)| *n == "Lathe").map(|(_, t)| *t).expect("built-in Lathe");
+    let edited = text.replacen("\"min\": -2.5, \"max\": 320.0", &format!("\"min\": {lo:?}, \"max\": {hi:?}"), 1);
+    assert_ne!(edited, text, "fixture: the X band was rewritten");
+    let m = machine::parse_mch(&edited).expect("the edited lathe parses");
+    job_load(clearance, |w| LoadMachine::new(w, "lathe-x.mch".into(), Some(m)).expect("edited lathe"))
+}
+
+fn x_problems(world: &World) -> Vec<String> {
+    let (_, m) = machine::of(world);
+    let c = check_document(world, &m.expect("a mounted machine")).expect("checks");
+    c.problems.into_iter().filter(|p| p.contains(" in X")).collect()
+}
+
+/// The fixture's premise: `op`'s cached path rides the Y meridian, so
+/// world X alone never sees its radius.
+fn on_the_y_meridian(world: &World, op: &str) {
+    let e = model::find_by_name(world, op).expect("op");
+    let path = model::toolpath_of(world, &e).expect("cache").path;
+    let pts = || path.moves.iter().flat_map(|m| [m.from, m.to]);
+    assert!(pts().all(|p| p.x.abs() < 1e-9), "{op}: world X is 0 throughout");
+    assert!(pts().any(|p| p.y.abs() > 1.0), "{op}: the radius rides Y");
+}
+
+#[test]
+fn a_facing_control_point_below_the_x_floor_is_refused_by_name() {
+    // Floor -0.5: the nose centre (X0) fits, the posted control point
+    // (-0.8) does not - the posted point decides, and nothing posts.
+    let world = lathe_with_x(-0.5, 320.0, 5.0);
+    on_the_y_meridian(&world, "Face1");
+    let p = x_problems(&world);
+    assert!(
+        p.iter().any(|l| l.starts_with("Face1:") && l.contains("reaches -0.800 in X, the stroke is -0.500..320.000")),
+        "{p:?}"
+    );
+    let path = std::env::temp_dir().join(format!("camcraft_lathe_floor_{}.nc", std::process::id()));
+    let posted = posting::post_setup(&world, &path);
+    let _ = std::fs::remove_file(&path);
+    assert!(posted.is_err(), "an X over-travel past the floor never posts");
+}
+
+#[test]
+fn a_facing_control_point_on_the_x_floor_passes() {
+    let world = lathe_with_x(-0.8, 320.0, 5.0);
+    let p = x_problems(&world);
+    assert!(p.is_empty(), "the control point at the band edge fits: {p:?}");
+}
+
+#[test]
+fn a_turning_pass_beyond_the_x_ceiling_is_refused_by_name() {
+    // The bar is r10; an X ceiling of 9 is short of every OD pass.
+    let world = lathe_with_x(-2.5, 9.0, 5.0);
+    on_the_y_meridian(&world, "Rough1");
+    let p = x_problems(&world);
+    assert!(
+        p.iter().any(|l| l.starts_with("Rough1:") && l.contains(" in X, the stroke is -2.500..9.000")),
+        "{p:?}"
+    );
 }

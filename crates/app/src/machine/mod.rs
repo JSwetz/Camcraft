@@ -59,6 +59,8 @@ pub mod validate;
 pub mod draft;
 pub mod fields;
 pub mod store;
+// #647: a lathe's slides judged on the posted meridian radius.
+mod lathe_stroke;
 
 use flecs_ecs::prelude::World;
 
@@ -253,6 +255,10 @@ pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs
             );
         }
 
+        // #647: on a lathe the slides are judged on the POSTED path's
+        // meridian radius (`lathe_stroke`), not on the cache's world X.
+        let lathe_judged = lathe_stroke::judge(&mut out, name, &op.params, &op.tool, &tool, &cache.path, machine, origin);
+
         for (i, mv) in cache.path.moves.iter().enumerate() {
             // Pose (M5.1 stage A): a move that leans the tool asks
             // the machine to hold an angle, and the machine answers
@@ -332,6 +338,9 @@ pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs
                         slowest_axis(&machine.axes, ceil)
                     ));
                 }
+            }
+            if lathe_judged {
+                continue; // its stroke was judged above, as posted (#647)
             }
             // Travel: endpoints and - for arcs - the quarter points
             // the sweep can bulge past. A straight move's extremes
