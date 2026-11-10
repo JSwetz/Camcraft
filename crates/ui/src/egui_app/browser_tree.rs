@@ -56,12 +56,14 @@ pub(crate) enum Leaf {
     Model(String),
     Tool(String),
     Op(String),
+    /// A Pause / Home entry of the operation list (#155).
+    Entry(String),
 }
 
 /// Append one tree row and its parallel leaf. `icon` is the bundled glyph
 /// for the row's subject, `None` for headers (and the setup radio).
 #[allow(clippy::too_many_arguments)]
-fn push_row(
+pub(super) fn push_row(
     rows: &mut Vec<painted::Row>,
     leaves: &mut Vec<Leaf>,
     label: String,
@@ -93,6 +95,16 @@ pub(crate) fn model_row_marks(is_fixture: bool, hidden: bool) -> (String, painte
         if is_fixture { painted::Kind::Fixture } else { painted::Kind::Model },
         if is_fixture { Icon::Fixture } else { Icon::Model },
     )
+}
+
+/// A Fixtures child row's suffix (#339 slice 4): how the gate judges
+/// the steel - `mesh`, or `box only: <reason>` - then the hidden marker.
+pub(crate) fn fixture_row_suffix(mesh: Option<camcraft_app::fixture_view::MeshState>, hidden: bool) -> String {
+    let mut suffix = mesh.map(|m| m.label()).unwrap_or_default();
+    if hidden {
+        suffix.push_str(" (hidden)");
+    }
+    suffix
 }
 
 pub(crate) fn kind_name(k: ToolKind) -> &'static str {
@@ -215,7 +227,7 @@ fn setup_children(
     for (fixture, entity) in fixtures {
         let hidden = state.hidden_models.contains(&fixture);
         let selected = matches!(t, UiTarget::Model(n) if *n == fixture) || model::is_selected(w, &entity);
-        let suffix = if hidden { " (hidden)".to_owned() } else { String::new() };
+        let suffix = fixture_row_suffix(state.fixture_mesh_state(&fixture), hidden);
         push_row(rows, leaves, fixture.clone(), suffix, painted::Kind::Fixture, Some(Icon::Fixture), selected, hidden, depth + 1, Leaf::Model(fixture));
     }
     let ops = setup_ops(state, ctx);
@@ -226,7 +238,11 @@ fn setup_children(
         push_row(rows, leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, depth + 1, Leaf::Section);
     }
     for (key, entity) in ops {
-        op_row(state, t, &key, &entity, depth + 1, rows, leaves);
+        if camcraft_app::program_entry::is_entry(w, &entity) {
+            super::tree_entry::entry_row(state, &key, &entity, depth + 1, rows, leaves);
+        } else {
+            op_row(state, t, &key, &entity, depth + 1, rows, leaves);
+        }
     }
 }
 
@@ -238,13 +254,15 @@ fn count(n: usize, word: &str) -> String {
     }
 }
 
-/// The setup's operations in program order (`None` - every operation).
+/// The setup's operations in program order (`None` - every operation),
+/// its Pause / Home entries among them (#155).
 fn setup_ops(state: &State, ctx: Option<&str>) -> Vec<(String, flecs_ecs::prelude::Entity)> {
-    setup::operation_order(&state.world)
+    let w = &state.world;
+    camcraft_app::program_entry::sequence(w)
         .into_iter()
         .filter(|(_, e)| {
             ctx.is_none_or(|s| {
-                model::operation_of(&state.world, e).is_some_and(|op| setup::belongs(&state.world, op.setup.as_deref(), s))
+                setup::belongs(w, camcraft_app::program_entry::declared_setup(w, e).as_deref(), s)
             })
         })
         .collect()

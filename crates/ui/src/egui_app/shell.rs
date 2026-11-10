@@ -36,12 +36,14 @@ use crate::viewport::View3D;
 use super::icons;
 use super::layout;
 use super::machine_editor;
+use super::machines_pane;
 use super::unsaved_prompt;
 use super::frame_watch::FrameWatch;
 use super::gpu;
 use super::gpu_init;
 use super::pages;
 use super::panes;
+use super::post_refusal;
 use super::theme;
 use super::viewcube;
 use super::world;
@@ -68,6 +70,9 @@ pub(crate) fn run_windowed(pick: gpu::GpuPick, want: Option<String>) -> i32 {
         }
     };
     event_loop.set_control_flow(ControlFlow::Wait);
+    // #144: macOS's terminate path (Cmd+Q, the app menu's Quit) asks
+    // through the guarded Quit instead of ending the process.
+    let _ = super::os_quit::install();
     let mut shell = Shell::new(pick, want);
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
@@ -144,6 +149,7 @@ pub(crate) enum Tab {
     Viewport,
     Browser,
     Properties,
+    Machines,
 }
 
 impl Tab {
@@ -152,6 +158,7 @@ impl Tab {
             Tab::Viewport => "viewport",
             Tab::Browser => "browser",
             Tab::Properties => "properties",
+            Tab::Machines => "machines",
         }
     }
 }
@@ -644,6 +651,9 @@ pub(crate) fn shell_layout(
     // stands). None on a fresh State, closed by ✖, reopened by the next
     // successful post, so the snapshot never moves until a post happens.
     pages::gcode_window(ui.ctx(), state);
+    // #265: a refused post's reason, kept on screen past the status
+    // line's next write. None on a fresh State, so no snapshot moves.
+    post_refusal::window(ui.ctx(), state);
     // M3.3 stage C: the machine editor - same window law as both above
     // (in-app egui::Window over the dock, None on a fresh State, so
     // snapshots never move until the Setup pane opens it).
@@ -768,6 +778,19 @@ impl winit::application::ApplicationHandler for Shell {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // #144: an OS quit (macOS Cmd+Q / app-menu Quit) is a Quit like
+        // the window X; the window comes forward so the prompt is seen.
+        if super::os_quit::route_pending(&mut self.state) {
+            if self.failed {
+                el.exit();
+                return;
+            }
+            if let Some(window) = &self.window {
+                window.set_minimized(false);
+                window.focus_window();
+                window.request_redraw();
+            }
+        }
         if self.occluded {
             el.set_control_flow(ControlFlow::Wait);
             return;
@@ -922,6 +945,10 @@ impl TabViewer for ShellTabs<'_> {
             Tab::Properties => {
                 let pal = theme::current();
                 pages::properties(ui, self.state, &pal);
+            }
+            Tab::Machines => {
+                let pal = theme::current();
+                machines_pane::draw(ui, self.state, &pal);
             }
         }
     }
@@ -1559,6 +1586,7 @@ pub(crate) mod headless {
             yaw: 0.9,
             pitch: 0.5,
             dist: 160.0,
+            ..Camera::default()
         };
         let (w, h) = view.extent();
         let mvp = cam.mvp(f64::from(w.max(1)) / f64::from(h.max(1)));

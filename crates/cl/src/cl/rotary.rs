@@ -16,9 +16,13 @@
 //! reads 0, -90, ... -1080, never a jump back by 360. The tool axis is
 //! the station's - radial, tip toward shank along +X once turned - and
 //! a pose that leans off it is refused: a fixed live tool cannot hold
-//! it. Moves keep their part-frame `to` and `axis` (every verifier,
-//! sim and law reads them unchanged); `rotary` is the stated C beside
-//! them.
+//! it. Moves keep their part-frame `to` (every verifier, sim and law
+//! reads it unchanged); `rotary` is the stated C beside it. A move
+//! split into pieces states, on every piece, the station pose at that
+//! piece's own C - the move's axis turned back by the rest of the turn
+//! (issue #486; the last piece keeps the move's axis bit for bit) - so
+//! a law reading the pose sees the radial tool where the machine holds
+//! it, not where the whole move ends.
 //!
 //! The machine moves X (radius), Z and C linearly between two blocks,
 //! which in the part frame is a spiral, not the chord the verifier
@@ -127,7 +131,7 @@ pub fn stamp_c(path: &Toolpath, center: [f64; 2], tol: f64) -> Result<Toolpath, 
                 "C-axis move {i} leans the tool off the radial live-tool station - a fixed live tool cannot hold that pose"
             ));
         }
-        split(m, m.from, m.to, ca, cb, center, tol, 0, &mut out)
+        split(m, (m.from, m.to), (ca, cb), cb, center, tol, 0, &mut out)
             .map_err(|()| format!("C-axis move {i} passes too near the spindle line to follow its chord within {tol} mm"))?;
         prev = cb;
     }
@@ -141,20 +145,32 @@ pub fn stamp_c(path: &Toolpath, center: [f64; 2], tol: f64) -> Result<Toolpath, 
     Ok(t)
 }
 
+/// The move's stated pose `axis` (the station pose at its end C,
+/// `c_end`) as the station pose at C `c`: turned about Z by the turn
+/// left between them. At `c == c_end` the axis comes back unchanged,
+/// bit for bit.
+fn pose_at(axis: [f64; 3], c_end: f64, c: f64) -> [f64; 3] {
+    if c == c_end {
+        return axis;
+    }
+    let (s, co) = (c_end - c).to_radians().sin_cos();
+    [axis[0] * co - axis[1] * s, axis[0] * s + axis[1] * co, axis[2]]
+}
+
 #[allow(clippy::too_many_arguments)]
 fn split(
     m: &Move,
-    a: Point3,
-    b: Point3,
-    ca: f64,
-    cb: f64,
+    (a, b): (Point3, Point3),
+    (ca, cb): (f64, f64),
+    c_end: f64,
     center: [f64; 2],
     tol: f64,
     depth: u32,
     out: &mut Vec<Move>,
 ) -> Result<(), ()> {
     if deviation(a, b, ca, cb, center) <= tol {
-        out.push(Move { from: a, to: b, rotary: Some(cb), ..*m });
+        let axis = m.axis.map(|ax| pose_at(ax, c_end, cb));
+        out.push(Move { from: a, to: b, rotary: Some(cb), axis, ..*m });
         return Ok(());
     }
     if depth >= MAX_DEPTH {
@@ -162,8 +178,8 @@ fn split(
     }
     let mid = lerp(a, b, 0.5);
     let cm = azimuth(mid, center).map_or(ca, |p| unwrap_near(-p, ca));
-    split(m, a, mid, ca, cm, center, tol, depth + 1, out)?;
-    split(m, mid, b, cm, cb, center, tol, depth + 1, out)
+    split(m, (a, mid), (ca, cm), c_end, center, tol, depth + 1, out)?;
+    split(m, (mid, b), (cm, cb), c_end, center, tol, depth + 1, out)
 }
 
 #[cfg(test)]
@@ -193,6 +209,20 @@ mod tests {
         for w in t.moves.windows(2) {
             assert_eq!(w[0].to, w[1].from);
         }
+    }
+
+    #[test]
+    fn every_piece_states_the_station_pose_at_its_own_c() {
+        let b = Point3::new(0.0, 10.0, -3.0);
+        let m = mv(Point3::new(10.0, 0.0, 0.0), b);
+        let t = stamp_c(&Toolpath::new(vec![m]), [0.0, 0.0], 0.01).ok().unwrap_or_else(|| Toolpath::new(vec![]));
+        assert!(t.moves.len() > 1);
+        for p in &t.moves {
+            let (c, a) = (p.rotary.unwrap_or(f64::NAN), p.axis.unwrap_or([0.0; 3]));
+            assert!(on_station(a, c), "C {c}: {a:?}");
+        }
+        // The last piece keeps the move's own axis, bit for bit.
+        assert_eq!(t.moves.last().and_then(|p| p.axis), m.axis);
     }
 
     #[test]

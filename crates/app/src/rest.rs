@@ -56,11 +56,13 @@
 
 mod across;
 mod ahead;
+mod carried_cache;
 mod pilots;
 
 pub use pilots::{drills_ahead, turned_ahead, DrillAhead, TurnedAhead};
 
-pub use across::REST_CARRY_REFUSAL;
+pub use across::{REST_CARRY_REFUSAL, carried_digest, carried_stock_block, carried_stock_body, entered_body};
+pub use carried_cache::{CAP as CARRIED_CACHE_CAP, clear as clear_carried_cache, computes as carried_body_computes};
 use across::{carried_grid, chain_of};
 use ahead::{ahead_of, digest_of, Ahead};
 use crate::cl::Move;
@@ -110,7 +112,7 @@ pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u6
 
 /// The refusal a rest reading of `name` meets (#318): `Some` when the
 /// stock its setup starts from has to be carried across a boundary the
-/// carry refuses. Generation refuses every op that reads the prior.
+/// carry refuses. Generation refuses every op of that setup (#319).
 #[must_use]
 pub fn carry_refusal(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
     chain_of(world, name, setup, false).err()
@@ -159,7 +161,7 @@ pub fn prior_state(
         // left, carried (#318) - a mask even when nothing ahead cut.
         let digest = prior_digest(world, name, setup);
         let min_r = chain.ops().filter(|a| a.cut && a.radius > 0.0).map(|a| a.radius).fold(tool_r, f64::min);
-        let grid = carried_grid(world, &chain, min_r)
+        let grid = carried_grid(world, &chain, min_r, true)
             .map_err(|e| GenError::Invalid(format!("rest from previous setups: {e}")))?;
         return Ok(PriorState { grid: Some(grid), digest });
     }
@@ -307,7 +309,7 @@ pub fn prior_plan(world: &World, name: &str, setup: Option<&str>, tool_r: f64) -
     // The same holds for a turning kind on a mill-turn: the column grid
     // reads its undercuts the same way, so outside a lathe every turning
     // kind but nose-cut Facing ahead is unknown too.
-    let lathe = crate::machine::kind_of(world) == crate::machine::Kind::Lathe;
+    let lathe = crate::machine::kind_of_setup(world, setup) == crate::machine::Kind::Lathe;
     let facing = |a: &Ahead| a.kind == crate::operation::OpType::Facing && a.nose.is_some();
     let turning = |a: &Ahead| a.kind.info().family() == crate::operation::Family::Turn;
     if let Some(a) = ahead.iter().find(|a| !facing(a) && (lathe || turning(a))) {

@@ -27,9 +27,11 @@
   itself guarantees a probe that never touched never backs off and
   measures air, so no post-side no-contact test is written. Dropped:
   G38.3 + `o<n> if [#5070 EQ 0]` - documented, but it moves that safety
-  from the control into our own branch for no gain; #174's protected
-  descent is a separate question (on LinuxCNC a trip during a non-probe
-  G0/G1 already errors).
+  from the control into our own branch for no gain. The positioning feeds
+  around the touches are #174's protected moves (main's `onProbeGuard`:
+  G38.3 + `o5001.. if [#5070 EQ 1]` / M2) - there G38.3 is right, as no
+  contact is the expected outcome; the touches' own `o901..` result
+  tests use a separate O-word range, so the two never collide.
 - **Trip frame.** #5061-#5063 are "in the coordinate system in which the
   G38 took place", in program units - the section's own WCS, the frame and
   unit every coordinate this post writes is in, so the expected values

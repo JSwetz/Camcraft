@@ -109,6 +109,23 @@ impl<'a> Revolved<'a> {
         }
     }
 
+    /// The stations the outer skin bends at (#369): between two of
+    /// them it runs straight, so a reading at both ends reads its
+    /// extremes.
+    pub(super) fn knots(&self) -> Vec<f64> {
+        match &self.outer {
+            Outer::Poly(p) => p.iter().map(|q| q.0).collect(),
+            Outer::Span { s0, s1, .. } => vec![*s0, *s1],
+        }
+    }
+
+    /// The material annulus at station `s`, unshrunk (#369): the hole's
+    /// radius ([`Self::inner`]: 0 for a solid core, `INFINITY` with no
+    /// wall) and the skin's (0 where the body has no material).
+    pub(super) fn annulus(&self, s: f64) -> (f64, f64) {
+        (self.inner(s), self.outer.radius(s))
+    }
+
     /// The hole's radius at station `s`: 0 when the axis is inside the
     /// body (an odd ray parity on either side of the station, in any
     /// direction), else the nearest wall any ray meets (`INFINITY`

@@ -127,9 +127,9 @@ fn rotary_world() -> World {
     // The letters need a machine that leans (the default VMC refuses
     // a tilted move by name - a different gate, not this one).
     mount(&world, &mut history, "tilthead.mch");
-    // ...and its Z stroke runs -500..0: G54 sits above the bar, so
-    // the program's Z reads below the table plane (the tilt suite's
-    // parked-anchor reasoning, done with the work offset instead).
+    // ...with G54 above the bar, so the program's Z reads below the
+    // table plane (the tilt suite's parked-anchor reasoning, done with
+    // the work offset; the -500..500 band of #457 holds either way).
     let g54 = Location { pos: Point3::new(0.0, 0.0, 40.0), rot: IDENTITY_Q };
     history.execute(&world, SetWcsOrigin::new(&world, g54).expect("place G54"));
     assert_eq!(status(&world, "RC1"), OpStatus::Ok, "fixture: fresh");

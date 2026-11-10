@@ -133,7 +133,7 @@ fn corner_posts_g38_2_and_sets_x_and_y_on_the_770mx() {
     let prog = post_ok(&mx770(), &stream(&mode("corner"), Some(1)));
     assert_eq!(count(&prog, "G38.2 "), 4, "two touches, seek + measure");
     assert!(prog.contains("G10 L20 P2 X[#5420-#190] Y[#5421-#191]\n"), "{prog}");
-    assert_eq!(count(&prog, "(MSG, PROBE "), 2, "one tolerance test per axis");
+    assert_eq!(prog.lines().filter(|l| l.ends_with(" OUT OF TOLERANCE)")).count(), 2, "one tolerance test per axis");
     o_blocks_pair_uniquely(&prog);
     assignments_are_bracketed(&prog);
     common::write_golden("nc/tormach/probe_corner.nc", &prog);

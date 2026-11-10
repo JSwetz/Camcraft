@@ -114,6 +114,41 @@ pub struct ToolDef {
     pub number: Option<u32>,
 }
 
+/// A tool's modelled body (#368): a holder or assembly mesh (a vendor
+/// STEP, an STL) placed in the tool's frame, and what the judging laws
+/// read off it, derived from those facets at landing and never stored
+/// apart from them. A milling tool's frame is the spindle's (tip at the
+/// origin, axis +Z toward the spindle; its revolved envelope); a lathe
+/// steel's is the turning tool frame (#369: tip at the origin, +x away
+/// from the spindle axis, +z along it; its clearance bands) - see
+/// [`crate::tool_body::BodyFrame`]. A tool without one judges its
+/// `holder_d`/`holder_len` cylinder, as always. Written only through
+/// `SetToolBody` (`crate::tool_body`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ToolBody {
+    /// Where the mesh came from (a file name), for display only.
+    pub source: String,
+    /// The placed facets, in the frame `frame` names.
+    pub facets: std::sync::Arc<[Triangle]>,
+    /// The drawn outline when the body is a spun profile (#93): the
+    /// facets are its revolve and the spindle frame's `profile` its exact
+    /// bands. `None` for an imported mesh (and every lathe-frame body).
+    pub spun: Option<camcraft_tools::spun::SpunProfile>,
+    /// The frame, the placement it landed with, and the derived read.
+    pub frame: crate::tool_body::BodyFrame,
+}
+
+impl ToolBody {
+    /// The revolved envelope of a milling (spindle-frame) body.
+    #[must_use]
+    pub fn profile(&self) -> Option<&camcraft_tools::holder_profile::HolderProfile> {
+        match &self.frame {
+            crate::tool_body::BodyFrame::Spindle { profile, .. } => Some(profile),
+            crate::tool_body::BodyFrame::Lathe { .. } => None,
+        }
+    }
+}
+
 /// One machine setup (M3.2 stage A): the named context that says WHICH
 /// raw material and WHICH work coordinate system an operation is
 /// machined against. The strings are entity NAMES, resolved through
@@ -152,6 +187,11 @@ pub struct ToolDef {
 /// a later change of that setup's alignment carry into this one. `None`,
 /// the default and every file before v56, links nothing. Written only by
 /// `SetSetupRelative` and the project loader.
+/// `stock_source` (#320) is where the setup's stock comes from: its own,
+/// or what the setup before it leaves. `None`, the default and every
+/// file before v57, reads as #317's implicit rule
+/// ([`crate::setup_stock::implicit`]). Written only by
+/// `SetSetupStockSource` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
@@ -162,6 +202,7 @@ pub struct SetupDef {
     pub machine: Option<MachineDef>,
     pub post: Option<PostRef>,
     pub relative_to: Option<String>,
+    pub stock_source: Option<crate::setup_stock::StockSource>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
@@ -230,6 +271,22 @@ pub struct Operation {
 pub struct OperationMeta {
     pub label: Option<String>,
     pub order: Option<u32>,
+}
+
+/// A standalone Pause or Home entry in the operation list (#155): an
+/// after-action with no tool and no toolpath, placed between operations
+/// by the same `OperationMeta::order` its siblings use. It is not an
+/// `Operation`, so every program walk that needs a tool or a toolpath
+/// (`setup::operation_order` and all who walk it) never sees it; the
+/// post folds it into the gap it stands in (`program_entry`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ProgramEntry {
+    /// What the machine does here - never `AfterOperation::None`.
+    pub action: AfterOperation,
+    /// The setup it stands in, the `Operation::setup` law.
+    pub setup: Option<String>,
+    /// Left out of the posted program, like a suppressed operation.
+    pub suppressed: bool,
 }
 
 /// The cached result of generating an operation: the path plus the
@@ -428,8 +485,10 @@ pub fn register_schema(world: &World) {
     world.component::<StockDef>();
     world.component::<Wcs>();
     world.component::<ToolDef>();
+    world.component::<ToolBody>();
     world.component::<Operation>();
     world.component::<OperationMeta>();
+    world.component::<ProgramEntry>();
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();

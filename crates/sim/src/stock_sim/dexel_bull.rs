@@ -30,9 +30,9 @@
 //!   conservative, the law `cut_ball` keeps.
 
 use super::dexel::{reach, Dexel};
+use super::dexel_arc::Atom;
 
 use crate::cl::{Move, MoveKind};
-use crate::geo2d::Point2;
 use crate::geometry::Point3;
 
 /// Golden-section rounds for the oblique stationary point.
@@ -89,7 +89,7 @@ impl Dexel {
 
     /// Bull-nose version of `subtract`: moves carry TIP positions and
     /// the tip IS the profile's anchor (no lift, the cone's
-    /// convention); arcs reduce to chords under the uniform-Z law.
+    /// convention); XY arcs sweep the true arc (`dexel_arc`).
     pub fn subtract_bull(&mut self, m: &Move, r: f64, c: f64, chord_tol: f64) {
         if m.kind == MoveKind::Rapid || !m.is_finite() {
             return;
@@ -102,18 +102,8 @@ impl Dexel {
                     self.cut_bull(a, b, r, c);
                 }
             }
-            Some(arc) => {
-                let a2 = Point2::new(m.from.x, m.from.y);
-                let b2 = Point2::new(m.to.x, m.to.y);
-                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
-                let n = cs.len().max(1) as f64;
-                let dz = m.to.z - m.from.z;
-                for (j, (ca, cb)) in cs.into_iter().enumerate() {
-                    let za = m.from.z + dz * (j as f64 / n);
-                    let zb = m.from.z + dz * ((j + 1) as f64 / n);
-                    self.cut_bull(Point3::new(ca.x, ca.y, za), Point3::new(cb.x, cb.y, zb), r, c);
-                }
-            }
+            // XY arcs sweep the true arc (#402), not chords.
+            Some(arc) => self.cut_xy_arc(m, arc, r, Atom::Bull(c)),
         }
     }
 }
@@ -121,7 +111,7 @@ impl Dexel {
 /// The minimum of a convex `f` on `[lo, hi]` by golden section: every
 /// value it returns is a real `f` evaluation, so it can only sit at or
 /// above the true minimum.
-fn golden(f: &impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
+pub(super) fn golden(f: &impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
     const PHI: f64 = 0.6180339887498949;
     let mut c = hi - PHI * (hi - lo);
     let mut d = lo + PHI * (hi - lo);
@@ -147,6 +137,7 @@ fn golden(f: &impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geo2d::Point2;
 
     fn p3(x: f64, y: f64, z: f64) -> Point3 {
         Point3::new(x, y, z)
