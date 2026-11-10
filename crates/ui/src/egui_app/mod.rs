@@ -63,6 +63,8 @@ mod tree_glyphs;
 mod pages;
 // #371: the tool editor's Body section and its picking preview.
 mod tool_body_page;
+// #630: the tool editor's lathe orientation row.
+mod tool_orientation_row;
 mod tool_profile_page;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).
@@ -104,6 +106,7 @@ mod unsaved_prompt;
 mod panes;
 // #441: the ribbon's Theme door and its dropdown.
 mod theme_drop;
+mod recent_drop;
 // #343: the browser tree, split from panes (rows / pane / operation menu).
 mod browser_tree;
 // #155: Pause / Home entry rows and their menu.
@@ -111,6 +114,8 @@ mod tree_entry;
 mod browser_pane;
 mod tree_menu;
 mod fixture_menu;
+// #339 slice 6: the fixture library's Save / Insert dialogs.
+pub(crate) mod fixture_library_dialog;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
 // (state.rs) installs the live table, the format tests read the
@@ -135,11 +140,15 @@ mod fixture_tests;
 #[cfg(test)]
 mod fixture_ux_tests;
 #[cfg(test)]
+mod fixture_library_tests;
+#[cfg(test)]
 mod footer_tests;
 #[cfg(test)]
 mod dialog_tests;
 #[cfg(test)]
 mod coolant_tests;
+#[cfg(test)]
+mod thread_hand_tests;
 #[cfg(test)]
 mod after_op_tests;
 #[cfg(test)]
@@ -199,6 +208,15 @@ pub fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
+    // #183: the live MCP server is opt-in - off unless asked for.
+    let mcp_env = std::env::var("CAMCRAFT_MCP_PORT").ok();
+    let mcp_port = match camcraft_app::mcp::port_from(args, mcp_env.as_deref()) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("mcp: {err}");
+            return 2;
+        }
+    };
     if args.iter().any(|a| a == "--headless") {
         if pick != gpu::GpuPick::Auto || want.is_some() {
             println!("gpu: --headless pins the fallback adapter for determinism; backend and adapter picks ignored");
@@ -214,6 +232,6 @@ pub fn run(args: &[String]) -> i32 {
             }
         }
     } else {
-        shell::run_windowed(pick, want)
+        shell::run_windowed(pick, want, mcp_port)
     }
 }

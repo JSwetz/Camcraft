@@ -120,7 +120,10 @@ fn an_edge_picked_for_y_turns_the_part_through_the_command_and_undoes() {
     h.run();
     let v = held_dir(h.state(), d).expect("Setup1 holds the part turned");
     assert!((v[1] - 1.0).abs() < 1e-9, "the edge runs along +Y: {v:?}");
-    assert!(h.state().axis_pick.is_none(), "a landed turn ends the pick");
+    let kept = h.state().axis_pick.clone().expect("the picks stay after Apply, for Flip");
+    assert!(kept.picking.is_none() && kept.applied, "a landed turn stops collecting, the picks kept");
+    assert!(apply_disabled(&h), "the same picks again are no turn");
+    assert!(h.query_by_label_contains("tick Flip").is_some(), "the greyed Apply says Flip re-applies");
     assert!(h.state().status.contains("turned in the plane"), "{}", h.state().status);
     assert_eq!(camcraft_app::setup::work_offset(&h.state().world, "Setup1"), None, "the work offset is untouched");
     key(&mut h, Key::Z);
@@ -133,8 +136,6 @@ fn an_edge_picked_for_y_turns_the_part_through_the_command_and_undoes() {
 fn two_points_for_x_pick_vertices_and_flip_reverses_them() {
     let mut h = harness();
     h.get_by_label("+X by Two points").click();
-    h.run();
-    h.get_by_label("Pick +X points").click();
     h.run();
     assert_eq!(h.state().geo_pick, GeoPick::Vertex, "two points pick vertices");
     let (edge, _) = front_top_edge(h.state());
@@ -178,4 +179,104 @@ fn an_upright_edge_greys_apply_out_with_the_reason() {
     // Arming the plane row stops the axis pick: one draft collects.
     crate::plane_pick::arm(h.state_mut(), "Setup1");
     assert!(!crate::axis_pick::collecting(h.state()));
+}
+
+#[test]
+fn choosing_a_by_mode_arms_its_pick() {
+    let mut h = harness();
+    h.get_by_label("+Y by Two points").click();
+    h.run();
+    let d = h.state().axis_pick.clone().expect("draft");
+    assert_eq!(d.picking, Some(InPlaneAxis::Y), "choosing Two points arms +Y");
+    assert_eq!(h.state().geo_pick, GeoPick::Vertex);
+    assert!(h.query_by_label("Stop picking +Y").is_some(), "the toggle shows armed");
+    assert!(h.state().status.contains("pick two points for +Y"), "{}", h.state().status);
+    // Re-choosing the current mode (Edge is the default) arms too.
+    h.get_by_label("+X by Edge").click();
+    h.run();
+    assert_eq!(h.state().axis_pick.as_ref().and_then(|d| d.picking), Some(InPlaneAxis::X), "one axis collects");
+    assert_eq!(h.state().geo_pick, GeoPick::Edge);
+    assert!(h.query_by_label("Stop picking +X").is_some() && h.query_by_label("Pick +Y points").is_some());
+}
+
+#[test]
+fn a_stray_feature_click_with_nothing_armed_says_what_to_do() {
+    let mut h = harness();
+    assert!(h.state().axis_rows_shown, "the rows say they are on screen");
+    h.get_by_label("+X by Two points").click();
+    h.run();
+    h.get_by_label("Stop picking +X").click();
+    h.run();
+    assert!(!crate::axis_pick::collecting(h.state()));
+    assert!(crate::axis_pick::hint_stray(h.state_mut()), "a stray click is swallowed");
+    let status = h.state().status.clone();
+    assert!(status.contains("click Pick +Y edge or Pick +X points first"), "{status}");
+    assert!(!status.contains("open an operation"), "{status}");
+    // Armed, the click feeds the axis and no hint fires.
+    h.get_by_label("Pick +X points").click();
+    h.run();
+    assert!(!crate::axis_pick::hint_stray(h.state_mut()));
+}
+
+#[test]
+fn the_picked_rows_name_points_and_edges_in_document_units() {
+    let mut h = harness();
+    h.get_by_label("+X by Two points").click();
+    h.run();
+    let a = corner(h.state(), [0.0, 0.0, 0.0]);
+    crate::axis_pick::take(h.state_mut(), a);
+    h.run();
+    assert!(h.query_by_label_contains("+X: 1 of 2 points on 'part' (0.000, 0.000, 0.000) mm").is_some());
+    let b = corner(h.state(), [0.0, 20.0, 0.0]);
+    crate::axis_pick::take(h.state_mut(), b);
+    h.get_by_label("+Y by Edge").click();
+    h.run();
+    let (edge, _) = front_top_edge(h.state());
+    crate::axis_pick::take(h.state_mut(), edge);
+    h.run();
+    let label = |h: &Harness<'static, State>, head: &str| {
+        h.query_all_by_label_contains(head).find_map(|n| n.accesskit_node().label().or_else(|| n.accesskit_node().value())).unwrap_or_default()
+    };
+    let pts = label(&h, "+X: 2 points");
+    assert_eq!(pts, "        +X: 2 points on 'part' (0.000, 0.000, 0.000) -> (0.000, 20.000, 0.000) mm");
+    let e = label(&h, "+Y: edge");
+    assert!(e.contains("edge on 'part', 20.000 mm long, along ("), "{e}");
+    for t in [&pts, &e] {
+        assert!(!t.contains("0x") && !t.contains("vertex") && !t.contains("chain"), "no feature id: {t}");
+    }
+    h.state_mut().pending.push_back(CommandKind::SetUnits(camcraft_app::units::Unit::Inches));
+    h.run();
+    let pts = label(&h, "+X: 2 points");
+    assert!(pts.ends_with("(0.00000, 0.00000, 0.00000) -> (0.00000, 0.78740, 0.00000) in"), "{pts}");
+    let e = label(&h, "+Y: edge");
+    assert!(e.contains("0.78740 in long"), "{e}");
+}
+
+#[test]
+fn flip_after_apply_re_applies_as_its_own_undo_step() {
+    let mut h = harness();
+    h.get_by_label("+Y by Edge").click();
+    h.run();
+    let (edge, d) = front_top_edge(h.state());
+    crate::axis_pick::take(h.state_mut(), edge);
+    h.run();
+    h.get_by_label("Apply axes").click();
+    h.run();
+    let along = |h: &Harness<'static, State>| held_dir(h.state(), d).map(|v| v[1]);
+    assert!(along(&h).is_some_and(|y| (y - 1.0).abs() < 1e-9), "applied: the edge runs +Y");
+    assert!(apply_disabled(&h));
+    h.get_by_label("Flip +Y").click();
+    h.run();
+    assert!(!apply_disabled(&h), "Flip after Apply offers Apply again");
+    assert!(h.query_by_label_contains("turns the part 180° about Z").is_some(), "the flip is a half turn");
+    h.get_by_label("Apply axes").click();
+    h.run();
+    assert!(along(&h).is_some_and(|y| (y + 1.0).abs() < 1e-9), "flipped: the edge runs -Y");
+    key(&mut h, Key::Z);
+    assert!(along(&h).is_some_and(|y| (y - 1.0).abs() < 1e-9), "one undo takes back only the flip");
+    key(&mut h, Key::Y);
+    assert!(along(&h).is_some_and(|y| (y + 1.0).abs() < 1e-9), "redo flips it again");
+    key(&mut h, Key::Z);
+    key(&mut h, Key::Z);
+    assert_eq!(setup_align::stored(&h.state().world, "Setup1"), None, "a second undo restores as modelled");
 }

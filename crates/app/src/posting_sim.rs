@@ -51,14 +51,24 @@ pub struct SimClause {
 pub fn sim_clause(world: &World) -> SimClause {
     match crate::stock_sim::simulate_document(world) {
         Ok(sim) if sim.dev.gouge_cells > 0 => {
+            let u = crate::units::of(world);
             let at = sim.dev.max_gouge_at.map_or_else(
                 || "?".to_owned(),
-                |q| format!(" at ({:.2}, {:.2}, z {:.2})", q.x, q.y, q.z),
+                |q| {
+                    format!(
+                        " at ({}, {}, z {})",
+                        crate::units::len(q.x, u, 2),
+                        crate::units::len(q.y, u, 2),
+                        crate::units::len(q.z, u, 2)
+                    )
+                },
             );
             SimClause {
                 problem: Some(format!(
-                    "gouge: program cuts below the model in {} cell(s), worst {:.2} mm{}",
-                    sim.dev.gouge_cells, sim.dev.max_gouge, at
+                    "gouge: program cuts below the model in {} cell(s), worst {} {}{at}",
+                    sim.dev.gouge_cells,
+                    crate::units::len(sim.dev.max_gouge, u, 2),
+                    u.suffix()
                 )),
                 not_judged: None,
             }

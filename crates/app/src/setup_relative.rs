@@ -225,3 +225,37 @@ pub fn carry_point(world: &World, from: &str, to: &str, p: Point3) -> Result<Poi
     let t = transform_between(world, from, to)?;
     Ok(transform_point(p, t.pos, t.rot))
 }
+
+/// Where a setup's WCS (work offset) is drawn while the viewport shows
+/// the ACTIVE setup's frame (#558). A WCS is setup furniture: placed in
+/// its own setup's frame, so a point fixed on the part there. Another
+/// setup's WCS therefore goes through the same rigid transform the part
+/// goes through between the two frames ([`transform_between`]) - it stays
+/// on the same spot of the part, wherever the active setup holds it.
+///
+/// `Ok(Some(pose))`: draw it there. `Ok(None)`: the name is no setup's
+/// WCS, or the document has no active setup - the caller draws the
+/// stored pose (every document before #326, and every WCS of the active
+/// setup itself, map through the identity).
+///
+/// # Errors
+/// The owning setup's transform to the active one is refused (no rigid
+/// alignment) - the caller must not draw it at a guessed place.
+pub fn wcs_view_pose(world: &World, wcs_name: &str, stored: Location) -> Result<Option<Location>, String> {
+    let Some(active) = setup::active(world) else {
+        return Ok(None);
+    };
+    let owners: Vec<String> = setup::names(world)
+        .into_iter()
+        .filter(|s| setup::wcs_entity_name(world, Some(s)) == wcs_name)
+        .collect();
+    if owners.is_empty() || owners.contains(&active) {
+        return Ok(None); // not a setup's WCS, or the active setup's own
+    }
+    // A WCS two setups share sits in each one's frame alike only when they
+    // hold the part alike; map from the first owner, refused by name else.
+    let t = transform_between(world, &owners[0], &active).inspect_err(|e| {
+        tracing::debug!(wcs = wcs_name, "not drawn in setup '{active}' frame: {e}");
+    })?;
+    Ok(Some(compose(t, stored)))
+}

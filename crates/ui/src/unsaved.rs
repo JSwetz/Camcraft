@@ -7,6 +7,8 @@
 //! Provenance: our own design, specced from common desktop-editor
 //! save-on-close behavior; no HSMWorks material involved.
 
+use camcraft_app::recent::RecentKind;
+
 use crate::state::{CommandKind, State, save_project_dialog};
 
 /// The prompt's three answers.
@@ -23,10 +25,13 @@ pub enum UnsavedChoice {
 /// The user-facing actions that would throw the current document away.
 /// The `*File` arms stay unguarded: they are the scripted/headless paths.
 fn discards_document(action: &CommandKind) -> bool {
-    matches!(
-        action,
-        CommandKind::NewDocument | CommandKind::OpenProjectDialog | CommandKind::Quit
-    )
+    match action {
+        CommandKind::NewDocument | CommandKind::OpenProjectDialog | CommandKind::Quit => true,
+        // #662: a recent project replaces the document like Open does.
+        // A missing one is refused by name before anything is asked.
+        CommandKind::OpenRecent(RecentKind::Project, path) => path.is_file(),
+        _ => false,
+    }
 }
 
 /// What the prompt says the held action is about to do.
@@ -34,7 +39,7 @@ fn discards_document(action: &CommandKind) -> bool {
 pub fn held_verb(action: &CommandKind) -> &'static str {
     match action {
         CommandKind::NewDocument => "starting a new document",
-        CommandKind::OpenProjectDialog => "opening another project",
+        CommandKind::OpenProjectDialog | CommandKind::OpenRecent(..) => "opening another project",
         _ => "closing",
     }
 }

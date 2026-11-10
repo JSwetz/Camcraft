@@ -34,6 +34,7 @@ pub mod engine;
 pub mod invert;
 pub mod js;
 pub mod machine;
+pub mod nose_tip;
 pub mod probe_rec;
 mod program;
 
@@ -86,6 +87,10 @@ pub struct Dump<'a> {
     pub setup_name: &'a str,
     pub tool_kind: &'a str,
     pub tool_corner_r: f64,
+    /// Commentary too (#630): the lathe tool orientation the section's
+    /// moves were converted for ([`nose_tip`]) - the code the operator
+    /// touches the tool off by. None writes no PARAM.
+    pub tool_orientation: Option<u8>,
     pub rpm: f64,
     pub clearance_z: f64,
     pub retract_z: f64,
@@ -146,6 +151,7 @@ impl<'a> Default for Dump<'a> {
             setup_name: "",
             tool_kind: "",
             tool_corner_r: 0.0,
+            tool_orientation: None,
             rpm: 0.0,
             clearance_z: 0.0,
             retract_z: 0.0,
@@ -207,6 +213,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // refuses, by name, a script that does not declare `liveTooling`.
     if t.moves.iter().any(|m| m.rotary.is_some()) {
         out.push(Record::Param { name: "LiveTool".into(), value: json!("radial") });
+    }
+    // A thread whose passes need the spindle reversed (#629): the
+    // record states hand and direction, and the tool lays its arcs
+    // about the part only under M04. Said before the section opens,
+    // so the spindle starts the right way; forward (M03) is silent.
+    if t.threads.iter().any(|c| c.is_sane(&t.moves) && c.reverse_spindle()) {
+        out.push(Record::Param { name: "SpindleDirection".into(), value: json!("reverse") });
     }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
@@ -435,6 +448,9 @@ fn comment_params(d: &Dump, out: &mut Vec<Record>) {
     }
     if d.tool_corner_r.is_finite() && d.tool_corner_r > 0.0 {
         out.push(Record::Param { name: "ToolCornerRadius".into(), value: json!(d.tool_corner_r) });
+    }
+    if let Some(q) = d.tool_orientation {
+        out.push(Record::Param { name: "ToolOrientation".into(), value: json!(q) });
     }
 }
 

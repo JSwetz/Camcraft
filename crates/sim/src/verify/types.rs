@@ -224,6 +224,13 @@ pub enum Warning {
     /// "M13.8 B" (3)): shown and named everywhere a warning is, and
     /// the one kind that never blocks the post.
     Scallop { at: usize, mm: f64, gate_mm: f64 },
+    /// A probe op's search limit (#570): the seek at move `at` may run
+    /// `mm` past the expected contact before the control alarms, more
+    /// than the `limit_mm` a touch probe's stylus is trusted to take. A
+    /// missing or misplaced feature then drives the stylus that far into
+    /// its overtravel. Advisory like the scallop: shown and named, never
+    /// binding - a stated probe distance is the operator's to choose.
+    ProbeSearch { at: usize, mm: f64, limit_mm: f64 },
 }
 
 impl Warning {
@@ -231,7 +238,7 @@ impl Warning {
     /// reading (M13.9), which is a quality note - shown, never binding.
     #[must_use]
     pub fn blocks_post(&self) -> bool {
-        !matches!(self, Warning::Scallop { .. })
+        !matches!(self, Warning::Scallop { .. } | Warning::ProbeSearch { .. })
     }
 
     /// The envelope report's unjudged hidden half, as the warning that
@@ -304,6 +311,10 @@ impl core::fmt::Display for Warning {
             Warning::Scallop { at, mm, gate_mm } => write!(
                 f,
                 "scallop {mm:.3} mm over the {gate_mm:.3} mm tolerance at move {at} (surface quality - the post is not held)"
+            ),
+            Warning::ProbeSearch { at, mm, limit_mm } => write!(
+                f,
+                "probe distance {mm:.3} mm at move {at}: the search may run that far past the expected contact, beyond the {limit_mm:.3} mm a stylus is trusted to overtravel (the post is not held)"
             ),
         }
     }

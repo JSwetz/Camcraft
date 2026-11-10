@@ -123,7 +123,7 @@ fn probe_params() -> OpParams {
         target: [0.0; 3],
         radius: 10.0,
         approach: 5.0,
-        overtravel: 5.0,
+        overtravel: 1.0, // #570: the new-op default
         backoff: 1.0,
         fast_feed: 300.0,
         slow_feed: 30.0,
