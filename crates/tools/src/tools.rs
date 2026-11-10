@@ -187,8 +187,9 @@ pub struct Tool {
     /// LinuxCNC 1-9 code that says where the control point the
     /// operator touches off stands on the nose circle. `None` = not
     /// stated, read as the kind's default
-    /// ([`crate::orientation::default_for`]); inert on every kind
-    /// that does not ride a nose centre.
+    /// ([`crate::orientation::default_for`]). On a grooving blade it
+    /// names the touched-off corner of the tip edge (#641,
+    /// [`crate::orientation::blade_corner`]); inert on every other kind.
     pub orientation: Option<u8>,
 }
 

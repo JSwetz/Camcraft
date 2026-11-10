@@ -42,8 +42,29 @@
 //! ("the X and Z inputs call for orientation [1, 5, 6]") is
 //! reproduced for a cut needing the -X and +Z contacts.
 //!
+//! Blades (#641): a grooving/parting blade has no nose circle - its
+//! CL is the middle of its tip edge (the band's centre at the tip
+//! line), and the operator touches it off on one CORNER of that edge
+//! (LinuxCNC Lathe User Information section 4.2 works its parting-tool
+//! example from the left side). The same chart names the corner: the
+//! blade plunges toward the axis, so its tip is on the -X side and
+//! only the Z sign is left to say -
+//!
+//! | q | the blade's control point |
+//! |---|---|
+//! | 1 | the +Z corner of the tip edge (right, toward the free end) |
+//! | 2 | the -Z corner (left, toward the chuck) - the default |
+//! | 6 | the middle of the tip edge (touched off on the width centre) |
+//! | 9 | read as 6 (a blade states no nose circle to centre on) |
+//!
+//! Every other code states an ID or a face blade, which no OD groove or
+//! part-off rides: [`blade_corner`] says None and the post refuses it by
+//! name. A radiused corner changes nothing: the imaginary tip of a
+//! rounded corner is where its tip line and flank line meet - the
+//! sharp rectangle's corner, `width / 2` from the edge's middle.
+//!
 //! Provenance: LinuxCNC Lathe User Information (public docs, sections
-//! 3, 4.1 and 7.1) for the numbering and the control point; machine-
+//! 3, 4.1, 4.2 and 7.1) for the numbering and the control point; machine-
 //! tool handbook practice for nose-radius compensation. Behaviour
 //! only - no vendor text or post consulted.
 
@@ -137,14 +158,45 @@ pub fn fitting(need: &[Contact]) -> Vec<u8> {
 /// The orientation a kind takes when the library states none: the
 /// right-hand OD turning tool cutting toward the chuck (2) for a
 /// turning insert, the boring bar cutting toward the chuck (3) for a
-/// boring bar. None for every kind whose cut does not ride a nose
-/// circle's centre (the mills, blades, gauges and cycle tools).
+/// boring bar, the left (-Z, chuck-side) corner (2) for a grooving or
+/// parting blade (#641). None for every kind whose posted point is not
+/// a touched-off tip (the mills, threading V, form gauges, cycle
+/// tools).
 #[must_use]
 pub fn default_for(kind: ToolKind) -> Option<u8> {
     match kind {
-        ToolKind::Turning => Some(2),
+        ToolKind::Turning | ToolKind::Groove => Some(2),
         ToolKind::Bore => Some(3),
         _ => None,
+    }
+}
+
+/// The codes an OD grooving/parting blade can be touched off as
+/// (#641): its +Z corner, its -Z corner, its width centre.
+pub const BLADE_FITTING: [u8; 3] = [1, 2, 6];
+
+/// Which way a blade's control point stands from the middle of its tip
+/// edge, in half-widths along Z: +1 the +Z corner, -1 the -Z corner,
+/// 0 the middle. None for a code that states no OD blade.
+#[must_use]
+pub fn blade_corner(q: u8) -> Option<f64> {
+    match q {
+        1 => Some(1.0),
+        2 => Some(-1.0),
+        6 | 9 => Some(0.0),
+        _ => None,
+    }
+}
+
+/// A short label for the editor's list, read for a blade.
+#[must_use]
+pub fn blade_label(q: u8) -> &'static str {
+    match q {
+        1 => "1 - right corner (+Z, toward the free end)",
+        2 => "2 - left corner (-Z, toward the chuck)",
+        6 => "6 - width centre",
+        9 => "9 - width centre",
+        _ => "not an OD blade",
     }
 }
 
@@ -197,7 +249,20 @@ mod tests {
         assert_eq!(default_for(ToolKind::Turning), Some(2));
         assert_eq!(default_for(ToolKind::Bore), Some(3));
         assert_eq!(default_for(ToolKind::EndMill), None);
-        assert_eq!(default_for(ToolKind::Groove), None);
+        assert_eq!(default_for(ToolKind::Groove), Some(2), "the left corner (#641)");
+        assert_eq!(default_for(ToolKind::Thread), None);
         assert!(covers(9, Contact::PlusX) && covers(9, Contact::MinusZ));
+    }
+
+    #[test]
+    fn a_blade_names_its_corner_by_the_chart() {
+        assert_eq!(blade_corner(1), Some(1.0));
+        assert_eq!(blade_corner(2), Some(-1.0));
+        assert_eq!(blade_corner(6), Some(0.0));
+        assert_eq!(blade_corner(9), Some(0.0));
+        for q in [0, 3, 4, 5, 7, 8, 10] {
+            assert_eq!(blade_corner(q), None, "{q} states no OD blade");
+        }
+        assert!(BLADE_FITTING.iter().all(|q| blade_corner(*q).is_some()));
     }
 }

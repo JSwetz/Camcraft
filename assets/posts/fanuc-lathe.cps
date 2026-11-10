@@ -30,9 +30,12 @@ liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine r
 //    for a nose-radiused insert the app has already moved the kernel's
 //    nose-centre path to the tool's imaginary tip for its orientation
 //    (PARAM ToolOrientation, LinuxCNC's 1-9 chart) - the point the
-//    operator touches the tool off on. This script never shifts a
-//    point, and writes the orientation in the tool note so the setup
-//    can be checked against it.
+//    operator touches the tool off on. A grooving/parting blade's
+//    stream is likewise already its touched-off CORNER (#641: the
+//    orientation names the corner - 1 right/+Z, 2 left/-Z, 6 the width
+//    centre). This script never shifts a point, and writes the
+//    orientation in the tool note so the setup can be checked against
+//    it.
 //    A move with BOTH in-plane coordinates off the axis is off every
 //    meridian - milling work - and is refused by name, never projected.
 //  - G97 constant rpm, from the stream's SpindleSpeed; G96 constant
