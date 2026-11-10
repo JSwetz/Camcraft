@@ -1,0 +1,110 @@
+//! #554's frame test: with the Setups page's plane row armed, a real
+//! viewport click a few pixels inside a face, right beside its edge (well
+//! within the edge-snap radius), takes the FACE - the row picks faces
+//! only. The same click with an axis row armed (#557) takes the edge,
+//! because an edge does set a direction.
+//! Provenance: our own pick law test over our own shell; no vendor
+//! material consulted.
+
+use camcraft_app::pick::InPlaneAxis;
+
+use super::*;
+
+/// A pixel 4 px inside the most camera-facing side face of the seed's
+/// 60 x 60 x 30 block, toward its centre from its top edge's midpoint.
+fn beside_an_edge(sh: &ShellUi) -> egui::Pos2 {
+    let ([x0, y0], [x1, y1]) = sh.state.viewport_rect;
+    let (w, hgt) = (x1 - x0, y1 - y0);
+    let mvp = sh.state.cam.mvp(f64::from(w / hgt));
+    let eye = sh.state.cam.eye_f32();
+    let sides = [
+        ([60.0, 30.0, 15.0], [1.0, 0.0, 0.0]),
+        ([0.0, 30.0, 15.0], [-1.0, 0.0, 0.0]),
+        ([30.0, 60.0, 15.0], [0.0, 1.0, 0.0]),
+        ([30.0, 0.0, 15.0], [0.0, -1.0, 0.0]),
+    ];
+    let px = |p: [f64; 3]| interact::project_uv(&mvp, p).map(|uv| egui::pos2(x0 + uv[0] * w, y0 + uv[1] * hgt));
+    let mut best: Option<(f32, egui::Pos2)> = None;
+    for (c, n) in sides {
+        let facing = ((f64::from(eye[0]) - c[0]) * n[0]
+            + (f64::from(eye[1]) - c[1]) * n[1]
+            + (f64::from(eye[2]) - c[2]) * n[2]) as f32;
+        let (Some(pc), Some(pm)) = (px(c), px([c[0], c[1], 30.0])) else { continue };
+        let d = pc - pm;
+        if facing <= 0.0 || d.length() < 20.0 {
+            continue;
+        }
+        let p = pm + d.normalized() * 4.0;
+        if best.is_none_or(|(bf, _)| facing > bf) {
+            best = Some((facing, p));
+        }
+    }
+    best.expect("the block shows a side face to the default camera").1
+}
+
+#[test]
+fn a_click_beside_an_edge_picks_the_face_for_the_plane_and_the_edge_for_an_axis() {
+    let mut harness = shell_harness();
+    // #664: a pick collects only while its setup page is shown.
+    harness.state_mut().state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.run();
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Settings),
+    );
+    harness.run();
+    let p = beside_an_edge(harness.state());
+    assert!(
+        interact::edge_nearest(&harness.state().state, [p.x, p.y], interact::PICK_EDGE_PX).is_some(),
+        "the pixel is inside the edge-snap radius - an Edge-mode click there would take the edge"
+    );
+    crate::plane_pick::arm(&mut harness.state_mut().state, "Setup1");
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Face, "the plane row arms faces only");
+    click_viewport(&mut harness, p);
+    let picks = harness.state().state.plane_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
+    assert_eq!(picks.len(), 1, "one pick drafted: {picks:?} ({})", harness.state().state.status);
+    assert!(matches!(picks[0].feature, FeatureSel::Face(_)), "the face, not the edge: {picks:?}");
+    assert!(harness.state().state.op_ui.geo.len() <= 1, "nothing joins an operation");
+
+    // The axis row takes the edge at the same pixel.
+    crate::axis_pick::arm(&mut harness.state_mut().state, "Setup1", InPlaneAxis::Y);
+    assert!(harness.state().state.plane_pick.is_none(), "one draft collects at a time");
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Edge, "an axis by edge picks edges");
+    click_viewport(&mut harness, p);
+    let d = harness.state().state.axis_pick.clone().expect("the axis draft");
+    let y = d.wanted().y.map(|a| a.picks).unwrap_or_default();
+    assert_eq!(y.len(), 1, "one edge for +Y: {y:?} ({})", harness.state().state.status);
+    assert!(matches!(y[0].feature, FeatureSel::Chain(_)), "the edge: {y:?}");
+}
+
+/// #573 hand check: on a setup page with the axes rows open and no axis
+/// armed, a real Edge-mode viewport click on the part says what to do -
+/// never "open an operation first" - and nothing is picked anywhere.
+/// Choosing "+Y by Two points" then arms vertex picking at once.
+#[test]
+fn a_stray_click_on_the_setup_page_names_the_axis_pick_and_a_mode_choice_arms() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.run();
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Settings),
+    );
+    harness.run();
+    assert!(harness.state().state.axis_rows_shown, "the setup page draws the axes rows");
+    harness.state_mut().state.geo_pick = GeoPick::Edge;
+    let geo_before = harness.state().state.op_ui.geo.clone();
+    let p = beside_an_edge(harness.state());
+    click_viewport(&mut harness, p);
+    let status = harness.state().state.status.clone();
+    assert!(status.contains("click Pick +Y edge or Pick +X edge first"), "{status}");
+    assert!(!status.contains("open an operation"), "{status}");
+    assert_eq!(harness.state().state.op_ui.geo, geo_before, "nothing joins an operation");
+    assert!(!crate::axis_pick::collecting(&harness.state().state));
+
+    harness.get_by_label("+Y by Two points").click();
+    harness.run();
+    assert!(crate::axis_pick::collecting(&harness.state().state), "choosing the mode arms it");
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Vertex);
+    assert!(harness.query_by_label("Stop picking +Y").is_some());
+}

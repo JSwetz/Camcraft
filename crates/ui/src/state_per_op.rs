@@ -13,19 +13,10 @@ use super::{ErrorScope, PostView, State};
 impl State {
     /// The Output choice: `true` writes one file per operation.
     pub(super) fn set_per_op_output(&mut self, per_op: bool) {
+        // #389: routed to the active setup's own options when it has them.
         let next = camcraft_app::schema::PostOptions { per_op, ..posting::post_options(&self.world) };
-        match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
-            Ok(command) => {
-                self.history.execute(&self.world, command);
-                self.doc_version += 1;
-                self.status = if per_op {
-                    "post writes one file per operation".to_owned()
-                } else {
-                    "post writes one combined program".to_owned()
-                };
-            }
-            Err(err) => self.refuse(ErrorScope::Operation, format!("post options not changed: {err}")),
-        }
+        let done = if per_op { "post writes one file per operation" } else { "post writes one combined program" };
+        self.route_post_options(next, done, "post options not changed", ErrorScope::Operation);
     }
 
     /// The program name a per-op post stamps on its files: the

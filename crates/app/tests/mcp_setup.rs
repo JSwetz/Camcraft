@@ -5,6 +5,7 @@
 //! input a tool error.
 //!
 //! Gate map (M4.4): covers app::mcp::setup_tools, app::mcp::fixture_tools,
+//! app::mcp::align_tools (#557, #555),
 //! app::posting (fixture_findings).
 
 use camcraft_app::mcp::Server;
@@ -268,4 +269,157 @@ fn bad_setup_input_is_a_tool_error() {
     assert!(e.contains("position"), "{e}");
     let e = c.refused("set_wcs", json!({ "origin": [0.0, 0.0, 0.0], "typo": 1 }));
     assert!(e.contains("unknown argument"), "{e}");
+}
+
+/// #561: `locate_part` mates a part face onto a fixture face by
+/// `list_features` ids (a fixture's features list too), one undo step;
+/// an edge is refused by name.
+#[test]
+fn locate_part_seats_the_part_on_the_fixture_by_feature_ids() {
+    let dir = tmp_dir("locate");
+    let part = dir.join("block.stl");
+    let vise = dir.join("vise.stl");
+    write_box_stl(&part, (10.0, 5.0, 8.0));
+    write_box_stl(&vise, (40.0, 30.0, 15.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+    c.ok("import_model", json!({ "path": vise.display().to_string() }));
+    c.ok("add_fixture", json!({ "model": "vise" }));
+    c.ok("move_fixture", json!({ "name": "vise", "position": [100.0, 0.0, -20.0] }));
+    // The flat face lying at world Z `z` ("facing" is winding-free).
+    let face = |c: &mut Client, model: &str, z: f64| -> String {
+        let f = c.ok("list_features", json!({ "model": model, "kinds": ["faces"] }));
+        f["faces"]
+            .as_array()
+            .and_then(|fs| {
+                fs.iter().find(|fa| fa["bounds"]["min"][2] == json!(z) && fa["bounds"]["max"][2] == json!(z))
+            })
+            .and_then(|fa| fa["id"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| panic!("{model} has a face at Z {z}: {f}"))
+    };
+    let bottom = face(&mut c, "block", 0.0);
+    let top = face(&mut c, "vise", -5.0);
+    let placed = c.ok(
+        "locate_part",
+        json!({ "part": "block", "fixture": "vise", "mates": [{ "part": bottom, "fixture": top }], "offset": [0.0, 0.0, 2.0] }),
+    );
+    assert_eq!(placed["moved"], json!("block"), "{placed}");
+    assert_eq!(placed["origin"][2], json!(-3.0), "the bottom 2 mm above the vise top at Z -5: {placed}");
+    assert_eq!(placed["warning"], Value::Null, "{placed}");
+    c.ok("undo", json!({}));
+    let job = c.ok("get_job", json!({}));
+    assert!(job.to_string().contains("block"), "{job}");
+
+    let chain = c.ok("list_features", json!({ "model": "block", "kinds": ["chains"] }))["chains"][0]["id"]
+        .as_str()
+        .map(str::to_owned)
+        .expect("a chain");
+    let e = c.refused("locate_part", json!({ "part": "block", "fixture": "vise", "mates": [{ "part": chain, "fixture": top }] }));
+    assert!(e.contains("is an edge"), "{e}");
+    let e = c.refused("locate_part", json!({ "part": "block", "fixture": "vise", "mates": [{ "part": bottom, "fixture": top }], "move": "both" }));
+    assert!(e.contains("\"move\""), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #557: `set_part_axes` turns the part in the setup's work plane from an
+/// edge chain or two vertices, one undo step, refusals by name.
+#[test]
+fn set_part_axes_turns_the_part_from_an_edge_or_two_points() {
+    let dir = tmp_dir("axes");
+    let part = dir.join("block.stl");
+    write_box_stl(&part, (20.0, 20.0, 15.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+    let refused = c.refused("set_part_axes", json!({ "y": [] }));
+    assert!(refused.contains("add_setup first") || refused.contains("at least one pick"), "{refused}");
+    c.ok("add_setup", json!({}));
+    let f = c.ok("list_features", json!({ "model": "block", "kinds": ["chains", "vertices"] }));
+    let chain = |f: &Value, want: &dyn Fn(&Value, &Value) -> bool| -> String {
+        f["chains"]
+            .as_array()
+            .and_then(|cs| cs.iter().find(|c| want(&c["start"], &c["end"])))
+            .and_then(|c| c["id"].as_str())
+            .expect("a chain")
+            .to_owned()
+    };
+    let along_x = chain(&f, &|a, b| a[1] == b[1] && a[2] == b[2] && a[0] != b[0]);
+    let upright = chain(&f, &|a, b| a[0] == b[0] && a[1] == b[1]);
+    let vertex = |at: [f64; 3]| -> String {
+        f["vertices"]
+            .as_array()
+            .and_then(|vs| vs.iter().find(|v| v["at"] == json!(at)))
+            .and_then(|v| v["id"].as_str())
+            .expect("a vertex")
+            .to_owned()
+    };
+    let pick = |id: &str| json!({ "model": "block", "id": id });
+
+    let names: Vec<String> = c.request("tools/list", json!({}))["result"]["tools"]
+        .as_array()
+        .map(|t| t.iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    assert!(names.iter().any(|n| n == "set_part_axes"), "{names:?}");
+
+    let turned = c.ok("set_part_axes", json!({ "y": [pick(&along_x)] }));
+    assert_eq!(turned["turn_deg"].as_f64().map(f64::abs), Some(90.0), "{turned}");
+    assert!(turned["alignment"].is_object(), "{turned}");
+    let again = c.refused("set_part_axes", json!({ "y": [pick(&along_x)] }));
+    assert!(again.contains("already holds the part that way"), "{again}");
+    c.ok("undo", json!({}));
+    let pts = [pick(&vertex([-20.0, -20.0, 0.0])), pick(&vertex([20.0, 20.0, 0.0]))];
+    let diag = c.ok("set_part_axes", json!({ "x": pts, "primary": "x" }));
+    assert!((diag["turn_deg"].as_f64().unwrap_or(0.0) + 45.0).abs() < 1e-9, "{diag}");
+    c.ok("undo", json!({}));
+    let msg = c.refused("set_part_axes", json!({ "y": [pick(&upright)] }));
+    assert!(msg.contains("along the work plane's normal"), "{msg}");
+    let msg = c.refused("set_part_axes", json!({ "y": [pick(&along_x)], "primary": "z" }));
+    assert!(msg.contains("\"primary\""), "{msg}");
+}
+
+/// #555: `lay_part_on_points` lays the part on a plane through three
+/// vertices - flip rests them on the table - one undo step, refusals by
+/// name.
+#[test]
+fn lay_part_on_points_lays_the_plane_through_three_vertices() {
+    let dir = tmp_dir("points");
+    let part = dir.join("block.stl");
+    write_box_stl(&part, (20.0, 20.0, 15.0));
+    let mut c = Client::new();
+    c.ok("import_model", json!({ "path": part.display().to_string() }));
+    c.ok("add_setup", json!({}));
+    let f = c.ok("list_features", json!({ "model": "block", "kinds": ["vertices"] }));
+    let pick = |at: [f64; 3]| -> Value {
+        let id = f["vertices"]
+            .as_array()
+            .and_then(|vs| vs.iter().find(|v| v["at"] == json!(at)))
+            .and_then(|v| v["id"].as_str())
+            .expect("a vertex")
+            .to_owned();
+        json!({ "model": "block", "id": id })
+    };
+    let names: Vec<String> = c.request("tools/list", json!({}))["result"]["tools"]
+        .as_array()
+        .map(|t| t.iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    assert!(names.iter().any(|n| n == "lay_part_on_points"), "{names:?}");
+
+    // The front wall (y = -20): its outside is -Y; flip lays it on the table.
+    let wall = [pick([-20.0, -20.0, 0.0]), pick([20.0, -20.0, 0.0]), pick([20.0, -20.0, 15.0])];
+    let laid = c.ok("lay_part_on_points", json!({ "points": wall, "flip": true }));
+    assert!(laid["alignment"].is_object(), "{laid}");
+    assert!(laid["outside"].as_str().is_some_and(|s| s.contains("-Y")), "{laid}");
+    let again = c.refused("lay_part_on_points", json!({ "points": wall, "flip": true }));
+    assert!(again.contains("already holds the part that way"), "{again}");
+    c.ok("undo", json!({}));
+    let framed = c.ok("lay_part_on_points", json!({ "points": wall, "flip": true, "frame": true, "plane": "g17" }));
+    assert!(framed["alignment"].is_object(), "{framed}");
+    c.ok("undo", json!({}));
+    let same = [pick([-20.0, -20.0, 0.0]), pick([-20.0, -20.0, 0.0]), pick([20.0, -20.0, 15.0])];
+    let msg = c.refused("lay_part_on_points", json!({ "points": same }));
+    assert!(msg.contains("coincide"), "{msg}");
+    let msg = c.refused("lay_part_on_points", json!({ "points": [pick([-20.0, -20.0, 0.0])] }));
+    assert!(msg.contains("pick three points - 1 picked"), "{msg}");
+    let msg = c.refused("lay_part_on_points", json!({ "points": wall, "plane": "g20" }));
+    assert!(msg.contains("\"plane\""), "{msg}");
 }

@@ -145,11 +145,14 @@ pub(super) fn to_raw_mouths(
             // else): the plunge coordinate and its direction.
             let (c, dc) = if h.dir.x.abs() >= h.dir.y.abs() { (h.origin.x, h.dir.x) } else { (h.origin.y, h.dir.y) };
             if c * dc > 0.0 {
-                return Err(GenError::Invalid(format!(
-                    "cross hole at ({:.3}, {:.3}, {:.3}) plunges away from the spindle - a cross \
-                     drill feeds toward the bar's axis; flip the hole's direction",
-                    h.origin.x, h.origin.y, h.origin.z
-                )));
+                return Err(GenError::invalid_at(
+                    format!(
+                        "cross hole at ({:.3}, {:.3}, {:.3}) plunges away from the spindle - a cross \
+                         drill feeds toward the bar's axis; flip the hole's direction",
+                        h.origin.x, h.origin.y, h.origin.z
+                    ),
+                    h.origin,
+                ));
             }
             let line = hole_line(h.origin, h.dir);
             let shift = entry(&st.mesh, raw, line, 0.5 * d).unwrap_or(0.0) - c.abs();

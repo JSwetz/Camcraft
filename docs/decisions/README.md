@@ -12,7 +12,7 @@ then **what was decided**, **why**, what was considered and dropped, and
 what it would cost to change later. One PR, one file. A review fix on the
 same PR edits that PR's file, never another PR's.
 
-At a minor or major cut, `scripts/collect-decisions.ps1` (or
-`scripts/collect-decisions.sh`) appends every file here, in issue-number
+At a minor or major cut, `cargo xtask decisions --version X.Y.Z` (or its
+wrappers `scripts/collect-decisions.ps1` / `.sh`) appends every file here, in issue-number
 order, to `RECOMMENDED.md` under a `## vX.Y.Z` heading, then deletes those
 files. This file, `README.md`, stays.

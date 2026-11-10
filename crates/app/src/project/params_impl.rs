@@ -921,6 +921,7 @@ impl ParamsDto {
                 infeed,
                 feed,
                 plunge_feed,
+                hand,
             } => ParamsDto::Threading {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -931,6 +932,7 @@ impl ParamsDto {
                 infeed: *infeed,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
+                hand: (*hand).into(),
             },
             // The contour kinds (M5.2 stage E): the promise-number
             // or two rides beside the trio - and the nose
@@ -2070,6 +2072,7 @@ impl ParamsDto {
                 infeed,
                 feed,
                 plunge_feed,
+                hand,
             } => OpParams::Threading {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -2080,6 +2083,7 @@ impl ParamsDto {
                 infeed: *infeed,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
+                hand: (*hand).into(),
             },
             // Read back whole, the contour kinds' way too - sane or
             // nothing, `validate_kind`'s door again first (M5.2 E).

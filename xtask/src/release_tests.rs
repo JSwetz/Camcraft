@@ -1,12 +1,13 @@
 //! Pins the release cut: the version bump on Cargo.toml / Cargo.lock fixture text, the Cargo.lock diff
-//! guard, the RELEASE_NOTES.md check, the staged zip layout, and the dry run's phase list on a
-//! throwaway git repo.
+//! guard, the RELEASE_NOTES.md check, the staged zip layout, `cargo xtask package` (the one zip path
+//! release and release.yml share) and the dry run's phase list on a throwaway git repo.
 //! Provenance: our own release law (AGENTS.md "Commits and Releases"), #749.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::package::{self as pkg, PackageArgs, Packed};
 use crate::release::{Cut, ReleaseArgs, parse};
 use crate::release_bump::{bump_lock, bump_toml, check_notes, lock_diff_versions_only, unexpected_changes};
 use crate::release_pack::{self as pack, Os};
@@ -235,4 +236,106 @@ fn refusals_are_named() {
     let rb = repo("release/v9.9.9", "9.9.8");
     let mut notes = Cut::new(&rb.0, args("9.9.9"), Os::Windows);
     assert!(notes.phases().expect_err("notes").contains("not 9.9.9"));
+}
+
+fn pkg_args(version: Option<&str>, root: &Path, dry: bool) -> PackageArgs {
+    PackageArgs {
+        version: version.map(String::from),
+        out: Some(PathBuf::from("dist")),
+        bin_dir: Some(root.join("bin")),
+        dry,
+    }
+}
+
+#[test]
+fn package_parse_takes_its_flags() {
+    let a: Vec<String> =
+        ["--version", "1.2.3", "--out", "o", "--bin-dir", "b", "--dry-run"].map(String::from).to_vec();
+    let p = pkg::parse(&a).expect("parse");
+    assert_eq!(
+        p,
+        PackageArgs {
+            version: Some("1.2.3".into()),
+            out: Some(PathBuf::from("o")),
+            bin_dir: Some(PathBuf::from("b")),
+            dry: true
+        }
+    );
+    assert_eq!(pkg::parse(&[]), Ok(PackageArgs::default()), "version defaults to post.exe's");
+    assert!(pkg::parse(&["--out".to_string()]).expect_err("value").contains("--out needs a value"));
+    assert!(pkg::parse(&["--tag".to_string()]).is_err());
+}
+
+#[test]
+fn package_dry_run_lists_the_release_yml_tree_on_any_host() {
+    let r = repo("main", "0.17.0");
+    for os in [Os::Windows, Os::Linux, Os::Macos] {
+        let mut out = Vec::new();
+        let p = pkg::package(&r.0, &pkg_args(Some("0.17.0"), &r.0, true), os, &mut |l| out.push(l)).expect("dry");
+        let stage = r.0.join("dist").join("camcraft-0.17.0-win-x64");
+        assert_eq!(p, Packed { version: "0.17.0".into(), stage: stage.clone(), zip: r.0.join("dist/camcraft-0.17.0-win-x64.zip"), files: 13 });
+        let listed: Vec<&str> = out.iter().filter_map(|l| l.strip_prefix("[dry-run]   ")).collect();
+        assert_eq!(listed[..3], ["camcraft-ui.exe", "camcraft-cli.exe", "post.exe"], "{os:?}: always the win-x64 exes");
+        assert_eq!(listed.len(), 13);
+        assert!(out.iter().any(|l| l.contains("Compress-Archive")));
+        assert!(!r.0.join("dist").exists(), "a dry run writes nothing");
+    }
+    let mut sink = |_: String| {};
+    let no_version = pkg::package(&r.0, &pkg_args(None, &r.0, true), Os::Windows, &mut sink);
+    assert!(no_version.expect_err("dry needs a version").contains("--version"));
+    let bad = pkg::package(&r.0, &pkg_args(Some("0.17"), &r.0, true), Os::Windows, &mut sink);
+    assert!(bad.expect_err("X.Y.Z").contains("X.Y.Z"));
+}
+
+#[test]
+fn package_refuses_a_real_zip_off_windows_by_name() {
+    let r = repo("main", "0.17.0");
+    let e = pkg::package(&r.0, &pkg_args(Some("0.17.0"), &r.0, false), Os::Linux, &mut |_| {}).expect_err("linux");
+    assert!(e.contains("not built on linux") && e.contains("--dry-run"), "{e}");
+    assert!(!r.0.join("dist").exists());
+}
+
+#[test]
+fn package_reports_what_github_actions_steps_read() {
+    let p = Packed {
+        version: "0.17.0".into(),
+        stage: PathBuf::from("dist/camcraft-0.17.0-win-x64"),
+        zip: PathBuf::from("dist/camcraft-0.17.0-win-x64.zip"),
+        files: 13,
+    };
+    let out = p.github_output();
+    assert_eq!(out[0], "version=0.17.0", "release.yml's windows job output `version`");
+    assert!(out[1].starts_with("stage=") && out[1].ends_with("camcraft-0.17.0-win-x64"));
+    assert!(out[2].starts_with("zip="));
+    assert_eq!(p.github_env(), ["CAMCRAFT_VERSION=0.17.0"]);
+    assert_eq!(pkg::version_from_post("post 0.17.0\n"), Some("0.17.0".into()));
+    assert_eq!(pkg::version_from_post("post\n"), None);
+    let r = repo("main", "0.17.0");
+    let f = r.0.join("gh_output");
+    pkg::append_lines(&f, &out).expect("append");
+    pkg::append_lines(&f, &p.github_env()).expect("append again");
+    let text = std::fs::read_to_string(&f).expect("read");
+    assert_eq!(text.lines().count(), 4);
+    assert!(text.starts_with("version=0.17.0\n"));
+}
+
+#[cfg(windows)]
+#[test]
+fn package_stages_and_zips_on_windows() {
+    let r = repo("main", "0.17.0");
+    for e in pack::EXES {
+        write(&r.0.join("bin"), &format!("{e}.exe"), "exe");
+    }
+    let mut out = Vec::new();
+    let p = pkg::package(&r.0, &pkg_args(Some("0.17.0"), &r.0, false), Os::Windows, &mut |l| out.push(l))
+        .expect("package");
+    assert_eq!(p.files, 13);
+    assert!(p.stage.join("post.exe").is_file() && p.stage.join("assets/ui/fonts/sans.ttf").is_file());
+    assert!(p.zip.is_file(), "{out:?}");
+    // The release cut's zip phase is this same function: its dry run prints the same file list.
+    let rc = repo("release/v0.17.0", "0.17.0");
+    let mut cut = Cut::new(&rc.0, ReleaseArgs { skip_gate: true, skip_build: true, ..args("0.17.0") }, Os::Windows);
+    assert_eq!(cut.phases(), Ok(()));
+    let listed: Vec<&String> = cut.out.iter().filter(|l| l.starts_with("[dry-run]   ")).collect();
+    assert_eq!(listed.len(), 13, "{:?}", cut.out);
 }

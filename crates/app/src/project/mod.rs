@@ -115,7 +115,7 @@ mod entity;
 mod thread_dto;
 mod break_dto;
 pub use break_dto::EdgeBreakDto;
-pub use thread_dto::ThreadCycleDto;
+pub use thread_dto::{ThreadCycleDto, ThreadHandDto};
 mod touch_dto;
 pub use touch_dto::ProbeTouchDto;
 mod params_impl;
@@ -141,6 +141,9 @@ mod wcs_one;
 // #343: a setup's own machine and post (v55).
 mod mount_dto;
 pub use mount_dto::{SetupMachineDto, SetupPostDto};
+// #389: a setup's own post options (additive).
+mod setup_options_dto;
+pub use setup_options_dto::SetupPostOptionsDto;
 // #316: setup links (v56), checked before any world write.
 mod setup_links;
 // #368: a tool's modelled body on file (v57).

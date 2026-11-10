@@ -1735,7 +1735,22 @@ mod view_cube_tests {
         let top = cam.toward([0.0, 0.0, 1.0]);
         assert_eq!((top.target, top.dist), (cam.target, cam.dist));
         assert!((top.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
-        assert!(top.yaw.abs() < 1e-12, "atan2(0, 0) must read 0, not NaN");
+        // At a pole the vanishing atan2 takes the roll from the pre-click
+        // yaw snapped to the nearest quarter turn (#622), never NaN. This
+        // start yaw (0.7) is nearer 0 than pi/2, so it still reads 0.
+        assert!(top.yaw.abs() < 1e-12);
+        let top = cam.oriented(2.0, 0.2).toward([0.0, 0.0, 1.0]);
+        assert!(
+            (top.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+            "a pole click keeps the pre-click yaw's quarter turn: {}",
+            top.yaw
+        );
+        let bottom = cam.oriented(-2.3, 0.2).toward([0.0, 0.0, -1.0]);
+        assert!(
+            (bottom.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+            "the south pole snaps the same way: {}",
+            bottom.yaw
+        );
         let front = cam.toward([0.0, -1.0, 0.0]);
         assert!((front.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12);
         assert!(front.pitch.abs() < 1e-12);
@@ -1751,9 +1766,12 @@ mod view_cube_tests {
 
     #[test]
     fn pole_views_hold_a_stable_roll() {
-        // Straight up and straight down are the basis degeneracies; the
-        // zero-guard in basis_right pins screen-right to +X and
-        // basis_up follows, whatever the yaw atan2 picked.
+        // Straight up and straight down are the basis degeneracies; there
+        // the quarter turn `toward` snapped the yaw to (#622) decides the
+        // roll: screen-right rides the guard frame (-sin y, cos y, 0) that
+        // is continuous with every near-pole view, and basis_up follows.
+        // Views whose pre-click yaw shared a quarter turn roll alike.
+        let snap = |y: f64| (y / std::f64::consts::FRAC_PI_2).round() * std::f64::consts::FRAC_PI_2;
         for d in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
             for yaw0 in [0.0, 0.9, -2.3] {
                 let cam = Camera {
@@ -1766,13 +1784,60 @@ mod view_cube_tests {
                 .toward(d);
                 let (r, u, _) = cam.view_basis();
                 let (r, u): ([f64; 3], [f64; 3]) = (r.into(), u.into());
-                assert!(near(r, [1.0, 0.0, 0.0]), "screen right at the {d:?} pole: {r:?}");
-                assert!(
-                    u[0].abs() < 1e-9 && u[2].abs() < 1e-9,
-                    "screen up must ride a world axis at the {d:?} pole: {u:?}"
-                );
+                let (rs, cs) = (snap(yaw0).sin(), snap(yaw0).cos());
+                let want_r = [-rs, cs, 0.0];
+                let want_u = if d[2] > 0.0 { [-cs, -rs, 0.0] } else { [cs, rs, 0.0] };
+                assert!(near(r, want_r), "screen right at the {d:?} pole: {r:?}");
+                assert!(near(u, want_u), "screen up at the {d:?} pole: {u:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_pole_click_keeps_the_roll_the_view_had() {
+        // The #622 complaint: a TOP click from a near-top view swung the
+        // screen frame up to half a turn (the old +X pin ignored the yaw
+        // the orbit had put there). The snap law bounds the swing to a
+        // half-quarter - 45 degrees.
+        let cam = Camera {
+            yaw: 1.0,
+            pitch: 1.5,
+            dist: 80.0,
+            ..Camera::default()
+        };
+        let (_, u0, _) = cam.view_basis();
+        let u0: [f64; 3] = u0.into();
+        let top = cam.toward([0.0, 0.0, 1.0]);
+        let (_, u1, _) = top.view_basis();
+        let u1: [f64; 3] = u1.into();
+        let dot: f64 = (0..3).map(|i| u0[i] * u1[i]).sum();
+        assert!(
+            dot > std::f64::consts::FRAC_1_SQRT_2,
+            "a pole click may not turn the screen up more than 45 degrees: {u0:?} -> {u1:?}"
+        );
+    }
+
+    #[test]
+    fn a_second_pole_click_lands_the_same_view() {
+        // The reported repro was clicking TOP twice and watching the model
+        // twitch: under the snap law the second click's yaw is already a
+        // quarter turn, so it changes nothing.
+        let cam = Camera {
+            yaw: 1.0,
+            pitch: 1.5,
+            dist: 80.0,
+            ..Camera::default()
+        };
+        let once = cam.toward([0.0, 0.0, 1.0]);
+        let twice = once.toward([0.0, 0.0, 1.0]);
+        assert_eq!(twice.target, once.target);
+        assert_eq!(twice.dist, once.dist);
+        assert!(
+            (twice.yaw - once.yaw).abs() < 1e-12 && (twice.pitch - once.pitch).abs() < 1e-12,
+            "the second click moved the camera: {:?} -> {:?}",
+            (once.yaw, once.pitch),
+            (twice.yaw, twice.pitch)
+        );
     }
 
     #[test]
@@ -1909,6 +1974,58 @@ mod projection_tests {
 
     fn shifted(p: [f64; 3], d: (f64, f64, f64), k: f64) -> [f64; 3] {
         [p[0] + k * d.0, p[1] + k * d.1, p[2] + k * d.2]
+    }
+
+    /// clip z over clip w - the depth the rasterizer compares, which
+    /// WebGPU requires inside [0, 1] alongside -1 <= x, y <= 1 (#600).
+    fn z_ndc(m: &[[f32; 4]; 4], p: [f64; 3]) -> f32 {
+        let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+        let mut z = 0.0f32;
+        let mut w = 0.0f32;
+        for c in 0..4 {
+            z += v[c] * m[c][2];
+            w += v[c] * m[c][3];
+        }
+        z / w
+    }
+
+    #[test]
+    fn the_ortho_depth_spans_zero_to_one_between_the_planes() {
+        // The OpenGL ortho convention spans NDC z over [-1, +1], but
+        // WebGPU clips on 0 <= z <= w, and ortho keeps clip.w at 1 -
+        // so every point nearer than (near + far) / 2 was clipped away
+        // and the viewport went blank (#600). The planes themselves
+        // must land on 0 and 1, and depth must climb between them.
+        let cam = ortho();
+        let m = cam.mvp(ASPECT);
+        let eye = cam.eye();
+        let look = [
+            cam.target[0] - eye[0],
+            cam.target[1] - eye[1],
+            cam.target[2] - eye[2],
+        ];
+        let len = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        let at = |d: f64| {
+            z_ndc(
+                &m,
+                [
+                    eye[0] + look[0] / len * d,
+                    eye[1] + look[1] / len * d,
+                    eye[2] + look[2] / len * d,
+                ],
+            )
+        };
+        let near = 0.1f64;
+        let far = (cam.dist * 40.0).max(1000.0);
+        assert!((at(near) - 0.0).abs() < 1e-3, "the near plane sits at {}", at(near));
+        assert!((at(far) - 1.0).abs() < 1e-3, "the far plane sits at {}", at(far));
+        let mut last = at(near);
+        for d in [cam.dist, (near + far) / 2.0, far * 0.9] {
+            let z = at(d);
+            assert!(z > 0.0 && z < 1.0, "depth at {d} mm is {z}, outside the clip volume");
+            assert!(z > last, "depth at {d} mm is {z}, not deeper than {last}");
+            last = z;
+        }
     }
 
     #[test]
