@@ -182,6 +182,7 @@ pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs
         // origin law (one copy, in posting), so a G54 slide shifts
         // what passes exactly as it shifts the G-code.
         let (_, origin) = posting::wcs_context(world, op.setup.as_deref());
+        let lathe = kind(Some(machine)) == Kind::Lathe;
 
         // Spindle: the tool's suggested speed is what the op runs -
         // today every op posts its tool's rpm, so the tool IS the
@@ -338,11 +339,25 @@ pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs
             // ARE its endpoints. The stroke is the machine's own; an
             // inverted axis (#373) reads program `v` as `-v`, so the
             // band is judged in the machine's coordinates.
+            // #631: on a lathe, an arc about the SPINDLE axis (a thread's
+            // half-turn) is the spindle turning, not the slide: its far
+            // side (negative X, and the quarter points) is the CL's
+            // antipode, never a slide position. The slide reaches the
+            // radius - judge |r| in X. Every other move keeps its signed X,
+            // so a real move past centre is judged as before.
+            let spindle_arc = lathe
+                && mv.arc.is_some_and(|a| {
+                    a.plane.is_xy() && (a.center.x - origin[0]).abs() < 1e-6 && (a.center.y - origin[1]).abs() < 1e-6
+                });
             for p in move_extremes(mv) {
                 for (k, w) in [p.x, p.y, p.z].iter().enumerate() {
                     let Some(ax) = machine.axis(k) else { continue };
                     let Some((lo, hi)) = ax.travel else { continue };
-                    let v = (w - origin[k]) * ax.direction.sign();
+                    let v = if spindle_arc && k == 0 {
+                        (p.x - origin[0]).hypot(p.y - origin[1]) * ax.direction.sign()
+                    } else {
+                        (w - origin[k]) * ax.direction.sign()
+                    };
                     if v < lo || v > hi {
                         let inv = if ax.direction.is_standard() { "" } else { " (inverted axis)" };
                         say(&mut out, format!(
