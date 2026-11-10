@@ -2,44 +2,65 @@
 //! and collision checks for a 2D plasma program. A plasma op cuts through,
 //! so the hazards are not depth but ORDER and GAPS:
 //!
-//! - **Cut order (refusal).** A part's inner contour cut after the outer
-//!   contour that frees it: the part has dropped (or tipped) before its
-//!   holes are cut.
+//! - **Cut order (refusal).** A contour cut after a contour that encloses
+//!   it (a hole after its outline, an island after its hole): the
+//!   enclosing cut has freed the material it sits in.
 //! - **Kerf crossing (warning).** A cut whose centre line comes within one
 //!   kerf of an earlier cut's: the torch crosses an open kerf, the arc
 //!   voltage jumps and torch height control dives - it "can smash the
-//!   torch into the material" (LinuxCNC Plasma Primer §12).
+//!   torch into the material" (LinuxCNC Plasma Primer §12). This law
+//!   covers only that torch-height hazard, so it warns (a shared-kerf
+//!   common line is legal); a centre line truly crossing a finished
+//!   contour outside a lead becomes a refusal when the CL reader lands
+//!   (#672 step 2).
 //! - **Tip-up (warning).** A rapid that crosses the area of a part already
 //!   cut free: a freed part can tip up into the torch (Tormach 1300PL
 //!   manual UM10720 §1.4.2, §4.12.8).
 //! - **Malformed (refusal).** A non-positive or non-finite kerf, a NaN
-//!   point, a cut with fewer than two points - refused by name.
+//!   point, a cut with fewer than two points (unless a centre-pierced
+//!   small hole), a duplicate contour id, a parent that is the contour
+//!   itself or no cut carries, an inner contour with no parent, a rapid
+//!   list that does not match the cuts, a NaN rapid point - refused by
+//!   name.
 //!
 //! Input is a neutral program - the cuts in order, each the torch-on
-//! polyline (arcs chorded by the caller) with its contour id, inner/outer
-//! and parent outer - so the laws read the CL's torch records (#670) and
-//! nothing of the operation's internals.
+//! polyline (arcs chorded by the caller) with its contour id, role and
+//! enclosing contour (the CL's `TORCH ON C<id> OUTER|INNER|OPEN
+//! [PARENT<id>] [SMALL..]`, #670) - and nothing of the operation's
+//! internals.
 //!
 //! Provenance: our own geometry over the cited plasma practice; no vendor
 //! implementation inspected.
 
 use crate::geo2d::Point2;
 
+/// What a contour is: a part's outline (or an island in a hole), a hole,
+/// or an open path (a slit, not a closed area).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CutRole {
+    Outer,
+    Inner,
+    Open,
+}
+
 /// One torch-on span: a contour cut from pierce to torch-off.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlasmaCut {
     pub contour: u32,
-    /// A hole (or other inner contour) of a part, rather than its outline.
-    pub inner: bool,
-    /// The outer contour an inner one belongs to.
+    pub role: CutRole,
+    /// The smallest closed contour enclosing this one (a hole's outline,
+    /// an island's hole); `None` for a top-level contour.
     pub parent: Option<u32>,
+    /// A centre-pierced small hole: its path may be a single point.
+    pub small: bool,
     /// The torch path, lead-in to lead-out, in cut order.
     pub path: Vec<Point2>,
 }
 
 /// A plasma program: the kerf, the cuts in cut order, and the rapid that
-/// reaches each cut's pierce (`rapids[i]` precedes `cuts[i]`; `None` when
-/// the program starts there).
+/// reaches each cut's pierce - `rapids[i]` is (previous torch-off point,
+/// pierce point) before `cuts[i]`, `None` when the program starts there.
+/// `rapids` has one entry per cut.
 #[derive(Clone, Debug, Default)]
 pub struct PlasmaProgram {
     pub kerf: f64,
@@ -50,8 +71,8 @@ pub struct PlasmaProgram {
 /// What the laws find.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlasmaFinding {
-    /// Refusal: inner contour `inner` is cut after its outer `parent`.
-    CutOrder { inner: u32, parent: u32 },
+    /// Refusal: `contour` is cut after `enclosing`, which encloses it.
+    CutOrder { contour: u32, enclosing: u32 },
     /// Warning: contour `contour` comes within a kerf of earlier `earlier`.
     KerfCrossing { contour: u32, earlier: u32, at: Point2 },
     /// Warning: the rapid before `contour` crosses freed part `freed`.
@@ -68,32 +89,24 @@ impl PlasmaFinding {
     }
 }
 
-/// Judge a plasma program. Findings come in cut order.
+/// Judge a plasma program. Findings come in cut order; a malformed
+/// program is one refusal and nothing else.
 #[must_use]
 pub fn judge(p: &PlasmaProgram) -> Vec<PlasmaFinding> {
-    if !(p.kerf.is_finite() && p.kerf > 0.0) {
-        return vec![PlasmaFinding::Malformed(format!("plasma kerf {} is not a positive width", p.kerf))];
-    }
-    for c in &p.cuts {
-        if c.path.len() < 2 {
-            return vec![PlasmaFinding::Malformed(format!("contour {} has no cut path", c.contour))];
-        }
-        if c.path.iter().any(|q| !(q.x.is_finite() && q.y.is_finite())) {
-            return vec![PlasmaFinding::Malformed(format!("contour {} has a non-finite point", c.contour))];
-        }
+    if let Err(why) = well_formed(p) {
+        return vec![PlasmaFinding::Malformed(why)];
     }
     let mut out = Vec::new();
     for (i, c) in p.cuts.iter().enumerate() {
-        // Cut order: an inner contour after its parent outer.
-        if c.inner
-            && let Some(parent) = c.parent
-            && p.cuts[..i].iter().any(|e| !e.inner && e.contour == parent)
+        // Cut order: anything enclosing this contour already cut.
+        if let Some(parent) = c.parent
+            && p.cuts[..i].iter().any(|e| e.contour == parent)
         {
-            out.push(PlasmaFinding::CutOrder { inner: c.contour, parent });
+            out.push(PlasmaFinding::CutOrder { contour: c.contour, enclosing: parent });
         }
-        // Tip-up: the rapid into this cut over a part already cut free.
+        // Tip-up: the rapid into this cut over a closed outline already cut.
         if let Some(Some((a, b))) = p.rapids.get(i) {
-            for e in p.cuts[..i].iter().filter(|e| !e.inner) {
+            for e in p.cuts[..i].iter().filter(|e| e.role == CutRole::Outer) {
                 if let Some(at) = crosses_area(*a, *b, &e.path) {
                     out.push(PlasmaFinding::TipUp { contour: c.contour, freed: e.contour, at });
                 }
@@ -107,6 +120,45 @@ pub fn judge(p: &PlasmaProgram) -> Vec<PlasmaFinding> {
         }
     }
     out
+}
+
+/// The program's shape, refused by name when it cannot be judged.
+fn well_formed(p: &PlasmaProgram) -> Result<(), String> {
+    if !(p.kerf.is_finite() && p.kerf > 0.0) {
+        return Err(format!("plasma kerf {} is not a positive width", p.kerf));
+    }
+    if p.rapids.len() != p.cuts.len() {
+        return Err(format!("{} rapids for {} cuts - one rapid entry per cut", p.rapids.len(), p.cuts.len()));
+    }
+    let finite = |q: &Point2| q.x.is_finite() && q.y.is_finite();
+    let mut ids = std::collections::HashSet::new();
+    for (c, r) in p.cuts.iter().zip(&p.rapids) {
+        if !ids.insert(c.contour) {
+            return Err(format!("contour {} appears twice", c.contour));
+        }
+        if c.path.is_empty() || (c.path.len() < 2 && !c.small) {
+            return Err(format!("contour {} has no cut path", c.contour));
+        }
+        if !c.path.iter().all(finite) {
+            return Err(format!("contour {} has a non-finite point", c.contour));
+        }
+        if let Some((a, b)) = r
+            && !(finite(a) && finite(b))
+        {
+            return Err(format!("the rapid into contour {} has a non-finite point", c.contour));
+        }
+    }
+    for c in &p.cuts {
+        match c.parent {
+            Some(parent) if parent == c.contour => return Err(format!("contour {} names itself as its parent", c.contour)),
+            Some(parent) if !ids.contains(&parent) => {
+                return Err(format!("contour {} names parent {parent}, which no cut carries", c.contour));
+            }
+            None if c.role == CutRole::Inner => return Err(format!("inner contour {} has no parent", c.contour)),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// The first point of `a` whose segment comes within `gap` of `b`'s path.
