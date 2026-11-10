@@ -376,3 +376,18 @@ fn a_click_in_the_frame_the_pane_hides_misses_the_hidden_locate_draft() {
         harness.state().state.status
     );
 }
+
+/// #555 meets #664: the three-points draft is dropped once its Setups
+/// page is left, so a later viewport click never feeds it.
+#[test]
+fn a_three_points_pick_disarms_when_its_page_is_left() {
+    let mut harness = on_setup_page();
+    harness.get_by_label("Pick three points").click();
+    harness.run();
+    assert!(harness.state().state.points_pick.is_some(), "the points row arms");
+    crate::actions::target(&mut harness.state_mut().state, UiTarget::Operation("Contour1".into()));
+    harness.run();
+    assert!(harness.state().state.points_pick.is_none(), "the page was left: the points draft is dropped");
+    show_setup_page(&mut harness);
+    assert!(harness.query_by_label("Pick three points").is_some(), "the row offers to pick again");
+}
