@@ -161,6 +161,10 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         crate::locate_pick::take(state, pick); // #561: the locate mates
         return;
     }
+    if state.points_pick.is_some() {
+        crate::points_pick::take(state, pick); // #555: refuses a face by name
+        return;
+    }
     if crate::axis_pick::collecting(state) {
         crate::axis_pick::take(state, pick); // #557: refuses a face by name
         return;
@@ -246,6 +250,10 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     });
     if state.locate_pick.is_some() {
         crate::locate_pick::take(state, GeoSel { entity, feature: sel }); // #561: refuses an edge by name
+        return;
+    }
+    if state.points_pick.is_some() {
+        crate::points_pick::take(state, GeoSel { entity, feature: sel }); // #555: refused by name
         return;
     }
     if crate::axis_pick::collecting(state) {
@@ -1687,6 +1695,10 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     }
     if let Some(draft) = state.plane_pick.as_ref().filter(|d| d.picking) {
         return feature_lines(state, &draft.picks);
+    }
+    // #555: the three-points draft's picks.
+    if let Some(d) = &state.points_pick {
+        return feature_lines(state, &d.picks);
     }
     // #557: the axes-in-the-plane draft's picks, while it collects.
     if let Some(d) = state.axis_pick.as_ref().filter(|d| d.picking.is_some()) {

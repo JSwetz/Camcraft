@@ -159,7 +159,7 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
     }
 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown)?;
-    let mut bld = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut bld = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
     // `Plunge` passes no center and the ladder dives at the pass start
     // as it always did - the goldens' shape. The ramped families certify
@@ -341,7 +341,7 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
     }
 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown)?;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     // Trace engraves the region's own vertices - the point is to ride
     // the boundary as picked, so no arc fitter runs here.
     //
