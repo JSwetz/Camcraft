@@ -48,7 +48,8 @@ pub(super) fn page(ui: &mut Ui, state: &mut State, name: &str, page: SetupPage) 
             if editable(ui, state, ctx) {
                 ownership(ui, state, ctx, Mount::Post);
                 pages::post_section(ui, state);
-                hint(ui, "The post options above apply to the whole document.");
+                ui.separator();
+                super::setup_post_page::options_ownership(ui, state, ctx);
             }
         }
         SetupPage::Fixtures => {
@@ -62,6 +63,7 @@ pub(super) fn page(ui: &mut Ui, state: &mut State, name: &str, page: SetupPage) 
             ui.heading(format!("Tool list - {title}"));
             ui.separator();
             tool_table(ui, state, ctx);
+            super::setup_post_page::tool_list_export(ui, state, ctx);
             ui.separator();
             pages::tool_list_section(ui, state, ctx);
             pages::sheet_footer(ui, state);
@@ -159,6 +161,7 @@ fn settings(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     super::setup_align_pick::picker(ui, state, name);
     super::setup_relative_pick::picker(ui, state, name);
     super::setup_plane_pick::row(ui, state, name);
+    super::setup_points_pick::row(ui, state, name);
     super::setup_axis_pick::rows(ui, state, name);
     super::setup_wcs_pick::picker(ui, state, name);
     ui.separator();

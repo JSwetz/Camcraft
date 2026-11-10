@@ -23,7 +23,7 @@ impl SetPostOptions {
     /// Choose the post options; the current choice again is refused
     /// (a no-op would be an empty undo step).
     pub fn new(world: &World, next: PostOptions) -> Result<Self, CommandError> {
-        let prev = posting::post_options(world);
+        let prev = crate::setup_post_options::document(world);
         if prev == next {
             return Err(CommandError::Invalid("those post options are already set".to_owned()));
         }

@@ -12,6 +12,8 @@ pub mod import_model;
 // #339 slice 6: a fixture library entry placed into a setup.
 pub mod insert_fixture;
 pub mod load_machine;
+// #561: locate the part in a fixture (or the fixture on the part) by mates.
+pub mod locate;
 pub mod move_model;
 pub mod operation;
 pub mod post;
@@ -31,6 +33,7 @@ pub mod setup_align;
 pub mod setup_wcs;
 // #343: a setup's own machine and post.
 pub mod setup_mount;
+pub mod setup_post_options;
 // #316: a setup placed relative to another (flip / turn presets).
 pub mod setup_relative;
 // #320: a setup's stock source.
@@ -61,6 +64,7 @@ pub use import_fixture::ImportFixture;
 pub use import_model::ImportModel;
 pub use insert_fixture::InsertFixture;
 pub use load_machine::LoadMachine;
+pub use locate::{Locate, LocateFixture, LocatePart};
 pub use move_model::MoveModel;
 pub use operation::{
     ChangeOperationKind, ClearToolpath, CreateOperation, DeleteOperation, EditOperationLinks,
@@ -78,6 +82,7 @@ pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
 pub use setup_align::AlignPartToSetup;
 pub use setup_wcs::SetSetupWorkOffset;
 pub use setup_mount::{SetSetupMachine, SetSetupPost};
+pub use setup_post_options::SetSetupPostOptions;
 pub use setup_relative::SetSetupRelative;
 pub use setup_stock::SetSetupStockSource;
 pub use set_units::SetUnits;
