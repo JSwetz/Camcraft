@@ -28,7 +28,7 @@ use super::hole::{Hole, THROUGH_CLEAR};
 use super::recognize::recognize;
 
 use crate::cl::{CycleKind, Toolpath};
-use crate::geometry::Triangle;
+use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 use crate::multiaxis::axis;
 use crate::verify::Warning;
@@ -90,27 +90,39 @@ pub fn axial_doors(
         return Err(GenError::Invalid("the bar has no far end to measure a hole against".into()));
     }
     for h in holes {
+        // #677: the spot each refusal below marks - the hole's mouth,
+        // or its floor where the floor is what is wrong.
+        let mouth = Point3::new(h.xy.x, h.xy.y, h.entry_z);
         let e = off_axis(&ax, h.xy.x, h.xy.y);
         if !(e.is_finite() && e <= AXIAL_TOL) {
-            return Err(GenError::Invalid(format!(
-                "hole at ({}, {}) stands {e:.3} mm off the spindle axis: a lathe's turret drills on the axis only - a radial hole is the live tooling's cross drill (M5.2 F2), an off-axis end hole needs a C axis (M13.5 B)",
-                h.xy.x, h.xy.y
-            )));
+            return Err(GenError::invalid_at(
+                format!(
+                    "hole at ({}, {}) stands {e:.3} mm off the spindle axis: a lathe's turret drills on the axis only - a radial hole is the live tooling's cross drill (M5.2 F2), an off-axis end hole needs a C axis (M13.5 B)",
+                    h.xy.x, h.xy.y
+                ),
+                mouth,
+            ));
         }
         let floor = bottom_z.unwrap_or(h.floor_z - if h.through { THROUGH_CLEAR } else { 0.0 });
         if floor < bar_end - THROUGH_CLEAR - 1e-9 {
-            return Err(GenError::Invalid(format!(
-                "hole at ({}, {}) bottoms at z = {floor}, past the bar's far end at z = {bar_end}: the drill would leave the steel through the chuck side",
-                h.xy.x, h.xy.y
-            )));
+            return Err(GenError::invalid_at(
+                format!(
+                    "hole at ({}, {}) bottoms at z = {floor}, past the bar's far end at z = {bar_end}: the drill would leave the steel through the chuck side",
+                    h.xy.x, h.xy.y
+                ),
+                Point3::new(h.xy.x, h.xy.y, floor),
+            ));
         }
         if tool_d > 2.0 * h.radius + 2.0 * super::hole::FIT_TOL {
-            return Err(GenError::Invalid(format!(
-                "the drill is {tool_d} mm across, the bore at ({}, {}) is modeled {} mm: a wider drill cuts past the modeled wall",
-                h.xy.x,
-                h.xy.y,
-                2.0 * h.radius
-            )));
+            return Err(GenError::invalid_at(
+                format!(
+                    "the drill is {tool_d} mm across, the bore at ({}, {}) is modeled {} mm: a wider drill cuts past the modeled wall",
+                    h.xy.x,
+                    h.xy.y,
+                    2.0 * h.radius
+                ),
+                mouth,
+            ));
         }
     }
     Ok(())

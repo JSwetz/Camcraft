@@ -49,6 +49,15 @@ impl Unit {
         }
     }
 
+    /// The volume suffix (stock blocks, removed metal).
+    #[must_use]
+    pub fn vol_suffix(self) -> &'static str {
+        match self {
+            Unit::Millimeters => "mm³",
+            Unit::Inches => "in³",
+        }
+    }
+
     /// The area suffix (face readouts).
     #[must_use]
     pub fn area_suffix(self) -> &'static str {
@@ -133,6 +142,22 @@ pub fn feed(v_mmmin: f64, unit: Unit) -> String {
     match unit {
         Unit::Millimeters => format!("{v_mmmin}"),
         Unit::Inches => format!("{:.2}", v_mmmin / MM_PER_INCH),
+    }
+}
+
+/// A volume in mm^3 (a stock block, the metal a program removed). The
+/// inch cube is ~16 000 mm^3, so like [`area`] the inch side needs more
+/// decimals than the +2 [`len`] rule: three extra holds the millimeter
+/// reading without turning a small cut into a string of zeros.
+#[must_use]
+pub fn vol(v_mm3: f64, unit: Unit, mm_prec: usize) -> String {
+    match unit {
+        Unit::Millimeters => format!("{v_mm3:.mm_prec$}"),
+        Unit::Inches => format!(
+            "{:.prec$}",
+            v_mm3 / (MM_PER_INCH * MM_PER_INCH * MM_PER_INCH),
+            prec = mm_prec + 3
+        ),
     }
 }
 

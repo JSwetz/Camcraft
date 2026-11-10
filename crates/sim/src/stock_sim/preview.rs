@@ -86,6 +86,10 @@ pub struct PreviewCamera {
     pub up: Point3,
     /// Tangent of the half vertical field of view (> 0, finite).
     pub tan_half_fov: f64,
+    /// `Some(h)`: an orthographic eye (#609) - parallel rays along
+    /// `fwd`, each starting on the eye plane, the frame `h` world units
+    /// tall about `eye`. `None`: the perspective cone from `eye`.
+    pub ortho_half_height: Option<f64>,
 }
 
 impl PreviewCamera {
@@ -107,23 +111,59 @@ impl PreviewCamera {
             None => return refuse("the up hint is parallel to the view direction"),
         };
         let up = right.cross(fwd); // already unit: fwd, right orthonormal
-        Ok(PreviewCamera { eye, fwd, right, up, tan_half_fov })
+        Ok(PreviewCamera { eye, fwd, right, up, tan_half_fov, ortho_half_height: None })
+    }
+
+    /// The same eye made orthographic (#609): parallel rays over a
+    /// frame `half_height` tall (each way) about the eye. Refused by
+    /// name unless finite and positive.
+    pub fn orthographic(self, half_height: f64) -> Result<Self, StockError> {
+        if !(half_height.is_finite() && half_height > 0.0) {
+            return Err(StockError::Invalid("preview camera: the orthographic half height must be finite and positive".into()));
+        }
+        Ok(PreviewCamera { ortho_half_height: Some(half_height), ..self })
+    }
+
+    /// The ray through pixel (`px`, `py`) of a `w` x `h` frame (row 0
+    /// is the top) as (origin, unit direction): the eye and `ray_dir`
+    /// in perspective; in orthographic the pixel's own point on the
+    /// eye plane and `fwd` (#609) - the parallel box `Camera::mvp`
+    /// draws. The single ray law both eyes and the composite walk.
+    pub fn ray(&self, px: u32, py: u32, w: u32, h: u32) -> (Point3, Point3) {
+        let Some(hh) = self.ortho_half_height else {
+            return (self.eye, self.ray_dir(px, py, w, h));
+        };
+        let (u, v) = pixel_uv(px, py, w, h);
+        let a = hh * (w as f64 / h as f64);
+        (add(self.eye, add(scale(self.right, u * a), scale(self.up, v * hh))), self.fwd)
     }
 
     /// The direction through pixel (`px`, `py`) of a `w` x `h` frame
     /// (row 0 is the top): the single ray law the CPU march and the
     /// GPU parity tests both walk.
+    /// In orthographic every ray runs along `fwd` (see `ray`).
     pub fn ray_dir(&self, px: u32, py: u32, w: u32, h: u32) -> Point3 {
-        let u = 2.0 * ((px as f64 + 0.5) / w as f64) - 1.0;
-        let v = 1.0 - 2.0 * ((py as f64 + 0.5) / h as f64);
+        if self.ortho_half_height.is_some() {
+            return self.fwd;
+        }
+        let (u, v) = pixel_uv(px, py, w, h);
         let a = self.tan_half_fov * (w as f64 / h as f64);
         let dir = add(self.fwd, add(scale(self.right, u * a), scale(self.up, v * self.tan_half_fov)));
         unit(dir).unwrap_or(self.fwd) // finite inputs: the norm cannot vanish
     }
 }
 
+/// Pixel (`px`, `py`)'s centre in -1..1 frame coordinates (u right,
+/// v up; row 0 is the top).
+fn pixel_uv(px: u32, py: u32, w: u32, h: u32) -> (f64, f64) {
+    let u = 2.0 * ((px as f64 + 0.5) / w as f64) - 1.0;
+    let v = 1.0 - 2.0 * ((py as f64 + 0.5) / h as f64);
+    (u, v)
+}
+
 /// One frame of the machined view. `depth` is the distance along the
-/// ray to the hit (NaN where the march or the world has no answer);
+/// ray from its `PreviewCamera::ray` origin to the hit (NaN where the
+/// march or the world has no answer);
 /// `class` is `color_classes`' vocabulary per pixel (0 clean, 1 rest,
 /// 2 gouge, 3 unjudged); `shade` is the lambert-times-AO luminance
 /// the compositor multiplies into the class color.
@@ -178,8 +218,8 @@ pub fn preview(
     let mut pv = Preview { w, h, depth: vec![f64::NAN; n], class: vec![3.0; n], shade: vec![0.0; n], unresolved: 0 };
     for py in 0..h {
         for px in 0..w {
-            let dir = cam.ray_dir(px, py, w, h);
-            match march::trace(&mut eye, cam.eye, dir) {
+            let (origin, dir) = cam.ray(px, py, w, h);
+            match march::trace(&mut eye, origin, dir) {
                 Seen::Hit { t, p } => {
                     let i = (py as usize) * (w as usize) + px as usize;
                     pv.depth[i] = t;

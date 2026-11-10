@@ -101,6 +101,8 @@ const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 /// like operations.rs's contents() dispatcher. The operation page owns
 /// its scroll (its action bar stays fixed under it); every other page
 /// scrolls whole.
+/// The Setups page's pick rows mark themselves drawn; the shell's
+/// per-frame sweep (#664, #667) disarms the rest after the dock.
 pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     let t = state.pane_target();
     // Only an open Boundary group draws its viewport marks (M11.5 UX):
@@ -403,6 +405,7 @@ pub(super) fn post_section(ui: &mut Ui, state: &mut State) {
         state.pending.push_back(CommandKind::SetPerOpOutput(pick));
     }
     super::post_options::threading_picker(ui, state);
+    super::post_options::end_units_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not
@@ -754,6 +757,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             ui.label(line);
             super::setup_align_pick::picker(ui, state, name);
             super::setup_plane_pick::row(ui, state, name);
+            super::setup_axis_pick::rows(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
     }
@@ -1366,6 +1370,8 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         num(ui, u, &mut state.tool_ui.nose_radius);
                         ui.label("the ground tip circle the bar rides the hole wall on (M5.2 F) - inert on drilling cycles, which size by the slide");
                     }
+                    // #630: which point of the nose the lathe posts write.
+                    super::tool_orientation_row::orientation_row(ui, state);
                     if state.tool_ui.kind == 7 {
                         field(ui, "Blade width");
                         num(ui, u, &mut state.tool_ui.width);

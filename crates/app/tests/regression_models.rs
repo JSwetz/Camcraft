@@ -205,10 +205,10 @@ fn wavy_slab_faces_to_a_measured_program() {
         3.0,
     );
     assert_eq!(m.facets, 386, "top 288 + walls 96 + bottom 2");
-    assert_eq!(m.moves, 41, "path moves");
+    assert_eq!(m.moves, 42, "path moves, the approach rapid (#690) included");
     close("cut_mm", m.cut_mm, 1342.0, TOL_MM);
-    close("minutes", m.minutes, 1.4676666666666667, TOL_MIN);
-    assert_eq!(m.posted_lines, 56, "line count is exact (the operation and tool comments of #257 included)");
+    close("minutes", m.minutes, 1.474753430541823, TOL_MIN); // + the approach rapid (#690)
+    assert_eq!(m.posted_lines, 57, "line count is exact (the operation and tool comments of #257 and the approach of #690 included)");
 }
 
 #[test]
@@ -223,8 +223,8 @@ fn cube_stl_faces_to_a_measured_program() {
         0.8,
     );
     assert_eq!(m.facets, 12, "the unit cube's shell");
-    assert_eq!(m.moves, 3, "path moves");
+    assert_eq!(m.moves, 4, "path moves, the approach rapid (#690) included");
     close("cut_mm", m.cut_mm, 12.0, TOL_MM);
-    close("minutes", m.minutes, 0.35933333333333334, TOL_MIN);
-    assert_eq!(m.posted_lines, 18, "line count is exact (the operation and tool comments of #257 included)");
+    close("minutes", m.minutes, 0.35983333333333334, TOL_MIN); // + the approach rapid (#690)
+    assert_eq!(m.posted_lines, 19, "line count is exact (the operation and tool comments of #257 and the approach of #690 included)");
 }

@@ -101,6 +101,10 @@ pub struct SdfField {
     /// counters (`field_batch::CostLedger`), boxed so the `Stock`
     /// enum's arms stay the same size class.
     pub(crate) cost: Box<super::field_batch::CostLedger>,
+    /// #633: a block stock's exact box distance - the mesh layer's
+    /// magnitude wherever no brick was stored (`mag_at`), so a block
+    /// builds with no band fill. `None` for every mesh-seeded field.
+    pub(crate) analytic: Option<super::field_box::AnalyticBox>,
 }
 
 /// World cell of a point on the origin-locked lattice.
@@ -176,18 +180,24 @@ impl SdfField {
     }
 
     /// The stored magnitude at a cell: out of band, in an unallocated
-    /// brick, or in a brick's NaN cell, it is `cap` by one law.
+    /// brick, or in a brick's NaN cell, it is `cap` by one law - or,
+    /// for a block stock (#633), the box's exact distance, clamped to
+    /// `cap` by the same band law.
     pub(crate) fn mag_at(&self, key: [i32; 3]) -> f64 {
+        let unstored = || match self.analytic {
+            Some(b) => b.at_cell(key, self.cell).min(self.cap),
+            None => self.cap,
+        };
         match self.bricks.get(&brick_of(key)) {
             Some(b) => {
                 let v = b[in_brick(key)];
                 if v.is_nan() {
-                    self.cap
+                    unstored()
                 } else {
                     v
                 }
             }
-            None => self.cap,
+            None => unstored(),
         }
     }
 
