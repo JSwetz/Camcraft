@@ -293,3 +293,46 @@ fn an_entry_in_a_skipping_setups_gap_is_muted_with_its_op() {
     h.undo(&world);
     assert!(posting::op_streams(&world).is_err(), "undo brings the clash back");
 }
+
+/// How many operations carry a smoothing ask in the stream.
+fn smoothed(world: &World) -> usize {
+    cnc::serialize(&posting::stream_records(world).expect("streams"))
+        .lines()
+        .filter(|l| l.starts_with("PARAM Smoothing "))
+        .count()
+}
+
+/// #616 + #389 (review of #635): smoothing is read per op, from the op's
+/// OWN setup, like "Skip pauses and homes" - never from whichever setup
+/// happens to be active. Setup1 turns it on, Setup2 follows the document
+/// (off): exactly Setup1's pocket asks, whichever setup is active. (A
+/// Face asks no smoothing, so each setup also gets a Pocket over its
+/// stock - a kind that does.)
+#[test]
+fn smoothing_follows_each_ops_own_setup_not_the_active_one() {
+    let (world, mut h) = doc(2);
+    let mut pocket = camcraft_app::operation::retype_params(&face(), camcraft_app::operation::OpType::Pocket.ordinal());
+    // No model here: the heights are stated, on the 20 mm stock.
+    if let OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. } = &mut pocket {
+        *clearance_z = Height::fixed(25.0);
+        *retract_z = None;
+        *top_z = Height::fixed(20.0);
+        *bottom_z = Height::fixed(19.0);
+    }
+    for (i, setup) in ["Setup1", "Setup2"].iter().enumerate() {
+        h.execute(&world, ActivateSetup::new(&world, Some(setup)).expect("activate"));
+        let name = format!("Pocket{}", i + 1);
+        h.execute(&world, CreateOperation::new(&world, &name, TOOL, SrcRef::Stock, pocket.clone()).expect("pocket"));
+        h.execute(&world, GenerateOperation::new(&world, &name).expect("generate"));
+    }
+    assert_eq!(smoothed(&world), 0, "off everywhere by default");
+    let on = PostOptions { smoothing: true, ..PostOptions::default() };
+    h.execute(&world, SetSetupPostOptions::new(&world, "Setup1", Some(on)).expect("Setup1 smooths"));
+    for active in ["Setup1", "Setup2"] {
+        h.execute(&world, ActivateSetup::new(&world, Some(active)).expect("activate"));
+        assert_eq!(smoothed(&world), 1, "only Setup1's pocket smooths, with {active} active");
+    }
+    // The document turning it on reaches Setup2 (which follows it) too.
+    h.execute(&world, SetPostOptions::new(&world, on).expect("document smooths"));
+    assert_eq!(smoothed(&world), 2);
+}

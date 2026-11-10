@@ -831,9 +831,15 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             part_unload,
             part_transfer,
             probe_tol,
-            // #616: the op's smoothing ask, only when the document
-            // turned smoothing on (off: byte-identical output).
-            smoothing: if post_options(world).smoothing { crate::smoothing::of(&op.params) } else { None },
+            // #616: the op's smoothing ask, only when its OWN setup's
+            // post options turn smoothing on (off: byte-identical output) -
+            // read per op like "Skip pauses and homes" (#389), never from
+            // whichever setup happens to be active.
+            smoothing: if crate::setup_post_options::of(world, op.setup.as_deref()).smoothing {
+                crate::smoothing::of(&op.params)
+            } else {
+                None
+            },
             coolant: op.coolant,
             // "Skip pauses and homes" (#110) mutes every after-action
             // at post; the ops keep their choices. Entries ride it (#155).
