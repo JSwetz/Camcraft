@@ -1911,6 +1911,58 @@ mod projection_tests {
         [p[0] + k * d.0, p[1] + k * d.1, p[2] + k * d.2]
     }
 
+    /// clip z over clip w - the depth the rasterizer compares, which
+    /// WebGPU requires inside [0, 1] alongside -1 <= x, y <= 1 (#600).
+    fn z_ndc(m: &[[f32; 4]; 4], p: [f64; 3]) -> f32 {
+        let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+        let mut z = 0.0f32;
+        let mut w = 0.0f32;
+        for c in 0..4 {
+            z += v[c] * m[c][2];
+            w += v[c] * m[c][3];
+        }
+        z / w
+    }
+
+    #[test]
+    fn the_ortho_depth_spans_zero_to_one_between_the_planes() {
+        // The OpenGL ortho convention spans NDC z over [-1, +1], but
+        // WebGPU clips on 0 <= z <= w, and ortho keeps clip.w at 1 -
+        // so every point nearer than (near + far) / 2 was clipped away
+        // and the viewport went blank (#600). The planes themselves
+        // must land on 0 and 1, and depth must climb between them.
+        let cam = ortho();
+        let m = cam.mvp(ASPECT);
+        let eye = cam.eye();
+        let look = [
+            cam.target[0] - eye[0],
+            cam.target[1] - eye[1],
+            cam.target[2] - eye[2],
+        ];
+        let len = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        let at = |d: f64| {
+            z_ndc(
+                &m,
+                [
+                    eye[0] + look[0] / len * d,
+                    eye[1] + look[1] / len * d,
+                    eye[2] + look[2] / len * d,
+                ],
+            )
+        };
+        let near = 0.1f64;
+        let far = (cam.dist * 40.0).max(1000.0);
+        assert!((at(near) - 0.0).abs() < 1e-3, "the near plane sits at {}", at(near));
+        assert!((at(far) - 1.0).abs() < 1e-3, "the far plane sits at {}", at(far));
+        let mut last = at(near);
+        for d in [cam.dist, (near + far) / 2.0, far * 0.9] {
+            let z = at(d);
+            assert!(z > 0.0 && z < 1.0, "depth at {d} mm is {z}, outside the clip volume");
+            assert!(z > last, "depth at {d} mm is {z}, not deeper than {last}");
+            last = z;
+        }
+    }
+
     #[test]
     fn the_ortho_matrix_is_affine_and_perspective_is_not() {
         let o = ortho().mvp(ASPECT);

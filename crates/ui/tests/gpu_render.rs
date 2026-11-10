@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use egui_wgpu::wgpu;
 use camcraft_app::stock::{StockShape, stock_mesh};
 use camcraft_ui::state::DisplayMode;
-use camcraft_ui::viewport::{Camera, GpuPart, View3D};
+use camcraft_ui::viewport::{Camera, GpuPart, ProjectionMode, View3D};
 
 const SIDE: u32 = 256;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -399,4 +399,34 @@ fn cut_region_fill_is_translucent() {
         see_through * 2 > moved,
         "fill must blend over what it covers, not replace it: {see_through}/{moved} gentle"
     );
+}
+
+#[test]
+fn orthographic_paints_the_band_perspective_does() {
+    // #600: the ortho matrix mapped depth OpenGL-style, into negative
+    // clip z, and WebGPU's 0 <= z <= w rule discarded every triangle -
+    // the viewport went blank the moment Orthographic was clicked.
+    // The same part and camera must paint a comparable band in both
+    // modes; the framing is built to match at the target plane.
+    let parts = [stock_part(&StockShape::Box {
+        dx: 60.0,
+        dy: 60.0,
+        dz: 40.0,
+    })];
+    let Some((persp_img, w, h)) = render(&parts, &test_cam()) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    let ortho_cam = Camera {
+        projection: ProjectionMode::Orthographic,
+        ..test_cam()
+    };
+    let Some((ortho_img, _, _)) = render(&parts, &ortho_cam) else {
+        return; // the perspective render found an adapter; this one cannot differ
+    };
+    let total = (w * h) as usize;
+    let p = changed_pixels(&persp_img);
+    let o = changed_pixels(&ortho_img);
+    assert!(o > total / 20 && o < total - total / 20, "ortho should paint a solid band, not {o}/{total}");
+    assert!(o * 2 < p * 3 && p * 2 < o * 3, "the modes frame alike at dist: {o} ortho vs {p} perspective");
 }
