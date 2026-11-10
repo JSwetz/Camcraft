@@ -46,6 +46,7 @@ mod face;
 mod face_entry;
 mod face_holes;
 mod fillet;
+mod gen_error;
 mod fillet_arc;
 mod fillet_tally;
 mod lead_ext;

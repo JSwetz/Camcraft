@@ -34,12 +34,18 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let carried = job.carried_overhang.take();
     let tool_r = job.tool.diameter * 0.5;
     let kind = job.params.kind();
+    // #261 part 2: a refusal's spot is in the frame the generators ran
+    // in (a 3+2 tilt's local one); the UI draws in world, so it is
+    // carried out through the same frame the path would have been.
+    let frame = job.frame;
     let _span = tracing::info_span!("generate", op = %job.op_name).entered();
     let started = std::time::Instant::now();
     tracing::debug!(kind = %kind, "generation started");
-    let (mut path, warns) = run_job_arms(job).inspect_err(|e| {
-        tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
-    })?;
+    let (mut path, warns) = run_job_arms(job)
+        .map_err(|e| e.map_location(|p| frame.map_or(p, |f| f.to_world(p))))
+        .inspect_err(|e| {
+            tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
+        })?;
     tracing::info!(
         kind = %kind,
         moves = path.moves.len(),

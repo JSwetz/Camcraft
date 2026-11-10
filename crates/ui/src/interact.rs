@@ -1011,6 +1011,10 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
             return out;
         }
     }
+    // #261 part 2: a standing generate refusal marks the spot it names.
+    if let Some(at) = state.refusal_focus() {
+        crate::path_lines::refusal_mark(&mut out, at, pal, arm);
+    }
     out
 }
 
