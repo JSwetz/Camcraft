@@ -118,6 +118,11 @@ fn q(mm: f64) -> i64 {
 pub fn gen_to_cltext(t: &Toolpath) -> String {
     let version = if !t.is_prismatic() {
         4
+    } else if t.plasma.is_some() {
+        // #670: the plasma records - `; PLASMA` after START, `; TORCH
+        // ON` before each span's first lit move, `; TORCH OFF` after
+        // its last (docs/CNC-INTERMEDIATE.md, the `.cl` plasma records).
+        5
     } else if !t.cycles.is_empty() {
         3
     } else if t.has_arcs() {
@@ -130,7 +135,16 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
         Some(p) => s.push_str(&format!("START {} {} {}\n", q(p.x), q(p.y), q(p.z))),
         None => s.push_str("START\n"),
     }
-    for m in &t.moves {
+    if let Some(p) = &t.plasma {
+        s.push_str(&p.header_line());
+        s.push('\n');
+    }
+    let torches: &[camcraft_app::cl::TorchSpan] = t.plasma.as_ref().map_or(&[], |p| &p.torches);
+    for (i, m) in t.moves.iter().enumerate() {
+        for sp in torches.iter().filter(|sp| sp.on == i) {
+            s.push_str(&sp.on_line());
+            s.push('\n');
+        }
         let mut k = match m.kind {
             MoveKind::Rapid => "Rapid",
             MoveKind::Feed => "Feed",
@@ -172,6 +186,10 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
             s.push_str(&format!(" SC{}", (c * 1000.0).round() as i64));
         }
         s.push('\n');
+        for sp in torches.iter().filter(|sp| sp.off == i) {
+            s.push_str(&sp.off_line());
+            s.push('\n');
+        }
     }
     for c in &t.cycles {
         let kind = match c.kind {

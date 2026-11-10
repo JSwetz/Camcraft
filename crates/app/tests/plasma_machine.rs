@@ -246,7 +246,8 @@ fn a_mill_op_on_the_1300pl_is_refused_by_name() {
     assert_eq!(machine::kind_of(&world), Kind::Plasma);
     let err = CreateOperation::new(&world, "Face1", TOOL, SrcRef::Stock, face()).err().expect("refused");
     assert!(format!("{err:?}").contains("plasma table, which cuts only plasma operations"), "{err:?}");
-    assert!(camcraft_app::operation::shown_for(Kind::Plasma).is_empty(), "no ribbon section until #670");
+    // #670: the plasma table's ribbon shows the Plasma section alone.
+    assert_eq!(camcraft_app::operation::shown_for(Kind::Plasma), vec![camcraft_app::operation::Section::Plasma]);
 
     // At the gate: a mill op the table was mounted under after the fact
     // blocks the post, named.

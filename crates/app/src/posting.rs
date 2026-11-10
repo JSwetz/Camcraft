@@ -223,7 +223,8 @@ pub fn document_post_of(world: &World) -> PostRef {
 /// one answer the post and the machine's spindle-range check both read.
 #[must_use]
 pub fn posted_rpm(tool: &crate::tools::Tool) -> f64 {
-    if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm }
+    // A torch states rpm 0 by law (#670): no spindle word, like a probe.
+    if matches!(tool.kind, crate::tools::ToolKind::Probe | crate::tools::ToolKind::Torch) { 0.0 } else { tool.rpm }
 }
 
 /// Write the singleton. For the `SelectPost` command and the project
@@ -922,6 +923,7 @@ impl HeightRefs for OpParams {
     fn heights(&self) -> Vec<&Height> {
         match self {
             OpParams::Probe { clearance_z, .. } => vec![clearance_z],
+            OpParams::PlasmaProfile(p) => vec![&p.clearance_z, &p.top_z, &p.bottom_z],
             OpParams::Face {
                 clearance_z,
                 cut_z,

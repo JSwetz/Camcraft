@@ -56,7 +56,12 @@ fn family_is_derived_not_forked() {
     // The family is the section's, wherever the row sits (#108: the
     // appended Probe row is a mill kind past the turning run).
     for (i, k) in KindInfo::ALL.iter().enumerate() {
-        let want = if k.section == Section::Turning { Family::Turn } else { Family::Mill };
+        // #670: the Plasma section is the plasma family's.
+        let want = match k.section {
+            Section::Turning => Family::Turn,
+            Section::Plasma => Family::Plasma,
+            _ => Family::Mill,
+        };
         assert_eq!(k.family(), want, "row {i} ({}) family drifted", k.label);
     }
     for s in Section::ORDER {
@@ -83,11 +88,18 @@ fn shown_for_is_the_machine_filter() {
         [Section::Mill2D, Section::Mill3D, Section::Drilling, Section::MultiAxis]
     );
     assert_eq!(operation::shown_for(Kind::Lathe), [Section::Drilling, Section::Turning]);
-    assert_eq!(operation::shown_for(Kind::MillTurn), Section::ORDER);
+    // A mill-turn shows every section but the plasma table's (#670):
+    // it spins steel, it strikes no arc - and a plasma table shows its
+    // own section alone.
+    assert_eq!(
+        operation::shown_for(Kind::MillTurn),
+        [Section::Mill2D, Section::Mill3D, Section::Drilling, Section::MultiAxis, Section::Turning]
+    );
+    assert_eq!(operation::shown_for(Kind::Plasma), [Section::Plasma]);
     // The per-kind word behind the section list: a section shows
     // exactly when `kinds_for` is non-empty, and the lathe's Drilling
     // section carries the Drill kind alone.
-    for machine in [Kind::Mill, Kind::Lathe, Kind::MillTurn] {
+    for machine in [Kind::Mill, Kind::Lathe, Kind::MillTurn, Kind::Plasma] {
         for s in Section::ORDER {
             let kinds = s.kinds_for(machine);
             assert_eq!(
@@ -291,13 +303,15 @@ fn the_probe_appends_its_id_and_lists_in_drilling() {
     // every older row keeps its own - and the menu still shows it in
     // the Drilling section, behind the hole cycles.
     assert_eq!(KindInfo::ALL.len(), KIND_COUNT);
-    assert_eq!(KindInfo::ALL[KIND_COUNT - 1].ty, operation::OpType::Probe);
+    assert_eq!(KindInfo::ALL[38].ty, operation::OpType::Probe);
+    // #670 appended the plasma profile behind it.
+    assert_eq!(KindInfo::ALL[KIND_COUNT - 1].ty, operation::OpType::PlasmaProfile);
     assert_eq!(KindInfo::ALL[13].ty, operation::OpType::Pocket3D, "Pocket3D keeps id 13");
     assert_eq!(KindInfo::ALL[37].ty, operation::OpType::BoringTurning, "the turning tail keeps 37");
     let drilling: Vec<operation::OpType> = Section::Drilling.kinds().into_iter().map(|i| KindInfo::ALL[i].ty).collect();
     assert_eq!(drilling, [operation::OpType::Drill, operation::OpType::Bore, operation::OpType::Probe]);
-    assert!(Section::Drilling.kinds_for(Kind::Mill).contains(&(KIND_COUNT - 1)));
-    assert!(!Section::Drilling.kinds_for(Kind::Lathe).contains(&(KIND_COUNT - 1)), "a lathe has no probe row");
+    assert!(Section::Drilling.kinds_for(Kind::Mill).contains(&38));
+    assert!(!Section::Drilling.kinds_for(Kind::Lathe).contains(&38), "a lathe has no probe row");
 }
 
 /// Issue #143: a pin goes through the history. Undo puts the previous

@@ -207,3 +207,39 @@ reads as the program, not as the stream echoed back. `post --trace
 <file>` writes the excerpt (each block as a `; [record N] label`
 header over its lines) and the viewer shows the same blocks beside
 the listing; clicking a block centers its first line.
+
+## Plasma records (`.cl` v5, #670)
+
+A plasma profile's path (`OpType::PlasmaProfile`, the torch on a
+plasma table) carries `Toolpath::plasma` ([`cl::PlasmaCut`]): the kerf
+the moves were offset by, the torch on / off per contour, each
+contour's role and the contour it lies in. The `.cl` dump writes it as
+comment-prefixed records (`cl::text::to_text` / `from_text`, and the
+golden writer `common::gen_to_cltext`, byte for byte), so the header
+reads `; HSMW-CL v5` and a reader that knows only the legacy grammar -
+the post's stream parser included - skips them. The moves stay the
+torch-centre truth (every lit move stands kerf / 2 off the part on the
+waste side, or on the centre line of an open run); the records say
+what the moves alone cannot. Pinned by
+`crates/app/tests/golden/plasma_plate_with_holes.cl`.
+
+| line | meaning |
+|---|---|
+| `; PLASMA KERF<µm> [CONTROL] [PIERCE<µm>] [CUTH<µm>] [DELAY<ms>] [AUTOFEED] [REVERSED]` | the header, once, right after `START`. `KERF` the kerf width (the torch tool's diameter or the op's override) - required. `CONTROL`: the control compensates (the G41/G42 spans ride the path's comps - see `COMP` above - with straight engage / cancel leads at least the kerf radius long, Tormach's PathPilot rule); absent: the offset is in the moves. `PIERCE` / `CUTH` the pierce and cut heights above the plate, `DELAY` the pierce delay - each present only when the op states it (absent = the controller's AutoFS decides). `AUTOFEED`: the op states no feed - the lit moves carry no `F`, the controller's material table feeds. `REVERSED`: the cut direction was overridden (outer contours counter-clockwise, holes clockwise; the default is outer CW / holes CCW, Hypertherm's square edge on the part) |
+| `; TORCH ON C<id> OUTER\|INNER\|OPEN [PARENT<id>] [SMALL<f×1000>]` | the torch is struck before the next motion record (the pierce: the tool already stands at the cut plane over the pierce point; the controller's G15/G16 own the Z). `C<id>` the contour's id - ids run in CUT ORDER from 0. `OUTER` a part's outer edge (waste outside), `INNER` a hole (waste inside), `OPEN` an open run cut on its centre line. `PARENT<id>` the closed contour it lies inside (a hole names its part's outline; an island part inside a hole names the hole; absent = none). `SMALL<f>` the small-hole rule cut it (LinuxCNC Plasma Primer §13): a straight lead-in from near the centre, no lead-out, an optional overburn, the cut feed times `f/1000` (650 = 65 %) |
+| `; TORCH OFF C<id>` | the torch goes out after the previous motion record (the lead-out's end, or a small hole's overburn end); names the same id as its `ON` |
+
+Laws (the reader refuses by line, `PlasmaCut::is_sane`): one header
+before any `TORCH`; spans never nest or overlap and appear in cut
+order; every lit record is a feed or arc, never a rapid; ids are
+unique and every `PARENT` names a contour of the path; a torch never
+put out is an error. Cut order is the generator's law and the
+records make it checkable: every contour's `OFF` comes before its
+parent's `ON` - an island before its hole, a hole before the outline
+that frees the part.
+
+For the post (#671) and the plasma verification laws (#672): the
+`.cnc` stream does not carry these records yet - posting a plasma
+table is refused until the plasma post ships (`posting::PLASMA_POSTS`
+is empty), and the post owns voicing them (`M200`/`M207..M211`,
+`G15`/`G16`, `M205`, `G30`; [UM] §7).

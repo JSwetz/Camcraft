@@ -41,6 +41,11 @@ anything else), so the token loses nothing but the redundancy; `S` is
 `+1` ccw, `-1` cw. A straight-line path dumps identically in either
 version - the header only changes when `Toolpath::has_arcs()`.
 
+Plasma paths (#670) dump as **v5**: a `; PLASMA` header after
+`START` and `; TORCH ON` / `; TORCH OFF` lines around each lit contour
+(docs/CNC-INTERMEDIATE.md, "Plasma records") - the kerf, the torch
+state, the cut order and each contour's nesting pinned with the moves.
+
 ## Naming
 
 By operation and shape: `face_<shape>.cl`, `contour_<shape>.cl`,

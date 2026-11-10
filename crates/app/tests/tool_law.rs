@@ -29,6 +29,7 @@ fn every_tool_kind() -> Vec<ToolKind> {
         ToolKind::Form,
         ToolKind::Taper,
         ToolKind::Probe,
+        ToolKind::Torch,
     ];
     for k in &all {
         match k {
@@ -43,7 +44,8 @@ fn every_tool_kind() -> Vec<ToolKind> {
             | ToolKind::Thread
             | ToolKind::Form
             | ToolKind::Taper
-            | ToolKind::Probe => {}
+            | ToolKind::Probe
+            | ToolKind::Torch => {}
         }
     }
     all

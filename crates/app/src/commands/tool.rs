@@ -46,6 +46,10 @@ impl AddTool {
         if let Some(err) = reserved(world, name) {
             return Err(err);
         }
+        // #670: a torch stating a spindle speed is refused by name.
+        if let Some(why) = tool.torch_refusal() {
+            return Err(CommandError::Invalid(format!("tool '{name}': {why}")));
+        }
         if !tool.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "tool parameters must be finite and positive: {tool:?}"
@@ -90,6 +94,9 @@ pub struct ChangeTool {
 
 impl ChangeTool {
     pub fn new(world: &World, name: &str, next: Tool) -> Result<Self, CommandError> {
+        if let Some(why) = next.torch_refusal() {
+            return Err(CommandError::Invalid(format!("tool '{name}': {why}")));
+        }
         if !next.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "tool parameters must be finite and positive: {next:?}"

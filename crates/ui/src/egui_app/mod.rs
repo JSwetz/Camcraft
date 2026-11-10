@@ -93,6 +93,8 @@ mod geo_page;
 mod heights_page;
 mod holes_page;
 mod probe_page;
+// #670: the Plasma Profile's page.
+mod plasma_page;
 mod kind_editors;
 mod mill2d_more_page;
 mod mill2d_page;
@@ -165,6 +167,8 @@ mod tree_ink_tests;
 mod pin_tests;
 #[cfg(test)]
 mod ribbon_icon_tests;
+#[cfg(test)]
+mod plasma_ribbon_tests;
 #[cfg(test)]
 mod debug_info_tests;
 #[cfg(test)]

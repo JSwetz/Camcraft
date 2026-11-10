@@ -74,7 +74,7 @@ fn link_after(pockets: &[(f64, f64)], y_a: f64, y_b: f64) -> (Vec<Warning>, usiz
 }
 
 fn judge(moves: Vec<Move>) -> Vec<Warning> {
-    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
+    let p = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new(), plasma: None };
     let region = rect();
     let tool = ToolGeom {
         radius: R,

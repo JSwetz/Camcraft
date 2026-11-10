@@ -150,6 +150,7 @@ pub fn pocket3d_air_split(
         threads: Vec::new(),
         probes: Vec::new(),
         breaks: Vec::new(),
+        plasma: None,
     };
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
@@ -277,6 +278,7 @@ fn run_rest(
         threads: Vec::new(),
         probes: Vec::new(),
         breaks: Vec::new(),
+        plasma: None,
     };
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));

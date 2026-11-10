@@ -8,6 +8,7 @@ use crate::geometry::units::Unit;
 use super::comp::CompSpan;
 use super::edge_break::EdgeBreak;
 use super::thread::ThreadCycle;
+use super::torch::PlasmaCut;
 use super::touch::ProbeTouch;
 use super::moves::{lattice, Move, MoveKind};
 use super::plane::{z_extrema, ArcPlane};
@@ -50,6 +51,10 @@ pub struct Toolpath {
     /// judges the moves against the part WITH these bevels, so the
     /// break the op exists to cut is not a gouge and nothing past it is.
     pub breaks: Vec<EdgeBreak>,
+    /// The plasma statement (#670, [`PlasmaCut`]): `None` for every
+    /// path but a plasma profile's - the kerf, the torch on / off per
+    /// contour and the contours' nesting, in cut order.
+    pub plasma: Option<PlasmaCut>,
 }
 
 impl Toolpath {
@@ -62,6 +67,7 @@ impl Toolpath {
             threads: Vec::new(),
             probes: Vec::new(),
             breaks: Vec::new(),
+            plasma: None,
         }
     }
 
@@ -401,6 +407,7 @@ impl PathBuilder {
             threads: Vec::new(),
             probes: Vec::new(),
             breaks: Vec::new(),
+            plasma: None,
         }
     }
 }

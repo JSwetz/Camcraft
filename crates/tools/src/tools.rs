@@ -80,6 +80,14 @@ pub enum ToolKind {
     /// radius by law (a probe tip is a sphere). It turns no spindle and
     /// removes no stock: only the Probe operation mounts it.
     Probe,
+    /// Plasma torch (#670): the arc cuts a kerf through the plate.
+    /// `diameter` IS the kerf width (≈ 1.5x the nozzle orifice, set by
+    /// the consumables, amperage and material - confirm by a test cut;
+    /// Tormach's 1300PL guidance), so every offset reads radius =
+    /// kerf / 2. It turns no spindle: `rpm` must be 0 (a stated rpm is
+    /// refused by name, [`Tool::torch_refusal`]). Only the plasma
+    /// operations mount it.
+    Torch,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -97,6 +105,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Form => "form gauge",
             ToolKind::Taper => "chamfer mill",
             ToolKind::Probe => "touch probe",
+            ToolKind::Torch => "plasma torch",
         };
         f.write_str(s)
     }
@@ -236,7 +245,9 @@ impl Tool {
             && self.shank_len >= 0.0
             && self.holder_d >= 0.0
             && self.holder_len >= 0.0
-            && self.rpm > 0.0
+            // A torch turns no spindle (#670): its rpm is 0 by law, and
+            // every spinning kind states a positive one.
+            && (if self.kind == ToolKind::Torch { self.rpm == 0.0 } else { self.rpm > 0.0 })
             && self.feed > 0.0
             && self.flutes.is_none_or(|z| (1..=32).contains(&z))
             && self.orientation.is_none_or(crate::orientation::is_valid)
@@ -299,8 +310,24 @@ impl Tool {
                     (self.corner_r - self.diameter * 0.5).abs() < 1e-9
                         && self.flute_len >= self.diameter
                 }
+                // A torch's kerf is a cut width, never a corner: no
+                // corner radius rides it (#670).
+                ToolKind::Torch => self.corner_r == 0.0,
                 _ => true,
             }
+    }
+
+    /// The torch's own refusal, by name (#670): a plasma torch stating a
+    /// spindle speed asks the program for an S word a torch has not.
+    /// `None` for every other kind and for a torch at rpm 0.
+    #[must_use]
+    pub fn torch_refusal(&self) -> Option<String> {
+        (self.kind == ToolKind::Torch && self.rpm != 0.0).then(|| {
+            format!(
+                "a plasma torch turns no spindle - its rpm must be 0 (it states {}); the kerf width is the torch's diameter",
+                self.rpm
+            )
+        })
     }
 
     /// The corner radius the tip really has (#263). A ball nose's or a
@@ -398,7 +425,7 @@ impl Tool {
             // meridian, which the turning verdicts read off `Tool`,
             // not off this cylinder.
             ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning
-            | ToolKind::Groove | ToolKind::Thread | ToolKind::Form => add_pt(&mut p, 0.0, r),
+            | ToolKind::Groove | ToolKind::Thread | ToolKind::Form | ToolKind::Torch => add_pt(&mut p, 0.0, r),
             // The chamfer mill's cone is the same picture read the
             // other way in purpose - apex at the tip center opening
             // upward to the full radius - so it shares the drill's
@@ -565,6 +592,10 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         // The touch probe (#108): a 4 mm ruby ball on a 30 mm stylus, the
         // everyday starter size - the Probe kind's catalog hint.
         ("PRB-0400", probe_tool(4.0, 30.0)),
+        // The plasma torch (#670): a 1.5 mm kerf, the order of a 45 A
+        // nozzle's cut in mild steel - a starting value the test cut
+        // corrects, never a promise.
+        ("PT-KERF-150", torch_tool(1.5)),
     ];
     // Cutting data (M13.2): the rotating mills state their edge
     // material and flute count - carbide, as the speeds above were
@@ -613,6 +644,35 @@ pub fn probe_tool(ball_d: f64, stylus_len: f64) -> Tool {
         material_group: String::new(),
         rpm: 1.0,
         feed: 300.0,
+        tool_material: None,
+        flutes: None,
+        center_cutting: false,
+        orientation: None,
+    }
+}
+
+/// A plasma torch of kerf width `kerf` mm (#670): the kerf rides as the
+/// diameter, no corner, no spindle (rpm 0), the torch body as a plain
+/// shank. `feed` is a nominal starting value - the plasma op states its
+/// own (or leaves it to the controller's material table).
+#[must_use]
+pub fn torch_tool(kerf: f64) -> Tool {
+    Tool {
+        kind: ToolKind::Torch,
+        diameter: kerf,
+        corner_r: 0.0,
+        tip_angle: 0.0,
+        pitch: 0.0,
+        nose_radius: 0.0,
+        width: 0.0,
+        flute_len: 10.0,
+        shank_d: 30.0,
+        shank_len: 100.0,
+        holder_d: 0.0,
+        holder_len: 0.0,
+        material_group: "mild steel".into(),
+        rpm: 0.0,
+        feed: 2500.0,
         tool_material: None,
         flutes: None,
         center_cutting: false,

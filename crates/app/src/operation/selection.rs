@@ -216,7 +216,8 @@ pub(super) fn selection_geometry_in(
         params,
         OpParams::Pocket { .. } | OpParams::Adaptive2D { .. } | OpParams::Offset2D { .. }
     );
-    let contour = matches!(params, OpParams::Contour { .. });
+    // The plasma profile takes open runs as the contour does (#670).
+    let contour = matches!(params, OpParams::Contour { .. } | OpParams::PlasmaProfile(_));
     let contour_side = match params {
         OpParams::Contour { side, .. } => *side,
         _ => Side::Auto,

@@ -91,6 +91,10 @@ impl KindInfo {
 /// no cutting kind mounts a probe.
 pub const PROBE: &[ToolKind] = &[ToolKind::Probe];
 
+/// The plasma torch (#670): the plasma operations mount nothing else,
+/// and no cutting kind mounts a torch.
+pub const TORCH: &[ToolKind] = &[ToolKind::Torch];
+
 /// The radius a mill tool removes with certainty (#266): half its
 /// diameter, except a Tap-kind tool (tap or thread mill), whose sure
 /// removal is its thread's MINOR cylinder, `d / 2 - THREAD_DEPTH_PER_PITCH
