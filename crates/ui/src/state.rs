@@ -125,6 +125,10 @@ pub enum CommandKind {
         path: String,
         machine: Box<camcraft_app::machine::Machine>,
     },
+    /// The Machines pane's "Use for this setup" (#384): re-read and
+    /// re-validate a catalogue machine (a refused file never mounts),
+    /// then route it like every machine verb (`state_setup_mount`).
+    UseCatalogueMachine(camcraft_app::machine::library::MachineSource),
     /// The post script (M3.3 A): the built-in arm ships, the dialog arm
     /// picks a user `.cps` through the file-pick law, and the path arm
     /// is what the headless tests run. Selection is a command like
@@ -2534,6 +2538,9 @@ impl State {
                 }
             }
             CommandKind::EditMachineApply { path, machine } => self.mount_edited(path, *machine),
+            // #384: the Machines pane's "Use for this setup" - routed
+            // like every machine verb (`setup_mount`).
+            CommandKind::UseCatalogueMachine(source) => self.mount_catalogue(&source),
             CommandKind::SelectPostBuiltin => self.select_post(PostRef::Builtin),
             CommandKind::SelectPostDialog => {
                 if let Some(path) = pick_post_file() {
