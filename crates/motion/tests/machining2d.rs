@@ -71,10 +71,14 @@ fn face_of_a_square_is_three_exact_rows() {
 fn rapids_only_appear_at_the_ends() {
     let r = rect(0.0, 0.0, 20.0, 20.0);
     let t = face(&r, &params()).expect("valid params");
-    assert_eq!(t.moves[0].kind, MoveKind::Plunge);
-    assert_eq!(t.moves[0].from.z, 5.0, "path starts in air");
+    // The approach (#690): a rapid on the clearance plane to the entry,
+    // then the plunge - never a feed out of the tool-change position.
+    assert_eq!(t.moves[0].kind, MoveKind::Rapid);
+    assert_eq!((t.moves[0].from.z, t.moves[0].to.z), (5.0, 5.0), "the approach runs at clearance");
+    assert_eq!(t.moves[1].kind, MoveKind::Plunge);
+    assert_eq!(t.moves[1].from, t.moves[0].to, "the plunge drops from the approach's end");
     assert_eq!(t.moves.last().unwrap().kind, MoveKind::Rapid);
-    for m in &t.moves[1..t.len() - 1] {
+    for m in &t.moves[2..t.len() - 1] {
         assert_ne!(m.kind, MoveKind::Rapid, "mid-path rapid: {m:?}");
     }
     // The final rapid lifts straight up from the last row's end.
@@ -82,6 +86,21 @@ fn rapids_only_appear_at_the_ends() {
     assert_eq!(last.from.x, last.to.x);
     assert_eq!(last.from.y, last.to.y);
     assert_eq!(last.to.z, 5.0);
+}
+
+#[test]
+fn a_face_entering_at_the_origin_still_opens_with_its_approach() {
+    // #690's edge: tool 10 (r 5), climb - the entry is the region's low
+    // X minus r and the first row its low Y plus r, so this region puts
+    // the entry exactly at X0 Y0, the cursor's own start. The approach
+    // is still the first move, a rapid at clearance, before the plunge.
+    let t = face(&rect(5.0, -5.0, 25.0, 15.0), &params()).expect("valid params");
+    let (a, plunge) = (&t.moves[0], &t.moves[1]);
+    assert_eq!(a.kind, MoveKind::Rapid, "{a:?}");
+    assert_eq!((a.to.x, a.to.y, a.to.z), (0.0, 0.0, 5.0), "the approach commands the entry at clearance");
+    assert_eq!(plunge.kind, MoveKind::Plunge);
+    assert_eq!(plunge.from, a.to);
+    assert!(t.is_chained());
 }
 
 #[test]
@@ -142,7 +161,7 @@ fn face_steps_down_through_levels() {
         .iter()
         .filter(|m| m.kind == MoveKind::Rapid)
         .count();
-    assert_eq!(rapids, 2 * (zs.len() - 1) + 1, "hop rapids plus the final lift");
+    assert_eq!(rapids, 1 + 2 * (zs.len() - 1) + 1, "the approach (#690), hop rapids, the final lift");
     for (i, m) in t.moves.iter().enumerate() {
         if m.kind == MoveKind::Plunge && i > 0 {
             assert_eq!(t.moves[i - 1].kind, MoveKind::Rapid);

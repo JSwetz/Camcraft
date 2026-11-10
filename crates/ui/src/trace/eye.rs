@@ -43,7 +43,7 @@ use camcraft_app::geometry::Point3;
 
 use super::composite::{Composite, FrameGeom};
 use super::cpu_eye::{CpuEye, CpuJob};
-use super::eye_geom::{cam_bits, TAN_HALF_FOV};
+use super::eye_geom::{cam_bits, ortho_word, TAN_HALF_FOV};
 pub use super::eye_geom::{encode, fit, preview_camera};
 use super::TracePass;
 use crate::viewport::Camera;
@@ -59,13 +59,13 @@ const CPU_PIXELS: u64 = 1 << 15;
 /// CPU worker only carries it back).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Key {
-    cam: [u64; 4],
+    cam: [u64; 5],
     view: (u32, u32),
 }
 
 impl Key {
     /// A key no frame is ever shown under (a lost worker's answer).
-    pub(crate) const NONE: Key = Key { cam: [u64::MAX; 4], view: (0, 0) };
+    pub(crate) const NONE: Key = Key { cam: [u64::MAX; 5], view: (0, 0) };
 }
 
 struct Frame {
@@ -214,6 +214,7 @@ impl StockEye {
             right: v(f.pcam.right),
             up: v(f.pcam.up),
             tan_half_fov: TAN_HALF_FOV as f32,
+            ortho_half_height: ortho_word(&f.pcam),
             view: f.key.view,
             k: f.k,
             trace: f.trace,

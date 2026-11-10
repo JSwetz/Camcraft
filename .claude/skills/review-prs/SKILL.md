@@ -126,6 +126,60 @@ was clean. Merging a PR can turn others `CONFLICTING`, so each run also
 re-checks every open PR labelled `merge-ready` and swaps any that now
 conflict to `conflicts`.
 
+## 2c. Token cost comment - when a PR turns merge-ready
+
+When a review ends with the PR labelled `merge-ready` (step 2b), the
+dispatcher (this skill's caller, not the reviewer - only the caller sees
+the agent's usage) posts one more PR comment with the estimated token
+cost of getting that PR to merge-ready (user, 2026-11-10: "an average
+token cost should be added as comment to each review based when its
+merge ready").
+
+- **What counts:** every agent run on this PR that the caller dispatched,
+  plus the merge-ready review itself - each review and re-review
+  (`PR-reviewer`), conflict-resolution or replacement-branch agents, and
+  the fix agent for our own issue PRs. Take each run's token total from
+  its completion notification (`subagent_tokens`) and its model. The
+  caller's own main-session turns aren't attributable per PR and are not
+  counted - say so.
+- **Rate:** usage reports one total, not an input/output split, so
+  estimate it as 90 % input and 10 % output at list price - a blended
+  upper estimate (cache reads, billed at about a tenth of input, make the
+  real cost lower). Blended per million tokens: Opus 5.5 about $5.60,
+  Sonnet 5.5 about $2.80, Haiku 5.5 about $0.14. When list prices change,
+  update these numbers from the `claude-api` skill's model table.
+- **Comment shape** (one comment, first line is the marker so it's never
+  posted twice for the same head):
+
+  ```
+  <!-- review-cost: <head sha> -->
+  **Estimated agent cost to merge-ready:** ~$X.XX (N tokens)
+  | Run | Model | Tokens | Est. cost |
+  |---|---|---|---|
+  | review | Sonnet 5.5 | 71k | ~$0.20 |
+  | conflict fix (replacement #M) | Opus 5.5 | 64k | ~$0.36 |
+  Blended upper estimate (90 % input / 10 % output at list price; cache
+  reads make the real cost lower). Main-session coordination isn't
+  counted.
+  ```
+- A run whose token total isn't known (e.g. a review from another
+  session) is listed as "not known" and left out of the sum.
+- No cost comment for `needs-rework`, `conflicts` or `needs-maintainer`
+  verdicts; the next review that ends `merge-ready` sums every run on
+  the PR so far (earlier rounds included).
+
+## 2d. Process PRs - version bump and announcement
+
+A PR that changes a process file (`AGENTS.md`, `.claude/agents/`,
+`.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh`) must increment
+the integer in `.claude/PROCESS_VERSION` (AGENTS.md "Process changes bump
+`PROCESS_VERSION`"). The reviewer checks this; a missing bump is a
+requested change (`needs-rework`). When such a PR merges, whoever merges
+it comments on the pinned issue #681 (Process changes):
+`PROCESS_VERSION <n>` · PR #M · what changed · what a fork must do (usually
+"pull the process files", the command in the issue body). That comment is
+how fork maintainers subscribed to #681 hear about it.
+
 ## 3. Report
 
 One short line per PR: number, author, verdict, link to the posted review.

@@ -296,7 +296,7 @@ pub fn geodesic(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Gen
         }
     }
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = 0usize;
     let mut refused_runs = 0usize;
     let mut breaks = 0usize;
