@@ -98,5 +98,5 @@ pub(crate) use arc_cross::crossing_free;
 pub(crate) use arc_proof::{ProofTally, fit_proved};
 pub(crate) use arcs::push_segs;
 pub(crate) use microlift::link_at as microlift_link;
-pub(crate) use pocket_hsm::adaptive_passes;
+pub(crate) use pocket_hsm::{adaptive_passes, choose_entry};
 pub(crate) use waterscan::chord_crosses_path;

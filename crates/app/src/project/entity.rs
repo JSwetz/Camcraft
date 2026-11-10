@@ -117,6 +117,10 @@ pub struct PathDto {
     /// cache no longer matches: see `to_cache`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<super::touch_dto::ProbeTouchDto>,
+    /// The declared edge breaks (#303, `crate::cl::EdgeBreak`): the
+    /// same additive law - absent is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<super::break_dto::EdgeBreakDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -281,6 +285,11 @@ pub struct SetupDto {
     /// every older file - links nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relative_to: Option<String>,
+    /// v57 (#320): where the setup's stock comes from (`"own"` |
+    /// `"from_previous"`). Absent - every older file, and a setup never
+    /// picked - is #317's implicit rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_source: Option<String>,
 }
 
 /// A setup's WCS as files hold it. v54 (#342) writes one entity name
@@ -469,6 +478,7 @@ impl PathDto {
             comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
             threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
             probes: t.path.probes.iter().map(super::touch_dto::ProbeTouchDto::from_touch).collect(),
+            breaks: t.path.breaks.iter().map(super::break_dto::EdgeBreakDto::from_break).collect(),
         }
     }
 
@@ -492,6 +502,7 @@ impl PathDto {
             .collect();
         path.probes = super::touch_dto::load(&self.probes, &path.moves);
         path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
+        path.breaks = super::break_dto::load(&self.breaks);
         ToolpathCache::new(path, self.warnings.clone())
     }
 }
@@ -536,4 +547,8 @@ pub struct EntityDto {
     /// of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixture: Option<FixtureDto>,
+    /// A Pause / Home entry (#155); present exactly when
+    /// `kind == Some(Entry)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<super::program_entry_dto::ProgramEntryDto>,
 }

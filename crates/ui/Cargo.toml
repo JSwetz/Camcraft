@@ -27,6 +27,10 @@ egui_dock = { workspace = true }
 # derived deserializer's error soup cannot promise.
 serde_json = { workspace = true }
 
+# #144: the Cmd+Q terminate hook (egui_app/os_quit.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+
 [dev-dependencies]
 # egui's own test harness, for the frame tests in the lib (egui_app) -
 # the point is to run the SAME shell_layout code the window runs.

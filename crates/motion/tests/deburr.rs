@@ -181,12 +181,16 @@ fn rim_of_an_open_mesh_rides_the_whole_loop() {
 }
 
 #[test]
-fn convex_creases_all_ride_a_closed_box_breaks_every_edge() {
-    // Every dihedral of a box is convex: the cut stands on the eight
-    // corners' tip lines, at the two level lines z - DROP.
+fn convex_creases_all_ride_a_closed_box_breaks_every_level_edge() {
+    // Every dihedral of a box is convex: the level creases ride at the
+    // two level lines z - DROP, around the corners. The four vertical
+    // corner creases climb steeper than the cone's flank - a vertical
+    // cone riding one would countersink the corner down to the window
+    // floor (#303) - so they are skipped, and the path says so.
     let f = box_mesh(0.0, 0.0, 40.0, 20.0, -10.0, 0.0);
     let t = deburr(&f, &params(2.0, -12.0)).expect("a box is all burr");
-    assert!(t.notes.is_empty(), "a clean weld speaks nothing: {:?}", t.notes);
+    assert_eq!(t.notes.len(), 1, "only the steep skip speaks: {:?}", t.notes);
+    assert!(t.notes[0].contains("4 edges climb steeper"), "{:?}", t.notes);
     let corners = [(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)];
     for c in cut_points(&t) {
         assert!(
@@ -206,6 +210,18 @@ fn convex_creases_all_ride_a_closed_box_breaks_every_edge() {
                 "the corner ({x},{y}) level {z} never rode"
             );
         }
+    }
+    // No cut move runs up a corner line: every feed is level.
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Feed) {
+        assert!((m.from.z - m.to.z).abs() < 1e-9, "a feed climbed a vertical corner: {m:?}");
+    }
+    // The declared breaks are the two level loops at the edges' own Z.
+    assert_eq!(t.breaks.len(), 2, "{:?}", t.breaks);
+    for b in &t.breaks {
+        assert!((b.depth - DROP).abs() < 1e-9 && (b.slope - 1.0).abs() < 1e-9, "{b:?}");
+        let z = b.edge[0].z;
+        assert!(z == 0.0 || z == -10.0, "a break off the edge levels: {b:?}");
+        assert!(b.edge.iter().all(|p| p.z == z), "a level loop that climbs: {b:?}");
     }
 }
 
@@ -231,18 +247,41 @@ fn concave_creases_are_pencil_s_corner_not_a_burr() {
 
 #[test]
 fn the_window_clips_along_the_edges_own_line() {
-    // A curtain standing z 0..-10: with the tip window [-4, -2] the
-    // top rim (tip -2) rides whole and each side rim is cut short -
-    // its kept end stands exactly ON the window floor, the rim's own
-    // slope's doing, not a drop of the whole segment.
-    let t = deburr(&curtain(0.0, 10.0, -10.0, 0.0), &params(-2.0, -4.0)).expect("top rim is in reach");
+    // A trapezoid curtain in y = 0: the top rim level at z 0, its two
+    // sides falling 1 in 2 to z -10 (shallower than the 90-deg cone's
+    // flank, so they ride). With the tip window [-4, -2] the top rim
+    // (tip -2) rides whole and each side is cut short - its kept end
+    // stands exactly ON the window floor, the rim's own slope's doing,
+    // not a drop of the whole segment.
+    let f = vec![
+        Triangle::new(p3(-20.0, 0.0, -10.0), p3(30.0, 0.0, -10.0), p3(10.0, 0.0, 0.0)),
+        Triangle::new(p3(-20.0, 0.0, -10.0), p3(10.0, 0.0, 0.0), p3(0.0, 0.0, 0.0)),
+    ];
+    let t = deburr(&f, &params(-2.0, -4.0)).expect("top rim is in reach");
+    assert!(t.notes.is_empty(), "nothing steep here: {:?}", t.notes);
     let cut = cut_points(&t);
-    let want = keys(&[p3(0.0, 0.0, -2.0), p3(10.0, 0.0, -2.0), p3(0.0, 0.0, -4.0), p3(10.0, 0.0, -4.0)]);
-    assert_eq!(keys(&cut), want, "one clipped circuit: the rim plus two clipped sides");
+    let want = keys(&[p3(-4.0, 0.0, -4.0), p3(0.0, 0.0, -2.0), p3(10.0, 0.0, -2.0), p3(14.0, 0.0, -4.0)]);
+    let mut got = keys(&cut);
+    got.sort_unstable();
+    got.dedup();
+    assert_eq!(got, want, "one clipped circuit: the rim plus two clipped sides");
     assert_eq!(t.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count(), 1);
     for c in &cut {
         assert!(c.z >= -4.0 - 1e-9 && c.z <= -2.0 + 1e-9, "a tip outside the programmed window: {c:?}");
     }
+}
+
+#[test]
+fn a_vertical_edge_is_skipped_out_loud_never_countersunk() {
+    // #303: the plain curtain's side rims are vertical. A vertical cone
+    // riding one, apex DROP under each point, would cut the top of the
+    // rim down to the window floor - so only the top rim rides, the
+    // sides are skipped, and the note names them.
+    let t = deburr(&curtain(0.0, 10.0, -10.0, 0.0), &params(-2.0, -4.0)).expect("top rim is in reach");
+    assert!(t.notes.iter().any(|n| n.contains("2 edges climb steeper")), "{:?}", t.notes);
+    let mut got = keys(&cut_points(&t));
+    got.dedup();
+    assert_eq!(got, keys(&[p3(0.0, 0.0, -2.0), p3(10.0, 0.0, -2.0)]), "only the level rim rides");
 }
 
 #[test]

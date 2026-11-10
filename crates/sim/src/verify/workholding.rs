@@ -12,7 +12,9 @@
 //! clear: an upright move (rotary at zero - both frames agree), a pose
 //! the rotary alone cannot stand upright, or no axis stated keep the
 //! part-frame laws byte-identical. The turning boxes keep theirs
-//! untouched.
+//! untouched. Under the spindle C (#486, [`super::c_steel`]) every
+//! box is read at the station pose the C states, and fixed boxes are
+//! read in the machine frame as well - that reading only ADDS hits.
 //!
 //! Provenance: rigid rotation of a rotary work about its axis line is
 //! textbook machine kinematics (RS-274 rotary addresses; 4-axis
@@ -21,8 +23,10 @@
 use crate::cl::{MoveKind, Toolpath};
 use crate::fixture::FixtureBox;
 use crate::tools::ToolGeom;
+use camcraft_tools::holder_profile::HolderStack;
 
-use super::laws::{bands_vs_fixtures, rapids_vs_fixtures_spindle};
+use super::c_steel::{fixed_hits, merge, station_poses};
+use super::laws::{bands_vs_fixtures_held, rapids_vs_fixtures_held};
 use super::posed_steel::{sweep, Verdict};
 use super::rotary::RotaryAxis;
 use super::types::{FixturePart, Warning};
@@ -52,9 +56,31 @@ pub fn bands_vs_workholding(
     spindle: Option<(f64, f64)>,
     chord_tol: f64,
 ) -> Vec<Warning> {
-    judge(path, wh, false, |boxes| bands_vs_fixtures(path, tool, boxes, spindle, chord_tol), |boxes, ax| {
-        sweep(path, tool, boxes, spindle, chord_tol, false, Some(ax))
-    })
+    bands_vs_workholding_held(path, tool, &HolderStack::cylinder(tool), wh, spindle, chord_tol)
+}
+
+/// [`bands_vs_workholding`] with what stands above the shank stated
+/// (#368): a modelled body's bands in place of the holder cylinder.
+#[must_use]
+pub fn bands_vs_workholding_held(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    holder: &HolderStack,
+    wh: &Workholding<'_>,
+    spindle: Option<(f64, f64)>,
+    chord_tol: f64,
+) -> Vec<Warning> {
+    // Under the spindle C (#486): the pose the machine holds, and the
+    // fixed steel read in the machine frame too ([`super::c_steel`]).
+    let path = &*station_poses(path);
+    let warns = judge(
+        path,
+        wh,
+        false,
+        |boxes| bands_vs_fixtures_held(path, tool, holder, boxes, spindle, chord_tol),
+        |boxes, ax| sweep(path, tool, holder, boxes, spindle, chord_tol, false, Some(ax)),
+    );
+    merge(warns, &fixed_hits(path, tool, holder, wh.fixed, wh.axis.as_ref(), spindle, chord_tol, false))
 }
 
 /// Law (d2) over split workholding: every rapid, the spindle housing
@@ -66,9 +92,28 @@ pub fn rapids_vs_workholding(
     wh: &Workholding<'_>,
     spindle: Option<(f64, f64)>,
 ) -> Vec<Warning> {
-    judge(path, wh, true, |boxes| rapids_vs_fixtures_spindle(path, tool, boxes, spindle), |boxes, ax| {
-        sweep(path, tool, boxes, spindle, 0.01, true, Some(ax))
-    })
+    rapids_vs_workholding_held(path, tool, &HolderStack::cylinder(tool), wh, spindle)
+}
+
+/// [`rapids_vs_workholding`] with what stands above the shank stated
+/// (#368).
+#[must_use]
+pub fn rapids_vs_workholding_held(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    holder: &HolderStack,
+    wh: &Workholding<'_>,
+    spindle: Option<(f64, f64)>,
+) -> Vec<Warning> {
+    let path = &*station_poses(path);
+    let warns = judge(
+        path,
+        wh,
+        true,
+        |boxes| rapids_vs_fixtures_held(path, tool, holder, boxes, spindle),
+        |boxes, ax| sweep(path, tool, holder, boxes, spindle, 0.01, true, Some(ax)),
+    );
+    merge(warns, &fixed_hits(path, tool, holder, wh.fixed, wh.axis.as_ref(), spindle, 0.01, true))
 }
 
 /// The merge: per move the turning boxes' verdict first; else the

@@ -17,6 +17,7 @@ capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 axisInversion = true; // verified on the engine's mirrored stream for an inverted X/Y (#374): goldens + equivalence test
+probeAxisInversion = true; // probing blocks verified on the mirrored stream (#392): macro interpreter on a simulated inverted machine
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -33,6 +34,7 @@ var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var homedAt = -1;          // linesWritten() just after a trip home (#504): onClose skips its own home when nothing followed
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
@@ -54,6 +56,16 @@ function fu(v) {  // mm at three decimals, trailing zeros trimmed
   var s = Number(v).toFixed(3);
   if (s.indexOf(".") >= 0) s = s.replace(/0+$/, "").replace(/\.$/, "");
   return s === "-0" ? "0" : s;
+}
+// #377: `expr - v` as a macro-B expression with v's sign folded into the
+// operator, so a negative v never writes a doubled sign (`#100--15`).
+// Macro B's arithmetic form is `#i=#j-#k` / `#i=#j+#k` (Fanuc custom
+// macro B, published operator documentation); a value that formats to 0
+// (including -0 and anything under half a micron) adds no term.
+function minusU(expr, v) {
+  var s = fu(v);
+  if (s === "0") return expr;
+  return s.charAt(0) === "-" ? expr + "+" + s.substring(1) : expr + "-" + s;
 }
 function ff(v) { return has(v) && v > 0 ? String(Math.round(v)) : "0"; }
 function w(letter, v) { return has(v) ? letter + fu(v) : ""; }
@@ -369,6 +381,7 @@ function afterOp() {
     block(["G91", "G28", "Z0"]);  // straight up to the reference point first
     block(["G28", "X0", "Y0"]);
     block(["G90"]);               // absolute again before the next section
+    homedAt = linesWritten();
     return;
   }
   msg(coolantWho() + "unknown after-operation ask " + ask);
@@ -494,7 +507,7 @@ function onProbeMove() {
   var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
   var ai = d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
   var tgt = [p.X - orgX, p.Y - orgY, p.Z - orgZ][ai];
-  block(["IF[ABS[#" + (5061 + ai) + "-" + fu(tgt) + "]LT0.001]THEN#3000=2(PROBE NO CONTACT)"]);
+  block(["IF[ABS[" + minusU("#" + (5061 + ai), tgt) + "]LT0.001]THEN#3000=2(PROBE NO CONTACT)"]);
   if (has(p.Measure) && p.Measure >= 0) {
     var b = probeBase + 3 * p.Measure;
     block(["#" + b + "=#5061"]);
@@ -506,6 +519,24 @@ function onProbeRetreat() {
   var p = properties;
   block(["G91", "G01", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
   block(["G90"]);
+}
+// #174. A protected positioning move (the descent to a touch's start,
+// the travel between touches, the rise) is the same G31 skip, read the
+// other way round: with no skip signal the block ends at its target and
+// #5061-#5063 hold that end point; a trip on the way stops it short, so
+// any moving axis whose skip position is not the target alarms (#3000)
+// - an obstacle where the model has none stops the program instead of
+// the stylus being driven into it. Same public sources as above.
+function onProbeGuard() {
+  startPreamble();
+  compRefuse("a protected probe move");
+  var p = properties;
+  block(["G31", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  var to = [p.X, p.Y, p.Z], from = [p.StartX, p.StartY, p.StartZ], org = [orgX, orgY, orgZ];
+  for (var ai = 0; ai < 3; ai++) {
+    if (has(from[ai]) && Math.abs(to[ai] - from[ai]) < 1e-6) continue;  // an axis that holds still
+    block(["IF[ABS[" + minusU("#" + (5061 + ai), to[ai] - org[ai]) + "]GT0.001]THEN#3000=3(PROBE HIT ON POSITIONING)"]);
+  }
 }
 function slotOf(word) {  // "G55" -> 1
   var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
@@ -522,7 +553,7 @@ function onProbeResult() {
     var sum = [];
     for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
     var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
-    block(["#" + (dev + i) + "=" + mean + "-" + fu(a.Expected - org[ai])]);
+    block(["#" + (dev + i) + "=" + minusU(mean, a.Expected - org[ai])]);
     block(["IF[ABS[#" + (dev + i) + "]GT" + fu(p.Tolerance) + "]THEN#3000=1(PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
   }
   if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
@@ -541,8 +572,12 @@ function onProbeResult() {
 // ------------------------------------------------------------ footer
 function onClose() {
   endPreamble();
-  block(["G91", "G28", "Z0"]);
-  block(["G28", "X0", "Y0"]);
+  // #504: a trip home with nothing written after it (a trailing Go
+  // home) already is the program-end home - written once, not twice.
+  if (linesWritten() !== homedAt) {
+    block(["G91", "G28", "Z0"]);
+    block(["G28", "X0", "Y0"]);
+  }
   block(["M30"]);
   writeln("%");
 }

@@ -2,6 +2,7 @@
 
 use super::kernel::{StockError, part_surface};
 use super::dexel::Dexel;
+use super::wall_slack::{settle, Candidate};
 
 use crate::geometry::{Point3, Triangle};
 /// What the finished program leaves, per column, against the model's
@@ -40,7 +41,10 @@ impl Deviation {
     }
 }
 
-/// Measure the grid against the model on the grid's own lattice.
+/// Measure the grid against the model on the grid's own lattice. A
+/// gouge is judged with `tol` of lateral slack as well as vertical
+/// (`wall_slack`, #299): a column within `tol` of a wall is not
+/// charged the wall's height.
 pub fn deviate(dex: &Dexel, facets: &[Triangle], tol: f64) -> Result<Deviation, StockError> {
     if !tol.is_finite() {
         return Err(StockError::Invalid(format!("tolerance {tol} is not finite")));
@@ -63,6 +67,7 @@ pub fn deviate(dex: &Dexel, facets: &[Triangle], tol: f64) -> Result<Deviation, 
         max_rest_at: None,
         max_gouge_at: None,
     };
+    let mut cands: Vec<Candidate> = Vec::new();
     for iy in 0..dex.ny {
         for ix in 0..dex.nx {
             let k = ix + iy * dex.nx;
@@ -80,15 +85,13 @@ pub fn deviate(dex: &Dexel, facets: &[Triangle], tol: f64) -> Result<Deviation, 
                     d.max_rest_at = Some(Point3::new(dex.center(ix, iy).x, dex.center(ix, iy).y, sim));
                 }
             } else if v < -tol {
-                d.gouge_cells += 1;
-                d.gouge_volume += -v * a2;
-                if -v > d.max_gouge {
-                    d.max_gouge = -v;
-                    d.max_gouge_at = Some(Point3::new(dex.center(ix, iy).x, dex.center(ix, iy).y, sim));
-                }
+                // #299: judged once the whole lattice is read - a
+                // column within `tol` of a wall is not the wall's gouge.
+                cands.push(Candidate { k, sim, v, at: Point3::new(dex.center(ix, iy).x, dex.center(ix, iy).y, sim) });
             }
         }
     }
+    settle(&mut d, facets, dex.x0, dex.y0, &part, &cands);
     Ok(d)
 }
 

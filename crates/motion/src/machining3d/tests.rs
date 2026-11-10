@@ -79,3 +79,14 @@ fn the_sampler_reads_both_stock_engines_alike() {
     assert!(seen[0] > 0.3 && seen[0] < 0.7, "the wall pass is a half bite: {seen:?}");
     assert_eq!(seen[2], 1.0, "the fresh shelf is a full bite: {seen:?}");
 }
+
+/// Issue #55: the wrap's air split sorts a plane AT the part's leave
+/// envelope (to the last bit of float noise) with the material planes;
+/// only a plane clearly above it is an air plane.
+#[test]
+fn a_plane_at_the_leave_envelope_is_a_material_plane() {
+    let zs = [7.000000000000001, 6.500000000000001, 6.000000000000001, 5.5];
+    assert_eq!(super::entry::air_levels(&zs, 6.5), 1, "6.5 + 1 ulp is the envelope's own plane");
+    assert_eq!(super::entry::air_levels(&zs, 6.4), 2, "a plane 0.1 above is air");
+    assert_eq!(super::entry::air_levels(&zs, 7.5), 0, "no plane above the envelope");
+}

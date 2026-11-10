@@ -19,11 +19,13 @@
 //! - **Subtraction is conservative.** A move removes, per cell, the
 //!   LOWEST Z the tool bottom reaches while its disc touches the cell
 //!   center - computed from the exact interval of the move that is in
-//!   reach, not from the endpoints. Arcs ride their `chords` (the same
-//!   sagitta law as everywhere else): chords sweep a hair LESS than
-//!   the true arc, so a sim reports a touch more rest than exists and
-//!   never a gouge the tool did not commit. A silent wrong answer is
-//!   the one failure mode; over-reporting rest is honest noise.
+//!   reach, not from the endpoints. XY arcs sweep the TRUE arc
+//!   (`dexel_arc`, #402): inscribed chords stand a sagitta nearer the
+//!   arc's centre, which over-cuts toward a convex corner (a gouge the
+//!   tool never committed, refusing a correct post) and under-cuts
+//!   away from it (a concave wall's real gouge hidden) - no chord
+//!   placement is honest on both sides at once. XZ / YZ arcs still
+//!   ride their in-plane chords.
 //! - **Rapids touch nothing** (RS-274 G0 practice: no material contacts
 //!   a tool moving at rapid). Feeds and plunges cut.
 //! - **The ball atom is exact, not sampled** (`cut_ball`): a sphere's
@@ -50,6 +52,9 @@
 //!   trusted to be right, or wrong. Columns that answer no verdict
 //!   (air in the stock, or air in the model) carry NaN, never a zero
 //!   dressed up as a clean bill of health.
+//! - **A gouge is judged with `tol` sideways too** (#299, `wall_slack`):
+//!   against the lowest part top within `tol` of the column centre, so
+//!   a centre microns inside a finished wall is not charged the wall.
 
 
 
@@ -59,11 +64,14 @@ mod carry;
 mod columns;
 mod cut;
 mod dexel;
+mod dexel_arc;
 mod dexel_bull;
 mod deviate;
+mod edge_break;
 mod display;
 mod dual;
 mod field;
+mod field_arc;
 mod field_batch;
 mod field_blade;
 mod field_bull;
@@ -83,10 +91,13 @@ mod qef;
 pub mod iso;
 pub mod preview;
 mod ridge;
+mod ridge_scan;
 mod scan;
+mod scan_arc;
 mod scan_hidden;
 mod scan_near;
 mod tiles;
+mod wall_slack;
 
 pub use backend::{Backend, Stock, FIELD_BAND, FIELD_VERDICT_EPS, LATHE_COLUMN_REFUSAL};
 pub use carry::{Body, LatticeTurn, CARRY_TURN_REFUSAL};
@@ -94,6 +105,7 @@ pub use columns::Columns;
 pub use cut::{auto_cell, first_posed, simulate, SimOp, POSED_REFUSAL};
 pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};
 pub use dexel::{reach, Dexel};
+pub use edge_break::credit_breaks;
 pub use field::SdfField;
 pub use field_batch::CutStats;
 pub use field_blade::{LatheProfile, CROWN_SAG_TOL};

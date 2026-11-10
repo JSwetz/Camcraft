@@ -13,6 +13,8 @@
 //! No flecs, no schema.
 
 pub mod fixture;
+// #339: a fixture's closed mesh as the narrow phase of the steel laws.
+pub mod fixture_mesh;
 pub mod sim;
 pub mod solid_rest;
 pub mod stock_sim;
