@@ -10,7 +10,7 @@
 
 use egui::{RichText, Ui};
 
-use camcraft_app::setup_stock::{self, Incoming, StockSource};
+use camcraft_app::setup_stock::{self, StockSource};
 use camcraft_app::units;
 
 use crate::state::{CommandKind, State};
@@ -55,10 +55,12 @@ pub(super) fn picker(ui: &mut Ui, state: &mut State, name: &str) {
 }
 
 /// The incoming stock's box and volume, measured once per document
-/// version (the program sim is not run every frame).
+/// version (the program sim is not run every frame): the viewport
+/// sheet's measurement when it stands (#406), else measured here.
 fn incoming(ui: &mut Ui, state: &State, name: &str, prev: &str) {
     let id = egui::Id::new(("setup_incoming_stock", name.to_owned(), state.doc_version));
-    let cached: Option<Result<Incoming, String>> = ui.ctx().data(|d| d.get_temp(id));
+    // #406: the viewport's sheet measured this version already - one sim.
+    let cached = crate::incoming_view::measured(state, name).or_else(|| ui.ctx().data(|d| d.get_temp(id)));
     let got = cached.unwrap_or_else(|| {
         let v = setup_stock::incoming(&state.world, name);
         ui.ctx().data_mut(|d| d.insert_temp(id, v.clone()));

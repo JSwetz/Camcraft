@@ -280,3 +280,23 @@ fn flip_after_apply_re_applies_as_its_own_undo_step() {
     key(&mut h, Key::Z);
     assert_eq!(setup_align::stored(&h.state().world, "Setup1"), None, "a second undo restores as modelled");
 }
+
+/// #709 hand check: after the second of two points, BOTH keep their
+/// purple marker - the overlay draws every picked point (three arms each),
+/// not only the first.
+#[test]
+fn both_picked_points_keep_their_markers() {
+    let mut h = harness();
+    h.get_by_label("+X by Two points").click();
+    h.run();
+    let a = corner(h.state(), [0.0, 0.0, 0.0]);
+    let b = corner(h.state(), [0.0, 20.0, 0.0]);
+    crate::axis_pick::take(h.state_mut(), a);
+    h.run();
+    let one = crate::interact::selection_feature_lines(h.state()).len();
+    assert!(one > 0, "one point: its cross is drawn");
+    crate::axis_pick::take(h.state_mut(), b);
+    h.run();
+    let two = crate::interact::selection_feature_lines(h.state()).len();
+    assert_eq!(two, 2 * one, "two points: two crosses, the second as visible as the first");
+}

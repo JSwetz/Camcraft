@@ -301,3 +301,31 @@ fn bad_picks_are_tool_errors_never_a_panic() {
     assert_eq!(g["source"], json!({ "model": "part" }), "{g}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #692: list_features names only what a click can pick - a cylinder's
+/// two rims are its chains (never the 16 facet seams of its wall), and a
+/// round rim has no feature points (its chord vertices are not corners);
+/// a seam chain asked for by id is refused by the one rule.
+#[test]
+fn listed_chains_and_vertices_follow_the_one_pick_rule() {
+    let dir = tmp_dir("rule");
+    let stl = dir.join("boss.stl");
+    let mut s = String::from("solid boss\n");
+    for t in camcraft_app::geometry::cylinder(20.0, 10.0, 16).facets.iter() {
+        s.push_str(" facet normal 0 0 0\n  outer loop\n");
+        for p in [t.a, t.b, t.c] {
+            s.push_str(&format!("   vertex {} {} {}\n", p.x, p.y, p.z));
+        }
+        s.push_str("  endloop\n endfacet\n");
+    }
+    s.push_str("endsolid boss\n");
+    std::fs::write(&stl, s).expect("write stl");
+    let mut c = Client::new();
+    let imp = c.ok("import_model", json!({ "path": stl.display().to_string() }));
+    let name = imp["model"].as_str().expect("model name").to_owned();
+    let f = c.ok("list_features", json!({ "model": name, "kinds": ["chains", "vertices"] }));
+    assert_eq!(f["chains_total"], json!(2), "two rims, no wall seams: {f}");
+    assert!(f["chains"].as_array().is_some_and(|cs| cs.iter().all(|c| c["closed"] == json!(true))), "{f}");
+    assert_eq!(f["vertices_total"], json!(0), "a round rim has no corner: {f}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

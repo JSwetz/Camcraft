@@ -85,7 +85,9 @@ then merge A's fixed branch into B before main.
      be dropped by a resolution - when in doubt, it's this case.
 4. **Check nothing from main was dropped:** `git diff upstream/main --stat`
    must list only the PR's own files.
-5. **Targeted gate** (AGENTS.md "Test the change"): build the touched
+5. **Targeted gate** (AGENTS.md "Test the change"): `cargo xtask gate
+   quick --base upstream/main` on any OS (wrappers `scripts/gate.ps1` /
+   `gate.sh` forward to it), or by hand: build the touched
    crates; run the test binaries of the files that conflicted plus the
    PR's own pinning tests; `cargo clippy -p <touched crates> --all-targets
    -- -D warnings`. UI tests with CWD `crates/ui`. Run in the foreground

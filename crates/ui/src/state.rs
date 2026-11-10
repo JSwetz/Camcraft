@@ -1430,6 +1430,9 @@ pub struct State {
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
+    /// The incoming stock's viewport sheet (#406), cached per document
+    /// version while a carried setup's settings page is open.
+    pub incoming_view: crate::incoming_view::IncomingView,
     /// The Geometry list row under the pointer this frame, if any: the
     /// pane answers "which one is that?" by lighting the feature in the
     /// viewport, like pointer hover does. Ephemeral view state (the
@@ -1627,6 +1630,7 @@ impl State {
             axis_rows_shown: false,
             setup_pick_rows: Vec::new(),
             boundary_view: Default::default(),
+            incoming_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
             hidden_models: Vec::new(),
@@ -2461,6 +2465,8 @@ impl State {
         // A refusal that no longer describes the page retires, with its
         // status-strip mirror (crate::feedback).
         self.retire_stale_feedback();
+        // #406: the incoming stock's sheet follows the open setup page.
+        crate::incoming_view::refresh(self);
         // The editor window's ghost law (M1.4), mirroring `pane_target`:
         // an open editor never keeps pointing at a name the document lost
         // under it - deleted, undone, or swapped by New/Open all land here.

@@ -162,6 +162,11 @@ merge ready").
   reads make the real cost lower). Main-session coordination isn't
   counted.
   ```
+- **Effort** (AGENTS.md "Every issue is weighted by effort"): under the
+  total, add `Effort: <label of the issue the PR fixes>` and, if the issue
+  escalated on the way, `(escalated from <label>)` - the data the effort
+  table is recalibrated from. A Fable run is priced from the `claude-api`
+  skill's model table.
 - A run whose token total isn't known (e.g. a review from another
   session) is listed as "not known" and left out of the sum.
 - No cost comment for `needs-rework`, `conflicts` or `needs-maintainer`
@@ -171,7 +176,9 @@ merge ready").
 ## 2d. Process PRs - version bump and announcement
 
 A PR that changes a process file (`AGENTS.md`, `.claude/agents/`,
-`.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh`) must increment
+`.claude/skills/`, `xtask/`, `.cargo/config.toml`, `scripts/gate.ps1`,
+`scripts/gate.sh`, `scripts/release.ps1`, `scripts/collect-decisions.ps1`,
+`scripts/collect-decisions.sh`) must increment
 the integer in `.claude/PROCESS_VERSION` (AGENTS.md "Process changes bump
 `PROCESS_VERSION`"). The reviewer checks this; a missing bump is a
 requested change (`needs-rework`). When such a PR merges, whoever merges
