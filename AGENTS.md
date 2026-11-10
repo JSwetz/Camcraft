@@ -702,8 +702,10 @@ that broke them. A red result does not revert the merge by itself; the
 issue is worked in the normal order, and a minor/major cut does not start
 while a `P0` it opened is unfixed. The full release tier runs only at a
 minor/major cut. A fix-only stretch produces no build; to hand-test one, run
-`scripts/release.ps1 -Version <next> -NoTag` locally on main and discard the
-bump (no tag, no push).
+`cargo xtask release --version <next> --no-tag --skip-gate` (or the wrapper
+`scripts/release.ps1 -Version <next> -NoTag -SkipGate`) locally on a scratch
+branch off main (it refuses `--no-tag` on main) and discard the branch and
+its bump (no tag, no push).
 
 **A cut goes PR review → merge to main → tag** (user, 2026-11-07: "when
 cutting a tag, we are doing that by PR review, merging to main, then we cut
@@ -734,10 +736,13 @@ a tag"):
    The release notes also get a short "Process changes" section listing
    each `PROCESS_VERSION` since the previous tag (taken from the pinned
    issue #681). Commit all of it as `docs: X.Y.Z release notes;
-   changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
-   - it runs the release gate tier on that tree (pass `-SkipGate` only if
+   changelog`; then `cargo xtask release --version X.Y.Z --no-tag
+   --installer` (Windows; `scripts/release.ps1 -Version X.Y.Z -NoTag
+   -Installer` is the same command through its wrapper; on macOS and Linux
+   it hands packaging to `scripts/package-*.sh` and refuses `--installer`)
+   - it runs the release gate tier on that tree (pass `--skip-gate` only if
    this exact tree already passed it), commits the version bump, builds
-   the zip and installer, and makes no tag (it refuses `-NoTag` on main).
+   the zip and installer, and makes no tag (it refuses `--no-tag` on main).
 3. **Release PR.** `git push -u origin release/vX.Y.Z`,
    `gh pr create --base main --title "chore(release): X.Y.Z"`, reviewed like
    any PR. Record the branch tip first (`tip=$(git rev-parse
