@@ -17,6 +17,7 @@ use camcraft_app::commands::{CreateSetup, History, ImportModel, MoveFixture, Mov
 use camcraft_app::geometry::{Aabb, Mesh, Point3, Triangle, cube, quat_from_euler};
 use camcraft_app::model;
 use camcraft_app::schema::Location;
+use camcraft_app::stock::StockShape;
 use camcraft_app::stock::fit_box_sides;
 use camcraft_app::world::new_world;
 
@@ -46,12 +47,17 @@ fn document(fixture: bool, bottom: Option<f64>) -> (World, History) {
     }
     h.execute(&world, CreateSetup::new(&world, None, None).expect("Setup1"));
     if let Some(b) = bottom {
-        let e = model::find_by_name(&world, "part").expect("part");
-        let bb = model::entity_world_aabb(&world, &e).expect("bounds");
-        let (shape, pos) = fit_box_sides(&Aabb { min: bb.min, max: bb.max }, [1.0, 1.0, 1.0, 1.0, b, 1.0]).expect("fits");
-        h.execute(&world, SetStock::new(&world, shape, Location { pos, ..Location::default() }).expect("stock"));
+        box_stock(&world, &mut h, [1.0, 1.0, 1.0, 1.0, b, 1.0]);
     }
     (world, h)
+}
+
+/// A square box stock round the part: -X, +X, -Y, +Y, under, top.
+fn box_stock(world: &World, h: &mut History, sides: [f64; 6]) {
+    let e = model::find_by_name(world, "part").expect("part");
+    let bb = model::entity_world_aabb(world, &e).expect("bounds");
+    let (shape, pos) = fit_box_sides(&Aabb { min: bb.min, max: bb.max }, sides).expect("fits");
+    h.execute(world, SetStock::new(world, shape, Location { pos, ..Location::default() }).expect("stock"));
 }
 
 fn at(x: f64, y: f64, z: f64) -> Location {
@@ -96,6 +102,32 @@ fn a_move_whose_stock_allowance_sinks_into_the_floor_warns_for_the_stock_only() 
     let w = c.warning().expect("the stock goes through the floor");
     assert!(w.starts_with(&format!("the stock '{stock}' would sink into the fixture 'vise' (near ")), "{w}");
     assert!(!w.contains("'part' would sit"), "the part itself only touches: {w}");
+}
+
+#[test]
+fn a_turn_whose_regrown_square_stock_sinks_into_the_jaw_warns_for_the_stock() {
+    // 3 mm all round: a 26 x 16 x 14 block, square to the machine.
+    let (world, mut h) = document(true, None);
+    box_stock(&world, &mut h, [3.0; 6]);
+    let stock = camcraft_app::setup::stock_entity_name(&world, Some("Setup1"));
+    // Yaw 90: the part spans X 40..50, Y 0..20, Z 10..18 - clear of the
+    // jaw face at Y -1. #571 regrows the block square round it, 16 x 26:
+    // Y -3..23, 2 mm into the jaw. The pre-turn 26 x 16 block on the same
+    // centre (Y 2..18), or left where it was (Z 47..61), touches nothing -
+    // so this warns only when the check reads the re-fitted block.
+    let turned = Location { pos: p(50.0, 0.0, 10.0), rot: quat_from_euler(0.0, 0.0, 90f64.to_radians()) };
+    let c = MoveModel::new(&world, "part", turned).expect("a warning is not a refusal");
+    let w = c.warning().expect("the regrown stock enters the jaw").to_owned();
+    assert!(w.starts_with(&format!("the stock '{stock}' would sink into the fixture 'vise' (near ")), "{w}");
+    assert!(!w.contains("'part' would sit"), "the part itself is clear: {w}");
+    h.execute(&world, c);
+    let se = model::find_by_name(&world, &stock).expect("stock");
+    match model::stock_def_of(&world, &se) {
+        Some(StockShape::Box { dx, dy, .. }) => {
+            assert!((dx - 16.0).abs() < 1e-6 && (dy - 26.0).abs() < 1e-6, "regrown, not carried: {dx} x {dy}");
+        }
+        other => panic!("still a box stock: {other:?}"),
+    }
 }
 
 #[test]
