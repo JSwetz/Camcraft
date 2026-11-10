@@ -40,6 +40,12 @@ fn read_column(c: &CarriedField, x: f64, y: f64) -> Result<Option<(f64, f64)>, S
         Read::Unreadable => return Err(format!("the carried field cannot read its column at ({x:.4}, {y:.4})")),
     };
     match f.floor_at(x, y) {
+        // A NaN or infinite read is no verdict: refused, never an empty
+        // column (review of #656 - an empty column is material the
+        // verdict never sees).
+        FloorRead::Floor(z) if !(top.is_finite() && z.is_finite()) => {
+            Err(format!("the carried stock read a non-finite top or floor at ({x:.4}, {y:.4}) - refused rather than guessed"))
+        }
         FloorRead::Floor(z) => Ok(Some((top, z))),
         FloorRead::NoMaterial => Ok(None),
         FloorRead::CutFromBelow => Err(format!(

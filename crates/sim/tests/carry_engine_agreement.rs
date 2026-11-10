@@ -37,22 +37,31 @@ fn turns() -> Vec<LatticeTurn> {
 
 /// A flat-end slot across the 20 x 12 block at depth `z`.
 fn cut(b: Backend, z: f64) -> Stock {
+    cut_with(b, 6.0, z, 2.0, false)
+}
+
+/// A slot across the block along y = `y`, depth `z`, radius `r`.
+fn cut_with(b: Backend, y: f64, z: f64, r: f64, ball: bool) -> Stock {
     let mut s = Stock::block(b, 0.0, 0.0, 20.0, 12.0, TOP, CELL).expect("block");
     let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     let moves = [
-        Move::new(MoveKind::Rapid, p(-4.0, 6.0, 8.0), p(-4.0, 6.0, z), None),
-        Move::new(MoveKind::Feed, p(-4.0, 6.0, z), p(24.0, 6.0, z), Some(500.0)),
+        Move::new(MoveKind::Rapid, p(-4.0, y, 8.0), p(-4.0, y, z), None),
+        Move::new(MoveKind::Feed, p(-4.0, y, z), p(24.0, y, z), Some(500.0)),
     ];
-    s.simulate(&[SimOp { moves: &moves, radius: 2.0, ball: false, cone: None, corner: None }]).expect("cut");
+    s.simulate(&[SimOp { moves: &moves, radius: r, ball, cone: None, corner: None }]).expect("cut");
     s
 }
 
 fn agree(slot_z: f64) {
-    let col = match cut(Backend::Column, slot_z) {
+    agree_with(cut(Backend::Column, slot_z), cut(Backend::Field { band: FIELD_BAND }, slot_z), EPS);
+}
+
+fn agree_with(col: Stock, field: Stock, eps: f64) {
+    let col = match col {
         Stock::Column(d) => d,
         Stock::Field(_) => panic!("a column stock"),
     };
-    let field = cut(Backend::Field { band: FIELD_BAND }, slot_z).field().expect("a field").clone();
+    let field = field.field().expect("a field").clone();
     // The block stock's floor as the field built it (an uncut corner).
     let floor = match field.floor_at(0.25, 0.25) {
         camcraft_sim::stock_sim::FloorRead::Floor(z) => z,
@@ -72,10 +81,11 @@ fn agree(slot_z: f64) {
             }
             let (ta, tb) = (a.dex.top_at(k), b.dex.top_at(k));
             let (fa, fb) = (a.floor_at(k), b.floor_at(k));
-            assert!((ta - tb).abs() <= EPS, "{t:?} column {k}: top {ta} vs {tb}");
-            assert!((fa - fb).abs() <= EPS, "{t:?} column {k}: floor {fa} vs {fb}");
+            assert!((ta - tb).abs() <= eps, "{t:?} column {k}: top {ta} vs {tb}");
+            assert!((fa - fb).abs() <= eps, "{t:?} column {k}: floor {fa} vs {fb}");
         }
-        assert!((a.volume() - b.volume()).abs() <= 1e-6, "{t:?}: volume {} vs {}", a.volume(), b.volume());
+        let cells = (d.nx * d.ny) as f64 * d.cell * d.cell;
+        assert!((a.volume() - b.volume()).abs() <= eps * cells, "{t:?}: volume {} vs {}", a.volume(), b.volume());
     }
 }
 
@@ -85,8 +95,21 @@ fn a_slot_from_the_top_carries_the_same_on_both_engines() {
 }
 
 #[test]
-fn a_slot_cut_through_carries_as_air_on_both_engines() {
-    // A slot deeper than the top: on the column engine the cut columns
-    // stand on the block's floor; the field reads the same top and floor.
+fn a_deep_slot_carries_the_same_on_both_engines() {
+    // A slot 4 deep: the cut columns stand on the block's floor on both.
     agree(1.0);
+}
+
+#[test]
+fn an_off_grid_ball_slot_carries_the_same_on_both_engines() {
+    // Review of #656: walls off the cell boundaries and a curved floor -
+    // both engines read the ball's surface at the same cell centres; the
+    // field's march brackets its top within MARCH_EPS.
+    const MARCH_EPS: f64 = 1e-3;
+    let (y, z, r) = (6.3, 3.2, 1.7);
+    agree_with(
+        cut_with(Backend::Column, y, z, r, true),
+        cut_with(Backend::Field { band: FIELD_BAND }, y, z, r, true),
+        MARCH_EPS,
+    );
 }
