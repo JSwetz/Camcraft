@@ -255,7 +255,8 @@ fn a_browser_post_never_reaches_the_app() {
 }
 
 /// The listener's log lines, captured: a global subscriber writing into
-/// a shared buffer (only the idle test installs it).
+/// a shared buffer, installed once per test binary by [`log_capture`]
+/// (the idle tests read it by their own client's address).
 #[derive(Clone, Default)]
 struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
 
@@ -267,6 +268,22 @@ impl Write for LogBuf {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+/// The process-wide captured log, installed on first use; `None` when
+/// another subscriber was installed first.
+fn log_capture() -> Option<&'static LogBuf> {
+    static LOG: std::sync::OnceLock<Option<LogBuf>> = std::sync::OnceLock::new();
+    LOG.get_or_init(|| {
+        let log = LogBuf::default();
+        let sink = log.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).is_ok().then_some(log)
+    })
+    .as_ref()
 }
 
 /// Wait for one request and answer it against `world`.
@@ -289,14 +306,7 @@ fn answer_one(inbox: &Inbox, world: &World, history: &mut History) -> String {
 /// logged by its address, and the next client is served.
 #[test]
 fn an_idle_client_is_dropped_by_name_and_the_next_one_is_served() {
-    let log = LogBuf::default();
-    let sink = log.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_writer(move || sink.clone())
-        .finish();
-    let captured = tracing::subscriber::set_global_default(subscriber).is_ok();
-
+    let log = log_capture();
     let inbox = Inbox::listen_with_idle(0, Box::new(|| {}), Duration::from_millis(300)).expect("listen");
     let addr = inbox.addr().expect("bound address");
     let silent = TcpStream::connect(addr).expect("connect");
@@ -324,7 +334,7 @@ fn an_idle_client_is_dropped_by_name_and_the_next_one_is_served() {
     r.read_line(&mut answer).expect("answer");
     assert!(answer.contains("\"id\":1") && answer.contains("\"result\""), "{answer}");
 
-    if captured {
+    if let Some(log) = log {
         let text = String::from_utf8_lossy(&log.0.lock().expect("log lock")).into_owned();
         assert!(text.contains(&format!("client {silent_addr} dropped: idle")), "the log names the idle client: {text}");
     }
@@ -360,5 +370,63 @@ fn a_client_that_keeps_talking_is_never_dropped_as_idle() {
     assert_eq!(answers.len(), 8);
     for (id, a) in answers.iter().enumerate() {
         assert!(a.contains(&format!("\"id\":{id}")) && !a.contains("idle"), "call {id}: {a}");
+    }
+}
+
+/// #567 review (slow loris): a client trickling one byte faster than
+/// the poll step, never a newline, is dropped on the idle schedule all
+/// the same - a partial line never resets the clock - logged by its
+/// address, and the next client is served.
+#[test]
+fn a_trickling_client_is_dropped_on_the_idle_schedule() {
+    let log = log_capture();
+    let window = Duration::from_millis(400);
+    let inbox = Inbox::listen_with_idle(0, Box::new(|| {}), window).expect("listen");
+    let addr = inbox.addr().expect("bound address");
+    let s = TcpStream::connect(addr).expect("connect");
+    let trickler_addr = s.local_addr().expect("client address");
+    // A regression must fail, never hang.
+    s.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
+    let mut w = s.try_clone().expect("clone");
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&stop);
+    // One byte every 10 ms (the poll step is 50 ms), for at most 5 s.
+    let trickle = std::thread::spawn(move || {
+        let end = Instant::now() + Duration::from_secs(5);
+        while !flag.load(std::sync::atomic::Ordering::Relaxed) && Instant::now() < end {
+            if w.write_all(b"{").and_then(|()| w.flush()).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    let t = Instant::now();
+    let mut r = BufReader::new(s);
+    let mut line = String::new();
+    let got = r.read_line(&mut line);
+    let after = t.elapsed();
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    trickle.join().expect("trickle thread");
+    got.expect("an idle note, not silence - the trickling client was never dropped");
+    assert!(line.contains("notifications/message") && line.contains("idle"), "{line}");
+    assert!(after >= Duration::from_millis(350), "dropped before the window: {after:?}");
+    assert!(after < Duration::from_millis(1500), "dropped late, not on the idle schedule: {after:?}");
+
+    // The next client is served.
+    let s = TcpStream::connect(addr).expect("reconnect");
+    s.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
+    let mut w = s.try_clone().expect("clone");
+    let mut r = BufReader::new(s);
+    writeln!(w, r#"{{"jsonrpc":"2.0","id":1,"method":"ping"}}"#).expect("send");
+    let world = new_world();
+    let mut history = History::default();
+    answer_one(&inbox, &world, &mut history);
+    let mut answer = String::new();
+    r.read_line(&mut answer).expect("answer");
+    assert!(answer.contains("\"id\":1") && answer.contains("\"result\""), "{answer}");
+
+    if let Some(log) = log {
+        let text = String::from_utf8_lossy(&log.0.lock().expect("log lock")).into_owned();
+        assert!(text.contains(&format!("client {trickler_addr} dropped: idle")), "the log names the trickling client: {text}");
     }
 }

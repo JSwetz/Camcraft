@@ -27,9 +27,11 @@
 //! app spends answering does not count) is told why in an MCP
 //! `notifications/message`, closed, logged by its peer address, and the
 //! next client is served. A newcomer never pre-empts a connected client
-//! before that: an agent pausing between calls keeps its session.
+//! before that: an agent pausing between calls keeps its session. The
+//! deadline holds inside the read too: a client trickling bytes with no
+//! newline is dropped on the same schedule as a silent one.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -48,6 +50,10 @@ const MAX_LINE: usize = 16 * 1024 * 1024;
 /// How long a write to a client may block before the client is dropped -
 /// a client that stops reading must not hold the listener.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The most one read takes off the socket before the idle deadline is
+/// looked at again.
+const CHUNK: usize = 8 * 1024;
 
 /// How long a client may go without sending a complete line before it
 /// is dropped so the next one can be served (#567).
@@ -231,24 +237,32 @@ fn accept_loop(listener: &TcpListener, tx: &Sender<Request>, stop: &AtomicBool, 
 
 /// One client until it hangs up, the app stops, the app's end of the
 /// channel is gone, or it sends no complete line for `idle`.
-fn serve_client(stream: TcpStream, tx: &Sender<Request>, stop: &AtomicBool, wake: &Wake, idle: Duration) -> std::io::Result<End> {
+///
+/// The idle deadline is enforced inside the read (#567 review): each
+/// read waits at most the poll step or the time left in the window,
+/// whichever is shorter, and takes at most [`CHUNK`] bytes, and the
+/// deadline is checked after every chunk - so a client trickling bytes
+/// with no newline cannot keep a read alive past its window.
+fn serve_client(mut stream: TcpStream, tx: &Sender<Request>, stop: &AtomicBool, wake: &Wake, idle: Duration) -> std::io::Result<End> {
     // An accepted socket may inherit the listener's non-blocking mode
     // (BSD does); reads wait, but only a POLL at a time.
     stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(POLL))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let mut writer = stream.try_clone()?;
-    let mut reader = BufReader::new(stream);
+    // Bytes read but not yet a complete line. Between reads it never
+    // holds a newline and never more than MAX_LINE bytes.
     let mut buf = Vec::new();
+    let mut chunk = [0_u8; CHUNK];
     // The idle clock: reset by each complete line once it is answered,
     // so the app's own answering time never counts against the client.
+    // A partial line never resets it.
     let mut active = Instant::now();
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(End::Closed);
         }
         let quiet = active.elapsed();
-        if quiet >= idle {
+        let Some(left) = idle.checked_sub(quiet).filter(|d| !d.is_zero()) else {
             let note = format!(
                 r#"{{"jsonrpc":"2.0","method":"notifications/message","params":{{"level":"warning","logger":"camcraft","data":"idle for {}s with no complete message - the connection is closed"}}}}"#,
                 quiet.as_secs()
@@ -256,34 +270,44 @@ fn serve_client(stream: TcpStream, tx: &Sender<Request>, stop: &AtomicBool, wake
             // Best effort: the write times out, and the client goes either way.
             let _ = writeln!(writer, "{note}").and_then(|()| writer.flush());
             return Ok(End::Idle(quiet));
-        }
+        };
+        // Never wait past the idle deadline (nor a poll step, for the
+        // stop flag). A zero timeout is refused by the OS API; `left`
+        // is non-zero, and a sub-millisecond rest rounds up to 1 ms.
+        stream.set_read_timeout(Some(left.min(POLL).max(Duration::from_millis(1))))?;
         // Bounded as it reads: never more than one byte past the cap.
-        let room = (MAX_LINE + 1).saturating_sub(buf.len()) as u64;
-        match Read::by_ref(&mut reader).take(room).read_until(b'\n', &mut buf) {
-            Ok(0) => {
-                // End of input: a last unterminated line still counts,
-                // as it does on stdio.
-                if !buf.is_empty() {
-                    let line = std::mem::take(&mut buf);
-                    forward(&line, tx, &mut writer, stop, wake)?;
-                }
-                return Ok(End::Closed);
-            }
-            Ok(_) if buf.ends_with(b"\n") => {
-                let line = std::mem::take(&mut buf);
-                if !forward(&line, tx, &mut writer, stop, wake)? {
-                    return Ok(End::Closed);
-                }
-                active = Instant::now();
-            }
-            // Bytes without a newline: the next read returns 0 (EOF).
-            Ok(_) => {}
-            Err(e)
+        let room = (MAX_LINE + 1).saturating_sub(buf.len()).clamp(1, CHUNK);
+        let got = match chunk.get_mut(..room).map(|c| stream.read(c)) {
+            Some(Ok(n)) => n,
+            Some(Err(e))
                 if matches!(
                     e.kind(),
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
-                ) => {}
-            Err(e) => return Err(e),
+                ) =>
+            {
+                continue;
+            }
+            Some(Err(e)) => return Err(e),
+            None => 0,
+        };
+        if got == 0 {
+            // End of input: a last unterminated line still counts, as
+            // it does on stdio.
+            if !buf.is_empty() {
+                let line = std::mem::take(&mut buf);
+                forward(&line, tx, &mut writer, stop, wake)?;
+            }
+            return Ok(End::Closed);
+        }
+        buf.extend_from_slice(chunk.get(..got).unwrap_or_default());
+        // Every complete line in what arrived, in order.
+        while let Some(nl) = buf.iter().position(|b| *b == b'\n') {
+            let rest = buf.split_off(nl.saturating_add(1));
+            let line = std::mem::replace(&mut buf, rest);
+            if !forward(&line, tx, &mut writer, stop, wake)? {
+                return Ok(End::Closed);
+            }
+            active = Instant::now();
         }
         if buf.len() > MAX_LINE {
             let refusal = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"message too long - the connection is closed"}}"#;
