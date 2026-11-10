@@ -1528,8 +1528,8 @@ fn parr(p: egui::Pos2) -> [f32; 2] {
 }
 
 /// Headless proof (the M-a gate, graduated from the spike's S2 gate): no
-/// window, no surface - the fallback adapter (the same deterministic choice
-/// as tests/gpu_render.rs), View3D on the shell's Rgba8Unorm offscreen
+/// window, no surface - `headless_gpu::device()` (software adapter first,
+/// else hardware; the same choice as tests/gpu_render.rs), View3D on the shell's Rgba8Unorm offscreen
 /// format, the SEEDED document rendered (block + stock + region + cached
 /// path through set_overlay), and the readback showing a solid footprint of
 /// changed pixels. The second half of the proof is the world itself:
@@ -1560,17 +1560,11 @@ pub(crate) mod headless {
             ));
         }
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            force_fallback_adapter: true,
-            compatible_surface: None,
-            ..Default::default()
-        }))
-        .map_err(|err| err.to_string())?;
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor::default(),
-        ))
-        .map_err(|err| format!("device: {err}"))?;
+        // Software adapter first, else the hardware one (#615: macOS's
+        // Metal has no software fallback).
+        let gpu = crate::headless_gpu::device()?;
+        println!("headless: {} adapter {}", gpu.kind.label(), gpu.name);
+        let (device, queue) = (gpu.device, gpu.queue);
 
         let mut view = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             View3D::new(&device, VIEW3D_FORMAT, 320, 240)

@@ -4,8 +4,10 @@
 //!
 //! Headless UI tests build frames with no GPU, so buffer/pipeline/draw code
 //! is otherwise unverified. These tests instantiate a real `View3D`, render
-//! known geometry, and assert it paints pixels. On a machine with no usable
-//! adapter they skip (green with a note) rather than fail.
+//! known geometry, and assert it paints pixels. The device comes from
+//! `headless_gpu`: the software adapter, else the hardware one (#615). On
+//! a machine with no adapter at all they print a loud SKIP (not a pass) -
+//! `CAMCRAFT_REQUIRE_GPU=1` makes that a failure.
 //!
 //! Gate map (M4.4): covers ui::state, ui::viewport, app::stock.
 
@@ -24,17 +26,13 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 // a time while leaving the rest of the test suite parallel.
 static GPU_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// Software adapter first, else the hardware one (#615); no adapter at
+/// all prints a loud SKIP, and `CAMCRAFT_REQUIRE_GPU=1` fails instead.
 fn device_and_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let options = wgpu::RequestAdapterOptions {
-        force_fallback_adapter: true,
-        compatible_surface: None,
-        ..Default::default()
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
-    Some((device, queue))
+    match camcraft_ui::headless_gpu::device_for_test("gpu_render") {
+        Ok(gpu) => gpu.map(|g| (g.device, g.queue)),
+        Err(err) => panic!("{err}"),
+    }
 }
 
 /// Triangle soup of a stock shape, world-identity placed.
