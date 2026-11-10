@@ -341,6 +341,19 @@ be resolved; only merge commits are allowed.
   comment when its release is published. Only `vX.Y.0` tags (and manual
   runs) build the release artifact on GitHub.
 
+## Supporting the project
+
+The best way to support CamCraft is to point your coding agent at it. Pick an
+open issue, or a pull request that needs work or a review, and let your agent
+take it through the process described under [Contributing](#contributing).
+Every fixed issue and every reviewed PR moves the project forward.
+
+If you'd rather support it another way, you can
+[chip in here](https://buy.stripe.com/8x2dR93Up10S6eP0FO4c800) or use the
+**Sponsor** button at the top of the repository page. Contributions go
+toward more agent subscriptions, which means more agents working through the
+issue list.
+
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
