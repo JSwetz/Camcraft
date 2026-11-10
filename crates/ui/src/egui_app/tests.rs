@@ -1736,6 +1736,8 @@ fn egui_shell_snapshot() {
 /// The dark snapshot tests (and their structural twins) read that same
 /// table through their frames, so all of them share this lock - without it a parallel dark frame
 /// could catch the light table and fail its own golden, and vice versa.
+/// Any other test whose frames move the world's theme (the Theme door's
+/// switch, #605) writes that table too and must take this lock as well.
 static SNAPSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn snapshot_guard() -> std::sync::MutexGuard<'static, ()> {
