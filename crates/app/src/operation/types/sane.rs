@@ -894,6 +894,7 @@ impl OpParams {
                 infeed,
                 feed,
                 plunge_feed,
+                hand: _,
             } => {
                 pos(*tolerance)
                     && clearance_z.is_sane()

@@ -103,14 +103,16 @@ fn a_cycle_off_the_axis_and_a_back_bore_are_refused_by_name() {
 #[test]
 fn a_thread_helix_posts_as_g32_and_a_stray_xy_arc_refuses() {
     // The threading kernel's spelling: a plunge on the meridian, then
-    // XY half-turns about the axis rising half a pitch each - one
-    // lead of Z under G32 with F = lead, the X word modal.
-    let arc = |x: f64, y: f64, z: f64| {
+    // XY half-turns about the axis falling half a pitch each - one
+    // lead of Z under G32 with F = lead, the X word modal. Clockwise
+    // seen from +Z falling toward the chuck: right-hand under M03 (#629).
+    let arc_ccw = |x: f64, y: f64, z: f64, ccw: bool| {
         cnc::Record::Move(cnc::MoveRec {
-            kind: MoveKind::Feed, x, y, z, feed: Some(100.0), center: Some((0.0, 0.0)), ccw: true,
+            kind: MoveKind::Feed, x, y, z, feed: Some(100.0), center: Some((0.0, 0.0)), ccw,
             plane: Default::default(), abc: None,
         })
     };
+    let arc = |x: f64, y: f64, z: f64| arc_ccw(x, y, z, false);
     let mut r = preface();
     r.push(mv(MoveKind::Rapid, 0.0, 4.0, 10.0, None));
     r.push(mv(MoveKind::Plunge, 0.0, 2.5, 10.0, Some(100.0)));
@@ -122,6 +124,20 @@ fn a_thread_helix_posts_as_g32_and_a_stray_xy_arc_refuses() {
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     assert!(out.program.contains("G01 X5 Z10 F0.1"), "the plunge in diameter and per-rev: {}", out.program);
     assert!(out.program.contains("G32 Z9 F2\nG32 Z8 F2\n"), "two half-turns, one lead: {}", out.program);
+    assert!(out.program.contains("M03") && !out.program.contains("M04"), "{}", out.program);
+
+    // #629: the same passes turning counter-clockwise under the M03 the
+    // stream left standing would cut the other hand - refused by name,
+    // never posted (every pre-#629 stream turned this way).
+    let mut r = preface();
+    r.push(mv(MoveKind::Rapid, 0.0, 4.0, 10.0, None));
+    r.push(mv(MoveKind::Plunge, 0.0, 2.5, 10.0, Some(100.0)));
+    r.push(arc_ccw(0.0, -2.5, 9.0, true));
+    r.push(arc_ccw(0.0, 2.5, 8.0, true));
+    r.push(cnc::Record::Section { begin: false });
+    let out = run(r);
+    assert!(out.warnings.iter().any(|w| w.contains("would cut the other hand")), "{:?}", out.warnings);
+    assert!(!out.program.contains("G32"), "{}", out.program);
 
     // An XY arc that is not a half-turn about the axis is no thread.
     let mut r = preface();

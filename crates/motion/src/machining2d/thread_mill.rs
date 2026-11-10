@@ -134,25 +134,33 @@ impl ThreadParams {
                     "a threaded hole must have its floor below its entry".into(),
                 ));
             }
+            // #261 part 2: a refusal about this hole points at its mouth.
+            let mouth = Point3::new(x.xy.x, x.xy.y, x.top_z);
             if x.stepped {
-                return Err(GenError::Invalid(format!(
-                    "hole at ({}, {}) carries a counterbore fold - thread milling cuts the \
-                     wall it can see and would silently miss the ring it cannot",
-                    x.xy.x, x.xy.y
-                )));
+                return Err(GenError::invalid_at(
+                    format!(
+                        "hole at ({}, {}) carries a counterbore fold - thread milling cuts the \
+                         wall it can see and would silently miss the ring it cannot",
+                        x.xy.x, x.xy.y
+                    ),
+                    mouth,
+                ));
             }
             // The air door: the whole disc must stand inside the minor
             // cylinder to plunge at the axis, and the tangent start
             // circle R_min - r must be a real circle the helix can
             // begin its orbit on.
             if self.tool_diameter * 0.5 >= x.radius {
-                return Err(GenError::Invalid(format!(
-                    "a {} mm thread mill has no air to enter the {} mm drill hole at ({}, {})",
-                    self.tool_diameter,
-                    x.radius * 2.0,
-                    x.xy.x,
-                    x.xy.y
-                )));
+                return Err(GenError::invalid_at(
+                    format!(
+                        "a {} mm thread mill has no air to enter the {} mm drill hole at ({}, {})",
+                        self.tool_diameter,
+                        x.radius * 2.0,
+                        x.xy.x,
+                        x.xy.y
+                    ),
+                    mouth,
+                ));
             }
         }
         Ok(())

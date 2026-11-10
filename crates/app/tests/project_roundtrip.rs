@@ -4461,6 +4461,34 @@ fn v35_file_steps_to_v36_and_the_thread_grammar_round_trips() {
         matches!(project::open(&world4, &no_pitch), Err(ProjectError::Corrupt(_))),
         "a thread with no pitch is no helix"
     );
+
+    // #629: the hand. A file from before the key (this one) reads
+    // right-hand - the hand its drawing meant; it is then always
+    // written, a left-hand thread round-trips, and a word that is no
+    // hand refuses the file.
+    let hand_of = |w: &flecs_ecs::prelude::World| {
+        let e = model::find_by_name(w, "TH1").expect("op");
+        match model::operation_of(w, &e).expect("operation").params {
+            OpParams::Threading { hand, .. } => hand,
+            other => panic!("threading expected, got {other:?}"),
+        }
+    };
+    use camcraft_app::cl::ThreadHand;
+    assert_eq!(hand_of(&world), ThreadHand::Right, "an old file's thread is right-hand");
+    assert_eq!(first.matches("\"hand\": \"right\"").count(), 1, "the hand is stated: {first}");
+    let left = text.replace("\"plunge_feed\": 40.0}", "\"plunge_feed\": 40.0, \"hand\": \"left\"}");
+    assert_ne!(left, text);
+    let world5 = new_world();
+    project::open(&world5, &left).expect("a left-hand thread reads");
+    assert_eq!(hand_of(&world5), ThreadHand::Left);
+    let p = tmp_path("v36hand");
+    project::save(&world5, &p).expect("save");
+    let world6 = new_world();
+    project::load(&world6, &p).expect("reload");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(hand_of(&world6), ThreadHand::Left, "left-hand survives the file");
+    let sideways = text.replace("\"plunge_feed\": 40.0}", "\"plunge_feed\": 40.0, \"hand\": \"sideways\"}");
+    assert!(project::open(&new_world(), &sideways).is_err(), "no such hand");
 }
 
 #[test]
@@ -5308,4 +5336,62 @@ fn the_shell_key_round_trips_and_absent_means_the_ladder() {
     let third = std::fs::read_to_string(&p).expect("reread");
     let _ = std::fs::remove_file(&p);
     assert_eq!(second, third, "the shell shape round-trips byte-identically");
+}
+
+/// #630: the lathe tool orientation is additive - an unstated one is
+/// never written (older files read byte for byte as before and take
+/// the kind's default), a stated one round-trips, and an off-chart code
+/// is refused at read.
+#[test]
+fn a_lathe_orientation_round_trips_and_old_tools_take_the_default() {
+    let path = tmp_path("orient");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, AddTool::new(&world, "TN", catalog_tool("TN-1600-0R8")).expect("insert"));
+    let stated = Tool { orientation: Some(6), ..catalog_tool("TN-1600-0R8") };
+    history.execute(&world, AddTool::new(&world, "TN6", stated).expect("stated insert"));
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert_eq!(text.matches("\"orientation\"").count(), 1, "only the stated tool writes the key: {text}");
+
+    let back = new_world();
+    project::load(&back, &path).expect("load");
+    let tool = |n: &str| model::find_by_name(&back, n).and_then(|e| model::tool_of(&back, &e)).expect("tool");
+    assert_eq!(tool("TN").orientation, None, "an unstated orientation stays unstated");
+    assert_eq!(tool("TN").lathe_orientation(), Some(2), "and reads as the insert's default");
+    assert_eq!(tool("TN6").orientation, Some(6));
+    project::save(&back, &path).expect("resave");
+    assert_eq!(std::fs::read_to_string(&path).expect("reread"), text, "byte-identical round trip");
+
+    let bad = text.replace("\"orientation\": 6", "\"orientation\": 12");
+    assert_ne!(bad, text, "the fixture carries the key");
+    let _ = std::fs::remove_file(&path);
+    assert!(matches!(project::open(&new_world(), &bad), Err(ProjectError::Corrupt(_))), "orientation 12 is refused");
+}
+
+/// #641: a grooving blade's touched-off corner rides the same additive
+/// key - an older blade (no key) reads as the left-corner default, a
+/// stated corner round-trips byte for byte.
+#[test]
+fn a_blade_corner_round_trips_and_old_blades_take_the_left_corner() {
+    let path = tmp_path("blade-corner");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, AddTool::new(&world, "GT", catalog_tool("GT-0300")).expect("blade"));
+    let right = Tool { orientation: Some(1), ..catalog_tool("GT-0300") };
+    history.execute(&world, AddTool::new(&world, "GT1", right).expect("right-corner blade"));
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert_eq!(text.matches("\"orientation\"").count(), 1, "only the stated blade writes the key: {text}");
+
+    let back = new_world();
+    project::load(&back, &path).expect("load");
+    let tool = |n: &str| model::find_by_name(&back, n).and_then(|e| model::tool_of(&back, &e)).expect("tool");
+    assert_eq!(tool("GT").orientation, None, "an older blade states no corner");
+    assert_eq!(tool("GT").lathe_orientation(), Some(2), "and reads as the left (-Z) corner");
+    assert_eq!(tool("GT1").orientation, Some(1));
+    project::save(&back, &path).expect("resave");
+    let again = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(again, text, "byte-identical round trip");
 }

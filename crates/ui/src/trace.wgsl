@@ -12,7 +12,7 @@ struct U {
     up: vec4<f32>,       // xyz, w cap
     solid_lo: vec4<f32>, // xyz, w class tol (already gate-widened)
     solid_hi: vec4<f32>, // xyz, w has_target (0 / 1)
-    world_lo: vec4<f32>,
+    world_lo: vec4<f32>, // xyz, w ortho half height (0 = perspective)
     world_hi: vec4<f32>,
     origin: vec4<i32>,   // stock lattice texel (0,0,0), w frame width
     dims: vec4<i32>,     // stock lattice extent, w frame height
@@ -194,16 +194,24 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= w || gid.y >= h) {
         return;
     }
-    // PreviewCamera::ray_dir - the one ray law both paths walk.
+    // PreviewCamera::ray - the one ray law both paths walk: the eye's
+    // cone, or (#609) parallel rays from the eye plane in orthographic.
     let uu = 2.0 * ((f32(gid.x) + 0.5) / f32(w)) - 1.0;
     let vv = 1.0 - 2.0 * ((f32(gid.y) + 0.5) / f32(h));
-    let tanh = u.eye.w;
-    let a = tanh * (f32(w) / f32(h));
-    let dir = normalize(u.fwd.xyz + u.right.xyz * (uu * a) + u.up.xyz * (vv * tanh));
-    let r = trace(u.eye.xyz, dir);
+    let oh = u.world_lo.w;
+    var origin = u.eye.xyz;
+    var dir = u.fwd.xyz;
+    if (oh > 0.0) {
+        origin = u.eye.xyz + u.right.xyz * (uu * oh * (f32(w) / f32(h))) + u.up.xyz * (vv * oh);
+    } else {
+        let tanh = u.eye.w;
+        let a = tanh * (f32(w) / f32(h));
+        dir = normalize(u.fwd.xyz + u.right.xyz * (uu * a) + u.up.xyz * (vv * tanh));
+    }
+    let r = trace(origin, dir);
     let i = gid.y * w + gid.x;
     if (r.y == 1.0) {
-        let p = u.eye.xyz + dir * r.x;
+        let p = origin + dir * r.x;
         out[i] = vec4<f32>(r.x, deviation(p), shade(p), 1.0);
     } else {
         out[i] = vec4<f32>(-1.0, 3.0, 0.0, r.y);

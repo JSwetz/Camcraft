@@ -4,8 +4,10 @@
 //!
 //! Headless UI tests build frames with no GPU, so buffer/pipeline/draw code
 //! is otherwise unverified. These tests instantiate a real `View3D`, render
-//! known geometry, and assert it paints pixels. On a machine with no usable
-//! adapter they skip (green with a note) rather than fail.
+//! known geometry, and assert it paints pixels. The device comes from
+//! `headless_gpu`: the software adapter, else the hardware one (#615). On
+//! a machine with no adapter at all they print a loud SKIP (not a pass) -
+//! `CAMCRAFT_REQUIRE_GPU=1` makes that a failure.
 //!
 //! Gate map (M4.4): covers ui::state, ui::viewport, app::stock.
 
@@ -15,7 +17,7 @@ use std::sync::Mutex;
 use egui_wgpu::wgpu;
 use camcraft_app::stock::{StockShape, stock_mesh};
 use camcraft_ui::state::DisplayMode;
-use camcraft_ui::viewport::{Camera, GpuPart, View3D};
+use camcraft_ui::viewport::{Camera, GpuPart, ProjectionMode, View3D};
 
 const SIDE: u32 = 256;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -24,17 +26,13 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 // a time while leaving the rest of the test suite parallel.
 static GPU_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// Software adapter first, else the hardware one (#615); no adapter at
+/// all prints a loud SKIP, and `CAMCRAFT_REQUIRE_GPU=1` fails instead.
 fn device_and_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let options = wgpu::RequestAdapterOptions {
-        force_fallback_adapter: true,
-        compatible_surface: None,
-        ..Default::default()
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
-    Some((device, queue))
+    match camcraft_ui::headless_gpu::device_for_test("gpu_render") {
+        Ok(gpu) => gpu.map(|g| (g.device, g.queue)),
+        Err(err) => panic!("{err}"),
+    }
 }
 
 /// Triangle soup of a stock shape, world-identity placed.
@@ -399,4 +397,34 @@ fn cut_region_fill_is_translucent() {
         see_through * 2 > moved,
         "fill must blend over what it covers, not replace it: {see_through}/{moved} gentle"
     );
+}
+
+#[test]
+fn orthographic_paints_the_band_perspective_does() {
+    // #600: the ortho matrix mapped depth OpenGL-style, into negative
+    // clip z, and WebGPU's 0 <= z <= w rule discarded every triangle -
+    // the viewport went blank the moment Orthographic was clicked.
+    // The same part and camera must paint a comparable band in both
+    // modes; the framing is built to match at the target plane.
+    let parts = [stock_part(&StockShape::Box {
+        dx: 60.0,
+        dy: 60.0,
+        dz: 40.0,
+    })];
+    let Some((persp_img, w, h)) = render(&parts, &test_cam()) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    let ortho_cam = Camera {
+        projection: ProjectionMode::Orthographic,
+        ..test_cam()
+    };
+    let Some((ortho_img, _, _)) = render(&parts, &ortho_cam) else {
+        return; // the perspective render found an adapter; this one cannot differ
+    };
+    let total = (w * h) as usize;
+    let p = changed_pixels(&persp_img);
+    let o = changed_pixels(&ortho_img);
+    assert!(o > total / 20 && o < total - total / 20, "ortho should paint a solid band, not {o}/{total}");
+    assert!(o * 2 < p * 3 && p * 2 < o * 3, "the modes frame alike at dist: {o} ortho vs {p} perspective");
 }

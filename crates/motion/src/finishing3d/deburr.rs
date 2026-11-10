@@ -134,6 +134,7 @@ pub fn deburr(facets: &[Triangle], p: &DeburrParams) -> Result<Toolpath, GenErro
     p.validate(facets)?;
     let drop = p.drop();
     if !drop.is_finite() || drop <= 0.0 {
+        // #677: names no spot - a tool/width mismatch, true at every edge.
         return Err(GenError::Invalid(format!(
             "deburr tip depth {drop} is not a standable drop for width {} at {} deg",
             p.width, p.tip_angle_deg
