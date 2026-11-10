@@ -4461,6 +4461,34 @@ fn v35_file_steps_to_v36_and_the_thread_grammar_round_trips() {
         matches!(project::open(&world4, &no_pitch), Err(ProjectError::Corrupt(_))),
         "a thread with no pitch is no helix"
     );
+
+    // #629: the hand. A file from before the key (this one) reads
+    // right-hand - the hand its drawing meant; it is then always
+    // written, a left-hand thread round-trips, and a word that is no
+    // hand refuses the file.
+    let hand_of = |w: &flecs_ecs::prelude::World| {
+        let e = model::find_by_name(w, "TH1").expect("op");
+        match model::operation_of(w, &e).expect("operation").params {
+            OpParams::Threading { hand, .. } => hand,
+            other => panic!("threading expected, got {other:?}"),
+        }
+    };
+    use camcraft_app::cl::ThreadHand;
+    assert_eq!(hand_of(&world), ThreadHand::Right, "an old file's thread is right-hand");
+    assert_eq!(first.matches("\"hand\": \"right\"").count(), 1, "the hand is stated: {first}");
+    let left = text.replace("\"plunge_feed\": 40.0}", "\"plunge_feed\": 40.0, \"hand\": \"left\"}");
+    assert_ne!(left, text);
+    let world5 = new_world();
+    project::open(&world5, &left).expect("a left-hand thread reads");
+    assert_eq!(hand_of(&world5), ThreadHand::Left);
+    let p = tmp_path("v36hand");
+    project::save(&world5, &p).expect("save");
+    let world6 = new_world();
+    project::load(&world6, &p).expect("reload");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(hand_of(&world6), ThreadHand::Left, "left-hand survives the file");
+    let sideways = text.replace("\"plunge_feed\": 40.0}", "\"plunge_feed\": 40.0, \"hand\": \"sideways\"}");
+    assert!(project::open(&new_world(), &sideways).is_err(), "no such hand");
 }
 
 #[test]

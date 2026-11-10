@@ -1280,6 +1280,7 @@ fn seed_threading(c: &Carried) -> OpParams {
         infeed: 0.4,
         feed: c.feed,
         plunge_feed: c.plunge,
+        hand: crate::cl::ThreadHand::Right,
     }
 }
 

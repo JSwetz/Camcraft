@@ -2271,6 +2271,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             feed,
             plunge_feed,
             tolerance,
+            hand,
             ..
         } => {
             if tool.kind != crate::tools::ToolKind::Thread {
@@ -2301,6 +2302,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     plunge_feed: *plunge_feed,
                     insert_width: tool.width,
                     form_angle: tool.tip_angle,
+                    hand: *hand,
                 },
                 turn_stock,
             )?;
@@ -2888,7 +2890,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // the tool's V, not a boxcar, says what stands between
             // the turns. The insert's crest width and included
             // angle ride from the tool, the blade's law again.
-            if let OpParams::Threading { tolerance, .. } = &params {
+            if let OpParams::Threading { tolerance, hand, .. } = &params {
                 warns.extend(crate::turning::thread_warnings(
                     &material.facets,
                     &path,
@@ -2896,6 +2898,9 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     tool.tip_angle,
                     *tolerance,
                 ));
+                // The hand verdict (#629): every half-turn winds the
+                // way the operation asked, or the post is refused.
+                warns.extend(crate::turning::thread_hand_warnings(&path, *hand));
             }
             // The crown verdict (M5.2 E2): the same meridian scan the
             // blade and the wave ride, read with the CROWN floor - the
