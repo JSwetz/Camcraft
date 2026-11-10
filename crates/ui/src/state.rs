@@ -339,6 +339,15 @@ pub enum CommandKind {
         setup: String,
         axes: camcraft_app::pick::InPlaneAxes,
     },
+    /// Lay the part on a G17 / G18 / G19 plane through three picked
+    /// points (#555), read by the app through the face pick's apply
+    /// path; optionally the 3-2-1 frame. Undoable (`AlignPartToSetup`).
+    /// Never touches the work offset.
+    LayPartOnPoints {
+        setup: String,
+        picks: Vec<camcraft_app::operation::GeoSel>,
+        lay: camcraft_app::pick::PointsLay,
+    },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
     /// Ok-or-Stale from the two setups' placements.
@@ -1323,6 +1332,9 @@ pub struct State {
     /// The Setups page's axes-in-the-plane draft (#557); while it is
     /// collecting, Edge/Vertex picks land in it ahead of everything else.
     pub axis_pick: Option<crate::axis_pick::AxisDraft>,
+    /// The Setups page's three-points draft (#555); `Some` routes Vertex
+    /// picks into it (and refuses faces and edges by name).
+    pub points_pick: Option<crate::points_pick::PointsPick>,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1513,6 +1525,7 @@ impl State {
             boundary_pick: None,
             plane_pick: None,
             axis_pick: None,
+            points_pick: None,
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
@@ -3078,6 +3091,23 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("part not laid on the plane: {err}"));
+                    }
+                }
+            }
+            CommandKind::LayPartOnPoints { setup, picks, lay } => {
+                match AlignPartToSetup::lay_on_points(&self.world, &setup, &picks, lay) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.points_pick = None;
+                        self.status = format!(
+                            "{setup} part laid on {} through three points: {}",
+                            camcraft_app::pick::plane_label(lay.lay.plane),
+                            crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("part not laid on the three points: {err}"));
                     }
                 }
             }

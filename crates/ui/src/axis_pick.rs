@@ -103,6 +103,7 @@ fn mode_of(by: AxisBy) -> GeoPick {
 /// Vertex mode for two points. The lay-on-a-plane draft stops.
 pub fn arm(state: &mut State, setup: &str, axis: InPlaneAxis) {
     state.plane_pick = None;
+    state.points_pick = None; // #555: one draft collects at a time
     let d = draft_for(state, setup);
     d.picking = Some(axis);
     let by = d.by(axis);

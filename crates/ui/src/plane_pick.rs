@@ -27,6 +27,7 @@ pub struct PlanePick {
 /// click anywhere on a face - near its edge included - takes the face.
 pub fn arm(state: &mut State, setup: &str) {
     crate::axis_pick::disarm(state); // #557: one draft collects at a time
+    state.points_pick = None; // #555
     state.plane_pick = Some(PlanePick { setup: setup.to_owned(), picks: Vec::new() });
     state.geo_pick = GeoPick::Face;
     state.status = format!("{setup}: pick a flat face to lay on the plane");

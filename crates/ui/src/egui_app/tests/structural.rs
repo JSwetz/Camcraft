@@ -231,8 +231,8 @@ fn tool_editor_structure() {
     );
 }
 
-/// #557 / #554: a setup's own page carries the part-alignment rows in
-/// the properties leaf - the plane row (a face) and the axes-in-the-plane
+/// #557 / #554 / #555: a setup's own page carries the part-alignment rows in
+/// the properties leaf - the plane row (a face), the three-points row (#555) and the axes-in-the-plane
 /// rows (an edge or two points), each saying which pick it takes, with nothing armed and Apply hidden until
 /// an axis is picked.
 #[test]
@@ -260,4 +260,17 @@ fn setup_page_alignment_rows_structure() {
     }
     assert!(h.query_by_label("Apply axes").is_none(), "Apply waits for an axis pick");
     assert!(h.state().state.axis_pick.is_none(), "nothing is armed by drawing the page");
+    // #555: the three-points row sits right under the face row, says it
+    // takes points, and shows no prompts or Apply until it is armed.
+    let points = h.query_by_label_contains("Lay on a plane - pick three points").expect("the points row shows").rect();
+    assert!(plane.min.y < points.min.y && points.min.y < axes.rect().min.y, "face row, points row, then the axes rows");
+    for label in ["Pick three points", "Flip points", "Point 1 to plane level", "3-2-1 frame"] {
+        assert!(h.query_by_label(label).is_some(), "the points row must show {label:?}");
+        assert!(!disabled(&h, label), "{label:?} is live");
+    }
+    for label in ["Apply points", "Remove last", "Clear points"] {
+        assert!(h.query_by_label(label).is_none(), "{label:?} waits for the row to be armed");
+    }
+    assert!(h.query_by_label_contains("Point 1:").is_none(), "no prompts until armed");
+    assert!(h.state().state.points_pick.is_none(), "nothing is armed by drawing the page");
 }

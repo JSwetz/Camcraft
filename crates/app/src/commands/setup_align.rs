@@ -25,7 +25,8 @@
 //!   angles turn the parts about the centre of their bounds, so a flip
 //!   leaves them on the same spot of the table. [`AlignPartToSetup::new`]
 //!   takes any rigid transform - the door the face pick (#330) uses,
-//!   through [`AlignPartToSetup::lay_on_plane`], and the in-plane axis
+//!   through [`AlignPartToSetup::lay_on_plane`], three points (#555),
+//!   through [`AlignPartToSetup::lay_on_points`], and the in-plane axis
 //!   picks (#557), through [`AlignPartToSetup::turn_in_plane`].
 //! - **Linked setups follow (#316).** Every setup placed relative to
 //!   this one (directly or through others, [`crate::setup_relative`])
@@ -143,6 +144,33 @@ impl AlignPartToSetup {
         lay: crate::pick::PlaneLay,
     ) -> Result<Self, CommandError> {
         let at = crate::pick::lay_on_plane(world, picks, lay).map_err(CommandError::Invalid)?;
+        Self::new(world, setup, Some(at))
+    }
+
+    /// Would [`Self::lay_on_points`] be accepted? The same refusals, by
+    /// name, without building the command (the Setups page's Apply).
+    pub fn check_points(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        pl: crate::pick::PointsLay,
+    ) -> Result<(), CommandError> {
+        let at = crate::pick::lay_on_points(world, picks, pl).map_err(CommandError::Invalid)?;
+        change_of(world, setup, Some(at)).map(|_| ())
+    }
+
+    /// Lay the part on a G17 / G18 / G19 plane through three picked
+    /// points (#555), read by [`crate::pick::lay_on_points`] through the
+    /// face pick's own apply path; with `frame`, point 1 is the origin and
+    /// 1 -> 2 the plane's first axis (3-2-1). Refused by name before any
+    /// write.
+    pub fn lay_on_points(
+        world: &World,
+        setup: &str,
+        picks: &[crate::operation::GeoSel],
+        pl: crate::pick::PointsLay,
+    ) -> Result<Self, CommandError> {
+        let at = crate::pick::lay_on_points(world, picks, pl).map_err(CommandError::Invalid)?;
         Self::new(world, setup, Some(at))
     }
 

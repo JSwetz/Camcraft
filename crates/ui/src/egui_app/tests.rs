@@ -92,6 +92,8 @@ mod first_setup;
 mod structural;
 // #554: the plane row's click takes the face, an axis row's the edge.
 mod plane_face_pick;
+// #555: real clicks pick the three points of the plane.
+mod points_vertex_pick;
 mod one_wcs;
 // #343: the per-setup browser tree.
 mod setup_tree;
