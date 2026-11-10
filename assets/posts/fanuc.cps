@@ -349,17 +349,18 @@ function onToolChange(number, name) {
 // it at onSection; a legacy .cl (no records at all) gets it at its
 // first motion - a posted program without an offset or a spindle is
 // not a posted program.
-// #616: per-operation smoothing, only when the document turned it on
-// (the stream then carries PARAM Smoothing / SmoothingMode). AI contour control on/off; the R smoothing level is control-version dependent, so none is written (#616).
-// Written after the preamble, undone at the section's end so no
-// tolerance leaks into the next operation.
+// #616: per-operation smoothing. Fanuc's G5.1 Q1 (AI contour control)
+// states no tolerance - the deviation is the control's own parameter, so
+// a word written here could not be held to the op's ask (review of
+// #635). The ask is named once and nothing is written until a bounded
+// form is stated per control (#614's Doosan DNM).
+var smoothNamed = false;
 function smoothOn() {
-  if (!(smoothTol > 0)) return;
-  block(["G5.1", "Q1"]);
-  smoothActive = true;
+  if (!(smoothTol > 0) || smoothNamed) return;
+  note("SMOOTHING NOT WRITTEN - G5.1 STATES NO TOLERANCE");
+  smoothNamed = true;
 }
 function smoothOff() {
-  if (smoothActive) block(["G5.1", "Q0"]);
   smoothActive = false;
   smoothTol = 0;
   smoothMode = "";

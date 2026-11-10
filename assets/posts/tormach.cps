@@ -180,7 +180,7 @@ function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   block(["(" + nm + ")"]);
   block([inch ? "G20" : "G21", "G17", "G90", "G91.1", "G94", "G40", "G49", "G80"]);
-  block(["G64", inch ? "P0.001" : "P0.025"]);
+  block(["G64", blendP()]);
   var z = safeZ();
   if (z !== null && z !== 0) block(["(SAFE RETRACT G53 Z" + fu(z) + " - STATED BY THE MACHINE)"]);
 }
@@ -303,13 +303,16 @@ function beltNote(rpm) {
 // (the stream then carries PARAM Smoothing / SmoothingMode). LinuxCNC path blending: G64 P is the deviation the trajectory planner may take.
 // Written after the preamble, undone at the section's end so no
 // tolerance leaks into the next operation.
+// The header's path-blending tolerance (#616: shared by the header and
+// the per-section reset, one constant).
+function blendP() { return inch ? "P0.001" : "P0.025"; }
 function smoothOn() {
   if (!(smoothTol > 0)) return;
   block(["G64", "P" + fu(smoothTol)]);
   smoothActive = true;
 }
 function smoothOff() {
-  if (smoothActive) block(["G64", inch ? "P0.001" : "P0.025"]);  // back to the header's blending
+  if (smoothActive) block(["G64", blendP()]);  // back to the header's blending
   smoothActive = false;
   smoothTol = 0;
   smoothMode = "";

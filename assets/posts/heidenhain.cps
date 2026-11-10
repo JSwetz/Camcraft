@@ -267,7 +267,7 @@ function onToolChange(number, name) {
 // words are gone: G54 (datum shift), G80 (WORKING PLANE, p. 756) are
 // not what a TNC reads them as.
 // #616: per-operation smoothing, only when the document turned it on
-// (the stream then carries PARAM Smoothing / SmoothingMode). Heidenhain ISO G62 (cycle 32 TOLERANCE): T the path deviation.
+// (the stream then carries PARAM Smoothing / SmoothingMode). Heidenhain ISO G62 (the ISO form of the tolerance cycle): T the path deviation.
 // Written after the preamble, undone at the section's end so no
 // tolerance leaks into the next operation.
 function smoothOn() {
