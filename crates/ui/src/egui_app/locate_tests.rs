@@ -215,3 +215,42 @@ fn a_refused_draft_says_why_instead_of_offering_apply() {
     assert!(!h.state().status.contains("Apply,"), "the status hint agrees: {}", h.state().status);
     assert!(h.query_by_label_contains("Not yet:").is_none(), "a located draft is not a refusal");
 }
+
+thread_local! {
+    static SHOW_FORM: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// The shell's law in miniature: reset, draw the page (or another one),
+/// then sweep.
+fn swept_frame(ui: &mut egui::Ui, st: &mut State) {
+    st.locate_form_drawn = false;
+    super::panes::shortcuts(ui, st);
+    st.drain_actions();
+    if SHOW_FORM.with(std::cell::Cell::get) {
+        super::pages::fixtures_section(ui, st, None);
+    }
+    crate::locate_pick::sweep(st);
+}
+
+/// Review of #566: a located draft keeps its mates for Offset edits, but
+/// leaving the page drops it - it must never capture picks with no form
+/// on screen (a face pick for an operation afterwards reaches the
+/// operation, not "neither the part nor the fixture").
+#[test]
+fn leaving_the_page_drops_a_located_draft() {
+    SHOW_FORM.with(|c| c.set(true));
+    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(swept_frame, with_vise());
+    h.run();
+    h.get_by_label("Locate part…").click();
+    h.run();
+    { let f = face(h.state(), "part", [10.0, 5.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+    { let f = face(h.state(), "vise", [50.0, 30.0, 0.0]); crate::locate_pick::take(h.state_mut(), f); }
+    h.run();
+    h.get_by_label("Apply locate").click();
+    h.run();
+    assert!(h.state().locate_pick.is_some(), "on the page, the located draft stays for Offset edits");
+    SHOW_FORM.with(|c| c.set(false));
+    h.run();
+    assert!(h.state().locate_pick.is_none(), "off the page, the draft is dropped");
+    SHOW_FORM.with(|c| c.set(true));
+}

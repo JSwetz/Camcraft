@@ -1324,6 +1324,11 @@ pub struct State {
     /// The locate-in-fixture mate draft (#561); `Some` routes Face and
     /// Vertex picks into it ahead of everything else.
     pub locate_pick: Option<crate::locate_pick::LocateDraft>,
+    /// Was the locate form drawn this frame? Reset before the dock, set
+    /// by the form; a draft whose form is off screen is dropped after
+    /// the dock (`locate_pick::sweep`) - a kept draft must never capture
+    /// picks with no form to show them (review of #566).
+    pub locate_form_drawn: bool,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1514,6 +1519,7 @@ impl State {
             boundary_pick: None,
             plane_pick: None,
             locate_pick: None,
+            locate_form_drawn: false,
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,

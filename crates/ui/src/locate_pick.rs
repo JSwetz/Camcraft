@@ -135,6 +135,17 @@ pub fn disarm(state: &mut State) {
     state.locate_pick = None;
 }
 
+/// After the dock: a draft whose form was not drawn this frame (its page
+/// left, the active setup changed, the pane closed) is dropped, so a
+/// located draft kept for Offset / Turn edits never captures picks with
+/// no form on screen (review of #566). The shell resets
+/// `locate_form_drawn` before the dock.
+pub fn sweep(state: &mut State) {
+    if state.locate_pick.is_some() && !state.locate_form_drawn {
+        disarm(state);
+    }
+}
+
 /// Drop the waiting half pick, else the last mate.
 pub fn remove_last(state: &mut State) {
     let Some(d) = state.locate_pick.as_mut() else { return };

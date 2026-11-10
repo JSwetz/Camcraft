@@ -53,6 +53,7 @@ pub(super) fn armed_for(state: &State, fixture: &str, part: Option<&str>) -> boo
 /// The armed draft's form: the mates, which body moves, the nudge, Apply.
 pub(super) fn form(ui: &mut Ui, state: &mut State) {
     let Some(d) = state.locate_pick.clone() else { return };
+    state.locate_form_drawn = true;
     let u = state.units();
     ui.label(RichText::new(format!("Locate {} in {}", if d.part.is_empty() { "the part" } else { &d.part }, d.fixture)).strong());
     for (i, m) in d.mates.iter().enumerate() {

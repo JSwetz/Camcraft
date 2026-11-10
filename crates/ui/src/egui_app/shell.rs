@@ -626,6 +626,7 @@ pub(crate) fn shell_layout(
         .show(ui, |ui| {
             panes::status(ui, &mut *state, &pal, icons);
         });
+    state.locate_form_drawn = false;
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
             .style(DockStyle::from_egui(ui.style().as_ref()))
@@ -640,6 +641,8 @@ pub(crate) fn shell_layout(
                 left_press,
             });
     });
+    // A locate draft whose form the dock did not draw is dropped (#566).
+    crate::locate_pick::sweep(state);
     // Last, so it floats over the dock: the M1.4 graphical tool editor.
     // An in-app egui::Window - this is the shell's only kind of extra
     // surface; the single-OS-window law stands. Closed by default
