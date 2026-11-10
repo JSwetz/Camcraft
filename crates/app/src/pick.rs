@@ -7,6 +7,9 @@
 pub mod align;
 pub mod axis;
 pub mod face;
+pub mod feature_arc;
+pub mod feature_graph;
+pub mod feature_pick;
 // #561: face / point datums for the fixture locate mates.
 pub mod mate;
 pub mod plane;
@@ -18,6 +21,12 @@ pub use axis::{AxisPick, InPlaneAxes, InPlaneAxis, in_plane_turn_deg, pick_coord
 pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
 pub use points::{PointsLay, lay_on_points, points_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
+pub use feature_arc::ArcCentre;
+pub use feature_graph::{FeatureGraph, FeaturePoint, PointKind, WeldedFace, feature_graph, feature_graph_cached};
+pub use feature_pick::{
+    FeaturePick, PickBody, PickKinds, PickQuery, PickRay, PickTarget, Projection, pick_bodies, pick_bodies_of,
+    pick_feature,
+};
 pub use mate::{MateDatum, mate_datum};
 
 use flecs_ecs::prelude::World;
@@ -176,7 +185,7 @@ pub fn soup_hit(tris: &[Triangle], origin: [f64; 3], dir: [f64; 3]) -> Option<(u
 
 /// Ray/triangle crossing in the entity's local frame; the ray direction need
 /// not be normalized. Returns t along the ray.
-fn ray_triangle(facet: Triangle, origin: Point3, dir: Point3) -> Option<f64> {
+pub(crate) fn ray_triangle(facet: Triangle, origin: Point3, dir: Point3) -> Option<f64> {
     let (a, b, c) = (facet.a, facet.b, facet.c);
     if !(a.is_finite() && b.is_finite() && c.is_finite()) {
         return None;

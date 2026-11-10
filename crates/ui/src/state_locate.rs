@@ -10,6 +10,15 @@ use camcraft_app::fixture_locate::{LocateSpec, Mover};
 
 use super::{ErrorScope, State};
 
+/// A status line with an interpenetration warning appended (#561, #582):
+/// the locate, a Model-page move and a Fixtures-page move all say it so.
+pub(super) fn with_warning(done: String, warning: Option<String>) -> String {
+    match warning {
+        Some(w) => format!("{done} - warning: {w}"),
+        None => done,
+    }
+}
+
 impl State {
     pub(super) fn dispatch_locate(&mut self, spec: &LocateSpec, mover: Mover) {
         match Locate::new(&self.world, spec, mover) {
@@ -27,10 +36,7 @@ impl State {
                     Mover::Part => format!("located {} in {}", spec.part, spec.fixture),
                     Mover::Fixture => format!("located {} on {}", spec.fixture, spec.part),
                 };
-                self.status = match warning {
-                    Some(w) => format!("{moved} - warning: {w}"),
-                    None => moved,
-                };
+                self.status = with_warning(moved, warning);
             }
             Err(err) => self.refuse(ErrorScope::Setup, format!("not located: {err}")),
         }

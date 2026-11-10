@@ -1,9 +1,9 @@
-//! A machine-square stock that keeps its allowance round a located part
-//! (#561): when a locate turns the part in the setup, a box or cylinder
-//! stock that stands square to the setup stays square and is re-fitted
-//! round the part's new place with the same allowance it had on each
-//! side - top stays top, the -X side stays the -X side. Pure: the
-//! commands snapshot what this returns.
+//! A machine-square stock that keeps its allowance round a turned part
+//! (#561 locate, #571 every `MoveModel` turn): when a move turns the part
+//! in the setup, a box or cylinder stock that stands square to the setup
+//! stays square and is re-fitted round the part's new place with the
+//! same allowance it had on each side - top stays top, the -X side stays
+//! the -X side. Pure: the commands snapshot what this returns.
 //!
 //! Provenance: our own design over plain shop practice - the blank is
 //! clamped square in the vise and the part is "inside" it by its
@@ -78,7 +78,7 @@ pub fn keep_square(
     if matches!(shape, StockShape::FromModel { .. }) || !is_square(loc.rot) {
         return Ok(None);
     }
-    let refused = || format!("the stock '{name}' cannot keep its allowance round the located part - set the stock again");
+    let refused = || format!("the stock '{name}' cannot keep its allowance round the turned part - set the stock again");
     let (Some((blo, bhi)), Some((alo, ahi))) = (local_bounds(loc, before), local_bounds(loc, after)) else {
         return Err(refused());
     };

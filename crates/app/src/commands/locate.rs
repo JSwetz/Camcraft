@@ -17,8 +17,9 @@
 //! - **A square stock stays square (#561 review).** The part write is
 //!   `MoveModel::locating` / `AlignPartToSetup::locating`: a box or
 //!   cylinder stock square to the setup keeps its orientation and its
-//!   allowance on each side round the located part (`crate::stock_follow`)
-//!   - the vise holds the blank square, it does not turn it with the part.
+//!   allowance on each side round the located part (`crate::stock_follow`;
+//!   since #571 every `MoveModel` turn keeps the same rule) - the vise
+//!   holds the blank square, it does not turn it with the part.
 //! - **The part moves as part alignment moves it.** In a setup that holds
 //!   the part as modelled the locate is a `MoveModel` (the document
 //!   placement; the stock follows the part); in a setup that holds the
@@ -134,7 +135,7 @@ impl LocateFixture {
         let e = model::find_by_name(world, &spec.fixture).ok_or_else(|| CommandError::NotFound(spec.fixture.clone()))?;
         let loc = model::transform_of(world, &e).unwrap_or_default();
         let next = setup_align::compose(setup_align::inverse(plan.delta), loc);
-        let write = MoveFixture::new(world, &spec.fixture, next)?;
+        let write = MoveFixture::locating(world, &spec.fixture, next)?;
         let warning = fixture_locate::join_warnings(
             fixture_locate::interpenetration(world, spec, &plan),
             fixture_locate::stock_interpenetration(world, spec, &plan, &fixture_locate::stock_carried(world, &plan)),
