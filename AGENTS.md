@@ -123,8 +123,9 @@ go to `CHANGELOG.md`.
   - Branch issue work from the fork's synced `main` as above. A PR into
     upstream still targets upstream's `main`; if it conflicts there, merge
     the conflicting upstream change into the branch (`git merge
-    upstream/main`) on that branch only, never into the fork's `main`, which
-    advances only at the next cut tag.
+    upstream/main`) on that branch only, never into the fork's `main`. The
+    fork's `main` takes upstream's code only at the next cut tag; process
+    files are the one exception (next point).
   - Note the tag the fork is on in the PR body ("fork synced at vX.Y.0").
   - **Process files sync on every session, not only at tags** (user,
     2026-11-10: "we need a way to inform all forks that there is changes
@@ -632,10 +633,10 @@ a tag"):
    `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
    removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per
-   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows)
-   - the notes also get a short "Process changes" section listing each
-   `PROCESS_VERSION` since the previous tag (from the pinned issue #681) -
-   commit as `docs: X.Y.Z release notes;
+   behaviour PR, from its `Changelog:` line, plus any `Unreleased` rows).
+   The release notes also get a short "Process changes" section listing
+   each `PROCESS_VERSION` since the previous tag (taken from the pinned
+   issue #681). Commit all of it as `docs: X.Y.Z release notes;
    changelog`; then `scripts/release.ps1 -Version X.Y.Z -NoTag -Installer`
    - it runs the release gate tier on that tree (pass `-SkipGate` only if
    this exact tree already passed it), commits the version bump, builds
