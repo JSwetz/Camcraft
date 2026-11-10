@@ -149,6 +149,7 @@ impl SdfField {
             cuts: HashMap::new(),
             cut_ups: HashMap::new(),
             cost: Box::default(),
+            analytic: None,
         };
         for (&key, &v) in &done {
             // Clamped: a stored value past the band is `cap`, exactly

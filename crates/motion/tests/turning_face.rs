@@ -227,10 +227,79 @@ fn a_stock_allowance_above_the_finished_part_is_faced_off() {
         assert!((s - want).abs() < 1e-9, "rung {k} at {s}, want {want}: {rungs:?}");
         assert!(*start > 7.0 + NOSE - 1e-9, "rung at {s} started inside the bar (rho {start})");
     }
+    // Every rapid ends outside the bar's radius, or is the lift off a
+    // face just cut (#632): straight up the axis from the pass's end,
+    // the nose rising into air the ladder already cleared.
+    let mut cut: Option<f64> = None; // the station of the last pass
     for m in &t.moves {
-        if m.kind == MoveKind::Rapid && station(m.to) > 12.0 - 1e-9 {
-            assert!(rho(m.to) > 7.0 + NOSE - 1e-9, "a rapid over the bar's end inside its radius: {m:?}");
+        if m.kind == MoveKind::Feed && rho(m.to) < 1e-9 {
+            cut = Some(station(m.to) - NOSE);
+        }
+        if m.kind == MoveKind::Rapid && rho(m.to) <= 7.0 + NOSE - 1e-9 {
+            let s = cut.expect("no rapid inside the bar before the first pass");
+            assert!(
+                rho(m.from) < 1e-9 && station(m.to) - NOSE > s + 1e-9,
+                "a rapid inside the bar's radius that is not a lift off its own face: {m:?}"
+            );
         }
         assert!(station(m.to) >= 10.0 + NOSE - 1e-9, "a CL point below the finished end: {m:?}");
+    }
+}
+
+#[test]
+fn the_first_move_is_a_rapid_to_the_clearance_point() {
+    // #632: the program opens with a commanded RAPID to the clearance
+    // point - outside the whole work, on the rapids plane - before any
+    // feed. It used to open with the plunge FEED, posted as a G1 from
+    // wherever the turret stood: an unplanned, unjudged path.
+    let t = facing(&drum(), None, &params(FACE_Z, STEP, NOSE)).expect("a drum faces");
+    let m0 = t.moves.first().expect("a path");
+    assert_eq!(m0.kind, MoveKind::Rapid, "the first move is a rapid: {m0:?}");
+    assert!((station(m0.to) - (20.0 + NOSE)).abs() < 1e-9, "on the clearance plane: {m0:?}");
+    assert!(rho(m0.to) > R + NOSE, "outside the work's radius: {m0:?}");
+    assert!((station(m0.from) - station(m0.to)).abs() < 1e-9, "travelling along the clearance plane: {m0:?}");
+    let feed = t.moves.iter().position(|m| m.kind == MoveKind::Feed).expect("a cut");
+    assert_eq!(feed, 1, "the plunge follows the approach directly");
+    assert!((rho(t.moves[1].from) - rho(m0.to)).abs() < 1e-9, "the plunge starts at the clearance point");
+}
+
+#[test]
+fn every_pass_lifts_off_its_face_before_it_rapids_out() {
+    // #632: each pass ends on the axis; the next move LIFTS the nose
+    // along the axis (rho stays 0, station rises by a small, positive
+    // amount no taller than the stepdown) and only then does a rapid
+    // carry it out radially - at the lifted station, never at the
+    // station just cut, where it dragged the nose across the fresh face.
+    for (step, nose) in [(STEP, NOSE), (0.1, 0.4), (1.6, NOSE)] {
+        let t = facing(&drum(), None, &params(FACE_Z, step, nose)).expect("a drum faces");
+        let mut passes = 0;
+        for (i, m) in t.moves.iter().enumerate() {
+            if !(m.kind == MoveKind::Feed && rho(m.to) < 1e-9) {
+                continue;
+            }
+            passes += 1;
+            let s = station(m.to);
+            let (up, out) = (&t.moves[i + 1], &t.moves[i + 2]);
+            assert_eq!(up.kind, MoveKind::Rapid, "step {step}: the lift: {up:?}");
+            assert!(rho(up.to) < 1e-9, "step {step}: the lift stays on the axis: {up:?}");
+            let lift = station(up.to) - s;
+            assert!(lift > 1e-6 && lift <= step + 1e-9, "step {step}: lift {lift} off the face");
+            assert_eq!(out.kind, MoveKind::Rapid, "step {step}: the radial exit: {out:?}");
+            assert!((station(out.to) - station(up.to)).abs() < 1e-9, "step {step}: out at the lifted station: {out:?}");
+            assert!(rho(out.to) > R + nose, "step {step}: out past the work: {out:?}");
+        }
+        assert!(passes > 0, "step {step}: passes were walked");
+        // No move slides radially along a station a pass cut, except the
+        // pass itself (and its feed in).
+        for m in &t.moves {
+            if m.kind == MoveKind::Rapid && (station(m.from) - station(m.to)).abs() < 1e-9 && rho(m.from) < rho(m.to) {
+                let s = station(m.to) - nose;
+                let on_a_face = t
+                    .moves
+                    .iter()
+                    .any(|c| c.kind == MoveKind::Feed && rho(c.to) < 1e-9 && (station(c.to) - nose - s).abs() < 1e-9);
+                assert!(!on_a_face, "step {step}: a rapid out along a cut face: {m:?}");
+            }
+        }
     }
 }
