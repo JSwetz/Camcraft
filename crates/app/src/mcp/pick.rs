@@ -72,7 +72,10 @@ fn pick_of(env: &Env, v: &Value) -> Result<GeoSel, String> {
     let entity = req_str(m, "model")?;
     req_model(env, entity)?;
     let feature = parse_feature_id(req_str(m, "id")?)?;
-    Ok(GeoSel { entity: entity.to_owned(), feature })
+    let pick = GeoSel { entity: entity.to_owned(), feature };
+    // #692: the one pick rule - an id is taken only if a click could land on it.
+    crate::pick::check_pickable(&env.world, &pick)?;
+    Ok(pick)
 }
 
 /// A pick list: a non-empty array of `{model, id}`.

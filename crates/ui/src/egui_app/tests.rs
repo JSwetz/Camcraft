@@ -92,6 +92,8 @@ mod first_setup;
 mod structural;
 // #554: the plane row's click takes the face, an axis row's the edge.
 mod plane_face_pick;
+// #692: one pick rule on the op page, the setup page and a smooth wall.
+mod one_pick_rule;
 // #664: a left Setups page disarms its picks.
 mod setup_picks_disarm;
 mod one_wcs;

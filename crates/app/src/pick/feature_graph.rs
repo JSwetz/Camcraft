@@ -19,10 +19,10 @@
 //! open sheet, or is a non-manifold fold.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::geometry::Triangle;
-use crate::geometry::feature::{self, EdgeKind, Features, VertexId};
+use crate::geometry::feature::{self, Chain, EdgeKind, Features, VertexId};
 use crate::model;
 use crate::operation::FeatureSel;
 
@@ -84,6 +84,11 @@ pub struct FeatureGraph {
     pub points: Vec<FeaturePoint>,
     /// Centres of round feature-edge runs (circles and arcs).
     pub arcs: Vec<ArcCentre>,
+    /// `feature::chains` / `feature::edge_runs` of `features`, derived on
+    /// first use and kept with the cached graph, so a per-frame edge
+    /// hover never re-walks them.
+    chains: OnceLock<Vec<Chain>>,
+    runs: OnceLock<Vec<Chain>>,
 }
 
 impl FeatureGraph {
@@ -91,6 +96,18 @@ impl FeatureGraph {
     #[must_use]
     pub fn face_of(&self, facet: usize) -> Option<&WeldedFace> {
         self.faces.get(*self.face_of_facet.get(facet)? as usize)
+    }
+
+    /// Every tangent chain of the topology (memoized `feature::chains`).
+    #[must_use]
+    pub fn chains(&self) -> &[Chain] {
+        self.chains.get_or_init(|| feature::chains(&self.features))
+    }
+
+    /// Every run of the topology (memoized `feature::edge_runs`).
+    #[must_use]
+    pub fn runs(&self) -> &[Chain] {
+        self.runs.get_or_init(|| feature::edge_runs(&self.features))
     }
 
     /// The local endpoints of feature edge `edge` (an index into
@@ -138,6 +155,53 @@ pub fn feature_graph_cached(tris: &[Triangle]) -> Arc<FeatureGraph> {
         cache.push((key, g.clone()));
         g
     })
+}
+
+/// How many live meshes [`feature_graph_shared`] remembers.
+const SHARED_CAP: usize = 32;
+
+/// One shared-cache entry: the mesh allocation (weak) and its graph.
+type SharedEntry = (std::sync::Weak<[Triangle]>, Arc<FeatureGraph>);
+
+thread_local! {
+    /// Graphs keyed by the facet allocation itself (#692 step 2): an
+    /// entity's `Facets` is an immutable `Arc<[Triangle]>` that every
+    /// landing replaces, so a live allocation at the same address IS the
+    /// same geometry. Entries whose mesh is gone are dropped on the next
+    /// call; a hit costs a pointer compare, never a re-hash of the facets.
+    static SHARED_CACHE: std::cell::RefCell<Vec<SharedEntry>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// [`feature_graph_cached`] for a mounted mesh, memoized by its shared
+/// allocation first - what the per-frame hover pick calls for every body.
+#[must_use]
+pub fn feature_graph_shared(tris: &Arc<[Triangle]>) -> Arc<FeatureGraph> {
+    if tris.is_empty() {
+        return Arc::new(FeatureGraph::default());
+    }
+    let key = Arc::downgrade(tris);
+    let hit = SHARED_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.retain(|(w, _)| w.strong_count() > 0);
+        let i = cache.iter().position(|(w, _)| w.ptr_eq(&key))?;
+        let entry = cache.remove(i);
+        let g = entry.1.clone();
+        cache.push(entry); // MRU bump
+        Some(g)
+    });
+    if let Some(g) = hit {
+        return g;
+    }
+    let g = feature_graph_cached(tris);
+    SHARED_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= SHARED_CAP {
+            cache.remove(0);
+        }
+        cache.push((key, g.clone()));
+    });
+    g
 }
 
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -326,5 +390,5 @@ fn graph_of(features: Arc<Features>, tris: &[Triangle]) -> FeatureGraph {
         }
     }
 
-    FeatureGraph { features, face_of_facet, faces, edges, points, arcs }
+    FeatureGraph { features, face_of_facet, faces, edges, points, arcs, chains: OnceLock::new(), runs: OnceLock::new() }
 }

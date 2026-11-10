@@ -12,6 +12,7 @@ pub mod boundary_draft;
 pub mod boundary_viz;
 pub mod boundary_summary;
 pub mod edge_pick;
+pub mod feature_click;
 pub mod egui_app;
 pub mod feedback;
 pub mod headless_gpu;
