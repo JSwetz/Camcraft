@@ -100,10 +100,10 @@ fn the_row_picks_a_face_and_lays_it_on_g17_through_the_command() {
     crate::plane_pick::take(h.state_mut(), wall);
     h.run();
     assert!(h.state().op_ui.geo.is_empty(), "a draft pick is not an operation pick");
-    h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply")).click();
+    h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face")).click();
     h.run();
     let n = wall_normal(h.state()).expect("Setup1 holds the part laid");
-    assert!(n[2] > 1.0 - 1e-9, "the wall faces up: {n:?}");
+    assert!(n[2] < -1.0 + 1e-9, "#606: the wall is laid face down on the table: {n:?}");
     assert!(h.state().plane_pick.is_none(), "a landed lay ends the pick");
     assert!(h.state().status.contains("laid on G17 (XY)"), "{}", h.state().status);
     assert_eq!(camcraft_app::setup::work_offset(&h.state().world, "Setup1"), None, "the work offset is untouched");
@@ -152,7 +152,7 @@ fn the_side_is_shown_and_a_pick_that_changes_nothing_greys_apply_out() {
         h.query_by_label_contains("outside: -Y in the model").is_some()
     };
     assert!(side(&h), "the wall's outside (-Y) is shown before Apply");
-    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply"));
+    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face"));
     assert!(!apply.accesskit_node().is_disabled(), "the wall lays the part differently");
     apply.click();
     h.run();
@@ -162,7 +162,36 @@ fn the_side_is_shown_and_a_pick_that_changes_nothing_greys_apply_out() {
     h.run();
     crate::plane_pick::take(h.state_mut(), wall);
     h.run();
-    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply"));
+    let apply = h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face"));
     assert!(apply.accesskit_node().is_disabled(), "the setup already holds the part that way");
     assert!(side(&h), "the side is still shown");
+}
+
+/// #606: "Face down" is on for a new pick - the picked face becomes the
+/// part's bottom - and turning it off lays the face up (the old default),
+/// both through the one undoable command.
+#[test]
+fn face_down_is_the_default_and_off_lays_the_face_up() {
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(700.0, 300.0))
+        .build_ui_state(frame, with_part());
+    h.run();
+    let toggled = |h: &Harness<'static, State>| {
+        h.get_by_label("Face down").accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+    };
+    assert!(toggled(&h), "Face down is on for a new pick");
+    h.get_by_label("Face down").click();
+    h.run();
+    assert!(!toggled(&h), "the click turns it off");
+    h.get_by_label("Pick a face").click();
+    h.run();
+    let wall = front_wall(h.state());
+    crate::plane_pick::take(h.state_mut(), wall);
+    h.run();
+    h.get_by(|n| n.role() == Role::Button && n.label().as_deref() == Some("Apply face")).click();
+    h.run();
+    let n = wall_normal(h.state()).expect("Setup1 holds the part laid");
+    assert!(n[2] > 1.0 - 1e-9, "off, the wall faces up: {n:?}");
+    key(&mut h, Key::Z);
+    assert_eq!(setup_align::stored(&h.state().world, "Setup1"), None, "undo restores as modelled");
 }
