@@ -195,6 +195,10 @@ pub struct PostOptionsDto {
     /// `"g76"` for the cycle; absent is the G32 passes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threading: Option<String>,
+    /// `"inch"` / `"mm"`: the unit the program ends in (#596), additive
+    /// (no version step); absent leaves the program's unit modal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_units: Option<String>,
 }
 
 /// The file mirror of the `PostRef` singleton (M3.3): exactly the two

@@ -403,6 +403,7 @@ pub(super) fn post_section(ui: &mut Ui, state: &mut State) {
         state.pending.push_back(CommandKind::SetPerOpOutput(pick));
     }
     super::post_options::threading_picker(ui, state);
+    super::post_options::end_units_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not

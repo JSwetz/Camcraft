@@ -473,8 +473,25 @@ function onCycle() {
 // stored G30 position holds; then G30 takes the machine to the
 // operator's preset G30 location (the unload spot), the way PathPilot's
 // own programs end. M30 ends the program (no % fence).
+//
+// #596: LinuxCNC's M2 / M30 (linuxcnc.org/docs, M-codes, "M2, M30
+// Program End") resets offsets to G54, the plane to G17, G90, G94, M48,
+// G40, M5, G1 and M9 - but not the length unit, so a G21 program leaves
+// an inch-run control in mm (DRO and MDI included). The user's post
+// option `EndUnits` ("inch" / "mm"; absent = leave the program's unit)
+// names the unit the control should be left in: when it differs from
+// the program's, its word goes after the final retract, right before
+// M30 - after the last move, so no position is read in the new unit.
+function endUnitsWord() {
+  var want = typeof postOptions !== "undefined" && postOptions ? postOptions.EndUnits : undefined;
+  if (want === "inch" && !inch) return "G20";
+  if (want === "mm" && inch) return "G21";
+  return "";
+}
 function onClose() {
   endPreamble();
   retract();
+  var u = endUnitsWord();
+  if (u) block([u]);
   block(["M30"]);
 }

@@ -18,7 +18,7 @@
 use crate::model;
 use crate::operation::{self, Height, OpStatus, OpParams};
 use crate::post::{self, cnc, engine, Dump};
-use crate::schema::{PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
+use crate::schema::{EndUnits, PostOptions, PostRef, ThreadingOutput, WCS_SLOTS};
 use flecs_ecs::prelude::*;
 use serde_json::Value;
 use std::path::Path;
@@ -201,14 +201,25 @@ pub fn post_options_set(world: &World, next: PostOptions) {
 }
 
 /// The options as the script's `postOptions` object: the words a
-/// script compares against (`Threading`: `"G32"` or `"G76"`).
+/// script compares against (`Threading`: `"G32"` or `"G76"`;
+/// `EndUnits`: `"inch"` or `"mm"`, absent when the program's unit is
+/// left modal, #596).
 #[must_use]
 pub fn options_value(o: PostOptions) -> Value {
     let threading = match o.threading {
         ThreadingOutput::G32Passes => "G32",
         ThreadingOutput::G76Cycle => "G76",
     };
-    serde_json::json!({ "Threading": threading })
+    let mut v = serde_json::json!({ "Threading": threading });
+    let end = match o.end_units {
+        EndUnits::Leave => None,
+        EndUnits::Inch => Some("inch"),
+        EndUnits::Millimeters => Some("mm"),
+    };
+    if let (Some(end), Some(map)) = (end, v.as_object_mut()) {
+        map.insert("EndUnits".to_owned(), Value::from(end));
+    }
+    v
 }
 
 /// The document's post for display: built-in name, or the file path
