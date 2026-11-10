@@ -104,6 +104,22 @@ pub enum CommandError {
     UnsupportedType(String),
     #[error("could not generate the toolpath: {0}")]
     Machining(String),
+    /// A [`Machining`](CommandError::Machining) refusal about one spot
+    /// of the part (#261 part 2): `at` is world coordinates. Reads as
+    /// `Machining` does.
+    #[error("could not generate the toolpath: {msg}")]
+    MachiningAt { msg: String, at: crate::geometry::Point3 },
+}
+
+impl CommandError {
+    /// The spot a refused generation names, in world coordinates.
+    #[must_use]
+    pub fn location(&self) -> Option<crate::geometry::Point3> {
+        match self {
+            CommandError::MachiningAt { at, .. } => Some(*at),
+            _ => None,
+        }
+    }
 }
 
 pub trait Command {

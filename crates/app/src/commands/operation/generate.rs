@@ -37,6 +37,17 @@ struct Staged {
     stamp: Option<operation::GenStamp>,
 }
 
+/// A generator refusal as the command's error, named for its operation.
+/// A refusal that names its spot (#261 part 2; `run_job` already
+/// carried it to world) keeps it, so the UI can show where.
+fn machining(name: &str, e: &crate::machining2d::GenError) -> CommandError {
+    let msg = format!("{name}: {e}");
+    match e.location() {
+        Some(at) => CommandError::MachiningAt { msg, at },
+        None => CommandError::Machining(msg),
+    }
+}
+
 fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
     let Some(entity) = model::find_by_name(world, name) else {
         return Err(CommandError::NotFound(name.to_string()));
@@ -50,8 +61,7 @@ fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
         return Err(CommandError::Machining(why));
     }
     let prev_cache = model::toolpath_of(world, &entity);
-    let job = operation::collect_job(world, &prev_operation, name)
-        .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;
+    let job = operation::collect_job(world, &prev_operation, name).map_err(|e| machining(name, &e))?;
     let stamp = operation::op_stamp(world, &prev_operation, name);
     Ok(Staged {
         name: name.to_string(),
@@ -64,8 +74,7 @@ fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
 
 impl Staged {
     fn finish(self) -> Result<GenerateOperation, CommandError> {
-        let (path, warnings) = operation::run_job(self.job)
-            .map_err(|e| CommandError::Machining(format!("{}: {e}", self.name)))?;
+        let (path, warnings) = operation::run_job(self.job).map_err(|e| machining(&self.name, &e))?;
         let stamp = self.stamp.ok_or_else(|| {
             CommandError::Machining(format!(
                 "{}: its tool or geometry source vanished mid-generation",

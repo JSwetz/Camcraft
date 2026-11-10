@@ -2,23 +2,16 @@
 //! adds the optional G2/G3 row-end reversal blends - provenance in
 //! `blend.rs` (RS-274 / ISO 6983 circular interpolation, path filleting).
 
-use thiserror::Error;
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
-use crate::geo2d::{GeoError, Point2, Region};
+use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
 use super::blend::plan_reversals;
 use super::face_holes::{self, FaceHoles};
 use super::levels::cut_levels;
-#[derive(Error, Debug, PartialEq)]
-pub enum GenError {
-    #[error("invalid machining parameters: {0}")]
-    Invalid(String),
-    #[error("nothing to machine: {0}")]
-    Empty(String),
-    #[error(transparent)]
-    Geo(#[from] GeoError),
-}
+// The enum moved to its own module (#261 part 2); every
+// `super::face::GenError` path keeps working through this re-export.
+pub use super::gen_error::GenError;
 
 /// Facing: clear the top plane of a footprint in straight XY passes.
 ///
@@ -193,11 +186,14 @@ pub fn face_over(
     // band a wide stepover leaves - visible, never silent.
     let mut unfaced = None;
     if !forbidden.is_empty() {
-        if let Some((y, gap)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces, p.tool_diameter) {
-            return Err(GenError::Invalid(format!(
-                "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, no wider than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
-                p.tool_diameter
-            )));
+        if let Some((y, gap, x)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces, p.tool_diameter) {
+            return Err(GenError::invalid_at(
+                format!(
+                    "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, no wider than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
+                    p.tool_diameter
+                ),
+                Point3::new(x, y, p.cut_z),
+            ));
         }
         unfaced = face_holes::uncut(region, &rows, &pieces, r)?;
     }
