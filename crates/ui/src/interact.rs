@@ -165,6 +165,9 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         crate::plane_pick::take(state, pick); // #330: the Setups page's draft
         return;
     }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
+    }
     if state.boundary_pick.is_some() {
         queue_boundary_pick(state, pick, mods);
         return;
@@ -244,6 +247,9 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     if state.plane_pick.is_some() {
         crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #554: refused by name
         return;
+    }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
     }
     if state.boundary_pick.is_some() {
         queue_boundary_pick(state, GeoSel { entity, feature: sel }, mods);

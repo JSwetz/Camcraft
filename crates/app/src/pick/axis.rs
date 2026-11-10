@@ -194,6 +194,18 @@ fn ends(world: &World, pick: &AxisPick, name: &str) -> Result<([f64; 3], [f64; 3
     }
 }
 
+/// Where one axis pick sits, in the DOCUMENT frame (mm), for readouts:
+/// a vertex's point, or a straight edge's (start, end). `None` for a
+/// face, a curved or closed chain, or a pick no longer in the model.
+#[must_use]
+pub fn pick_coords(world: &World, g: &GeoSel) -> Option<Vec<[f64; 3]>> {
+    match g.feature {
+        FeatureSel::Vertex(_) => point(world, g).ok().map(|p| vec![p]),
+        FeatureSel::Chain(_) => straight_edge(world, g, model::transform_of, "").ok().map(|(a, b)| vec![a, b]),
+        FeatureSel::Face(_) | FeatureSel::Patch(_) => None,
+    }
+}
+
 /// A picked vertex in the document frame.
 fn point(world: &World, g: &GeoSel) -> Result<[f64; 3], String> {
     let FeatureSel::Vertex(id) = g.feature else { return Err(gone(g)) };

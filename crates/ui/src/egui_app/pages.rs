@@ -106,6 +106,7 @@ pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     // Only an open Boundary group draws its viewport marks (M11.5 UX):
     // any other page this frame hides them and stops the collecting.
     state.boundary_view.shown = false;
+    state.axis_rows_shown = false; // #557: re-earned by the axes rows
     if !matches!(t, UiTarget::Operation(_)) {
         state.boundary_pick = None;
     }

@@ -69,3 +69,35 @@ fn a_click_beside_an_edge_picks_the_face_for_the_plane_and_the_edge_for_an_axis(
     assert_eq!(y.len(), 1, "one edge for +Y: {y:?} ({})", harness.state().state.status);
     assert!(matches!(y[0].feature, FeatureSel::Chain(_)), "the edge: {y:?}");
 }
+
+/// #573 hand check: on a setup page with the axes rows open and no axis
+/// armed, a real Edge-mode viewport click on the part says what to do -
+/// never "open an operation first" - and nothing is picked anywhere.
+/// Choosing "+Y by Two points" then arms vertex picking at once.
+#[test]
+fn a_stray_click_on_the_setup_page_names_the_axis_pick_and_a_mode_choice_arms() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.run();
+    crate::actions::target(
+        &mut harness.state_mut().state,
+        UiTarget::SetupNode("Setup1".into(), crate::state::SetupPage::Settings),
+    );
+    harness.run();
+    assert!(harness.state().state.axis_rows_shown, "the setup page draws the axes rows");
+    harness.state_mut().state.geo_pick = GeoPick::Edge;
+    let geo_before = harness.state().state.op_ui.geo.clone();
+    let p = beside_an_edge(harness.state());
+    click_viewport(&mut harness, p);
+    let status = harness.state().state.status.clone();
+    assert!(status.contains("click Pick +Y edge or Pick +X edge first"), "{status}");
+    assert!(!status.contains("open an operation"), "{status}");
+    assert_eq!(harness.state().state.op_ui.geo, geo_before, "nothing joins an operation");
+    assert!(!crate::axis_pick::collecting(&harness.state().state));
+
+    harness.get_by_label("+Y by Two points").click();
+    harness.run();
+    assert!(crate::axis_pick::collecting(&harness.state().state), "choosing the mode arms it");
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Vertex);
+    assert!(harness.query_by_label("Stop picking +Y").is_some());
+}

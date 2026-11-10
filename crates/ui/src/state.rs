@@ -1323,6 +1323,10 @@ pub struct State {
     /// The Setups page's axes-in-the-plane draft (#557); while it is
     /// collecting, Edge/Vertex picks land in it ahead of everything else.
     pub axis_pick: Option<crate::axis_pick::AxisDraft>,
+    /// The axes-in-the-plane rows were drawn this frame (#557): a
+    /// feature click with no axis armed says what to do, never falls
+    /// through to the operation pick.
+    pub axis_rows_shown: bool,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1513,6 +1517,7 @@ impl State {
             boundary_pick: None,
             plane_pick: None,
             axis_pick: None,
+            axis_rows_shown: false,
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
@@ -3086,7 +3091,12 @@ impl State {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
-                        self.axis_pick = None;
+                        // The picks stay (disarmed) so Flip re-applies
+                        // onto what the setup now holds (#557 hand check).
+                        if let Some(d) = self.axis_pick.as_mut().filter(|d| d.setup == setup) {
+                            d.picking = None;
+                            d.applied = true;
+                        }
                         self.status = format!(
                             "{setup} part turned in the plane: {}",
                             crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))

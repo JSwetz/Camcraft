@@ -72,3 +72,34 @@ its own `mcp/align_tools.rs` so the shared tool table is not touched.
 `pick/axis.rs` feeding the existing command; switching the work plane
 or the primary rule is local to it, and nothing is persisted beyond
 the alignment the command already stored.
+
+**Hand-check fixes (PR #573, 2026-11-09).** Three UX notes from the
+contributor's hand check:
+
+- *Choosing a mode arms its pick.* Clicking "+Y by Edge" / "+Y by Two
+  points" (also re-clicking the current mode) arms that axis at once,
+  the toggle reads "Stop picking +Y" and the viewport pick mode follows.
+  While the axes rows are on screen (`State::axis_rows_shown`, re-earned
+  each frame by the rows, cleared by the properties pane like the
+  Boundary group's `shown`) and nothing is armed, a Face/Edge/Vertex
+  click on the part is swallowed with "no axis is being picked - click
+  Pick +Y edge or Pick +X points first" (naming each axis's chosen
+  mode), never "open an operation first". Model-mode clicks still
+  select. Considered: only the hint, with the toggle the sole arm -
+  dropped, the tester expected the mode choice to start picking.
+- *The picked row reads in document units.* Its own line under the axis
+  row (so it is never cut short): "1 of 2 points on 'block' (x, y, z)
+  mm", "2 points on 'block' (..) -> (..) mm", or "edge on 'block',
+  50.000 mm long, along (dx, dy, dz)" - no feature id. Coordinates are
+  the document frame (the model as placed in the document, before any
+  setup alignment), the same frame the points are read in; the
+  direction is a unit vector (unitless). App helper:
+  `pick::pick_coords`.
+- *Flip after Apply re-applies.* Apply no longer drops the draft: it
+  stops collecting and keeps the picks (`AxisDraft::applied`). The same
+  picks are then a zero turn, so Apply greys out with "applied - tick
+  Flip +Y / Flip +X and Apply again to turn the part the other way";
+  ticking Flip makes it a 180-degree turn and Apply lands it as one more
+  `AlignPartToSetup` - one undo step per Apply. Considered: Flip turning
+  the part immediately as its own command - dropped, a checkbox that
+  silently turns the part is surprising (the tester's own call).
