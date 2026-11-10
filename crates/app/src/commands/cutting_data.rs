@@ -76,9 +76,12 @@ impl ApplyCuttingData {
             Some(ChangeTool::new(world, &op.tool, crate::tools::Tool { rpm: s.rpm, ..tool })?)
         };
         if edit.is_none() && change.is_none() {
+            let u = crate::units::of(world);
             return Err(CommandError::Invalid(format!(
-                "{name} already runs the suggestion ({:.0} rpm, {:.0} mm/min)",
-                s.rpm, s.feed
+                "{name} already runs the suggestion ({:.0} rpm, {} {})",
+                s.rpm,
+                crate::units::feed(s.feed, u),
+                u.feed_suffix()
             )));
         }
         Ok(Self { edit, tool: change, suggestion: s })

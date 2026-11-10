@@ -71,3 +71,22 @@ fn output_per_op_commits_undoes_and_posts_into_a_folder() {
     assert_eq!(names, vec!["program_01_Op.nc".to_owned()], "status: {}", state.status);
     assert!(state.status.contains("one per operation"), "{}", state.status);
 }
+
+/// #596: the Tormach end-units row queues `SetPostOptions`, which rides
+/// the history and leaves the other options as they were.
+#[test]
+fn end_units_choice_commits_and_undoes() {
+    use camcraft_app::schema::{EndUnits, PostOptions};
+    let mut state = opened(face());
+    run(&mut state, CommandKind::SetSkipStops(true));
+    let now = posting::post_options(&state.world);
+    assert_eq!(now.end_units, EndUnits::Leave, "left modal by default");
+    run(&mut state, CommandKind::SetPostOptions(PostOptions { end_units: EndUnits::Inch, ..now }));
+    let opts = posting::post_options(&state.world);
+    assert!(opts.end_units == EndUnits::Inch && opts.skip_stops, "{opts:?}");
+    run(&mut state, CommandKind::Undo);
+    assert_eq!(posting::post_options(&state.world).end_units, EndUnits::Leave, "Ctrl+Z restores it");
+    assert!(posting::post_options(&state.world).skip_stops, "and leaves the other switch");
+    run(&mut state, CommandKind::Redo);
+    assert_eq!(posting::post_options(&state.world).end_units, EndUnits::Inch, "Ctrl+Y reapplies it");
+}

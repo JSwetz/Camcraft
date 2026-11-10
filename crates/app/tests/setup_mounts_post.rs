@@ -17,7 +17,7 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     ActivateSetup, AddTool, CreateOperation, CreateSetup, EditOperationParams, GenerateOperation, History,
-    ImportModel, SetSetupMachine, SetSetupPost, SetStock,
+    ImportModel, SetSetupMachine, SetSetupPost, SetStock, SetToolNumber,
 };
 use camcraft_app::geometry::{Mesh, Point3, Triangle};
 use camcraft_app::machine::{self, AxisLimits, Coolant, Kind, Machine};
@@ -315,4 +315,38 @@ fn the_script_post_writes_one_file_per_mount() {
         let _ = std::fs::remove_file(&path);
     }
     assert_eq!(out.result["mounts"][1]["post"], "Fanuc Lathe (built-in)", "{}", out.result);
+}
+
+/// #438: the tool-number clash is judged per machine. Two machines are
+/// two tool tables - the same T number on each posts as two files; two
+/// tools on one machine sharing a number still refuse, naming the mount.
+#[test]
+fn a_tool_number_shared_across_machines_posts_but_clashes_within_one() {
+    let (world, mut h) = mill_and_lathe();
+    // LATHE_TOOL posts as T2 by position; the mill tool takes 2 too.
+    h.execute(&world, SetToolNumber::new(&world, MILL_TOOL, Some(2)).expect("number"));
+    generate(&world, &mut h, "Face1");
+    generate(&world, &mut h, "Facing2");
+    let files = post_mounts(&world, "t-across").expect("T2 on two machines is two tables");
+    assert_eq!(files.len(), 2);
+    assert!(files[0].1.contains("T02 M6") && files[1].1.contains("T02"), "{files:?}");
+
+    // A second mill tool on Setup1, posting by position, and the mill
+    // tool on that same number (renumbered if it is not already):
+    // one carousel, one T number.
+    const OTHER: &str = "EM-0600-4FL";
+    add_tool(&world, &mut h, OTHER);
+    let n = camcraft_app::tool_numbers::number_of(&world, OTHER).expect("a tool");
+    if camcraft_app::tool_numbers::number_of(&world, MILL_TOOL) != Some(n) {
+        h.execute(&world, SetToolNumber::new(&world, MILL_TOOL, Some(n)).expect("number"));
+    }
+    h.execute(&world, ActivateSetup::new(&world, Some("Setup1")).expect("activate"));
+    h.execute(&world, CreateOperation::new(&world, "Face1b", OTHER, SrcRef::Stock, face()).expect("face"));
+    generate(&world, &mut h, "Face1b");
+    let why = post_mounts(&world, "t-within").expect_err("one machine, one T number");
+    assert!(
+        why.contains(MILL_TOOL) && why.contains(OTHER) && why.contains(&format!("T{n}")) && why.contains("Setup1"),
+        "{why}"
+    );
+    assert!(!why.contains(LATHE_TOOL), "the lathe's T2 is its own table: {why}");
 }

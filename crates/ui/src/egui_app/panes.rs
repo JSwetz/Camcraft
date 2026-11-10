@@ -572,6 +572,7 @@ pub(super) fn follow_gate(c: Cmd, state: &mut State) {
             state.ribbon_more = None;
             state.ribbon_view_open = false;
             state.ribbon_theme_open = false;
+            state.ribbon_recent_open = None;
             state.ribbon_mode_open = true;
             state.status = format!("{why} - pick a workspace");
         }
@@ -601,6 +602,9 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
         Cmd::Machine => state.ribbon_mode_open,
         Cmd::View => state.ribbon_view_open,
         Cmd::Theme => state.ribbon_theme_open,
+        Cmd::Model | Cmd::Project => {
+            state.ribbon_recent_open.is_some() && state.ribbon_recent_open == super::recent_drop::kind_of(c)
+        }
         _ => false,
     }
 }
@@ -754,8 +758,10 @@ pub(super) fn op_icon(kind: OpType) -> Icon {
 fn run_cmd(c: Cmd, state: &mut State) {
     match c {
         Cmd::New => actions::new_document(state),
-        Cmd::Model => actions::open_model_dialog(state),
-        Cmd::Project => actions::open_project(state),
+        // #662: with recent files on hand the button opens its list
+        // (recent_drop.rs); with none it is the dialog, as before.
+        Cmd::Model => super::recent_drop::press(state, camcraft_app::recent::RecentKind::Model),
+        Cmd::Project => super::recent_drop::press(state, camcraft_app::recent::RecentKind::Project),
         Cmd::Save => actions::save_project(state),
         Cmd::SaveAs => actions::save_project_as(state),
         Cmd::Post => actions::post_program(state),
@@ -788,6 +794,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         // a time: opening either closes the other.
         Cmd::More(s) => {
             state.ribbon_more = (state.ribbon_more != Some(s)).then_some(s);
+            state.ribbon_recent_open = None;
             state.ribbon_mode_open = false;
             state.ribbon_view_open = false;
             state.ribbon_theme_open = false;
@@ -795,6 +802,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Machine => {
             state.ribbon_mode_open = !state.ribbon_mode_open;
             if state.ribbon_mode_open {
+                state.ribbon_recent_open = None;
                 state.ribbon_more = None;
                 state.ribbon_view_open = false;
                 state.ribbon_theme_open = false;
@@ -804,6 +812,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::View => {
             state.ribbon_view_open = !state.ribbon_view_open;
             if state.ribbon_view_open {
+                state.ribbon_recent_open = None;
                 state.ribbon_more = None;
                 state.ribbon_mode_open = false;
                 state.ribbon_theme_open = false;
@@ -812,6 +821,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Theme => {
             state.ribbon_theme_open = !state.ribbon_theme_open;
             if state.ribbon_theme_open {
+                state.ribbon_recent_open = None;
                 state.ribbon_more = None;
                 state.ribbon_mode_open = false;
                 state.ribbon_view_open = false;
@@ -1356,6 +1366,8 @@ pub fn ribbon(
             }
         }
     }
+    // The recent-files lists under Open and Model (#662): recent_drop.rs.
+    super::recent_drop::draw(ui, state, pal, base.with("recent-drop"), &cells, rect);
     // The source/build label is the rightmost toolbar item. At small window
     // widths it contracts to version plus source, then version alone; the
     // full text remains available on hover.
@@ -1464,6 +1476,10 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens, icons: Option<&IconS
                     .color(pal.text_faint)
                     .small(),
             );
+            // #183: the live MCP server says it is listening.
+            if let Some(note) = crate::mcp_host::badge(state) {
+                ui.label(RichText::new(note).color(pal.text_faint).small());
+            }
             if stale > 0 {
                 let button = ui.button(format!("Regenerate all stale ({stale})"));
                 if button.clicked() {

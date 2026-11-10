@@ -120,6 +120,9 @@ fn a_tap_past_its_flute_in_an_existing_hole_posts() {
 fn a_bore_bar_whose_shank_is_wider_than_the_hole_is_refused_by_name() {
     let (world, _h) = world_with(6.0, "BR-1000", tool("BR-1000", |t| t.shank_d = 14.0));
     let e = operation::generate(&world, &raw_op("BR-1000", params(6.0, CycleChoice::Bore)), "").err();
+    // #677: the refusal marks the hole it speaks of, on its material top.
+    let at = e.as_ref().and_then(|e| e.location());
+    assert!(at.is_some_and(|p| p.x == 0.0 && p.y == 0.0 && p.z.is_finite()), "marks the hole at (0, 0): {at:?}");
     let e = e.map(|e| e.to_string()).unwrap_or_else(|| panic!("a Ø14 shank fed into a Ø12 hole"));
     for s in ["Bore cycle at (0.000, 0.000)", "25.000 mm deep", "BR-1000's 20.000 mm flute", "shank dia. 14.000", "dia. 12.000 hole"] {
         assert!(e.contains(s), "the refusal names '{s}': {e}");

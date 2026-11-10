@@ -169,6 +169,7 @@ fn thread_params() -> OpParams {
         infeed: 0.4,
         feed: 120.0,
         plunge_feed: 40.0,
+        hand: camcraft_app::cl::ThreadHand::Right,
     }
 }
 
@@ -207,7 +208,8 @@ fn a_threaded_op_runs_clean_in_the_document() {
     assert!((rho(feeds[0].to) - (MAJOR - 0.4)).abs() < 1e-9, "the first rung is the first infeed");
     let last = feeds[feeds.len() - 1].to;
     assert!((rho(last) - (MAJOR - DEPTH)).abs() < 1e-9, "the last rung is the root: {:?}", last);
-    assert!((last.z - 14.0).abs() < 1e-6, "the run ends on the last center: {:?}", last);
+    // #629: toward the chuck - the run ends on the BOTTOM center.
+    assert!((last.z - 8.0).abs() < 1e-6, "the run ends on the last center: {:?}", last);
     for m in t.moves.iter().filter(|m| m.kind == camcraft_app::cl::MoveKind::Rapid) {
         assert!(rho(m.to) >= MAJOR + 0.05 - 1e-9 || m.to.z > 23.9, "a low rapid: {:?}", m.to);
     }
@@ -346,6 +348,47 @@ fn a_pitch_edit_rides_the_history_both_ways() {
 }
 
 #[test]
+fn the_thread_hand_edit_rides_the_history_both_ways() {
+    // #629: the hand is a parameter like the pitch - EditOperationParams
+    // writes it, the cache goes Stale, the regenerated helix winds the
+    // other way (counter-clockwise falling: left-hand), and undo / redo
+    // walk it back and forth.
+    use camcraft_app::cl::ThreadHand;
+    let hand_of = |world: &World| {
+        let e = model::find_by_name(world, "TH1").expect("op");
+        match model::operation_of(world, &e).expect("operation").params {
+            OpParams::Threading { hand, .. } => hand,
+            other => panic!("threading expected, got {other:?}"),
+        }
+    };
+    let turns = |world: &World| -> Vec<Option<ThreadHand>> {
+        let c = cache(world, "TH1").expect("cached");
+        c.path.moves.iter().filter(|m| m.arc.is_some()).map(ThreadHand::of_move).collect()
+    };
+    let (world, mut history) = thread_world();
+    create(&world, &mut history, "TH1", "TD-1732-60", thread_params());
+    assert_eq!(hand_of(&world), ThreadHand::Right, "right-hand unless the drawing says LH");
+    assert!(turns(&world).iter().all(|h| *h == Some(ThreadHand::Right)), "the seeded helix is right-hand");
+    let mut p = thread_params();
+    if let OpParams::Threading { hand, .. } = &mut p {
+        *hand = ThreadHand::Left;
+    }
+    history.execute(&world, EditOperationParams::new(&world, "TH1", p).expect("a legal hand"));
+    assert_eq!(hand_of(&world), ThreadHand::Left);
+    assert_eq!(status(&world, "TH1"), OpStatus::Stale, "the cached helix winds the old way");
+    history.execute(&world, GenerateOperation::new(&world, "TH1").expect("regenerate"));
+    assert_eq!(status(&world, "TH1"), OpStatus::Ok, "the hand verdict is silent on its own helix");
+    assert!(turns(&world).iter().all(|h| *h == Some(ThreadHand::Left)), "regenerated left-hand");
+    assert!(history.undo(&world), "undo the regenerate");
+    assert!(history.undo(&world), "undo the edit");
+    assert_eq!(hand_of(&world), ThreadHand::Right, "the hand is back");
+    assert_eq!(status(&world, "TH1"), OpStatus::Ok);
+    assert!(turns(&world).iter().all(|h| *h == Some(ThreadHand::Right)));
+    assert!(history.redo(&world), "redo the edit");
+    assert_eq!(hand_of(&world), ThreadHand::Left);
+}
+
+#[test]
 fn an_upward_window_refuses_at_the_create_door() {
     // The blade trio's ordering law restated for the wave: top
     // below bottom is no window of turns, and the door says it
@@ -361,6 +404,7 @@ fn an_upward_window_refuses_at_the_create_door() {
         infeed: 0.4,
         feed: 120.0,
         plunge_feed: 40.0,
+        hand: camcraft_app::cl::ThreadHand::Right,
     };
     let Err(err) =
         CreateOperation::new(&world, "TB1", "TD-1732-60", SrcRef::Entity("bar".into()), params)

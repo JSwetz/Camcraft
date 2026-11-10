@@ -73,6 +73,7 @@ mod dual;
 mod field;
 mod field_arc;
 mod field_batch;
+mod field_box;
 mod field_blade;
 mod field_bull;
 mod field_cut;

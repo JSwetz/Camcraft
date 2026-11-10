@@ -9,7 +9,7 @@
 // vendor post script text and no CAM post's output used; original work.
 // Structure follows our own haas.cps; the goldens lock this file's
 // decisions, not any vendor's.
-description = "Tormach PathPilot (3-axis mill, G20/G21 from the machine, G73/G81/G82/G83/G84/G86/G89, G2/G3, G98)";
+description = "Tormach PathPilot (3-axis mill, G20/G21 from the machine, G73/G81/G82/G83/G84/G86/G89, G2/G3, G98, G38.2 probing)";
 vendor = "Camcraft";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
@@ -140,7 +140,13 @@ function joinDash(parts) {  // the non-empty parts, " - " between
   for (var i = 0; i < parts.length; i++) if (parts[i]) a.push(parts[i]);
   return a.join(" - ");
 }
-function note(s) { block(["(" + s + ")"]); }
+// #594: LinuxCNC reads some comments as commands - (MSG,..) (DEBUG,..)
+// (PRINT,..) (LOG..) (PROBEOPEN ..) (ABORT,..) and AXIS's (AXIS,..), the
+// keyword in any case (LinuxCNC G-code manual, "Comments", "Messages",
+// "Probe Logging", "Logging", "Debug Messages"). A comment whose text
+// would open with one is led by "- ", so user text stays inert.
+var ACTIVE = /^\s*(MSG|DEBUG|PRINT|LOG|LOGOPEN|LOGAPPEND|LOGCLOSE|PROBEOPEN|PROBECLOSE|ABORT|AXIS|PY|PYRUN)\b/i;
+function note(s) { block(["(" + (ACTIVE.test(s) ? "- " + s : s) + ")"]); }
 function commentParam(name, value) {
   if (name === "SetupName") setupName = clean(value);
   else if (name === "OperationName") opName = clean(value);
@@ -175,7 +181,9 @@ function toolNote() {  // just before the tool change it describes
 function onOpen() {
   inch = typeof machine !== "undefined" && machine.units === "inch";
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
-  block(["(" + nm + ")"]);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, so `Tormach 770MX (ML)` never nests.
+  note(clean(nm) || "CAMCRAFT");
   block([inch ? "G20" : "G21", "G17", "G90", "G91.1", "G94", "G40", "G49", "G80"]);
   block(["G64", inch ? "P0.001" : "P0.025"]);
   var z = safeZ();
@@ -308,12 +316,15 @@ function startPreamble() {
     block(["G43", "H" + ni(tNo)]);
     toolWait = false;
   }
-  if (spindleWait) {
+  // A touch probe (#108, #362) states 0 rpm: no spindle start, no belt
+  // note and no cutting fluid on a probe stylus.
+  var touchProbe = spindleWait && !(sRpm > 0);
+  if (spindleWait && sRpm > 0) {
     block([beltNote(sRpm)]);
     block(["S" + ni(sRpm), "M3"]);
-    spindleWait = false;
   }
-  coolant = coolantCode();
+  spindleWait = false;
+  coolant = touchProbe ? "" : coolantCode();
   if (coolant) block([coolant]);
 }
 
@@ -466,6 +477,105 @@ function onCycle() {
   inCycle = true;
 }
 
+// ------------------------------------------------------------ probing
+// #362. PathPilot probes the LinuxCNC way, not with a G31 skip. Words
+// from the LinuxCNC G-code reference (linuxcnc.org/docs, "G38.n Straight
+// Probe", "G10 L20", numbered parameters, O-code conditionals, comment
+// messages) and Tormach's PathPilot post-processor guidelines / machine
+// code reference (G38.2-G38.5, G10 L2/L20, M0/M2 listed as supported):
+// - the touch is G38.2: probe toward the part, stop on contact, and the
+//   CONTROL raises an error and halts the program when no contact comes
+//   (and when the probe is already tripped at the start) - so no
+//   post-side no-contact test is needed, and a probe that never touched
+//   can never back off and measure air. G38.3 + a #5070 test would hand
+//   that safety to our own branch instead of the control's.
+// - the trip lands in #5061-#5063, "in the coordinate system in which
+//   the G38 took place" (the section's own WCS, current program units,
+//   the controlled point with the tool length offset in effect) - the
+//   same frame and unit this post writes every coordinate in. A measured
+//   trip k is kept in #(100+3k)..#(102+3k).
+// - the back-off is incremental (G91 ... G90), so a part found nearer
+//   than the model is never driven into.
+// - a deviation past the tolerance shows a (MSG,...) and ends the program
+//   (M2) inside an `o<n> if [...]` / `o<n> endif` block, one unique
+//   number per test. (ABORT,...) is not in the stable LinuxCNC reference
+//   and M0 could be resumed onto a wrong offset, so M2 is the alarm.
+// - the work offset is written with G10 L20, "the current coordinates
+//   become the given values": the current position #5420-#5422 (active
+//   WCS, current program units) minus the deviation. Exact whatever unit
+//   the control stores #5221.. in (the reference does not say) - G10 L2
+//   from #5221 + 20 x slot would mix units on a G21 program run on an
+//   inch-configured control.
+// - #575: each axis's deviation (#190.., found - expected: the value the
+//   G10 L20 write subtracts) is reported, after its tolerance test and
+//   before the offset write (or the measure-only stop), as a
+//   (DEBUG, PROBE <axis> ERROR #19n MM) comment - IN in a G20 program:
+//   the value is in the program's unit, and the line says which. The LinuxCNC G-code
+//   reference ("Messages" / "Comments" section): DEBUG shows its text like
+//   MSG - in the operator's status display, without stopping the program -
+//   with each #n / #<name> in it replaced by the parameter's value.
+// - arming: PathPilot's probe input is always live (the probe type is a
+//   Settings-tab choice); no M-code arms it, and none is written.
+var probeBase = 100;
+var probeIf = 900;        // the next O-word number for a test block
+function probeAxis(a) { return a === "X" ? 0 : (a === "Y" ? 1 : 2); }
+function onProbeMove() {
+  startPreamble();
+  var p = properties;
+  xyFirst(p.X, p.Y);       // never a probe from an unknown X Y
+  block(["G38.2", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
+  if (has(p.Measure) && p.Measure >= 0) {
+    var b = probeBase + 3 * p.Measure;
+    block(["#" + b + "=#5061"]);
+    block(["#" + (b + 1) + "=#5062"]);
+    block(["#" + (b + 2) + "=#5063"]);
+  }
+}
+function onProbeRetreat() {
+  var p = properties;
+  block(["G91", "G1", w("X", p.DeltaX), w("Y", p.DeltaY), w("Z", p.DeltaZ), fw(p.Feed)]);
+  block(["G90"]);
+}
+function nextO() { probeIf += 1; return "o" + probeIf; }  // unique per test block
+function onProbeResult() {
+  var p = properties;
+  var org = [orgX, orgY, orgZ];
+  var axes = p.Axes || [];
+  var dev = 190;  // #190.. hold each axis's deviation, found - expected
+  for (var i = 0; i < axes.length; i++) {
+    var a = axes[i];
+    var ai = probeAxis(a.Axis);
+    var sum = [];
+    for (var k = 0; k < a.Measures.length; k++) sum.push("#" + (probeBase + 3 * a.Measures[k] + ai));
+    var mean = a.Measures.length > 1 ? "[[" + sum.join("+") + "]/" + a.Measures.length + "]" : sum[0];
+    // LinuxCNC evaluates arithmetic only inside brackets: an assignment
+    // is `#n=[expr]` (PathPilot Hub refused the bare `#190=#102-0.7874`
+    // with "Bad character '-'"). The sign is folded so no `--` is written.
+    var ex = a.Expected - org[ai];
+    var op = ex < 0 ? "+" : "-";
+    block(["#" + (dev + i) + "=[" + mean + op + fu(Math.abs(ex)) + "]"]);
+    var o = nextO();
+    block([o, "if", "[ABS[#" + (dev + i) + "] GT " + fu(p.Tolerance) + "]"]);
+    block(["(MSG, PROBE " + a.Axis + " OUT OF TOLERANCE)"]);
+    block(["M2"]);
+    block([o, "endif"]);
+    // #575: the deviation that passed is reported before it is written,
+    // in the program's own unit (the G20/G21 onOpen wrote), named so the
+    // operator never reads an inch value as mm.
+    block(["(DEBUG, PROBE " + a.Axis + " ERROR #" + (dev + i) + (inch ? " IN" : " MM") + ")"]);
+  }
+  if (has(p.SetWorkOffset) && p.SetWorkOffset >= 0) {
+    var words = ["G10", "L20", "P" + (Number(p.SetWorkOffset) + 1)];
+    for (var j = 0; j < axes.length; j++) {
+      words.push(axes[j].Axis + "[#" + (5420 + probeAxis(axes[j].Axis)) + "-#" + (dev + j) + "]");
+    }
+    block(words);
+  } else {
+    block(["(MSG, CHECK PROBE RESULT #" + dev + "..)"]);
+    block(["M0"]);
+  }
+}
+
 // ------------------------------------------------------------ footer
 // G53 G0 Z0 lifts the spindle straight up to the top of Z travel in
 // machine coordinates (Tormach's Z home is at the top; another machine
@@ -473,8 +583,25 @@ function onCycle() {
 // stored G30 position holds; then G30 takes the machine to the
 // operator's preset G30 location (the unload spot), the way PathPilot's
 // own programs end. M30 ends the program (no % fence).
+//
+// #596: LinuxCNC's M2 / M30 (linuxcnc.org/docs, M-codes, "M2, M30
+// Program End") resets offsets to G54, the plane to G17, G90, G94, M48,
+// G40, M5, G1 and M9 - but not the length unit, so a G21 program leaves
+// an inch-run control in mm (DRO and MDI included). The user's post
+// option `EndUnits` ("inch" / "mm"; absent = leave the program's unit)
+// names the unit the control should be left in: when it differs from
+// the program's, its word goes after the final retract, right before
+// M30 - after the last move, so no position is read in the new unit.
+function endUnitsWord() {
+  var want = typeof postOptions !== "undefined" && postOptions ? postOptions.EndUnits : undefined;
+  if (want === "inch" && !inch) return "G20";
+  if (want === "mm" && inch) return "G21";
+  return "";
+}
 function onClose() {
   endPreamble();
   retract();
+  var u = endUnitsWord();
+  if (u) block([u]);
   block(["M30"]);
 }

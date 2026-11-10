@@ -10,6 +10,8 @@ pub mod commands;
 pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
+// #339 slice 6: the user fixture library file.
+pub mod fixture_library;
 pub mod fixture_carried;
 // #561: locate the part in a fixture (or the fixture on the part) by mates.
 pub mod fixture_clash;
@@ -40,8 +42,11 @@ pub mod posting;
 pub mod program_entry;
 pub use camcraft_motion::probing;
 pub mod project;
+// #35: pocket and slot recognition on the model's faces.
+pub mod recognize;
 // #182: the CPU rasteriser behind the MCP stock render.
 pub mod raster;
+pub mod recent;
 pub mod rest;
 pub mod ribbon;
 pub mod schema;
@@ -71,6 +76,8 @@ pub mod tool_list;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
 pub use camcraft_tools::tools;
+// #630: the lathe tool orientation code (LinuxCNC 1-9) and its control point.
+pub use camcraft_tools::orientation;
 // #93: the drawn spun profile of a milling holder.
 pub use camcraft_tools::spun;
 // #368: a tool's modelled body and the reads the judging laws take from it.
