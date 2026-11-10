@@ -14,6 +14,7 @@ pub mod boundary_summary;
 pub mod edge_pick;
 pub mod egui_app;
 pub mod feedback;
+pub mod incoming_view;
 pub mod headless_gpu;
 pub mod interact;
 pub mod locate_pick;
