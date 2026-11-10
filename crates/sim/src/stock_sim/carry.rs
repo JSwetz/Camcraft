@@ -232,6 +232,16 @@ impl Body {
         (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
     }
 
+    /// A body from per-column tops (in `dex`) and floors, as another
+    /// engine read them (#637 step D: a carried field read back onto a
+    /// lattice). `floor.len()` must match the lattice.
+    pub(crate) fn from_parts(dex: Dexel, floor: Vec<f64>, floor_judged: bool) -> Result<Self, String> {
+        if floor.len() != dex.nx * dex.ny {
+            return Err(format!("a body of {} floors on a {}x{} lattice", floor.len(), dex.nx, dex.ny));
+        }
+        Ok(Body { dex, floor, floor_judged })
+    }
+
     /// The same body seen through `turn`: its lattice re-indexed onto
     /// the image lattice, heights mapped (and swapped by a flip). No
     /// value is interpolated.

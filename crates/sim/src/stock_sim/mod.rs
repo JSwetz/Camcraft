@@ -75,6 +75,7 @@ mod field_arc;
 mod field_batch;
 mod field_box;
 mod field_carry;
+mod field_body;
 mod field_floor;
 mod field_blade;
 mod field_bull;
@@ -110,6 +111,7 @@ pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSur
 pub use dexel::{reach, Dexel};
 pub use edge_break::credit_breaks;
 pub use field::SdfField;
+pub use field_body::Lattice;
 pub use field_carry::{box_signed, CarriedField, Clip, ClipRefusal};
 pub use field_floor::FloorRead;
 pub use field_batch::CutStats;
