@@ -34,6 +34,7 @@ var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when unstated
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
+var homedAt = -1;          // linesWritten() just after a trip home (#504): onClose skips its own home when nothing followed
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
@@ -307,7 +308,9 @@ function invertedNotes() {
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block([oWord(), "(" + nm + ")"]);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, so `Tormach 770MX (ML)` never nests.
+  block([oWord(), "(" + (clean(nm) || "CAMCRAFT") + ")"]);
   invertedNotes();
 }
 
@@ -380,6 +383,7 @@ function afterOp() {
     block(["G91", "G28", "Z0"]);  // straight up to the reference point first
     block(["G28", "X0", "Y0"]);
     block(["G90"]);               // absolute again before the next section
+    homedAt = linesWritten();
     return;
   }
   msg(coolantWho() + "unknown after-operation ask " + ask);
@@ -540,6 +544,14 @@ function slotOf(word) {  // "G55" -> 1
   var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
   return n >= 0 && n <= 5 ? n : 0;
 }
+// #575: no deviation report is written before the offset write. Fanuc's
+// published custom macro B documentation (also the Haas and Mazak EIA
+// macro conventions this post family follows) gives an operator message
+// only as #3000 (an alarm, which stops) or #3006 (stop with a message);
+// DPRNT/POPEN go to an external I/O device, not the control's screen. No
+// documented message shows a value without stopping, so nothing is
+// emitted - a stop on every good probe is not a report. The measure-only
+// #3006 below stops by intent: there the operator must act on #190.. .
 function onProbeResult() {
   var p = properties;
   var org = [orgX, orgY, orgZ];
@@ -570,8 +582,12 @@ function onProbeResult() {
 // ------------------------------------------------------------ footer
 function onClose() {
   endPreamble();
-  block(["G91", "G28", "Z0"]);
-  block(["G28", "X0", "Y0"]);
+  // #504: a trip home with nothing written after it (a trailing Go
+  // home) already is the program-end home - written once, not twice.
+  if (linesWritten() !== homedAt) {
+    block(["G91", "G28", "Z0"]);
+    block(["G28", "X0", "Y0"]);
+  }
   block(["M30"]);
   writeln("%");
 }

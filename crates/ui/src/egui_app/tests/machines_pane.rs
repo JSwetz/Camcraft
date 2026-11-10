@@ -2,14 +2,16 @@
 //! beside the properties pane, it lists the shipped library, selecting a
 //! machine shows its properties and its validation - a clean pass, or
 //! each refusal by name - and none of it touches the command queue (the
-//! pane is view state; it edits and assigns nothing).
+//! pane is view state) except "Use for this setup" (#384), which queues
+//! the undoable machine assignment and is disabled, with its reason
+//! shown, for a refused machine.
 //! Provenance: our own tests, specced from the issue and the egui_dock /
 //! egui_kittest vendored sources; no HSMWorks material involved.
 //!
-//! Gate map (M4.4): covers ui::egui_app::machines_pane, ui::egui_app::layout, ui::state, app::machine::library, app::machine::validate.
+//! Gate map (M4.4): covers ui::egui_app::machines_pane, ui::egui_app::layout, ui::state, app::machine::library, app::machine::validate, app::commands::load_machine, ui::state_setup_mount.
 
 use super::super::layout::{self, ViewRow};
-use super::super::machines_pane::{row_label, verdict};
+use super::super::machines_pane::{row_label, verdict, USE_FOR_SETUP};
 use super::*;
 use crate::state::Panel;
 
@@ -153,4 +155,144 @@ fn a_refused_machine_file_shows_each_refusal_by_name() {
     h.get_by_label("X travel: min 10 must be below max 5");
     assert_no_commands(&h);
     let _ = std::fs::remove_file(&path);
+}
+
+fn ctrl_z(h: &mut Harness<'static, ShellUi>) {
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::COMMAND));
+    h.input_mut().events.push(Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    h.run_steps(2);
+}
+
+fn button_disabled(h: &Harness<'static, ShellUi>) -> bool {
+    use egui_kittest::kittest::NodeT;
+    h.get_by_label(USE_FOR_SETUP).accesskit_node().is_disabled()
+}
+
+#[test]
+fn use_for_this_setup_assigns_the_selected_machine_and_undo_restores_it() {
+    let mut h = blank_harness();
+    h.run();
+    let before = camcraft_app::machine::of(&h.state().state.world);
+    let lathe_path = camcraft_app::posting::builtin_path("Lathe");
+    assert_ne!(before.0, lathe_path, "the fixture must start on another machine");
+    open_machines(&mut h);
+    let lathe = h
+        .state()
+        .state
+        .machines_pane
+        .list
+        .as_ref()
+        .and_then(|l| l.iter().find(|e| e.name == "Lathe").cloned())
+        .expect("the library lists the lathe");
+    h.get_by_label(&row_label(&lathe)).click();
+    h.run_steps(2);
+    assert!(!button_disabled(&h), "a valid, unmounted machine can be assigned");
+    h.get_by_label(USE_FOR_SETUP).click();
+    h.run_steps(3);
+    let st = &h.state().state;
+    assert!(st.pending.is_empty(), "the queued command was drained: {:?}", st.pending);
+    assert_eq!(camcraft_app::machine::of(&st.world).0, lathe_path, "status: {}", st.status);
+    assert_eq!(camcraft_app::machine::kind_of(&st.world), camcraft_app::machine::Kind::Lathe);
+    assert!(!st.history.is_empty(), "the assignment is in the history");
+    // Now it is the setup's machine: the button says so and stays shut.
+    assert!(button_disabled(&h), "the mounted machine cannot be assigned again");
+    h.get_by_label("Cannot assign: it is already this setup's machine");
+    // Ctrl+Z puts the previous machine back exactly.
+    ctrl_z(&mut h);
+    assert_eq!(camcraft_app::machine::of(&h.state().state.world), before, "undo restores the machine");
+}
+
+#[test]
+fn a_refused_machine_cannot_be_assigned_and_names_why() {
+    let text = r#"{
+      "general": { "model": "BACKWARDS MILL", "kind": "mill" },
+      "kinematics": { "default": { "units": { "length": "mm" }, "parts": [
+        { "name": "X", "type": "linear", "travel": { "min": 10.0, "max": 5.0 } },
+        { "name": "Y", "type": "linear" }, { "name": "Z", "type": "linear" }
+      ] } }
+    }"#;
+    let path = std::env::temp_dir().join(format!("camcraft_ui_machines_assign_{}.mch", std::process::id()));
+    std::fs::write(&path, text).expect("write the fixture file");
+    let mut h = blank_harness();
+    h.run();
+    let before = camcraft_app::machine::of(&h.state().state.world);
+    open_machines(&mut h);
+    // The refused file is in the catalogue but NOT mounted, so the only
+    // thing keeping the button shut is its validation.
+    let bad = camcraft_app::machine::library::MachineEntry::from_file(&path);
+    assert!(!bad.is_valid());
+    {
+        let p = &mut h.state_mut().state.machines_pane;
+        let list = p.list.as_mut().expect("the catalogue was read");
+        list.push(bad.clone());
+        p.selected = Some(list.len() - 1);
+    }
+    h.run_steps(2);
+    assert!(button_disabled(&h), "a refused machine's button is disabled");
+    h.get_by_label("Cannot assign: fails validation - X travel: min 10 must be below max 5");
+    // Pressing the disabled button does nothing.
+    let at = h.get_by_label(USE_FOR_SETUP).rect().center();
+    click(&mut h, at);
+    assert_no_commands(&h);
+    assert_eq!(camcraft_app::machine::of(&h.state().state.world), before);
+    // Even queued directly, the command door refuses it by name.
+    h.state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::UseCatalogueMachine(bad.source.clone()));
+    h.run_steps(2);
+    let st = &h.state().state;
+    assert!(st.history.is_empty(), "a refused machine never lands in the history");
+    assert!(st.status.contains("X travel: min 10 must be below max 5"), "status: {}", st.status);
+    assert_eq!(camcraft_app::machine::of(&st.world), before);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn use_for_this_setup_replaces_an_own_machine_and_leaves_the_document_alone() {
+    let mut h = blank_harness();
+    h.run();
+    {
+        let st = &mut h.state_mut().state;
+        st.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    }
+    h.run_steps(2);
+    let s = camcraft_app::setup::active(&h.state().state.world).expect("a setup is active");
+    h.state_mut().state.pending.push_back(CommandKind::SetupOwnMachine { setup: s.clone(), own: true });
+    h.run_steps(2);
+    let world = &h.state().state.world;
+    assert!(camcraft_app::setup_mount::own_machine(world, Some(&s)).is_some(), "the setup owns its machine");
+    let doc_before = camcraft_app::machine::document_of(world);
+    let own_before = camcraft_app::machine::of(world);
+    let lathe_path = camcraft_app::posting::builtin_path("Lathe");
+    assert_ne!(own_before.0, lathe_path);
+    open_machines(&mut h);
+    let lathe = h
+        .state()
+        .state
+        .machines_pane
+        .list
+        .as_ref()
+        .and_then(|l| l.iter().find(|e| e.name == "Lathe").cloned())
+        .expect("the library lists the lathe");
+    h.get_by_label(&row_label(&lathe)).click();
+    h.run_steps(2);
+    h.get_by_label(USE_FOR_SETUP).click();
+    h.run_steps(3);
+    let st = &h.state().state;
+    assert_eq!(camcraft_app::machine::of(&st.world).0, lathe_path, "status: {}", st.status);
+    let own = camcraft_app::setup_mount::own_machine(&st.world, Some(&s)).map(|d| d.path);
+    assert_eq!(own.as_deref(), Some(lathe_path.as_str()), "the setup's own machine took the pick");
+    assert_eq!(camcraft_app::machine::document_of(&st.world), doc_before, "the document's machine is untouched");
+    assert!(button_disabled(&h));
+    ctrl_z(&mut h);
+    let world = &h.state().state.world;
+    assert_eq!(camcraft_app::machine::of(world), own_before, "undo restores the setup's machine");
+    assert_eq!(camcraft_app::machine::document_of(world), doc_before);
 }

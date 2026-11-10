@@ -1,5 +1,5 @@
 //! Is a body's facet winding its real outside? (#366) Face-normal
-//! alignment picks (the plane lay, the two-edge lay, the 3-2-1) read a
+//! alignment picks (the plane lay, the 3-2-1) read a
 //! face's outside from its facets' winding; a body wound inside-out (a
 //! common STL export fault) would lay the part upside down silently. This
 //! checks each body - a connected set of facets - once per mesh content:

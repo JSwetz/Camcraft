@@ -11,6 +11,7 @@
 use std::path::Path;
 
 use camcraft_app::commands::{CommandError, LoadMachine, SelectPost, SetSetupMachine, SetSetupPost};
+use camcraft_app::machine::library::{self, MachineSource};
 use camcraft_app::machine::Machine;
 use camcraft_app::schema::PostRef;
 use camcraft_app::{machine, posting, setup, setup_mount};
@@ -92,6 +93,20 @@ impl State {
     /// The machine editor's Apply.
     pub(super) fn mount_edited(&mut self, path: String, m: Machine) {
         let _ = self.route_machine(MachineVerb::Mount(path, Some(Box::new(m))), "machine edited", "machine edit refused");
+    }
+
+    /// The Machines pane's "Use for this setup" (#384): the catalogue
+    /// machine is read and validated again (a refused file never
+    /// mounts), then routed like every machine verb - onto the active
+    /// setup's own machine when it has one, else the document's.
+    pub(super) fn mount_catalogue(&mut self, source: &MachineSource) {
+        match library::read_for_assign(source) {
+            Ok((path, m)) => {
+                let done = format!("machine: {path}");
+                let _ = self.route_machine(MachineVerb::Mount(path, Some(Box::new(m))), &done, "machine not assigned");
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("machine not assigned: {err}")),
+        }
     }
 
     /// Choose the post script (M3.3 A), for the active setup's own post

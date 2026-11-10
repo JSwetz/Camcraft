@@ -206,7 +206,7 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
     let motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius).with_top(p.top_z);
     let cert = center_region.as_ref().map(Cert::Region);
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     // Ring-major: each circle runs its own ladder to its own floor
     // before the next starts. The nesting is exact (a disk's rings
     // cannot interfere), so the order costs no re-crossing anywhere,
@@ -228,9 +228,9 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
             } else {
                 p.bowl_z((rho + p.stepover + r).min(p.radius))
             };
-            cut_levels(prev, floor, p.stepdown)
+            cut_levels(prev, floor, p.stepdown)?
         } else {
-            cut_levels(p.top_z, p.bottom_z, p.stepdown)
+            cut_levels(p.top_z, p.bottom_z, p.stepdown)?
         };
         run_levels(&mut b, &pass, &zs, &motion, None, cert.as_ref(), cert.as_ref());
         k += 1;

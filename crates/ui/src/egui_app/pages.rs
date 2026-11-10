@@ -68,7 +68,7 @@ use crate::actions;
 use crate::interact;
 use crate::state::{CommandKind, ErrorScope, FixtureUi, ModelUi, PostView, State, UiTarget, quat_yaw_deg};
 
-use super::layout::{check_row, hint};
+use super::layout::hint;
 use super::panes::kind_name;
 use super::theme::Tokens;
 
@@ -101,6 +101,8 @@ const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 /// like operations.rs's contents() dispatcher. The operation page owns
 /// its scroll (its action bar stays fixed under it); every other page
 /// scrolls whole.
+/// The Setups page's pick rows mark themselves drawn; the shell's
+/// per-frame sweep (#664, #667) disarms the rest after the dock.
 pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     let t = state.pane_target();
     // Only an open Boundary group draws its viewport marks (M11.5 UX):
@@ -403,6 +405,7 @@ pub(super) fn post_section(ui: &mut Ui, state: &mut State) {
         state.pending.push_back(CommandKind::SetPerOpOutput(pick));
     }
     super::post_options::threading_picker(ui, state);
+    super::post_options::end_units_picker(ui, state);
 }
 
 /// The post offer (M13.5 B): when the mounted machine's kind is not
@@ -754,6 +757,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             ui.label(line);
             super::setup_align_pick::picker(ui, state, name);
             super::setup_plane_pick::row(ui, state, name);
+            super::setup_axis_pick::rows(ui, state, name);
             super::setup_wcs_pick::picker(ui, state, name);
         }
     }
@@ -853,71 +857,8 @@ pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>
     });
     for (name, entity) in fixtures {
         let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
-        let is_draft = state.fixture_ui.name == name;
-        ui.horizontal(|ui| {
-            if ui.selectable_label(is_draft, &name).clicked() {
-                state.fixture_ui = FixtureUi {
-                    name: name.clone(),
-                    x: loc.pos.x,
-                    y: loc.pos.y,
-                    z: loc.pos.z,
-                    yaw_deg: quat_yaw_deg(loc.rot),
-                };
-            }
-            ui.label(format!(
-                "{}, {}, {}  yaw {:.1}",
-                units::len(loc.pos.x, u, 2),
-                units::len(loc.pos.y, u, 2),
-                units::len(loc.pos.z, u, 2),
-                quat_yaw_deg(loc.rot)
-            ));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Delete").clicked() {
-                    state
-                        .pending
-                        .push_back(CommandKind::DeleteFixture(name.clone()));
-                }
-                if ui.small_button("Unmark").clicked() {
-                    state
-                        .pending
-                        .push_back(CommandKind::UntagFixture(name.clone()));
-                }
-            });
-        });
-        // #339 slice 4: how the gate judges this steel, and why a box.
-        if let Some(m) = state.fixture_mesh_state(&name) {
-            ui.label(format!("    Collision: {}", m.detail()));
-        }
-        // Whether the steel turns with the part (M13.8 (2)): a chuck
-        // rides the rotary, a tailstock or a table stands still and is
-        // judged in the machine frame. The box edits a copy - the flag
-        // lands through `SetFixtureFixed`, one undo unit, never a poke.
-        let mut fixed = camcraft_app::fixture::def_of(&state.world, &entity).is_some_and(|d| d.fixed);
-        if check_row(ui, "Fixed (does not turn with the part)", &mut fixed).changed() {
-            state.pending.push_back(CommandKind::SetFixtureFixed { name: name.clone(), fixed });
-        }
-        hint(
-            ui,
-            "On: a table or tailstock - it stands still while a rotary turns the part, \
-             so it is collision-checked in the machine frame. Off: a chuck, turning with the part.",
-        );
-        if is_draft {
-            ui.horizontal(|ui| {
-                ui.label("    place");
-                num(ui, u, &mut state.fixture_ui.x);
-                num(ui, u, &mut state.fixture_ui.y);
-                num(ui, u, &mut state.fixture_ui.z);
-                ui.label("yaw");
-                num_plain(ui, &mut state.fixture_ui.yaw_deg);
-                if ui.small_button("Apply").clicked() {
-                    state.pending.push_back(CommandKind::MoveFixture {
-                        name: name.clone(),
-                        pos: [state.fixture_ui.x, state.fixture_ui.y, state.fixture_ui.z],
-                        yaw_deg: state.fixture_ui.yaw_deg,
-                    });
-                }
-            });
-        }
+        let fixed = camcraft_app::fixture::def_of(&state.world, &entity).is_some_and(|d| d.fixed);
+        super::fixture_rows::row(ui, state, &name, &loc, fixed);
     }
     if let Some(t) = table {
         ui.label(format!(
@@ -927,7 +868,7 @@ pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>
             units::len(t.max.z, u, 2),
         ));
     }
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui.button("Import fixture…").clicked() {
             state.pending.push_back(CommandKind::ImportFixtureDialog);
         }
@@ -1429,6 +1370,8 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         num(ui, u, &mut state.tool_ui.nose_radius);
                         ui.label("the ground tip circle the bar rides the hole wall on (M5.2 F) - inert on drilling cycles, which size by the slide");
                     }
+                    // #630: which point of the nose the lathe posts write.
+                    super::tool_orientation_row::orientation_row(ui, state);
                     if state.tool_ui.kind == 7 {
                         field(ui, "Blade width");
                         num(ui, u, &mut state.tool_ui.width);

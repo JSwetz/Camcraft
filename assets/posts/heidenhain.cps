@@ -448,6 +448,16 @@ function owedDwell() {
   msg("drilling dwell without a feed move to the hole bottom - refused, not dropped");
 }
 
+// ------------------------------------------------------------ probing
+// #173: deliberately no onProbeMove / onProbeRetreat / onProbeResult.
+// The ISO user's manual this post is specced from documents no free
+// skip/measuring move and no variable holding a trip position; TNC
+// probing is the touch-probe cycles, whose call form and result Q
+// parameters live in the separate touch-probe cycle manual, not the
+// source of this post. Rather than guess a cycle number or a Q
+// parameter, the engine refuses a Probe operation by name for this
+// post (crates/app/tests/probe_dialects.rs pins it).
+
 // ------------------------------------------------------------ footer
 // #50: the program ends M2 (p. 66: `G00 Z+250 M2*`), then the end
 // block `N99999999 %NAME G71 *` (p. 130). The old optional `/G53 Z0`

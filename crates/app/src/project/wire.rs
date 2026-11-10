@@ -189,10 +189,18 @@ pub fn collect(world: &World) -> ProjectFile {
         // the #110 / #111 switches ride their own top-level keys below.
         post_options: {
             let o = crate::posting::post_options(world);
-            (o.threading != crate::schema::ThreadingOutput::default()).then(|| PostOptionsDto {
+            (o.threading != crate::schema::ThreadingOutput::default()
+                || o.end_units != crate::schema::EndUnits::default())
+            .then(|| PostOptionsDto {
                 threading: match o.threading {
                     crate::schema::ThreadingOutput::G32Passes => None,
                     crate::schema::ThreadingOutput::G76Cycle => Some("g76".into()),
+                },
+                // #596: left modal (the default) writes no key.
+                end_units: match o.end_units {
+                    crate::schema::EndUnits::Leave => None,
+                    crate::schema::EndUnits::Inch => Some("inch".into()),
+                    crate::schema::EndUnits::Millimeters => Some("mm".into()),
                 },
             })
         },

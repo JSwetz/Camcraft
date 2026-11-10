@@ -86,7 +86,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
         prop_row(ui, "Back-off", |ui| num(ui, u, backoff));
         prop_row(ui, "Depth below edge", |ui| num(ui, u, depth));
         prop_row(ui, "Corner inset", |ui| num(ui, u, inset));
-        hint(ui, "the probe distance is how far past the expected contact the control searches before it alarms");
+        hint(ui, "the probe distance is a search LIMIT past the expected contact, not a destination: the probe stops where it touches, and alarms if nothing trips by then - keep it small (over 2 mm is flagged)");
     }
     if tab == SEC_FEEDS {
         prop_row(ui, "Seek feed", |ui| num_feed(ui, u, fast_feed));

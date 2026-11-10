@@ -1,15 +1,15 @@
-//! #330 review on PR #346: two picked edges take their plane's outside
-//! from the one flat face they both bound (its facet winding), never from
-//! the part's centre - pinned on an L-bracket's inner step (a concave part,
-//! whose bounds centre sits on the step's outer side) and on a step whose
-//! plane runs through the centre. Edges that bound no common face, or sit
-//! on two bodies, are refused by name. Also pinned: a degenerate face is
-//! refused, and a part tilted upside down lays its face with the
-//! antiparallel half turn.
+//! #330 review on PR #346, narrowed by #554: the plane is set by a face
+//! only - an edge cannot define a plane, so the two-edge mode is gone and
+//! every edge pick (alone, in pairs that used to lay a plane, or on two
+//! bodies) is refused by name, pointing at the axis rows (#557). Still
+//! pinned: a concave part's step face lays outward up from its facet
+//! winding (never from the part's centre), a degenerate face is refused,
+//! and a part tilted upside down lays its face with the antiparallel half
+//! turn.
 //! Provenance: our own fixtures over plain datum-face practice; no vendor
 //! material consulted.
 //!
-//! Gate map (#330): covers app::pick::plane (edge side, refusals).
+//! Gate map (#330, #554): covers app::pick::plane (face side, edge refusals).
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;
@@ -24,7 +24,7 @@ use camcraft_app::schema::Location;
 use camcraft_app::setup_align;
 use camcraft_app::world::new_world;
 
-const NO_FACE: &str = "the two edges do not bound one face, so their outside is not defined - pick the face instead";
+const AN_EDGE: &str = "an edge cannot set a plane; pick a flat face";
 
 /// An L-bracket: the profile (x, z) (0,0) (40,0) (40,t) (t,t) (t,40)
 /// (0,40), extruded 20 along Y. Its inner step is the face z = t,
@@ -103,15 +103,21 @@ const Y: [f64; 3] = [0.0, 1.0, 0.0];
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
 const PLANES: [(ArcPlane, [f64; 3]); 3] = [(ArcPlane::Xy, Z), (ArcPlane::Xz, Y), (ArcPlane::Yz, X)];
 
-/// The step's two edges (front and right), which bound the step face.
-fn step_edges(w: &World, t: f64) -> [GeoSel; 2] {
-    [edge(w, "l", [t, 0.0, t], [40.0, 0.0, t]), edge(w, "l", [40.0, 0.0, t], [40.0, 20.0, t])]
+/// The step face (local z = t, x in t..40).
+fn step_face(w: &World, t: f64) -> GeoSel {
+    let id = features(w, "l")
+        .faces
+        .iter()
+        .find(|f| f.normal[2].abs() > 0.99 && (f.offset.abs() - t).abs() < 1e-9)
+        .map(|f| f.id)
+        .expect("the step face");
+    GeoSel { entity: "l".into(), feature: FeatureSel::Face(id) }
 }
 
 fn lays_step_up(t: f64) {
     for tilt in [[0.0; 3], [20.0, 35.0, -50.0]] {
         let w = world_of(vec![("l", l_bracket(t))], tilt);
-        let picks = step_edges(&w, t);
+        let picks = [step_face(&w, t)];
         for (plane, axis) in PLANES {
             for flip in [false, true] {
                 let a = lay_on_plane(&w, &picks, PlaneLay { plane, flip, place: false }).expect("laid");
@@ -125,9 +131,9 @@ fn lays_step_up(t: f64) {
 }
 
 #[test]
-fn two_edges_of_a_concave_step_take_the_step_faces_outside() {
-    // The bounds centre (20, 10, 20) sits above the step (z = 5): the old
-    // away-from-the-centre rule laid this part upside down.
+fn a_concave_step_face_lays_its_own_outside_up() {
+    // The bounds centre (20, 10, 20) sits above the step (z = 5): an
+    // away-from-the-centre rule would lay this part upside down.
     let w = world_of(vec![("l", l_bracket(5.0))], [0.0; 3]);
     let c = setup_align::part_centre(&w).expect("a centre");
     assert!(c.z > 5.0, "the fixture is concave over the step: {c:?}");
@@ -135,28 +141,35 @@ fn two_edges_of_a_concave_step_take_the_step_faces_outside() {
 }
 
 #[test]
-fn two_edges_whose_plane_runs_through_the_centre_still_take_the_faces_outside() {
+fn a_step_face_whose_plane_runs_through_the_centre_still_lays_its_outside_up() {
     let w = world_of(vec![("l", l_bracket(20.0))], [0.0; 3]);
     let c = setup_align::part_centre(&w).expect("a centre");
     assert!((c.z - 20.0).abs() < 1e-9, "the step's plane runs through the centre: {c:?}");
     lays_step_up(20.0);
 }
 
+/// #554: no edge pick sets a plane - one edge, the two edges of the step
+/// that the #330 mode used to lay, a face with an edge, or edges on two
+/// bodies: each refused by name, and the command writes nothing.
 #[test]
-fn two_edges_that_bound_no_common_face_are_refused_by_name() {
+fn every_edge_pick_is_refused_by_name() {
     let w = world_of(vec![("l", l_bracket(5.0))], [0.0; 3]);
-    // The bottom-right edge (bottom and right faces) and the top's front
-    // edge (top and front faces): no face in common.
-    let picks = [edge(&w, "l", [40.0, 0.0, 0.0], [40.0, 20.0, 0.0]), edge(&w, "l", [0.0, 0.0, 40.0], [5.0, 0.0, 40.0])];
-    let e = lay_on_plane(&w, &picks, PlaneLay { plane: ArcPlane::Xy, flip: false, place: false }).expect_err("refused");
-    assert_eq!(e, NO_FACE);
-    // Two edges on two bodies bound no one face either.
+    let step = [edge(&w, "l", [5.0, 0.0, 5.0], [40.0, 0.0, 5.0]), edge(&w, "l", [40.0, 0.0, 5.0], [40.0, 20.0, 5.0])];
+    let face = step_face(&w, 5.0);
+    for picks in [vec![step[0].clone()], step.to_vec(), vec![face, step[1].clone()]] {
+        let lay = PlaneLay { plane: ArcPlane::Xy, flip: false, place: false };
+        let e = lay_on_plane(&w, &picks, lay).expect_err("refused");
+        assert!(e.contains(AN_EDGE) && e.contains("is an edge"), "{picks:?}: {e}");
+        let cmd = camcraft_app::commands::AlignPartToSetup::lay_on_plane(&w, "Setup1", &picks, lay);
+        assert!(cmd.is_err_and(|e| e.to_string().contains(AN_EDGE)), "the command refuses by the same name");
+        assert_eq!(setup_align::stored(&w, "Setup1"), None, "a refusal writes nothing");
+    }
     let a = cube(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
     let b = cube(Point3::new(20.0, 0.0, 0.0), Point3::new(30.0, 10.0, 10.0));
     let w = world_of(vec![("a", a), ("b", b)], [0.0; 3]);
     let picks = [edge(&w, "a", [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]), edge(&w, "b", [30.0, 0.0, 10.0], [30.0, 10.0, 10.0])];
     let e = lay_on_plane(&w, &picks, PlaneLay { plane: ArcPlane::Xy, flip: false, place: false }).expect_err("refused");
-    assert_eq!(e, NO_FACE);
+    assert!(e.contains(AN_EDGE), "{e}");
 }
 
 #[test]
