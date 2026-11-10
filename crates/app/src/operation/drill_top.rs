@@ -128,12 +128,18 @@ pub(super) fn r_plane_clear(
     if top.is_finite() && c.entry_z.is_finite() && c.r_z.is_finite() && c.r_z >= top - TOL {
         return Ok(());
     }
-    Err(GenError::Invalid(format!(
-        "R plane Z {:.3} is below the {what} top Z {top:.3} over the hole at ({:.3}, {:.3}) - the rapid down to R \
-         would cross uncut stock (a collision); raise Top of Part Z (the R plane) to the {what} top or above \
-         (an earlier operation's removal counts only once that operation is generated, upright, in this setup)",
-        c.r_z, c.xy.x, c.xy.y
-    )))
+    // #677: the spot is the material top over the hole (the entry when
+    // the top is unknown); a non-finite one is dropped by `invalid_at`.
+    let z = if top.is_finite() { top } else { c.entry_z };
+    Err(GenError::invalid_at(
+        format!(
+            "R plane Z {:.3} is below the {what} top Z {top:.3} over the hole at ({:.3}, {:.3}) - the rapid down to R \
+             would cross uncut stock (a collision); raise Top of Part Z (the R plane) to the {what} top or above \
+             (an earlier operation's removal counts only once that operation is generated, upright, in this setup)",
+            c.r_z, c.xy.x, c.xy.y
+        ),
+        Point3::new(c.xy.x, c.xy.y, z),
+    ))
 }
 
 /// Does the facet's XY projection meet the disk? A facet with no area

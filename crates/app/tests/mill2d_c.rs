@@ -66,6 +66,7 @@ fn thread_mill(diameter: f64, pitch: f64) -> Tool {
         feed: 400.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 

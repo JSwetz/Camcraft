@@ -45,7 +45,11 @@ impl Default for Draft {
 pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     let id = ui.id().with(("setup_plane_draft", setup));
     let mut d: Draft = ui.data_mut(|m| *m.get_temp_mut_or_insert_with(id, Draft::default));
-    let armed = state.plane_pick.as_ref().is_some_and(|p| p.setup == setup);
+    if !state.setup_pick_rows.iter().any(|s| s == setup) {
+        state.setup_pick_rows.push(setup.to_owned()); // #664
+    }
+    let mine = state.plane_pick.as_ref().is_some_and(|p| p.setup == setup);
+    let armed = mine && crate::plane_pick::collecting(state);
     // #330 (reopened): short lines, so Flip, "Face to plane level" and
     // Apply stay on screen in the narrow properties pane - one long row
     // ran them past its right edge at a 1280-wide window, out of reach.
@@ -85,7 +89,7 @@ pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
         ui.checkbox(&mut d.place, "Face to plane level")
             .on_hover_text("Set the picked face onto the plane (e.g. Z 0 for G17); off keeps the part where it is.");
     });
-    if armed {
+    if mine {
         let picks = state.plane_pick.as_ref().map(|p| p.picks.clone()).unwrap_or_default();
         let lay = PlaneLay { plane: d.plane, flip: d.flip, place: d.place };
         // The command's own check: a refused pick, or one that gives the

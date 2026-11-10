@@ -165,9 +165,12 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         crate::axis_pick::take(state, pick); // #557: refuses a face by name
         return;
     }
-    if state.plane_pick.is_some() {
+    if crate::plane_pick::collecting(state) {
         crate::plane_pick::take(state, pick); // #330: the Setups page's draft
         return;
+    }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
     }
     if state.boundary_pick.is_some() {
         queue_boundary_pick(state, pick, mods);
@@ -212,7 +215,7 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     };
     let sel = if mods.alt {
         feature::singleton_chain_id(&features, edge).map(FeatureSel::Chain)
-    } else if state.boundary_pick.is_some() || state.plane_pick.is_some() || crate::axis_pick::collecting(state) {
+    } else if state.boundary_pick.is_some() || crate::plane_pick::collecting(state) || crate::axis_pick::collecting(state) {
         // A boundary (and a #557 axis pick) takes ONE edge per click (M11.5 UX): the run - one
         // straight stretch or one arc - never the whole tangent loop a
         // filleted rim chains into.
@@ -249,9 +252,12 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         crate::axis_pick::take(state, GeoSel { entity, feature: sel }); // #557
         return;
     }
-    if state.plane_pick.is_some() {
+    if crate::plane_pick::collecting(state) {
         crate::plane_pick::take(state, GeoSel { entity, feature: sel }); // #554: refused by name
         return;
+    }
+    if crate::axis_pick::hint_stray(state) {
+        return; // #557: the axes rows are open, nothing armed
     }
     if state.boundary_pick.is_some() {
         queue_boundary_pick(state, GeoSel { entity, feature: sel }, mods);
@@ -625,14 +631,22 @@ fn gizmo_len(state: &State) -> f64 {
 /// has the axes hidden: two gizmos around a moved G5x read as clutter, and
 /// the world axes are context furniture, not setup. The triads stay: they
 /// are the work offsets themselves.
-fn gizmos(state: &State) -> Vec<Gizmo> {
+pub(crate) fn gizmos(state: &State) -> Vec<Gizmo> {
     let mut out: Vec<Gizmo> = Vec::new();
     for (name, entity) in model::named_entities(&state.world) {
         if state.hidden_offsets.contains(&name) || !model::is_wcs(&state.world, &entity) {
             continue;
         }
-        let Some(loc) = model::transform_of(&state.world, &entity) else {
+        let Some(stored) = model::transform_of(&state.world, &entity) else {
             continue;
+        };
+        // #558: another setup's WCS is a point on the part in ITS setup's
+        // frame; the viewport shows the active setup's, so it rides the
+        // part's transform between the two. A refused transform hides
+        // the triad - never drawn at a place that is not on the part.
+        let loc = match camcraft_app::setup_relative::wcs_view_pose(&state.world, &name, stored) {
+            Ok(mapped) => mapped.unwrap_or(stored),
+            Err(_) => continue, // app logs why (setup_relative::wcs_view_pose)
         };
         out.push(Gizmo {
             pos: [loc.pos.x, loc.pos.y, loc.pos.z],
@@ -1026,6 +1040,10 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
         if !crate::path_lines::cache_lines(&mut out, &cache, pal, dim, arm) {
             return out;
         }
+    }
+    // #261 part 2: a standing generate refusal marks the spot it names.
+    if let Some(at) = state.refusal_focus() {
+        crate::path_lines::refusal_mark(&mut out, at, pal, arm);
     }
     out
 }
@@ -1661,7 +1679,7 @@ pub(crate) fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
 pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     // #330: while the Setups page collects a lay-on-a-plane pick, its
     // draft picks are the ones drawn.
-    if let Some(draft) = &state.plane_pick {
+    if let Some(draft) = state.plane_pick.as_ref().filter(|d| d.picking) {
         return feature_lines(state, &draft.picks);
     }
     // #555: the three-points draft's picks.

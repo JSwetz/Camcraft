@@ -44,6 +44,9 @@ impl Default for Draft {
 pub(super) fn row(ui: &mut Ui, state: &mut State, setup: &str) {
     let id = ui.id().with(("setup_points_draft", setup));
     let mut d: Draft = ui.data_mut(|m| *m.get_temp_mut_or_insert_with(id, Draft::default));
+    if !state.setup_pick_rows.iter().any(|s| s == setup) {
+        state.setup_pick_rows.push(setup.to_owned()); // #664: the rows are on screen
+    }
     let armed = state.points_pick.as_ref().is_some_and(|p| p.setup == setup);
     // Short lines like the face row (#330): its options stay on screen in
     // the narrow properties pane.

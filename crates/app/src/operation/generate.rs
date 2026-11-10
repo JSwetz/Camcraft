@@ -34,12 +34,18 @@ pub fn run_job(mut job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let carried = job.carried_overhang.take();
     let tool_r = job.tool.diameter * 0.5;
     let kind = job.params.kind();
+    // #261 part 2: a refusal's spot is in the frame the generators ran
+    // in (a 3+2 tilt's local one); the UI draws in world, so it is
+    // carried out through the same frame the path would have been.
+    let frame = job.frame;
     let _span = tracing::info_span!("generate", op = %job.op_name).entered();
     let started = std::time::Instant::now();
     tracing::debug!(kind = %kind, "generation started");
-    let (mut path, warns) = run_job_arms(job).inspect_err(|e| {
-        tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
-    })?;
+    let (mut path, warns) = run_job_arms(job)
+        .map_err(|e| e.map_location(|p| frame.map_or(p, |f| f.to_world(p))))
+        .inspect_err(|e| {
+            tracing::warn!(kind = %kind, ms = crate::logging::elapsed_ms(started), "generation refused: {e}");
+        })?;
     tracing::info!(
         kind = %kind,
         moves = path.moves.len(),
@@ -2271,6 +2277,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             feed,
             plunge_feed,
             tolerance,
+            hand,
             ..
         } => {
             if tool.kind != crate::tools::ToolKind::Thread {
@@ -2301,6 +2308,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     plunge_feed: *plunge_feed,
                     insert_width: tool.width,
                     form_angle: tool.tip_angle,
+                    hand: *hand,
                 },
                 turn_stock,
             )?;
@@ -2795,7 +2803,8 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if warns.iter().any(|w| matches!(w, Warning::RapidInStock { .. }))
                 && let Some(dex) = verify_prior.get()
             {
-                verify::acquit_by_prior(&path, dex, geom.radius, Z_TOL, &mut warns);
+                let prior = crate::stock_sim::Columns::of_grid(dex);
+                verify::acquit_by_prior(&path, &prior, geom.radius, Z_TOL, &mut warns);
             }
             // A turned path's axial rapids are judged in the meridian
             // plane, not by the column (#96, #103): the revolved stock
@@ -2887,7 +2896,7 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // the tool's V, not a boxcar, says what stands between
             // the turns. The insert's crest width and included
             // angle ride from the tool, the blade's law again.
-            if let OpParams::Threading { tolerance, .. } = &params {
+            if let OpParams::Threading { tolerance, hand, .. } = &params {
                 warns.extend(crate::turning::thread_warnings(
                     &material.facets,
                     &path,
@@ -2895,6 +2904,9 @@ fn run_job_arms(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     tool.tip_angle,
                     *tolerance,
                 ));
+                // The hand verdict (#629): every half-turn winds the
+                // way the operation asked, or the post is refused.
+                warns.extend(crate::turning::thread_hand_warnings(&path, *hand));
             }
             // The crown verdict (M5.2 E2): the same meridian scan the
             // blade and the wave ride, read with the CROWN floor - the

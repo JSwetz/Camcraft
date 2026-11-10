@@ -326,12 +326,16 @@ pub fn audit_bar(t: &Toolpath, center_cutting: bool, tool_r: f64, bar: &Bar, sit
     }
 }
 
+/// The refusal points at the plunge's bottom (#261 part 2).
 fn refusal(site: &str, xy: Point2, z: f64) -> GenError {
-    GenError::Invalid(format!(
-        "{CENTER_CUT_REFUSAL} - {site} at ({:.3}, {:.3}) would plunge axially into solid down to Z {z:.3}; \
-         pick a centre-cutting tool or an entry that starts outside the stock",
-        xy.x, xy.y
-    ))
+    GenError::invalid_at(
+        format!(
+            "{CENTER_CUT_REFUSAL} - {site} at ({:.3}, {:.3}) would plunge axially into solid down to Z {z:.3}; \
+             pick a centre-cutting tool or an entry that starts outside the stock",
+            xy.x, xy.y
+        ),
+        crate::geometry::Point3::new(xy.x, xy.y, z),
+    )
 }
 
 /// A round bar's true solid (#16): the cylinder of `radius` about the
