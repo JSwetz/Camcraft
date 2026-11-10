@@ -1454,6 +1454,10 @@ pub struct State {
     /// the document version, the page draft): once any of it moves, the
     /// refusal retires - see [`crate::feedback`].
     pub feedback_ctx: Option<crate::feedback::FeedbackCtx>,
+    /// #261 part 2: the world spot a refused generation named, beside
+    /// [`State::feedback`]; read only through [`State::refusal_focus`],
+    /// which retires it with the refusal it belongs to.
+    pub feedback_at: Option<[f64; 3]>,
 }
 
 /// Which page of the Operations pane a refused command's message belongs
@@ -1661,6 +1665,7 @@ impl State {
             ui_target: UiTarget::None,
             feedback: None,
             feedback_ctx: None,
+            feedback_at: None,
         }
     }
 
@@ -1731,6 +1736,8 @@ impl State {
         }
         self.feedback_ctx = self.feedback_ctx_for(scope);
         self.feedback = Some((scope, msg));
+        // A new refusal names no spot until its caller says so (#261).
+        self.feedback_at = None;
     }
 
     /// Refetch the Setup pane's drafts from the world after any document
@@ -2442,6 +2449,7 @@ impl State {
         // command (even a successful one) retires an old refusal.
         self.feedback = None;
         self.feedback_ctx = None;
+        self.feedback_at = None;
         // #107: New, Open and Quit over unsaved changes wait for the
         // prompt's answer instead of discarding the document.
         let Some(action) = self.hold_if_unsaved(action) else {
@@ -2998,7 +3006,9 @@ impl State {
                         };
                     }
                     Err(err) => {
-                        self.refuse(ErrorScope::Operation, format!("generate failed: {err}"))
+                        self.refuse(ErrorScope::Operation, format!("generate failed: {err}"));
+                        // #261 part 2: where the generator refused, if it said.
+                        self.feedback_at = err.location().map(|p| [p.x, p.y, p.z]);
                     }
                 }
             }

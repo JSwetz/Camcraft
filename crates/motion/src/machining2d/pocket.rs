@@ -275,7 +275,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         s => s,
     };
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     // The HSM plan may choose where its entry stands (`pocket_hsm`).
     let (passes, strategy, room, joins) = match strategy {
         PocketStrategy::Adaptive => {
@@ -288,7 +288,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     // The horizontal arc entry (M11.3) lands on the first pass: a closed
     // first ring starts mid its longest edge, where an arc has room.
     let passes = if p.links.approach.arc_xy && room.is_none() { super::descent_xy::reseat_first(passes) } else { passes };
-    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown)?;
     // Waterline rings circle around material, so they get the arc fitter
     // (rings straight enough to be lines stay exactly that); zigzag rows
     // are straight by construction and keep the plain walk.
@@ -390,7 +390,7 @@ pub(super) fn zigzag_passes(center: &Region, stepover: f64, climb: bool) -> Resu
         Some(b) => b,
         None => return Err(GenError::Empty("empty pocket region".into())),
     };
-    let ys = band(lo.y, hi.y, 0.0, stepover);
+    let ys = band(lo.y, hi.y, 0.0, stepover)?;
     let mut passes: Vec<Vec<Point2>> = Vec::new();
     let mut cur: Vec<Point2> = Vec::new();
     for (i, &y) in ys.iter().enumerate() {

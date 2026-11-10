@@ -33,6 +33,8 @@ pub mod viewport;
 #[cfg(test)]
 mod law_tests;
 #[cfg(test)]
+mod refusal_focus_tests;
+#[cfg(test)]
 mod helix_view_tests;
 #[cfg(test)]
 mod field_view_tests;

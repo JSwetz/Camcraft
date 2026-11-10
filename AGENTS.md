@@ -34,6 +34,29 @@ afterwards - the work must not bother them.
   the roadmap is done (idle after a gate, waiting on nothing, end-of-turn
   with open items), spawn a continuation nudge subagent to remind the
   session to claim the next issue. A stall is a bug.
+- **Conflicted PRs are re-merged by their author; the maintainer
+  re-checks** (user, 2026-11-10: "a skill that is intended to recheck
+  current PR's with contributors name to deal with conflicts, usually
+  conflicts is a remerge from main or similar easy fix. Same skill should
+  also be used from a maintainers perspective to check if conflicts has
+  been resolved."). Merging moves `main`, so reviewed PRs keep turning
+  `conflicts` (orange). The skill `/resolve-conflicts` (`.claude/skills/
+  resolve-conflicts/`) handles both sides:
+  - **Contributor mode** (`/resolve-conflicts [login]`): for the author's
+    open conflicting PRs, merge main into each branch (never rebase or
+    force-push), keep both sides where both added lines, take main's
+    snapshot PNGs and changelog files, run the targeted gate, push, and
+    comment "ready for a re-check". If both sides changed the same logic,
+    or a safety rule could be dropped, stop and report the hunk instead
+    of guessing.
+  - **Maintainer mode** (`/resolve-conflicts check`): re-read every
+    `conflicts` PR. Still conflicting -> ask the author once. Clean again
+    -> drop `conflicts`, then restore `merge-ready` (head unchanged), send
+    it to a delta review (only a merge-of-main commit was added), or to a
+    full `/review-prs` review (new code).
+  Agents in a fork run contributor mode on their own PRs at the start of
+  each session, after the process-file sync; the maintainer runs `check`
+  after a batch of merges (e.g. after `/merge-ready`).
 - **Side work rides subagents.** All testing, documentation, and knowledge
   graphing (the graphify updates) are done by subagents dispatched as
   subtasks, never inline: their completion notification is what triggers
@@ -354,6 +377,13 @@ operation property panel.
 
 Systems and UI never write these fields ad hoc; they only respond to commands.
 If a UI change has no command for it, that's a bug - add one.
+
+**Commands ship with an MCP tool** (#128, #356). The MCP server lets an AI agent
+drive CamCraft headlessly. A PR that adds a user-facing command also adds its
+MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a
+`source:agent` follow-up issue `MCP: <command>` and names it in the PR body. MCP
+tools call the same undoable commands the GUI uses, so undo/redo history and
+invariants hold headlessly.
 
 Components are auto-registered: declare them in `crates/app/src/schema.rs`
 and the startup hook (`flecs_bits::register_schema`) handles the rest, in every

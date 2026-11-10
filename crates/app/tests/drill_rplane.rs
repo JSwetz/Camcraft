@@ -181,7 +181,10 @@ fn an_r_plane_below_the_unfaced_stock_top_is_refused_by_name() {
     // posted G81 R20 (and the expanded chain's G00 Z+20) silently.
     for cycle in [CycleChoice::Drill, CycleChoice::Peck] {
         let (world, _h) = world_with(TOP + 5.0);
-        let e = operation::generate(&world, &raw_op(params(cycle)), "").err().map(|e| e.to_string());
+        let err = operation::generate(&world, &raw_op(params(cycle)), "").err();
+        // #677: the refusal marks the hole on the stock top it is under.
+        assert_eq!(err.as_ref().and_then(|e| e.location()), Some(Point3::new(0.0, 0.0, TOP + 5.0)), "{cycle:?}: {err:?}");
+        let e = err.map(|e| e.to_string());
         let e = e.unwrap_or_else(|| panic!("{cycle:?}: a rapid down through 5 mm of stock generated"));
         assert_r_refusal(&e, "20.000", "stock", "25.000", &format!("{cycle:?}"));
     }
