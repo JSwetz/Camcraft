@@ -25,7 +25,7 @@ afterwards - the work must not bother them.
   `RECOMMENDED.md` itself: every branch appending to one shared file made
   each merge re-conflict every other open PR (user, 2026-11-08: "this is
   getting annoying"). The cut gathers the files into `RECOMMENDED.md`
-  (`scripts/collect-decisions.ps1`, release step 2); `docs/decisions/README.md`
+  (`cargo xtask decisions`, release step 2); `docs/decisions/README.md`
   has the format.
 - **Never stop, never recap mid-roadmap.** There is no "wrap up and check
   in" state: the next issue is claimed when the current gate is green.
@@ -153,17 +153,24 @@ go to `CHANGELOG.md`.
   - **Process files sync on every session, not only at tags** (user,
     2026-11-10: "we need a way to inform all forks that there is changes
     to skills and agents"). The process - `AGENTS.md`, `.claude/agents/`,
-    `.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh` - changes
-    between releases, and a fork's agents must follow the current rules.
+    `.claude/skills/`, `xtask/` (the gate and decision tooling, #748),
+    `.cargo/config.toml` (its `cargo xtask` alias), `scripts/gate.ps1`,
+    `scripts/gate.sh` - changes between releases, and a fork's agents must
+    follow the current rules.
     At the start of every session in a fork, before claiming work,
     compare `git show upstream/main:.claude/PROCESS_VERSION` with the
     local `.claude/PROCESS_VERSION`. If upstream's is higher, pull just
     those files: `git checkout upstream/main -- AGENTS.md .claude/agents
-    .claude/skills .claude/PROCESS_VERSION scripts/gate.ps1
-    scripts/gate.sh`, commit as `chore(process): sync process files to
-    upstream PROCESS_VERSION <n>` on a `process-sync` branch, and merge
+    .claude/skills .claude/PROCESS_VERSION xtask .cargo/config.toml
+    scripts/gate.ps1 scripts/gate.sh`, commit as `chore(process): sync
+    process files to upstream PROCESS_VERSION <n>` on a `process-sync`
+    branch, and merge
     it into the fork's `main` (or open a PR there if the fork protects
-    main), then re-read AGENTS.md before going on. This is the one
+    main), then re-read AGENTS.md before going on. A fork whose cut tag
+    predates `xtask/` (the first cut after #748) also adds `"xtask"` to the
+    `members` of its root `Cargo.toml` in that same commit (and lets
+    `Cargo.lock` take the new package) - the wrappers call `cargo xtask`,
+    which needs the member; it adds no product code. This is the one
     exception to "sync only to a cut tag": process files don't change
     product code, so the fork's code stays on the tag while its rules stay
     current. What changed and why is in the pinned issue #681 ("Process
@@ -517,40 +524,52 @@ app-level fixtures in `crates/app/tests/common/mod.rs`). Each future subcrate
 carries its own tests inside its crate (M4.1).
 
 **Three gate tiers - never hours per change** (user, 2026-11-07: "break up
-those test suites so we don't have to run hours on hours of tests"):
+those test suites so we don't have to run hours on hours of tests"). One
+command runs them on Windows, macOS and Linux alike (#748): `cargo xtask
+gate <tier>`, from the workspace's `xtask/` crate. `scripts/gate.ps1`
+(`-Tier quick`, `-Test <name>`, ...) and `scripts/gate.sh` (`quick`,
+`test <name>`, ...) still work: they are thin wrappers that forward to it.
 
 1. **quick** (per patch, by the agent or gate-runner, target ≤ 5 min): only
    the test binaries the diff touches, picked from the gate maps and the
-   touched crates (`scripts/gate.ps1 -Tier quick`); debug; no heavy lanes.
+   touched crates (`cargo xtask gate quick [--base main]`); debug; no heavy
+   lanes.
 2. **batch** (main session, before committing a batch, target ≤ 20 min):
    every debug suite except those tagged slow, the ui suites from
-   `crates/ui`, clippy (`-Tier batch`). No release-mode heavy lanes.
+   `crates/ui`, clippy (`cargo xtask gate batch`). No release-mode heavy
+   lanes.
 3. **release** (only at a cut, run locally): everything - all debug
-   suites, the `--ignored` heavy lanes in release (`-Tier release`).
+   suites, the `--ignored` heavy lanes in release (`cargo xtask gate
+   release`).
+
+Any tier takes `--dry-run` to print its plan without running it; logs go
+to `gate-logs/<tier>-<timestamp>/`.
 
 **GitHub Actions minutes are budgeted** (3000/month; Windows bills 2x,
 macOS 10x). Nothing runs on push or PR: every gate tier runs locally
-through `scripts/gate.ps1`. GitHub runs only `release.yml` on a pushed tag
+through `cargo xtask gate`. GitHub runs only `release.yml` on a pushed tag
 (the build that publishes the artifact). `ci.yml` and `nightly.yml` are
 manual (`workflow_dispatch`) for the rare case a clean-machine run is
 wanted. Never add a `push`, `pull_request` or `schedule` trigger without
 the user's say-so.
 
 **Test the change, not everything.** A fix is proved by the test(s) that pin
-it, run one by one: `scripts/gate.ps1 -Test <name>` (or plain `cargo test -p
-<crate> --test <binary> -- <name> --exact`). A whole suite runs only when the
+it, run one by one: `cargo xtask gate test <name> [--crate c] [--binary b]
+[--exact]` (or plain `cargo test -p <crate> --test <binary> -- <name>
+--exact`). A whole suite runs only when the
 change touches what that suite covers; the full set runs only at a release
 cut (user, 2026-11-07: "tests should also be possible to run one by one …
 so we are testing changes rather than everything every time").
 
-Batch skips the debug binaries in `SLOW_BINARIES` at the top of
-`scripts/gate.ps1` (motion finish3d, pivot5d, flow; app
+Batch skips the debug binaries in `SLOW_BINARIES` (`xtask/src/plan.rs`,
+pinned by its unit tests) (motion finish3d, pivot5d, flow; app
 center_cut_multiaxis - each ~40-50 s); release runs them. camcraft-kernel
 runs in release, and in quick only when kernel itself is touched. Quick
 prints what it chose before running: the changed `#[test]` fns of a changed
 suite (`--exact`), and the gate-mapped suites of a changed src module; a
 change to shared test code (tests/common, goldens, snapshots) runs that
-crate's suites; geometry/cl/Cargo changes fall back to batch.
+crate's suites; geometry/cl/Cargo changes fall back to batch; a change
+under `xtask/` runs xtask's own unit tests.
 
 A test that takes more than ~60 s in debug moves to the heavy lane (with
 its lane named in the ignore reason) or gets a slimmer fixture; the batch
@@ -707,7 +726,7 @@ a tag"):
 2. **Release branch.** Sync main (`git pull --ff-only`), then
    `git switch -c release/vX.Y.Z`. The version is the highest bump among
    the commits since the last tag (table above). Run
-   `scripts/collect-decisions.ps1 -Version X.Y.Z` (appends every
+   `cargo xtask decisions --version X.Y.Z` (appends every
    `docs/decisions/*.md` to `RECOMMENDED.md` under a `vX.Y.Z` heading and
    removes them; it goes in the same docs commit). Write `RELEASE_NOTES.md`
    and the `CHANGELOG.md` rows for every PR merged since that tag (one per

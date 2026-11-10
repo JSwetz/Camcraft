@@ -39,9 +39,10 @@ order of the steps. Load the `gh-issues` skill for the `gh` mechanics.
   `docs/decisions/N-<slug>.md`.
 
 ## 3. Quick gate
-- Use the gate script of your OS: `scripts/gate.ps1 -Tier quick` on
-  Windows, `scripts/gate.sh quick` on macOS / Linux (single tests:
-  `-Test <name>` / `gate.sh test <name>`). Or, on any OS, run the touched
+- One command on every OS: `cargo xtask gate quick` (single tests:
+  `cargo xtask gate test <name> [--crate c] [--exact]`; `--dry-run` shows
+  the plan). The old `scripts/gate.ps1 -Tier quick` / `scripts/gate.sh
+  quick` still work - they forward to it. Or run the touched
   test binaries one by one, plus
   `cargo clippy -p <touched crates> --all-targets -- -D warnings`.
   Paths in commands use `/`; never assume a `.exe` suffix or a drive.
