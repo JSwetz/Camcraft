@@ -162,7 +162,7 @@ pub(crate) fn pick_vertex(state: &mut State, p: [f32; 2], mods: Mods) {
         crate::axis_pick::take(state, pick); // #557: a point of an axis
         return;
     }
-    if state.plane_pick.is_some() {
+    if crate::plane_pick::collecting(state) {
         crate::plane_pick::take(state, pick); // #554: a point sets no plane, refused by name
         return;
     }

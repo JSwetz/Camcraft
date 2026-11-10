@@ -1378,6 +1378,9 @@ pub struct State {
     /// feature click with no axis armed says what to do, never falls
     /// through to the operation pick.
     pub axis_rows_shown: bool,
+    /// The setups whose pick rows (plane, axes) were drawn this frame
+    /// (#664): any other setup's armed pick is disarmed at frame end.
+    pub setup_pick_rows: Vec<String>,
     /// The Boundary group's view state and caches (M11.5 UX): open this
     /// frame, the draft's machined-area preview, the entries' shapes.
     pub boundary_view: crate::boundary_draft::BoundaryView,
@@ -1569,6 +1572,7 @@ impl State {
             plane_pick: None,
             axis_pick: None,
             axis_rows_shown: false,
+            setup_pick_rows: Vec::new(),
             boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,

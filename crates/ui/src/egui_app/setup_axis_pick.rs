@@ -21,6 +21,9 @@ use crate::state::{CommandKind, State};
 /// The rows of one setup.
 pub(super) fn rows(ui: &mut Ui, state: &mut State, setup: &str) {
     state.axis_rows_shown = true;
+    if !state.setup_pick_rows.iter().any(|s| s == setup) {
+        state.setup_pick_rows.push(setup.to_owned()); // #664
+    }
     ui.label("    Axes in the plane - pick an edge or two points for +Y and/or +X");
     for axis in [InPlaneAxis::Y, InPlaneAxis::X] {
         axis_row(ui, state, setup, axis);
