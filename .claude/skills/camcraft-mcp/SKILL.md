@@ -1,6 +1,6 @@
 ---
 name: camcraft-mcp
-description: Guide and reference for driving CamCraft headlessly via its Model Context Protocol (MCP) server (camcraft-cli mcp). Covers the agent workflow, complete 34-tool table, parameter DTO shapes, undo/redo, error handling, shipped capabilities, and known remaining gaps.
+description: Guide and reference for driving CamCraft headlessly via its Model Context Protocol (MCP) server (camcraft-cli mcp). Covers the agent workflow, tool table, parameter DTO shapes, undo/redo, error handling, shipped capabilities, and remaining gaps.
 ---
 
 # CamCraft MCP Agent Guide
@@ -55,9 +55,9 @@ CamCraft exposes a Model Context Protocol (MCP) server on stdio (`camcraft-cli m
 
 ---
 
-## Tool Reference (34 Tools)
+## Tool Reference
 
-The server exposes 34 tools across three modules in `crates/app/src/mcp/`:
+The server exposes tools across three modules in `crates/app/src/mcp/` (see `crates/app/src/mcp/tools.rs:all()` or the `tools/list` protocol method for the authoritative live registry):
 
 ### 1. Document Lifecycle & History (`tools.rs`)
 - `open_project { "path": string }`: Load an existing `.camproj` file, replacing the current document and clearing history.
@@ -138,6 +138,8 @@ The following capabilities exist in the GUI or app command layer but do not yet 
    - Attaching and aligning vendor STEP models to tool holders is supported in the tool editor GUI, but lacks an MCP command wrapper.
 8. **Live Interactive GUI Connection (#183, #567):**
    - `camcraft-cli mcp` currently runs as a standalone headless stdio session. Driving an already-running visible GUI window over a live socket is an open enhancement.
+
+*Note:* Several remaining gaps above are tracked under dedicated milestone and feature issues (e.g. #183 live GUI, #258 program headers, #370 tool body alignment, #511 feature recognition). Per `AGENTS.md`, any future command PR that does not bundle an MCP tool must file a corresponding `source:agent` issue titled `MCP: <command>`.
 
 ---
 
