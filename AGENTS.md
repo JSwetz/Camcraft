@@ -200,10 +200,55 @@ go to `CHANGELOG.md`.
   is a claim", below).
 - **Agent-opened issues say so** (user, 2026-11-07: "All Issues opened by
   an Agent should have the tag source:agent"). Every issue an agent opens
-  carries the `source:agent` label alongside its `P*` and `area:*` labels -
+  carries the `source:agent` label alongside its `P*`, `effort:*` and `area:*` labels -
   including a bug the user reported in chat and an agent filed for them.
   An issue a human opens on GitHub never gets it. Agents and the user share
   one GitHub account, so the label, not the author, tells them apart.
+- **Every issue is weighted by effort** (user, 2026-11-10: "we need a way
+  of 'weighting' an issue ... to manage token spend on different levels of
+  complexity of tickets"). Beside its `P*`, every issue carries exactly one
+  effort label: how hard the *work* is, not which model does it. `P*`
+  still decides which issue is worked next; `effort:*` decides who works
+  it.
+
+  | Label | The work | Examples |
+  |---|---|---|
+  | `effort:low` | mechanical, one file, no new logic | docs, labels, a test fixture or field fix (#711), a string or layout tweak |
+  | `effort:medium` | one module or crate, a known pattern | a UI page change, an MCP tool over an existing command, a new machine file |
+  | `effort:high` | several crates, new behaviour with its tests | a new undoable command with its MCP tool, simulation or post logic, a refusal law |
+  | `effort:max` | new algorithms, formats or open design | geometry or toolpath algorithms, collision laws, a file format (DXF, #743), research-shaped work |
+
+  - **Set at filing.** Whoever files an issue sets its effort label with
+    its `P*` and `area:*`, from the table. A human-filed issue without
+    one gets it at triage (the first agent that reads it for a pick).
+  - **Safety floor.** Anything that can change posted G-code, a collision
+    or gouge check, stock simulation or geometry is at least
+    `effort:high`, however small the diff; every `P0` is at least
+    `effort:high`. The Prime Directive is never handed to the cheapest
+    tier.
+  - **Who works it.** The main session picks by Pick and the lanes as
+    before, then dispatches the issue to the worker agent of its effort -
+    `.claude/agents/issue-worker-<effort>.md`, each running the shared
+    `/work-issue` skill (claim, worktree, fix, pinning test, quick gate,
+    draft PR). The worker never merges; the main session keeps the
+    review and merge decisions. The model behind each effort is set only
+    in those agent files (`model:`), so a fork on other models changes
+    four lines, not this law. If an agent's model is unavailable (a 404),
+    run it without the `model:` line (the session's model) and note it in
+    the claim comment.
+  - **Review tier.** The review of a worker's PR runs at least on the
+    `effort:medium` model, and at the `effort:high` model for anything
+    under the safety floor. A cheap review of cheap work is how a bug
+    gets through.
+  - **Escalation, never silent.** A worker that fails its quick gate
+    twice, or finds the work is bigger than its label, stops: it comments
+    what it learned and where any held work lives, raises the label one
+    step (`low` -> `medium` -> `high` -> `max`), and releases the claim; the
+    next pick goes to the higher tier. At most one escalation per run.
+    Only the maintainer lowers an effort label.
+  - **Measured.** The PR's `review-cost` comment names the effort and
+    whether it escalated, so the table can be recalibrated from data
+    (escalation rate and cost per tier), not by feel.
 - **A claim comment is a claim** (user, 2026-11-08: "a comment should
   suffice ... if we come across a claimed issue thru comment we should
   just label it as such - and vice versa if they remove their comment,
@@ -241,7 +286,7 @@ go to `CHANGELOG.md`.
   code", with `plan: research`), but takes no branch, no PR and no lane
   slot. Working it means: answer the open questions in issue comments
   (research, recorded decisions), then file the concrete sub-issues it
-  lists - each with one `P*`, `area:*`, `source:agent` when an agent files
+  lists - each with one `P*`, one `effort:*`, `area:*`, `source:agent` when an agent files
   it, a "Done means" line and "Part of #N" - and link them back from the
   umbrella. When every sub-issue is filed, drop `needs-research` and close
   the umbrella with a comment naming them - it is not kept open, so Pick
@@ -249,7 +294,7 @@ go to `CHANGELOG.md`.
 - **Report on the issue, not in prose files.** A finding, a held patch, a
   blocker or a decision taken goes into an issue comment. If the work is
   blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
-  work, open a new issue for it (labels: one `P*`, one or more `area:*`)
+  work, open a new issue for it (labels: one `P*`, one `effort:*`, one or more `area:*`)
   rather than burying it (and `source:agent`).
 - **Done on a branch = pushed + PR, never merged to main** (user,
   2026-11-07: "when closing an issue we should push the branch, not merge
