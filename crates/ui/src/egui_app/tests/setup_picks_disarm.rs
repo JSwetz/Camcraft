@@ -271,3 +271,48 @@ fn a_plane_pick_disarms_when_another_tab_hides_the_properties_pane() {
     let kept = harness.state().state.plane_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
     assert_eq!(kept, drafted, "the picked face is kept");
 }
+
+/// The pre-dock half of the sweep: the pane is hidden in the SAME frame
+/// a click reaches the viewport. The View door's ask settles before the
+/// dock draws, and the viewport routes its click inside the dock, before
+/// the after-dock sweep runs - so only the before-dock disarm keeps the
+/// click off the hidden draft. The press lands a frame earlier (the pick
+/// fires on release), and the Machines tab hides the pane without moving
+/// the viewport, so the pixel still lands on the same corner. Two points
+/// mode, so a leaked click would show: a second point joins the draft.
+#[test]
+fn a_click_in_the_frame_the_pane_hides_misses_the_hidden_draft() {
+    let mut harness = on_setup_page();
+    harness.state_mut().state.machines_pane.user_dir = Some(None);
+    harness.get_by_label("+Y by Two points").click();
+    harness.run();
+    let p = a_corner(harness.state());
+    click_viewport(&mut harness, p);
+    let drafted = axis_y_picks(harness.state());
+    assert_eq!(drafted.len(), 1, "the setup draft takes the point: {}", harness.state().state.status);
+    assert!(crate::axis_pick::collecting(&harness.state().state), "still armed for another pick");
+
+    set_pos(&mut harness, p);
+    button_at(&mut harness, egui::PointerButton::Primary, p, true);
+    assert!(properties_shown(&harness), "the pane still shows at the press");
+    assert!(crate::axis_pick::collecting(&harness.state().state), "armed at the press");
+
+    // One frame: the View door's ask (the Machines tab to the front of
+    // the properties leaf) and the release that completes the click.
+    harness.state_mut().state.layout_request =
+        Some(crate::state::LayoutRequest::Toggle(crate::state::Panel::Machines));
+    harness.state_mut().state.status.clear();
+    harness.input_mut().events.push(Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    harness.step();
+    assert!(!properties_shown(&harness), "the pane hid this frame");
+    assert!(!crate::axis_pick::collecting(&harness.state().state), "hidden, disarmed");
+    assert_eq!(axis_y_picks(harness.state()), drafted, "the click never reaches the hidden draft: one point, not two");
+    assert!(!harness.state().state.status.contains("+Y"), "{}", harness.state().state.status);
+    harness.run();
+    assert_eq!(axis_y_picks(harness.state()), drafted, "nor in the frames after");
+}
