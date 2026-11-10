@@ -241,7 +241,7 @@ pub fn contour(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenE
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
     let shadow = shadow_region(&sups, r)?;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let emitted = shadow_pass(&mut b, p, r, &sups, &shadow, None, "contour")?;
     rings_and_tail(b, p, r, facets, emitted)
 }
@@ -261,7 +261,7 @@ pub fn project(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenE
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
     let shadow = shadow_region(&sups, r)?;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = shadow_pass(&mut b, p, r, &sups, &shadow, Some(0), "project")?;
     emitted |= drape::drape_pass(&mut b, p, r, &sups, facets, emitted);
     rings_and_tail(b, p, r, facets, emitted)

@@ -66,7 +66,7 @@ pub fn flat(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenErro
         .map(|s| Sup { shallow: is_floor(s, p.tolerance), folds: [None; 3], ..*s })
         .collect();
     let region = shadow_region(&fsups, r)?;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     // max_rings None: every pass until the floor collapses at its
     // medial axis - the contour family's law, verbatim.
     if !shadow_pass(&mut b, p, r, &fsups, &region, None, "flat")? {

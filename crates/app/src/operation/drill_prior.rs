@@ -14,7 +14,7 @@
 
 use crate::geo2d::Point2;
 use crate::rest::PriorPlan;
-use crate::stock_sim::Dexel;
+use crate::stock_sim::{Columns, Dexel};
 
 /// Whether an operation's verdict reads the program ahead, so its stamp
 /// must digest it (issue #109): Pocket3D's rest and the Drill laws, and
@@ -66,7 +66,8 @@ impl PriorRead<'_> {
     /// material inside it.
     pub(super) fn surface(&self, q: Point2, r: f64) -> Option<f64> {
         let r = r + self.dex.cell.abs() * std::f64::consts::FRAC_1_SQRT_2;
-        if self.revolved { revolved_surface(self.dex, q, r) } else { crate::verify::prior_surface(self.dex, q, r) }
+        let cols = Columns::of_grid(self.dex);
+        if self.revolved { revolved_surface(&cols, q, r) } else { crate::verify::prior_surface(&cols, q, r) }
     }
 }
 
@@ -77,11 +78,11 @@ impl PriorRead<'_> {
 /// samples can only read higher), then the highest of those rings.
 /// `None` when no ring is on the grid or a height is unreadable - an
 /// unknown prior is the raw stock.
-fn revolved_surface(dex: &Dexel, c: Point2, r: f64) -> Option<f64> {
-    if !(r.is_finite() && r >= 0.0 && dex.cell > 0.0 && c.x.is_finite() && c.y.is_finite()) {
+fn revolved_surface(dex: &Columns<'_>, c: Point2, r: f64) -> Option<f64> {
+    if !(r.is_finite() && r >= 0.0 && dex.cell() > 0.0 && c.x.is_finite() && c.y.is_finite()) {
         return None;
     }
-    let step = dex.cell * 0.5;
+    let step = dex.cell() * 0.5;
     let n = (r / step).ceil();
     if !n.is_finite() || n > 1.0e5 {
         return None; // too many rings to read: unknown, never a clamped short read
@@ -92,8 +93,8 @@ fn revolved_surface(dex: &Dexel, c: Point2, r: f64) -> Option<f64> {
         let rho = (i as f64 * step).min(r);
         let mut ring: Option<f64> = None;
         for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
-            if let Some(k) = dex.col(Point2::new(c.x + dx * rho, c.y + dy * rho)) {
-                let z = dex.top_at(k);
+            if let Some((ix, iy)) = dex.col(Point2::new(c.x + dx * rho, c.y + dy * rho)) {
+                let z = dex.top_at(ix, iy);
                 if z.is_nan() {
                     return None;
                 }

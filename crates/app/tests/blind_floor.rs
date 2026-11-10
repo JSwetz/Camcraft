@@ -346,6 +346,27 @@ fn a_drill_past_a_blind_floor_is_a_gouge_and_never_posts() {
     assert!(!nc.exists(), "blocked output is never written");
 }
 
+/// Issue #578: the gate's gouge clause speaks the document's numbers.
+/// The same world, told in inches: depth and location divide by 25.4
+/// with two extra decimals (the `len` law) and say "in", never mm.
+#[test]
+fn the_gouge_clause_speaks_the_document_s_units() {
+    use camcraft_app::posting::sim_clause;
+    use camcraft_app::units::{self, Unit};
+    let (world, mut h) = world_with(block_with_hole(Some(10.0)), "DR-0400");
+    let (_, w) = run(&world, &mut h, "D1", "DR-0400", drill_op(Some(5.0)));
+    assert!(gouges(&w) > 0, "below the floor is a gouge: {w:?}");
+    units::set(&world, Unit::Inches);
+    let clause = sim_clause(&world);
+    let problem = clause.problem.expect("a located gouge is a problem");
+    assert!(problem.starts_with("gouge: program cuts below the model in "), "{problem}");
+    assert!(problem.contains("worst") && problem.contains(" in at ("), "the inch clause: {problem}");
+    assert!(!problem.contains("mm"), "no millimeters in an inch document: {problem}");
+    units::set(&world, Unit::Millimeters);
+    let mm = sim_clause(&world).problem.expect("the same gouge");
+    assert!(mm.contains(" mm at ("), "mm mode keeps its sentence: {mm}");
+}
+
 #[test]
 fn a_face_cut_into_the_part_is_a_gouge() {
     let face = |cut: f64| OpParams::Face { holes: Default::default(),

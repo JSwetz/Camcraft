@@ -19,8 +19,11 @@ the property table there is the vocabulary, this file is the grammar.
 
 Manifest: top-level assignments only — `description`, `vendor`, `legal`,
 `certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
-`capabilities`, `coolantModes`, `liveTooling`, `afterModes`, `axisInversion`, `probeAxisInversion`. All but the last five are
-text the engine reads none of; `liveTooling = true` (issue #33) says the
+`capabilities`, `coolantModes`, `liveTooling`, `afterModes`, `axisInversion`, `probeAxisInversion`, `threadHands`. All but the last six are
+text the engine reads none of; `threadHands = true` (#629) says the script
+reads `PARAM SpindleDirection` and states a thread's hand (M04 when the
+helix needs the spindle reversed) - without it the engine refuses a
+reverse-spindle thread section by name (only fanuc-lathe.cps sets it); `liveTooling = true` (issue #33) says the
 script voices a `PARAM LiveTool` section - C-axis live-tool work, the
 stream's X Y Z the part-frame tip and C the stated spindle angle - and
 without it the engine refuses such a section by name (only
@@ -41,7 +44,7 @@ true` (#392) says the script's probing blocks on that mirrored stream
 (negated touch target and trip, back-off delta, found expected values)
 are verified by the macro-B interpreter on a simulated inverted machine
 (`crates/app/tests/inverted_probe.rs`) - without it probing on an
-inverted axis is refused by name. Only Fanuc sets it. The file-viewer's about box reads
+inverted axis is refused by name. Fanuc and Haas set it. The file-viewer's about box reads
 the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
