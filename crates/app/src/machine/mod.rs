@@ -185,19 +185,21 @@ pub fn check_ops(world: &World, machine: &Machine, program: &[(String, flecs_ecs
         let (_, origin) = posting::wcs_context(world, op.setup.as_deref());
         let lathe = kind(Some(machine)) == Kind::Lathe;
 
-        // Spindle: the tool's suggested speed is what the op runs -
-        // today every op posts its tool's rpm, so the tool IS the
-        // program's spindle word.
-        if tool.rpm > 0.0 {
+        // Spindle: the speed the program commands for this op - the
+        // post's own answer (`posting::posted_rpm`), so a touch probe,
+        // which is never spun, is not judged against the spindle range
+        // (#565); every cutter is, by its own rpm.
+        let rpm = posting::posted_rpm(&tool);
+        if rpm > 0.0 {
             if let Some(hi) = machine.spindle_max
-                && tool.rpm > hi
+                && rpm > hi
             {
-                say(&mut out, format!("{name}: tool {} runs {:.0} rpm, above the machine's {hi:.0}", op.tool, tool.rpm));
+                say(&mut out, format!("{name}: tool {} runs {rpm:.0} rpm, above the machine's {hi:.0}", op.tool));
             }
             if let Some(lo) = machine.spindle_min
-                && tool.rpm < lo
+                && rpm < lo
             {
-                say(&mut out, format!("{name}: tool {} runs {:.0} rpm, below the machine's {lo:.0}", op.tool, tool.rpm));
+                say(&mut out, format!("{name}: tool {} runs {rpm:.0} rpm, below the machine's {lo:.0}", op.tool));
             }
         }
         // Spindle power (M13.2): the estimate the cutting data makes
