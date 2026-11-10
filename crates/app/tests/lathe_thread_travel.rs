@@ -68,9 +68,6 @@ fn threaded() -> Mesh {
     revolve(&m)
 }
 
-/// The threaded bar in bar-sized stock on a lathe that states its
-/// ceiling and coolant, the thread generated, the lathe post chosen.
-
 /// The thread bar on a machine loaded from `mch` text.
 fn thread_on(mch: &str) -> World {
     let world = new_world();
@@ -126,3 +123,4 @@ fn a_real_over_travel_on_a_lathe_is_still_refused() {
     let p = travel_problems(&world);
     assert!(p.iter().any(|l| l.contains(" in X")), "a radius past the X stroke is refused by name: {p:?}");
 }
+
