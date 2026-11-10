@@ -56,6 +56,10 @@ pub(super) fn rows(ui: &mut Ui, state: &mut State, setup: &str) {
         if primary != d.axes.primary {
             axis_pick::draft_for(state, setup).axes.primary = primary;
         }
+    });
+    // Short lines (#330): the buttons stay on screen in the narrow pane.
+    ui.horizontal(|ui| {
+        ui.label("     ");
         let tip = match &check {
             Ok(()) => "Turn the part about Z so the picks run along their axes.".to_owned(),
             Err(why) => why.clone(),
@@ -111,6 +115,9 @@ fn axis_row(ui: &mut Ui, state: &mut State, setup: &str, axis: InPlaneAxis) {
                 axis_pick::set_by(state, setup, axis, b);
             }
         }
+    });
+    ui.horizontal(|ui| {
+        ui.label("     ");
         let what = match by {
             AxisBy::Edge => "edge",
             AxisBy::Points => "points",
