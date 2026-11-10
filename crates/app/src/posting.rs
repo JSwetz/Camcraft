@@ -139,6 +139,9 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
     ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
     ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
+    // #620: the PathPilot routers, each from its own manual / spec sheet.
+    ("Tormach 24R", include_str!("../../../assets/machines/tormach-24r.mch")),
+    ("Tormach xsTECH Pro", include_str!("../../../assets/machines/tormach-xstech-pro.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
