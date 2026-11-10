@@ -41,7 +41,7 @@ true` (#392) says the script's probing blocks on that mirrored stream
 (negated touch target and trip, back-off delta, found expected values)
 are verified by the macro-B interpreter on a simulated inverted machine
 (`crates/app/tests/inverted_probe.rs`) - without it probing on an
-inverted axis is refused by name. Only Fanuc sets it. The file-viewer's about box reads
+inverted axis is refused by name. Fanuc and Haas set it. The file-viewer's about box reads
 the text ones, and every shipped post carries them.
 New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
 five still carry the old label; do not copy that line's value).
