@@ -254,3 +254,20 @@ fn leaving_the_page_drops_a_located_draft() {
     assert!(h.state().locate_pick.is_none(), "off the page, the draft is dropped");
     SHOW_FORM.with(|c| c.set(true));
 }
+
+/// #582: a Model-page move that sinks the part into the marked floor
+/// lands (a warning, not a refusal) and says so by name on the status
+/// line; a clear move says nothing more than "moved".
+#[test]
+fn a_model_page_move_into_the_fixture_warns_on_the_status_line() {
+    use crate::state::CommandKind;
+    let mut st = with_vise();
+    let into = |z: f64| CommandKind::MoveModel { name: "part".into(), pos: [10.0, 10.0, z], roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 };
+    st.pending.push_back(into(-3.0));
+    st.drain_actions();
+    assert!((loc(&st, "part").pos.z + 3.0).abs() < 1e-9, "the move lands: a warning is not a refusal");
+    assert!(st.status.starts_with("moved part - warning: 'part' would sit inside the fixture 'vise'"), "{}", st.status);
+    st.pending.push_back(into(0.0));
+    st.drain_actions();
+    assert_eq!(st.status, "moved part", "resting on the floor is not inside it");
+}
