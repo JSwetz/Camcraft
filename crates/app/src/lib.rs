@@ -39,6 +39,7 @@ pub use camcraft_motion::probing;
 pub mod project;
 // #182: the CPU rasteriser behind the MCP stock render.
 pub mod raster;
+pub mod recent;
 pub mod rest;
 pub mod ribbon;
 pub mod schema;

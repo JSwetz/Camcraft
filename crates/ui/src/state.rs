@@ -51,6 +51,8 @@ mod tool_body_ui;
 pub use tool_body_ui::{BodyDraft, BodyPickMode, ToolBodyUi, ZOOM_MAX, ZOOM_MIN, clamp_zoom};
 #[path = "state_tool_profile.rs"]
 mod tool_profile_ui;
+#[path = "state_recent.rs"]
+mod recent_ui;
 pub use tool_profile_ui::{ToolColumn, ToolProfileUi, is_spun_kind, parametric_points};
 use flecs_ecs::prelude::World;
 
@@ -67,6 +69,11 @@ pub enum CommandKind {
     SaveProjectDialog,
     SaveProjectAsDialog,
     SaveProjectFile(PathBuf),
+    /// One recent project or model (#662): the same open / import the
+    /// dialogs run, a missing file refused by name.
+    OpenRecent(camcraft_app::recent::RecentKind, PathBuf),
+    /// "Clear recent" (#662): empty one list (preference state, not undoable).
+    ClearRecent(camcraft_app::recent::RecentKind),
     /// Post NC through the save-dialog law (M1.7b): path via rfd, gate
     /// via `posting::post_setup`.
     PostProgramDialog,
@@ -1243,6 +1250,15 @@ pub struct State {
     /// The Theme door's open flag (#441): the same dropdown law as
     /// `ribbon_view_open` - a frame fact, one door open at a time.
     pub ribbon_theme_open: bool,
+    /// The open recent-files drop-down (#662) under the Open (projects)
+    /// or Model (models) button - the same door law, one open at a time.
+    pub ribbon_recent_open: Option<camcraft_app::recent::RecentKind>,
+    /// The recent projects and models (#662): user preference state,
+    /// never document state and never on the history.
+    pub recent: camcraft_app::recent::RecentFiles,
+    /// Where the recents are written back; `None` (every headless
+    /// State) keeps them in memory only.
+    pub recent_store: Option<PathBuf>,
     /// The dock's closable panels as of this frame (see [`PanelsOpen`]).
     pub panels_open: PanelsOpen,
     /// The View door's pending dock ask (see [`LayoutRequest`]).
@@ -1528,6 +1544,9 @@ impl State {
             ribbon_mode_open: false,
             ribbon_view_open: false,
             ribbon_theme_open: false,
+            ribbon_recent_open: None,
+            recent: camcraft_app::recent::RecentFiles::default(),
+            recent_store: None,
             panels_open: PanelsOpen { browser: true, properties: true, machines: false },
             layout_request: None,
             tree_menu: None,
@@ -2425,6 +2444,8 @@ impl State {
                 }
             }
             CommandKind::SaveProjectFile(path) => self.save_project_path(path),
+            CommandKind::OpenRecent(kind, path) => self.open_recent(kind, path),
+            CommandKind::ClearRecent(kind) => self.clear_recent(kind),
             CommandKind::PostProgramDialog => self.post_program_dialog(),
             CommandKind::PostProgramFile(path) => self.post_program_path(path),
             CommandKind::PostProgramFolder(dir) => self.post_program_folder(dir),
@@ -3360,7 +3381,8 @@ impl State {
     /// Called on this thread when a worker result arrives (or inline
     /// fallback completes). Execution stays a normal history command.
     fn finish_import(&mut self, result: Result<ImportModel, CommandError>) {
-        self.import_file = None;
+        // #662: the file a landed import came from joins the recent models.
+        let file = self.import_file.take();
         let secs = self
             .import_started
             .take()
@@ -3393,6 +3415,7 @@ impl State {
                             };
                             self.history.execute(&self.world, cmd);
                             self.doc_version += 1;
+                            self.note_recent_model(file.as_deref());
                             self.status = match &binding {
                                 Some(s) => format!("{verb}; marked as {s}'s fixture"),
                                 None => format!("{verb}; marked as a fixture"),
@@ -3408,6 +3431,7 @@ impl State {
                             let summary = upd.changes().describe();
                             self.history.execute(&self.world, upd);
                             self.doc_version += 1;
+                            self.note_recent_model(file.as_deref());
                             self.status = timed("updated", &format!(" ({summary})"));
                         }
                         Err(err) => self.status = format!("import refused: {err}"),
@@ -3416,6 +3440,7 @@ impl State {
                     // Fresh model: the spawn path, unchanged.
                     self.history.execute(&self.world, command);
                     self.doc_version += 1;
+                    self.note_recent_model(file.as_deref());
                     self.status = timed("imported", "");
                 }
             }
@@ -3655,6 +3680,7 @@ impl State {
         match project::load_noted(&self.world, &path) {
             Ok(notes) => {
                 self.project_path = Some(path.clone());
+                self.note_recent(camcraft_app::recent::RecentKind::Project, &path);
                 // The loaded document is the new clean point (#107).
                 self.history.mark_clean();
                 self.doc_version += 1;
@@ -3675,6 +3701,7 @@ impl State {
                 // What is on disk now matches the history position (#107).
                 self.history.mark_clean();
                 self.status = format!("saved {}", path.display());
+                self.note_recent(camcraft_app::recent::RecentKind::Project, &path);
                 self.project_path = Some(path);
             }
             Err(err) => self.status = format!("save failed: {err}"),
