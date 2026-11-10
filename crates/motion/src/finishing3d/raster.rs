@@ -169,7 +169,7 @@ pub fn parallel(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Gen
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     // The crossing pair's directions. Scallop's are ±45 degrees:
     // the axes are already taken by ParallelMulti, and on prismatic
     // terrain the diagonals are the only directions no single-axis
@@ -207,7 +207,7 @@ pub fn blend(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenErr
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let emitted = raster_pass(&mut b, p, r, &sups, 1.0, 0.0, false)?;
     rings_and_tail(b, p, r, facets, emitted)
 }
@@ -263,7 +263,7 @@ pub fn swarf(
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
     let (ux, uy) = norm_dir(ux, uy)?;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let emitted = raster_pass(&mut b, p, r, &sups, ux, uy, false)?;
     rings_and_tail(b, p, r, facets, emitted)
 }
@@ -296,7 +296,7 @@ pub fn swarf_multi(
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
     let (ux, uy) = norm_dir(ux, uy)?;
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = false;
     // The gouge budget never relaxes (M13.8): the march, the ring
     // chords and the convex scan run at the nominal tolerance on
