@@ -660,6 +660,9 @@ pub(crate) fn shell_layout(
     // no frame where a hidden draft takes a click.
     if !layout::is_shown(dock, &Tab::Properties) {
         crate::axis_pick::disarm_all(state);
+        // #673: the locate draft's form is on that pane too - dropped
+        // here, before the dock routes a viewport release to it.
+        crate::locate_pick::disarm(state);
     }
     state.locate_form_drawn = false;
     egui::CentralPanel::default().show(ui, |ui| {
