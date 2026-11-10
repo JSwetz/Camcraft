@@ -72,6 +72,8 @@ mod setup_pages;
 mod setup_post_page;
 // #509: one fixture's row on the Fixtures page, sized to the pane.
 mod fixture_rows;
+// #561: the locate-in-fixture mate tools (Fixtures page and Model page).
+mod locate_form;
 // #326: the Setups page's part-alignment control.
 mod setup_align_pick;
 pub(crate) use setup_align_pick::align_text;
@@ -140,6 +142,8 @@ mod heights_tests;
 mod fixture_tests;
 #[cfg(test)]
 mod fixture_ux_tests;
+#[cfg(test)]
+mod locate_tests;
 #[cfg(test)]
 mod fixture_library_tests;
 #[cfg(test)]

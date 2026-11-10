@@ -97,8 +97,19 @@ pub struct AlignPartToSetup {
 impl AlignPartToSetup {
     /// Any rigid transform document -> setup frame; `None` clears.
     pub fn new(world: &World, setup: &str, alignment: Option<Location>) -> Result<Self, CommandError> {
+        Self::build(world, setup, alignment, false)
+    }
+
+    /// The alignment a locate writes (#561): this setup's square box or
+    /// cylinder stock keeps its allowance on each side round the part
+    /// (`crate::stock_follow`) instead of re-fitting the turned block.
+    pub fn locating(world: &World, setup: &str, alignment: Option<Location>) -> Result<Self, CommandError> {
+        Self::build(world, setup, alignment, true)
+    }
+
+    fn build(world: &World, setup: &str, alignment: Option<Location>, square: bool) -> Result<Self, CommandError> {
         let (prev, next) = change_of(world, setup, alignment)?;
-        let stock = following_stock(world, setup, prev, next)?;
+        let stock = following_stock(world, setup, prev, next, square)?;
         let mut carried = Vec::new();
         for (child, c_prev, c_next) in crate::setup_relative::carried(world, setup, prev, next) {
             let follow = |e: CommandError| {
@@ -111,10 +122,31 @@ impl AlignPartToSetup {
                 ))
             };
             let c_next = c_next.map(|a| check_location(a, "the carried part alignment")).transpose().map_err(follow)?;
-            let stock = following_stock(world, &child, c_prev, c_next).map_err(follow)?;
+            let stock = following_stock(world, &child, c_prev, c_next, false).map_err(follow)?;
             carried.push(Step { setup: child, prev: c_prev, next: c_next, stock });
         }
         Ok(AlignPartToSetup { main: Step { setup: setup.to_string(), prev, next, stock }, carried })
+    }
+
+    /// The main setup's following stock where the change leaves it
+    /// (setup frame) - what a locate's interpenetration check reads.
+    #[must_use]
+    pub fn moved_stock(&self) -> Vec<(String, Vec<Triangle>)> {
+        self.main
+            .stock
+            .iter()
+            .map(|(name, _, (_, at, mesh))| {
+                let tris = mesh
+                    .iter()
+                    .map(|t| Triangle::new(
+                        transform_point(t.a, at.pos, at.rot),
+                        transform_point(t.b, at.pos, at.rot),
+                        transform_point(t.c, at.pos, at.rot),
+                    ))
+                    .collect();
+                (name.clone(), tris)
+            })
+            .collect()
     }
 
     /// How many linked setups this change re-places with it (#316).
@@ -261,6 +293,7 @@ fn following_stock(
     setup: &str,
     prev: Option<Location>,
     next: Option<Location>,
+    square: bool,
 ) -> Result<Option<(String, StockState, StockState)>, CommandError> {
     let name = crate::setup::stock_entity_name(world, Some(setup));
     let Some(entity) = model::find_by_name(world, &name) else { return Ok(None) };
@@ -288,6 +321,9 @@ fn following_stock(
     // The change as one transform: undo the old alignment, apply the new.
     let undo = prev.map_or_else(Location::default, setup_align::inverse);
     let delta = setup_align::compose(next.unwrap_or_default(), undo);
+    if square && let Some(after) = square_refit(world, &name, &shape, (loc, &facets), &parts, (prev, next))? {
+        return Ok(Some((name, (shape, loc, facets), after)));
+    }
     let after = match &shape {
         StockShape::FromModel { .. } => {
             let moved = check_location(setup_align::compose(delta, loc), &format!("stock '{name}'"))?;
@@ -320,6 +356,32 @@ fn following_stock(
         }
     };
     Ok(Some((name, (shape, loc, facets), after)))
+}
+
+/// #561: the square block re-fitted round the one part with its
+/// allowance kept (`None`: not a square parametric block - the turned
+/// block is re-fitted as before).
+fn square_refit(
+    world: &World,
+    name: &str,
+    shape: &StockShape,
+    (loc, facets): (Location, &std::sync::Arc<[Triangle]>),
+    parts: &[String],
+    (prev, next): (Option<Location>, Option<Location>),
+) -> Result<Option<StockState>, CommandError> {
+    let [part] = parts else { return Ok(None) };
+    let Some(pe) = model::find_by_name(world, part) else { return Ok(None) };
+    let Some(tris) = model::facets_of(world, &pe) else { return Ok(None) };
+    let doc = model::transform_of(world, &pe).unwrap_or_default();
+    let seen = |a: Option<Location>| {
+        let at = a.map_or(doc, |a| setup_align::compose(a, doc));
+        tris.iter().flat_map(|t| [t.a, t.b, t.c]).map(|p| transform_point(p, at.pos, at.rot)).collect::<Vec<_>>()
+    };
+    let fit = crate::stock_follow::keep_square(name, shape, loc, &seen(prev), &seen(next)).map_err(CommandError::Invalid)?;
+    let Some((sized, at)) = fit else { return Ok(None) };
+    let at = check_location(at, &format!("stock '{name}'"))?;
+    let mesh = if &sized == shape { facets.clone() } else { mesh_of(&sized, name)? };
+    Ok(Some((sized, at, mesh)))
 }
 
 /// A stock-local point through its placement, then through the change.

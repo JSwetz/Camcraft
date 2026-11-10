@@ -13,6 +13,8 @@ pub mod fixture;
 // #339 slice 6: the user fixture library file.
 pub mod fixture_library;
 pub mod fixture_carried;
+// #561: locate the part in a fixture (or the fixture on the part) by mates.
+pub mod fixture_locate;
 pub mod fixture_struck;
 pub mod fixture_view;
 pub use camcraft_motion::finishing3d;
@@ -66,6 +68,8 @@ pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;
 pub mod stock_sim;
 pub mod stock_export;
+// #561: a square stock keeps its allowance round a located part.
+pub mod stock_follow;
 pub mod stock_play;
 pub mod stock_play_worker;
 pub mod stock_view;

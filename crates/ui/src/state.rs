@@ -45,6 +45,8 @@ mod setup_mount;
 mod setup_post_options;
 #[path = "state_fixture.rs"]
 mod fixture_view;
+#[path = "state_locate.rs"]
+mod locate_ui;
 #[path = "state_fixture_library.rs"]
 mod fixture_library;
 pub use fixture_library::{FixtureLibDialog, InsertFixtureDraft, LibraryRow, SaveFixtureDraft};
@@ -405,6 +407,12 @@ pub enum CommandKind {
     },
     DeleteFixture(String),
     ImportFixtureDialog,
+    /// Locate the part in a fixture, or the fixture on the part, by mates
+    /// (#561): one undoable `Locate` (`LocatePart` / `LocateFixture`).
+    Locate {
+        spec: camcraft_app::fixture_locate::LocateSpec,
+        mover: camcraft_app::fixture_locate::Mover,
+    },
     /// #339 slice 6: open the fixture library's Save / Insert dialog over
     /// a setup's Fixtures node (`""` - the implicit setup). View state;
     /// saving and deleting entries are confirmed file edits, not undo
@@ -1395,6 +1403,14 @@ pub struct State {
     /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
     /// Face picks into it ahead of the boundary and the selection.
     pub plane_pick: Option<crate::plane_pick::PlanePick>,
+    /// The locate-in-fixture mate draft (#561); `Some` routes Face and
+    /// Vertex picks into it ahead of everything else.
+    pub locate_pick: Option<crate::locate_pick::LocateDraft>,
+    /// Was the locate form drawn this frame? Reset before the dock, set
+    /// by the form; a draft whose form is off screen is dropped after
+    /// the dock (`locate_pick::sweep`) - a kept draft must never capture
+    /// picks with no form to show them (review of #566).
+    pub locate_form_drawn: bool,
     /// The Setups page's axes-in-the-plane draft (#557); while it is
     /// collecting, Edge/Vertex picks land in it ahead of everything else.
     pub axis_pick: Option<crate::axis_pick::AxisDraft>,
@@ -1601,6 +1617,8 @@ impl State {
             geo_pick: GeoPick::Model,
             boundary_pick: None,
             plane_pick: None,
+            locate_pick: None,
+            locate_form_drawn: false,
             axis_pick: None,
             points_pick: None,
             axis_rows_shown: false,
@@ -3298,6 +3316,7 @@ impl State {
                     }
                 }
             }
+            CommandKind::Locate { spec, mover } => self.dispatch_locate(&spec, mover),
             CommandKind::DeleteFixture(name) => match DeleteFixture::new(&self.world, &name) {
                 Ok(command) => {
                     self.history.execute(&self.world, command);

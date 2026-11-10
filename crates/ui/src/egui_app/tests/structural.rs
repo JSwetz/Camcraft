@@ -134,6 +134,13 @@ fn assert_shell_skeleton(h: &Harness<'static, ShellUi>) {
         .collect();
     assert!(titled.is_empty(), "no floating window may be open by default: {titled:?}");
     assert!(h.query_by_label("Shank diameter").is_none(), "the tool editor stays closed");
+    // #561: no locate-in-fixture mate draft is armed by default.
+    assert!(h.state().state.locate_pick.is_none(), "the locate picks start unarmed");
+    assert!(h.query_by_label("Apply locate").is_none(), "the locate form is drawn only while armed");
+    // #561 review: nor its turn row, its offset frame or its refusal line.
+    for gone in ["Turn (deg)", "Offset (setup X / Y / Z)", "Not yet: "] {
+        assert!(h.query_by_label_contains(gone).is_none(), "{gone} is drawn only while armed");
+    }
 }
 
 /// `egui_app.png`'s intent in the dark house look.

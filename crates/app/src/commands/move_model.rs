@@ -25,19 +25,28 @@
 //!   (`SetWcsOrigin`), and the machine table is derived prose - all
 //!   refused by name, because silently accepting them here would put
 //!   two commands on one piece of furniture and split the undo story.
+//! - **A locate keeps a square stock square (#561).** [`MoveModel::locating`]
+//!   re-fits a box or cylinder stock that stands square to the setup
+//!   round the part's new place with the allowance it had on each side
+//!   (`crate::stock_follow`) instead of turning it with the part; a
+//!   plain [`MoveModel::new`] keeps the rigid follow it always had.
 //! - **`apply` and `invert` are pure writes**, so redo replays bytes
 //!   and never re-derives.
+
+use std::sync::Arc;
 
 use flecs_ecs::prelude::World;
 
 use crate::commands::fixture::check_location;
 use crate::commands::{Command, CommandError};
 use crate::fixture::MACHINE_TABLE;
-use crate::geometry::{quat_conjugate, quat_mul, transform_inverse_point, transform_point};
+use crate::geometry::{Point3, Triangle, quat_conjugate, quat_mul, transform_inverse_point, transform_point};
 use crate::model;
 use crate::schema::Location;
 use crate::setup_align;
-use crate::stock::StockShape;
+use crate::schema::StockDef;
+use crate::stock::{self, StockShape};
+use crate::stock_follow;
 
 /// The part alignment of the setup that names `stock` as its stock, when
 /// that setup holds the part turned (#326).
@@ -48,6 +57,23 @@ fn aligned_owner(world: &World, stock: &str) -> Option<Location> {
         .find_map(|s| setup_align::stored(world, &s))
 }
 
+/// A following stock re-sized by a locate: (shape, mesh) before and after.
+type Reshape = ((StockShape, Arc<[Triangle]>), (StockShape, Arc<[Triangle]>));
+
+/// One following stock: name, placement before and after, and its new
+/// size when a locate re-fitted it.
+struct StockMove {
+    name: String,
+    before: Location,
+    after: Location,
+    reshape: Option<Reshape>,
+}
+
+/// The part's vertices placed at `at`.
+fn placed(tris: &[Triangle], at: Location) -> Vec<Point3> {
+    tris.iter().flat_map(|t| [t.a, t.b, t.c]).map(|p| transform_point(p, at.pos, at.rot)).collect()
+}
+
 /// Place a model: the same rigid transform any page sets, applied to
 /// the named part. Construction snapshots the previous `Location` for
 /// the inverse.
@@ -55,11 +81,22 @@ pub struct MoveModel {
     name: String,
     prev: Location,
     next: Location,
-    stock: Vec<(String, Location, Location)>,
+    stock: Vec<StockMove>,
 }
 
 impl MoveModel {
     pub fn new(world: &World, name: &str, location: Location) -> Result<Self, CommandError> {
+        Self::build(world, name, location, false)
+    }
+
+    /// The move a locate makes (#561): a square box or cylinder stock
+    /// keeps its orientation and its allowance on each side round the
+    /// part, instead of turning with it.
+    pub fn locating(world: &World, name: &str, location: Location) -> Result<Self, CommandError> {
+        Self::build(world, name, location, true)
+    }
+
+    fn build(world: &World, name: &str, location: Location, square: bool) -> Result<Self, CommandError> {
         if name == MACHINE_TABLE {
             return Err(CommandError::Invalid(
                 "the machine table is derived from the machine file - it is not a part you can move".into(),
@@ -79,48 +116,113 @@ impl MoveModel {
         }
         let next = check_location(location, &format!("'{name}'"))?;
         let prev = model::transform_of(world, &entity).unwrap_or_default();
+        let part_tris = if square { model::facets_of(world, &entity) } else { None };
         let single_part = model::model_entities(world)
             .iter()
             .filter(|(_, entity)| !model::is_fixture(world, entity))
             .count()
             == 1;
-        let stock = model::named_entities(world)
-            .into_iter()
-            .filter_map(|(stock_name, entity)| {
-                let shape = model::stock_def_of(world, &entity)?;
-                let follows = match shape {
-                    StockShape::FromModel { source } => source == name,
-                    _ => single_part,
-                };
-                follows.then(|| {
-                    let before = model::transform_of(world, &entity).unwrap_or_default();
-                    // #326: a stock placed in a setup that holds the part
-                    // turned follows the move as that setup sees it - the
-                    // document move conjugated by the setup's alignment.
-                    if let Some(a) = aligned_owner(world, &stock_name) {
-                        let delta = setup_align::compose(next, setup_align::inverse(prev));
-                        let seen = setup_align::compose(a, setup_align::compose(delta, setup_align::inverse(a)));
-                        return (stock_name, before, setup_align::compose(seen, before));
-                    }
-                    let local = transform_inverse_point(before.pos, prev.pos, prev.rot);
-                    let after = Location {
-                        pos: transform_point(local, next.pos, next.rot),
-                        rot: quat_mul(quat_mul(next.rot, quat_conjugate(prev.rot)), before.rot),
-                    };
-                    (stock_name, before, after)
-                })
-            })
-            .map(|(stock_name, before, after)| {
-                check_location(after, &format!("stock '{stock_name}'"))
-                    .map(|after| (stock_name, before, after))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut stock = Vec::new();
+        for (stock_name, entity) in model::named_entities(world) {
+            let Some(shape) = model::stock_def_of(world, &entity) else { continue };
+            let follows = match &shape {
+                StockShape::FromModel { source } => source == name,
+                _ => single_part,
+            };
+            if !follows {
+                continue;
+            }
+            let before = model::transform_of(world, &entity).unwrap_or_default();
+            let owner = aligned_owner(world, &stock_name);
+            // #561: a locate keeps a square block square, re-fitted round
+            // the part as the stock's setup sees it.
+            if let Some(tris) = &part_tris {
+                let seen = |l: Location| owner.map_or(l, |a| setup_align::compose(a, l));
+                let fit = stock_follow::keep_square(
+                    &stock_name,
+                    &shape,
+                    before,
+                    &placed(tris, seen(prev)),
+                    &placed(tris, seen(next)),
+                )
+                .map_err(CommandError::Invalid)?;
+                if let Some((sized, at)) = fit {
+                    let after = check_location(at, &format!("stock '{stock_name}'"))?;
+                    let reshape = (sized != shape)
+                        .then(|| {
+                            let unbuilt = || {
+                                CommandError::Invalid(format!("the stock '{stock_name}' cannot be rebuilt round the located part"))
+                            };
+                            let old = model::facets_of(world, &entity)
+                                .or_else(|| stock::stock_mesh(&shape).map(Arc::from))
+                                .ok_or_else(unbuilt)?;
+                            let mesh = stock::stock_mesh(&sized).filter(|_| sized.is_bounded()).ok_or_else(unbuilt)?;
+                            Ok::<_, CommandError>(((shape.clone(), old), (sized, Arc::from(mesh))))
+                        })
+                        .transpose()?;
+                    stock.push(StockMove { name: stock_name, before, after, reshape });
+                    continue;
+                }
+            }
+            // #326: a stock placed in a setup that holds the part turned
+            // follows the move as that setup sees it - the document move
+            // conjugated by the setup's alignment.
+            let after = if let Some(a) = owner {
+                let delta = setup_align::compose(next, setup_align::inverse(prev));
+                let seen = setup_align::compose(a, setup_align::compose(delta, setup_align::inverse(a)));
+                setup_align::compose(seen, before)
+            } else {
+                let local = transform_inverse_point(before.pos, prev.pos, prev.rot);
+                Location {
+                    pos: transform_point(local, next.pos, next.rot),
+                    rot: quat_mul(quat_mul(next.rot, quat_conjugate(prev.rot)), before.rot),
+                }
+            };
+            let after = check_location(after, &format!("stock '{stock_name}'"))?;
+            stock.push(StockMove { name: stock_name, before, after, reshape: None });
+        }
         Ok(MoveModel {
             name: name.to_string(),
             prev,
             next,
             stock,
         })
+    }
+
+    /// Each following stock's facets where the move leaves it (setup
+    /// frame) - what the locate's interpenetration check reads.
+    #[must_use]
+    pub fn moved_stock(&self, world: &World) -> Vec<(String, Vec<Triangle>)> {
+        self.stock
+            .iter()
+            .filter_map(|m| {
+                let mesh = match &m.reshape {
+                    Some((_, (_, mesh))) => mesh.clone(),
+                    None => model::facets_of(world, &model::find_by_name(world, &m.name)?)?,
+                };
+                let at = m.after;
+                let tris = mesh
+                    .iter()
+                    .map(|t| Triangle::new(
+                        transform_point(t.a, at.pos, at.rot),
+                        transform_point(t.b, at.pos, at.rot),
+                        transform_point(t.c, at.pos, at.rot),
+                    ))
+                    .collect();
+                Some((m.name.clone(), tris))
+            })
+            .collect()
+    }
+}
+
+/// Write one stock's placement and, when it was re-sized, its block.
+fn write_stock(world: &World, name: &str, at: Location, block: Option<&(StockShape, Arc<[Triangle]>)>) {
+    if let Some(entity) = model::find_by_name(world, name) {
+        model::set_transform(world, &entity, at);
+        if let Some((shape, mesh)) = block {
+            model::set_facets(world, &entity, mesh.clone());
+            entity.entity_view(world).set(StockDef { shape: shape.clone() });
+        }
     }
 }
 
@@ -129,10 +231,8 @@ impl Command for MoveModel {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             model::set_transform(world, &entity, self.next);
         }
-        for (name, _, next) in &self.stock {
-            if let Some(entity) = model::find_by_name(world, name) {
-                model::set_transform(world, &entity, *next);
-            }
+        for m in &self.stock {
+            write_stock(world, &m.name, m.after, m.reshape.as_ref().map(|(_, after)| after));
         }
     }
 
@@ -140,10 +240,8 @@ impl Command for MoveModel {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             model::set_transform(world, &entity, self.prev);
         }
-        for (name, prev, _) in &self.stock {
-            if let Some(entity) = model::find_by_name(world, name) {
-                model::set_transform(world, &entity, *prev);
-            }
+        for m in &self.stock {
+            write_stock(world, &m.name, m.before, m.reshape.as_ref().map(|(before, _)| before));
         }
     }
 }
