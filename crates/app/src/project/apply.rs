@@ -531,6 +531,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
         // The top-level switches (#110, #111): an absent key is off.
         skip_stops: file.skip_stops,
         per_op: file.per_op_files,
+        smoothing: file.smoothing,
     };
     let doc_units = match file.units.as_deref() {
         None | Some("mm") => Unit::Millimeters,

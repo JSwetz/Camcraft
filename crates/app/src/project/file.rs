@@ -174,6 +174,10 @@ pub struct ProjectFile {
     /// `skip_stops`: an absent key is one combined program.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub per_op_files: bool,
+    /// Per-operation smoothing at post (#616), additive like
+    /// `skip_stops`: an absent key is off - no smoothing words.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smoothing: bool,
     pub entities: Vec<EntityDto>,
 }
 

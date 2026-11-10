@@ -208,7 +208,7 @@ pub fn options_value(o: PostOptions) -> Value {
         ThreadingOutput::G32Passes => "G32",
         ThreadingOutput::G76Cycle => "G76",
     };
-    serde_json::json!({ "Threading": threading })
+    serde_json::json!({ "Threading": threading, "Smoothing": o.smoothing })
 }
 
 /// The document's post for display: built-in name, or the file path
@@ -780,6 +780,9 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             part_unload,
             part_transfer,
             probe_tol,
+            // #616: the op's smoothing ask, only when the document
+            // turned smoothing on (off: byte-identical output).
+            smoothing: if post_options(world).smoothing { crate::smoothing::of(&op.params) } else { None },
             coolant: op.coolant,
             // "Skip pauses and homes" (#110) mutes every after-action
             // at post; the ops keep their choices. Entries ride it (#155).

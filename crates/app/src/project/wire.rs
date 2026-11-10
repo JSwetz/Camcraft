@@ -218,6 +218,8 @@ pub fn collect(world: &World) -> ProjectFile {
         skip_stops: crate::posting::post_options(world).skip_stops,
         // One combined program writes no key (#111).
         per_op_files: crate::posting::post_options(world).per_op,
+        // Off writes no key (#616).
+        smoothing: crate::posting::post_options(world).smoothing,
         entities,
     }
 }

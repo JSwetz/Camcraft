@@ -32,6 +32,9 @@ var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
+var smoothTol = 0;          // #616: the section's PARAM Smoothing, mm (0: none asked)
+var smoothMode = "";        // #616: "finish" or "rough"
+var smoothActive = false;   // #616: this section wrote its smoothing words
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs)
 var inch = false;          // the machine is programmed in inches (onOpen)
 
@@ -231,6 +234,8 @@ function onRadiusCompensation() {
 }
 
 function onParameter(name, value) {
+  if (name === "Smoothing") { smoothTol = Number(value) || 0; return; }
+  if (name === "SmoothingMode") { smoothMode = String(value || ""); return; }
   commentParam(name, value);
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);
@@ -294,6 +299,22 @@ function beltNote(rpm) {
 // only then G30. M6 then runs the changer, or pauses for a manual change
 // when the tool is not in the tray, and G43 H applies the length the
 // tool table holds (measured by the tool setter).
+// #616: per-operation smoothing, only when the document turned it on
+// (the stream then carries PARAM Smoothing / SmoothingMode). LinuxCNC path blending: G64 P is the deviation the trajectory planner may take.
+// Written after the preamble, undone at the section's end so no
+// tolerance leaks into the next operation.
+function smoothOn() {
+  if (!(smoothTol > 0)) return;
+  block(["G64", "P" + fu(smoothTol)]);
+  smoothActive = true;
+}
+function smoothOff() {
+  if (smoothActive) block(["G64", inch ? "P0.001" : "P0.025"]);  // back to the header's blending
+  smoothActive = false;
+  smoothTol = 0;
+  smoothMode = "";
+}
+
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
@@ -315,12 +336,14 @@ function startPreamble() {
   }
   coolant = coolantCode();
   if (coolant) block([coolant]);
+  smoothOn();
 }
 
 function endPreamble() {
   if (!sectionOpen) return;
   restorePlane();            // the plane never leaks past its section
   sectionOpen = false;
+  smoothOff();
   if (inCycle) block(["G80"]);
   inCycle = false;
   if (coolant) block(["M9"]);

@@ -380,6 +380,12 @@ pub struct PostOptions {
     pub skip_stops: bool,
     /// One standalone program per operation (#111).
     pub per_op: bool,
+    /// Per-operation smoothing (#616): off (the default) posts no
+    /// smoothing words; on, each op asks its tolerance and the dialect
+    /// writes its control's mode (G64 P, G5.1, G187, CYCLE832, CYCL
+    /// DEF 32), reset at the op's end. Opt-in because several controls
+    /// need an option for it (Fanuc's AI contour control).
+    pub smoothing: bool,
 }
 
 /// The thread-output choice of [`PostOptions`].

@@ -133,6 +133,23 @@ pub struct Dump<'a> {
     /// carries touches - the stream then closes the section with a
     /// `FOUND` record built from the touches. None for every cutting op.
     pub probe_result: Option<probe_rec::ProbeResult>,
+    /// The op's smoothing ask (#616): `Some` only when the document
+    /// turned smoothing on - the stream then carries `PARAM Smoothing
+    /// <mm>` and `PARAM SmoothingMode finish|rough` before the section,
+    /// and the dialect writes its own words (G64 P, G5.1, G187,
+    /// CYCLE832, CYCL DEF 32). None writes nothing: every program a
+    /// document posted before #616 is byte-identical.
+    pub smoothing: Option<Smoothing>,
+}
+
+/// One operation's smoothing ask (#616): the contour deviation the
+/// control may take, mm, and whether the op FINISHES (maximum
+/// accuracy - the control's precise mode) or ROUGHS (the deviation
+/// derived from the stock the op leaves - its aggressive mode).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Smoothing {
+    pub tol_mm: f64,
+    pub finish: bool,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -162,6 +179,7 @@ impl<'a> Default for Dump<'a> {
             coolant: CoolantMode::Flood,
             after: AfterOperation::None,
             probe_result: None,
+            smoothing: None,
         }
     }
 }
@@ -200,6 +218,16 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     if let Some(word) = d.after.param_word() {
         out.push(Record::Param { name: "AfterOperation".into(), value: json!(word) });
+    }
+    // #616: the smoothing ask, only when the document turned it on - a
+    // finite positive deviation, or nothing (a script never sees a
+    // tolerance it would have to guess about).
+    if let Some(s) = d.smoothing.filter(|s| s.tol_mm.is_finite() && s.tol_mm > 0.0) {
+        out.push(Record::Param { name: "Smoothing".into(), value: json!(s.tol_mm) });
+        out.push(Record::Param {
+            name: "SmoothingMode".into(),
+            value: json!(if s.finish { "finish" } else { "rough" }),
+        });
     }
     // A path stating spindle C angles (issue #33) is live-tool work on
     // a C turn: the section says so before it opens, so a script can
