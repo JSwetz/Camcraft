@@ -208,6 +208,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     if t.moves.iter().any(|m| m.rotary.is_some()) {
         out.push(Record::Param { name: "LiveTool".into(), value: json!("radial") });
     }
+    // A thread whose passes need the spindle reversed (#629): the
+    // record states hand and direction, and the tool lays its arcs
+    // about the part only under M04. Said before the section opens,
+    // so the spindle starts the right way; forward (M03) is silent.
+    if t.threads.iter().any(|c| c.is_sane(&t.moves) && c.reverse_spindle()) {
+        out.push(Record::Param { name: "SpindleDirection".into(), value: json!("reverse") });
+    }
     for w in &d.warnings {
         out.push(Record::Warn { text: w.clone() });
     }

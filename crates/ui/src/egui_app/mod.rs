@@ -138,6 +138,8 @@ mod dialog_tests;
 #[cfg(test)]
 mod coolant_tests;
 #[cfg(test)]
+mod thread_hand_tests;
+#[cfg(test)]
 mod after_op_tests;
 #[cfg(test)]
 mod colorvision_tests;

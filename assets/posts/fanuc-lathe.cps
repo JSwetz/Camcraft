@@ -17,6 +17,7 @@ capabilities = 2; // reference contract: integer feature mask (bit 2 = turning)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
 liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine refuses them for a post without it
+threadHands = true;  // reads PARAM SpindleDirection (#629): the engine refuses a reverse-spindle thread for a post without it
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -41,9 +42,20 @@ liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine r
 //    ZX from +Y, so a YZ-stated arc flips CW<->CCW; an XZ-stated one
 //    does not. An XY arc is a thread half-turn (see G32) or a refusal.
 //  - G32: the threading kernel spells a synchronized helix as XY
-//    half-turn arcs about the axis, rising half a pitch each. Two
-//    half-turns at one radius are one lead of Z travel under G32 with
-//    F = lead (mm/rev). Anything else in XY is refused.
+//    half-turn arcs about the axis, half a pitch of Z each (toward the
+//    chuck, -Z, by default). Two half-turns at one radius are one lead
+//    of Z travel under G32 with F = lead (mm/rev). Anything else in XY
+//    is refused.
+//  - The thread's HAND (#629) is never dropped. The stream's +Z is the
+//    free end, the chuck below. A half-turn clockwise seen from +Z is
+//    the tool's motion about a part turning M03 (clockwise seen from
+//    the headstock); counter-clockwise needs M04. So a right-hand thread
+//    cut toward the chuck posts under M03 (the standard), a left-hand
+//    one toward the chuck under M04 - the stream says so beforehand with
+//    PARAM SpindleDirection reverse, and the section's spindle starts
+//    that way. A half-turn turning against the spindle the section
+//    started is refused by name (it would cut the other hand), and so
+//    is a G76 record whose hand and Z direction disagree with it.
 //  - G76 (user option postOptions.Threading = "G76"; G32 is the
 //    default): the stream's THREAD record becomes the two-block cycle
 //      G76 P(m)(r)(a) Q(dmin) R(d)
@@ -58,8 +70,10 @@ liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine r
 //    in ms), G84 tap, G85 bore, cancelled by G80. A cycle off the
 //    spindle axis and a back-bore are refused - a 2-axis lathe has no
 //    such cycle.
-//  - M03 always: the stream carries no spindle sense, and a left-hand
-//    tool would need the insert library to say so first.
+//  - M03 unless the stream states PARAM SpindleDirection reverse (#629,
+//    a thread whose hand needs it): then M04, with a note for the
+//    operator that the threading insert must be mounted for reverse
+//    rotation. Nothing else in the stream turns the spindle backwards.
 //  - C-axis live tooling (issue #33): a section carrying PARAM LiveTool
 //    is cut by a radial live tool with the spindle positioned as C.
 //    The stream's X Y Z stay the tip in the PART frame and C is the
@@ -96,6 +110,7 @@ var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (world -> program)
 var clampDone = false;     // G50 once per program
 var inThread = false;      // a G76 cycle stands for the passes being skipped
 var threadSeen = false;    // inside a THREAD record's span (cycle or not)
+var spinRev = false;       // PARAM SpindleDirection reverse (#629): this section's spindle runs M04
 var refused = {};          // each refusal counted once per program, by name
 var EPS = 0.0005;          // half a micron: the stream's own lattice
 var liveAsk = false;       // the section's PARAM LiveTool (issue #33)
@@ -293,6 +308,7 @@ function onParameter(name, value) {
   else if (name === "OriginY" && has(value)) orgY = Number(value);
   else if (name === "OriginZ" && has(value)) orgZ = Number(value);
   else if (name === "SurfaceSpeed" && has(value)) sCss = Number(value);
+  else if (name === "SpindleDirection") spinRev = String(value || "") === "reverse";
 }
 
 function onSpindleSpeed() {
@@ -328,8 +344,10 @@ function startPreamble() {
   if (liveAsk) {
     liveStart();
   } else if (spindleWait) {
-    if (sCss > 0) block(["G96", "S" + ff(sCss), "M03"]);
-    else block(["G97", "S" + ff(sRpm), "M03"]);
+    var m = spinRev ? "M04" : "M03";
+    if (spinRev) note("SPINDLE M04 - THREAD HAND NEEDS REVERSE ROTATION - MOUNT THE INSERT FOR M04");
+    if (sCss > 0) block(["G96", "S" + ff(sCss), m]);
+    else block(["G97", "S" + ff(sRpm), m]);
     spindleWait = false;
   }
   coolant = coolantFor(coolantAsk);
@@ -374,6 +392,7 @@ function endPreamble() {
     return;
   }
   block(["M05"]);
+  spinRev = false;           // the next section states its own
   afterOp();
 }
 
@@ -513,6 +532,14 @@ function threadHalfTurn(p) {
     refuse("G76 threading cycle chosen but the stream carries no thread cycle record for these passes - regenerate the thread, or choose G32 passes");
     return;
   }
+  // The hand (#629): clockwise seen from +Z is M03's, counter-clockwise
+  // M04's. A half-turn against the section's spindle would cut the
+  // other hand - refused, never posted.
+  var cw = p.CircularDirection === "CW";
+  if (cw === spinRev) {
+    refuse("thread half-turn turns " + (cw ? "clockwise" : "counter-clockwise") + " seen from +Z but the spindle runs " + (spinRev ? "M04" : "M03") + " - it would cut the other hand; regenerate the thread");
+    return;
+  }
   block(["G32", zWord(p.Z), "F" + fr(lead)]);
 }
 
@@ -550,6 +577,13 @@ function g76Why(p, r0, r1) {
   if (Math.abs(2 * Math.abs(r1) - p.MinorDiameter) > 2 * EPS) return "the end point does not stand on the minor diameter";
   if (!(Math.abs(r0) > p.MajorDiameter / 2)) return "the start point stands inside the crest";
   if (!(Math.abs(p.EndZ - p.Z) > EPS)) return "no thread length";
+  // The hand (#629): right-hand toward the chuck (-Z) and left-hand away
+  // from it turn clockwise seen from +Z - M03; the other two need M04.
+  if (p.Hand !== "right" && p.Hand !== "left") return "the thread record states no hand";
+  var rev = (p.Hand === "right") === (p.EndZ > p.Z);
+  if (rev !== spinRev) {
+    return "a " + p.Hand + "-hand thread cut " + (p.EndZ < p.Z ? "toward" : "away from") + " the chuck needs " + (rev ? "M04" : "M03") + ", the section's spindle runs " + (spinRev ? "M04" : "M03");
+  }
   return null;
 }
 
