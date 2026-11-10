@@ -41,15 +41,45 @@ pub fn axis_label(axis: [f64; 3]) -> Option<&'static str> {
     AXIS_CHOICES.iter().find(|(_, d)| dot(a, *d) > 1.0 - 1e-9).map(|(n, _)| *n)
 }
 
-/// Read a STEP / STL / OBJ for a tool body: its file name and its
-/// model-frame facets. Refuses an unreadable or empty file by name.
-pub fn load(path: &Path) -> Result<(String, Vec<Triangle>), String> {
+/// What loading a body from disk found: the source name, its facets, and
+/// the auto-alignment from ISO 13399 coordinate systems (#370) if present.
+pub struct LoadedBody {
+    pub source: String,
+    pub facets: Vec<Triangle>,
+    /// `Ok((axis, offset))` when aligned from ISO 13399 coordinate
+    /// systems; `Err(why)` when falling back to numeric placement.
+    pub alignment: Result<([f64; 3], f64), String>,
+}
+
+/// Read a STEP / STL / OBJ for a tool body: its file name, its
+/// model-frame facets, and automatic placement from ISO 13399 coordinate
+/// systems (#370) if present.
+pub fn load_aligned(path: &Path) -> Result<LoadedBody, String> {
     let mesh = crate::geometry::import::load_model(path).map_err(|e| e.to_string())?;
     if mesh.facets.is_empty() {
         return Err("the file holds no facets".into());
     }
     let source = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
-    Ok((source, mesh.facets.to_vec()))
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let alignment = if ext == "step" || ext == "stp" {
+        match std::fs::read(path) {
+            Ok(data) => match crate::geometry::import::step_csys::read_tool_csys(&data) {
+                Ok(report) => report.align_tool_body(),
+                Err(e) => Err(format!("coordinate systems unreadable: {e}")),
+            },
+            Err(e) => Err(format!("I/O error: {e}")),
+        }
+    } else {
+        Err("not a STEP file (no coordinate systems)".into())
+    };
+    Ok(LoadedBody { source, facets: mesh.facets.to_vec(), alignment })
+}
+
+/// Read a STEP / STL / OBJ for a tool body: its file name and its
+/// model-frame facets. Refuses an unreadable or empty file by name.
+pub fn load(path: &Path) -> Result<(String, Vec<Triangle>), String> {
+    let loaded = load_aligned(path)?;
+    Ok((loaded.source, loaded.facets))
 }
 
 /// The placement as `SetToolBody` would judge it, without landing it:

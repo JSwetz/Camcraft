@@ -22,6 +22,7 @@ use camcraft_tools::lathe_insert_zone::InsertZone;
 
 /// A body as the caller states it: model-frame facets, where they came
 /// from, and the numeric placement (`tool_body::place`).
+#[derive(Clone, Debug, PartialEq)]
 pub struct ToolBodySpec {
     pub source: String,
     pub facets: Vec<Triangle>,
@@ -30,6 +31,24 @@ pub struct ToolBodySpec {
     pub axis: [f64; 3],
     /// The model origin's height above the tool tip, along that axis.
     pub offset: f64,
+}
+
+impl ToolBodySpec {
+    /// Read a STEP file and align it automatically by its ISO 13399
+    /// coordinate systems (#370). Refuses by name if the file is unreadable,
+    /// holds no facets, or if coordinate systems are absent or ambiguous.
+    pub fn from_step_auto(path: &Path) -> Result<Self, String> {
+        let data = std::fs::read(path).map_err(|e| format!("I/O error: {e}"))?;
+        let mesh = crate::geometry::import::load_model(path).map_err(|e| e.to_string())?;
+        if mesh.facets.is_empty() {
+            return Err("the file holds no facets".into());
+        }
+        let report = crate::geometry::import::step_csys::read_tool_csys(&data)
+            .map_err(|e| format!("coordinate systems unreadable: {e}"))?;
+        let (axis, offset) = report.align_tool_body()?;
+        let source = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
+        Ok(ToolBodySpec { source, facets: mesh.facets.to_vec(), axis, offset })
+    }
 }
 
 /// A lathe-held body as the caller states it (#369): model-frame
@@ -46,6 +65,7 @@ pub struct LatheBodySpec {
 }
 
 /// Set (`Some`) or clear (`None`) a tool's body.
+#[derive(Debug)]
 pub struct SetToolBody {
     name: String,
     prev: Option<ToolBody>,
@@ -101,6 +121,14 @@ impl SetToolBody {
         let mesh = crate::geometry::import::load_model(path)?;
         let source = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
         Self::new(world, name, Some(ToolBodySpec { source, facets: mesh.facets.to_vec(), axis, offset }))
+    }
+
+    /// Read a STEP file, align it automatically by its ISO 13399
+    /// coordinate systems (#370), and place it on tool `name` with no
+    /// manual offsets.
+    pub fn from_step_auto(world: &World, name: &str, path: &Path) -> Result<Self, CommandError> {
+        let spec = ToolBodySpec::from_step_auto(path).map_err(CommandError::Invalid)?;
+        Self::new(world, name, Some(spec))
     }
 
     /// Place and judge a lathe body (#369) against tool `name` now;

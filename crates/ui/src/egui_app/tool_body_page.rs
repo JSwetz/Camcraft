@@ -83,6 +83,9 @@ pub(super) fn body_section(ui: &mut Ui, state: &mut State, exists: bool, u: Unit
     axis_combo(ui, &mut state.tool_body_ui.axis);
     field(ui, "Tip offset (model origin above the tip)");
     num(ui, u, &mut state.tool_body_ui.offset);
+    if let Some(ref note) = state.tool_body_ui.align_note {
+        ui.label(note);
+    }
     let pick = state.tool_body_ui.pick;
     ui.horizontal(|ui| {
         if ui

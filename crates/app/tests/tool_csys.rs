@@ -187,3 +187,28 @@ fn unreadable_input_is_a_clean_error_never_a_panic() {
         r.refused
     );
 }
+
+#[test]
+fn iso_13399_tool_csys_aligns_automatically() {
+    let r = read("tool_csys_iso13399.step");
+    let (axis, offset) = r.align_tool_body().expect("aligns from CIP");
+    assert!(close(axis, [0.0, 0.0, 1.0]), "{axis:?}");
+    assert!((offset - 75.0).abs() < 1e-12, "{offset}");
+}
+
+#[test]
+fn a_file_without_tool_csys_falls_back_by_name() {
+    let r = read("tool_csys_none.step");
+    let err = r.align_tool_body().expect_err("no coordinate systems");
+    assert_eq!(err, "the file names no coordinate systems");
+}
+
+#[test]
+fn degenerate_tool_csys_falls_back_by_name() {
+    let r = read("tool_csys_degenerate.step");
+    let err = r.align_tool_body().expect_err("degenerate coordinate systems");
+    assert!(
+        err.starts_with("every ISO 13399 coordinate system was refused"),
+        "{err}"
+    );
+}

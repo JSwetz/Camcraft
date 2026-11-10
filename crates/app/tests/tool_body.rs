@@ -365,3 +365,84 @@ fn a_body_reads_from_an_stl_and_is_placed_by_axis_and_offset() {
     assert!((judged.holder_len - (90.0 - shank_top())).abs() < 1e-9);
     assert!(judged.holder_d >= 24.0 - 1e-9 && judged.holder_d <= 24.0 + 1e-4);
 }
+
+fn testdata(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/models")
+        .join(name)
+}
+
+#[test]
+fn step_with_tool_coordinate_systems_aligns_automatically() {
+    let path = testdata("tool_csys_box_iso13399.step");
+    let spec = ToolBodySpec::from_step_auto(&path).expect("spec from step with CIP");
+    assert_eq!(spec.axis, [0.0, 0.0, 1.0]);
+    assert!((spec.offset - 75.0).abs() < 1e-9, "offset is 75 mm from CIP origin (0, 0, -75)");
+
+    let (world, mut history) = face_world();
+    let cmd = SetToolBody::from_step_auto(&world, TOOL, &path).expect("SetToolBody from step auto");
+    history.execute(&world, cmd);
+
+    let b = tool_body::body_of(&world, &tool_entity(&world)).expect("body landed on tool");
+    assert_eq!(b.source, "tool_csys_box_iso13399.step");
+    let profile = b.profile().expect("profile envelope");
+    // Model box z was [-40, 0], with offset 75 => tool frame z is [35, 75].
+    assert!((profile.bottom() - 35.0).abs() < 1e-6, "foot at 35 mm: {}", profile.bottom());
+    assert!((profile.top() - 75.0).abs() < 1e-6, "top at 75 mm: {}", profile.top());
+
+    // Undo removes the body, redo restores it.
+    history.undo(&world);
+    assert!(tool_body::body_of(&world, &tool_entity(&world)).is_none());
+    history.redo(&world);
+    assert!(tool_body::body_of(&world, &tool_entity(&world)).is_some());
+}
+
+#[test]
+fn step_without_tool_coordinate_systems_falls_back_by_name() {
+    let path = testdata("box.step");
+    let err = ToolBodySpec::from_step_auto(&path).expect_err("no csys falls back");
+    assert_eq!(err, "the file names no coordinate systems");
+
+    let (world, _) = face_world();
+    let cmd_err = SetToolBody::from_step_auto(&world, TOOL, &path).expect_err("command refuses by name");
+    match cmd_err {
+        CommandError::Invalid(msg) => assert!(msg.contains("the file names no coordinate systems"), "{msg}"),
+        other => panic!("expected CommandError::Invalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn step_with_degenerate_coordinate_systems_falls_back_by_name() {
+    let text = std::fs::read_to_string(testdata("tool_csys_box_iso13399.step"))
+        .expect("fixture reads")
+        .replace(
+            "#220 = AXIS2_PLACEMENT_3D('CIP', #221, #202, #203);",
+            "#220 = AXIS2_PLACEMENT_3D('CIP', #221, #300, #203);\n#300 = DIRECTION('', (0.0, 0.0, 0.0));",
+        );
+    let path = std::env::temp_dir().join(format!("camcraft_degenerate_{}.step", std::process::id()));
+    std::fs::write(&path, text).expect("write temp step");
+    let err = ToolBodySpec::from_step_auto(&path).expect_err("degenerate csys falls back");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        err.contains("axis has no direction") || err.contains("every ISO 13399 coordinate system was refused"),
+        "{err}"
+    );
+}
+
+#[test]
+fn tool_body_view_load_aligned_handles_step_csys_and_fallback() {
+    use camcraft_app::tool_body_view;
+
+    let path_aligned = testdata("tool_csys_box_iso13399.step");
+    let loaded = tool_body_view::load_aligned(&path_aligned).expect("loads");
+    assert_eq!(loaded.source, "tool_csys_box_iso13399.step");
+    assert!(!loaded.facets.is_empty());
+    let (axis, offset) = loaded.alignment.expect("aligned");
+    assert_eq!(axis, [0.0, 0.0, 1.0]);
+    assert!((offset - 75.0).abs() < 1e-9);
+
+    let path_none = testdata("box.step");
+    let loaded_none = tool_body_view::load_aligned(&path_none).expect("loads");
+    let err = loaded_none.alignment.expect_err("no csys fallback");
+    assert_eq!(err, "the file names no coordinate systems");
+}

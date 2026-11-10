@@ -200,6 +200,35 @@ impl ToolCsysReport {
             names.join(", ")
         ))
     }
+
+    /// Attempt automatic tool body alignment from the file's ISO 13399
+    /// coordinate systems (#370): returns the unit tool axis (pointing from
+    /// the cutting point toward the spindle) and the model origin's height
+    /// above the tip.
+    ///
+    /// If CIP (or CSIF) is present, the cutting point is its origin and the
+    /// axis is its unit z. If absent, ambiguous or degenerate, returns `Err`
+    /// with the named reason to fall back to numeric placement.
+    pub fn align_tool_body(&self) -> Result<([f64; 3], f64), String> {
+        let csys = match self.find(CsysRole::InProcess) {
+            Ok(cip) => cip,
+            Err(e_cip) => match self.find(CsysRole::Interface) {
+                Ok(csif) => csif,
+                Err(_) => {
+                    if let Some(reason) = self.none_found() {
+                        return Err(reason);
+                    }
+                    return Err(e_cip);
+                }
+            },
+        };
+        let axis = csys.z;
+        let offset = -dot(csys.origin, axis);
+        if !offset.is_finite() {
+            return Err("calculated tip offset is not finite".into());
+        }
+        Ok((axis, offset))
+    }
 }
 
 /// Read every named coordinate system of a STEP file. `Err` only when

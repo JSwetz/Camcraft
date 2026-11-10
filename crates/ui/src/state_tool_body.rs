@@ -45,6 +45,9 @@ pub struct ToolBodyUi {
     /// The model origin's height above the tip, along `axis`.
     pub offset: f64,
     pub pick: BodyPickMode,
+    /// Note on how the placement was determined (#370: auto-aligned by
+    /// ISO 13399 coordinate systems, or why it fell back to numeric).
+    pub align_note: Option<String>,
     /// The preview's orbit, radians off its default view.
     pub yaw: f32,
     pub pitch: f32,
@@ -139,21 +142,38 @@ impl State {
         }
     }
 
-    /// Read a STEP / STL / OBJ into the draft (+Z axis, origin at the
+    /// Read a STEP / STL / OBJ into the draft (auto-aligned by ISO 13399
+    /// coordinate systems when present, otherwise +Z axis / origin at
     /// tip until placed). Nothing reaches the world until Apply body.
     pub(crate) fn import_tool_body_from(&mut self, path: &Path) {
         self.sync_tool_body_ui();
-        match tool_body_view::load(path) {
-            Ok((source, facets)) => {
+        match tool_body_view::load_aligned(path) {
+            Ok(loaded) => {
                 let d = &mut self.tool_body_ui;
-                self.status = format!(
-                    "body {source}: {} facets - set the axis and tip, then Apply body",
-                    facets.len()
-                );
-                d.source = source;
-                d.facets = Arc::from(facets);
-                d.axis = [0.0, 0.0, 1.0];
-                d.offset = 0.0;
+                d.source = loaded.source;
+                d.facets = Arc::from(loaded.facets);
+                match loaded.alignment {
+                    Ok((axis, offset)) => {
+                        d.axis = axis;
+                        d.offset = offset;
+                        d.align_note = Some("aligned by ISO 13399 coordinate systems".into());
+                        self.status = format!(
+                            "body {}: {} facets - aligned by ISO 13399 coordinate systems; Apply body",
+                            d.source,
+                            d.facets.len()
+                        );
+                    }
+                    Err(why) => {
+                        d.axis = [0.0, 0.0, 1.0];
+                        d.offset = 0.0;
+                        d.align_note = Some(format!("numeric placement ({why})"));
+                        self.status = format!(
+                            "body {}: {} facets - numeric placement ({why}); set axis and tip, then Apply body",
+                            d.source,
+                            d.facets.len()
+                        );
+                    }
+                }
                 d.pick = BodyPickMode::Off;
                 d.preview = None;
             }
@@ -185,6 +205,7 @@ impl State {
             BodyPickMode::Tip => match tool_body_view::tip_offset_at(hit.vertex, d.axis) {
                 Some(o) => {
                     d.offset = o;
+                    d.align_note = Some("manual placement".into());
                     self.status = format!("tip picked: offset {o:.3} mm along the axis");
                 }
                 None => self.status = "tip not picked: set a usable axis first".into(),
@@ -192,6 +213,7 @@ impl State {
             BodyPickMode::Axis => match hit.normal {
                 Some(n) => {
                     d.axis = n;
+                    d.align_note = Some("manual placement".into());
                     self.status = format!(
                         "axis picked: {}",
                         tool_body_view::axis_label(n).map_or_else(|| format!("({:.3}, {:.3}, {:.3})", n[0], n[1], n[2]), str::to_owned)
