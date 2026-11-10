@@ -134,7 +134,7 @@ fn general(v: &Value, out: &mut Vec<Refusal>) {
     match g.and_then(|g| g.get("kind")) {
         None | Some(Value::Null) => {}
         Some(Value::String(w)) if w.is_empty() || Kind::from_word(w).is_some() => {}
-        Some(other) => out.push(Refusal::new("general.kind", format!("{other} is not mill, lathe or mill-turn"))),
+        Some(other) => out.push(Refusal::new("general.kind", format!("{other} is not mill, lathe, mill-turn or plasma"))),
     }
 }
 
@@ -346,7 +346,8 @@ fn controller(v: &Value, out: &mut Vec<Refusal>) {
 
 /// The keys every machine of its kind must carry: the kinematics tree,
 /// and the linear axes the kind moves - X/Y/Z for a mill, X/Z for a
-/// lathe, X/Y/Z and a rotary for a mill-turn. The kind is the declared
+/// lathe, X/Y/Z and a rotary for a mill-turn, X/Y/Z and the plasma
+/// rules (no spindle, coolant or rotary) for a plasma table. The kind is the declared
 /// word, else the reader's axis-inventory inference.
 fn required_by_kind(v: &Value, text: &str, axes: &[(String, &Value, bool)], out: &mut Vec<Refusal>) {
     if !v.pointer("/kinematics/default/parts").is_some_and(Value::is_array) {
@@ -363,12 +364,18 @@ fn required_by_kind(v: &Value, text: &str, axes: &[(String, &Value, bool)], out:
     let has_linear = |l: &str| axes.iter().any(|(n, _, r)| !r && n.eq_ignore_ascii_case(l));
     let need: &[&str] = match k {
         Kind::Lathe => &["X", "Z"],
-        Kind::Mill | Kind::MillTurn => &["X", "Y", "Z"],
+        // #669: a plasma table's Z is the torch lifter - required, as
+        // the axis the control raises and probes with.
+        Kind::Mill | Kind::MillTurn | Kind::Plasma => &["X", "Y", "Z"],
     };
     for l in need {
         if !has_linear(l) {
             out.push(Refusal::new(format!("{l} axis"), format!("required for a {} machine", k.word())));
         }
+    }
+    // #669: the plasma rules, the same list the reader refuses on.
+    if k == Kind::Plasma {
+        out.extend(super::plasma_refusals(v).into_iter().map(|(key, rule)| Refusal::new(key, rule)));
     }
     if k == Kind::MillTurn && !axes.iter().any(|(_, _, r)| *r) {
         out.push(Refusal::new("rotary axis", "required for a mill-turn machine (the turning spindle, C)"));

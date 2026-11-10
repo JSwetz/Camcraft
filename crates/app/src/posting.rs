@@ -46,6 +46,12 @@ pub const BUILTINS: &[(&str, &str)] = &[
 /// machine's kind through [`post_serves`]; a mill-turn lists both.
 pub const LATHE_POSTS: &[&str] = &["Fanuc Lathe"];
 
+/// The registry entries that speak PLASMA (#669): the torch words, no
+/// spindle and no Z depth. None ships yet - the PathPilot plasma post
+/// is #671 - so a plasma machine lists no post and nothing posts on it
+/// (its machine check refuses every op by name, `machine::plasma`).
+pub const PLASMA_POSTS: &[&str] = &[];
+
 /// Whether a registry entry can post programs for a machine of this
 /// kind: a lathe post serves lathes and mill-turns, a mill post serves
 /// mills and mill-turns. A mismatched choice is not refused here (a
@@ -55,10 +61,13 @@ pub const LATHE_POSTS: &[&str] = &["Fanuc Lathe"];
 pub fn post_serves(name: &str, kind: crate::machine::Kind) -> bool {
     use crate::machine::Kind;
     let lathe_post = LATHE_POSTS.contains(&name);
+    let plasma_post = PLASMA_POSTS.contains(&name);
     match kind {
-        Kind::Mill => !lathe_post,
+        Kind::Mill => !lathe_post && !plasma_post,
         Kind::Lathe => lathe_post,
-        Kind::MillTurn => true,
+        Kind::MillTurn => !plasma_post,
+        // #669: a cutting post would write spindle words a torch has not.
+        Kind::Plasma => plasma_post,
     }
 }
 
@@ -71,6 +80,11 @@ pub fn post_serves(name: &str, kind: crate::machine::Kind) -> bool {
 pub fn default_post_for(kind: crate::machine::Kind) -> PostRef {
     match kind {
         crate::machine::Kind::Lathe => LATHE_POSTS
+            .first()
+            .map_or(PostRef::Builtin, |n| PostRef::Named((*n).to_owned())),
+        // #669: until a plasma post ships (#671) there is none to name;
+        // the entry-0 answer is then refused by `post_offer`'s own check.
+        crate::machine::Kind::Plasma => PLASMA_POSTS
             .first()
             .map_or(PostRef::Builtin, |n| PostRef::Named((*n).to_owned())),
         _ => PostRef::Builtin,
@@ -104,7 +118,10 @@ pub fn post_offer(world: &World) -> Option<(&'static str, PostRef)> {
         return None;
     }
     let serves = if LATHE_POSTS.contains(&name) { "lathe" } else { "mill" };
-    Some((serves, default_post_for(kind)))
+    // #669: an offer that would not serve the mount either (a plasma
+    // table before any plasma post ships) is no offer.
+    let offer = default_post_for(kind);
+    post_name(&offer).is_some_and(|n| post_serves(n, kind)).then_some((serves, offer))
 }
 
 /// The default machine as text: a plain 3-axis VMC with flood coolant.
@@ -139,6 +156,8 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
     ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
     ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
+    // #669: the plasma table, from UM10720 §2 and the 03/24 spec sheet.
+    ("Tormach 1300PL", include_str!("../../../assets/machines/tormach-1300pl.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the

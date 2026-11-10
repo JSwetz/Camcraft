@@ -103,6 +103,18 @@ pub(super) fn family_gate(world: &World, context: Option<&str>, params: &OpParam
     if info.admits(machine) {
         return Ok(());
     }
+    // #669: no op family is a plasma table's; the refusal names the
+    // table's rule, not a mill to mount (the plasma op is #670).
+    if machine == crate::machine::Kind::Plasma {
+        return Err(CommandError::Invalid(format!(
+            "a {} operation is {} work; the setup's machine is a plasma table, which cuts only plasma operations",
+            params.kind(),
+            match family {
+                Family::Mill => "milling",
+                Family::Turn => "turning",
+            },
+        )));
+    }
     Err(CommandError::Invalid(format!(
         "a {} operation is {} work; the setup's machine is a {} - mount a {} (or a mill-turn) first",
         params.kind(),

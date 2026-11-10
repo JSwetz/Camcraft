@@ -52,7 +52,7 @@ pub struct MachinesPane {
 }
 
 /// The kinds New blank offers, in the combo's order.
-const KINDS: [Kind; 3] = [Kind::Mill, Kind::Lathe, Kind::MillTurn];
+const KINDS: [Kind; 4] = [Kind::Mill, Kind::Lathe, Kind::MillTurn, Kind::Plasma];
 
 /// A list row's words: name, then kind, axes and units - unique per
 /// entry in practice, and what a test finds the row by.

@@ -739,6 +739,7 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         ("Tormach PCNC 1100 (Series I)", Kind::Mill),
         ("Tormach PCNC 1100 (Series II)", Kind::Mill),
         ("Tormach PCNC 1100 (Series 3)", Kind::Mill),
+        ("Tormach 1300PL", Kind::Plasma),
     ];
     assert_eq!(MACHINES.len(), expectations.len(), "the pane offers what the tests pin");
     for ((name, text), (want_name, want_kind)) in MACHINES.iter().zip(expectations) {
@@ -748,7 +749,9 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         assert_eq!(kind(Some(&m)), want_kind, "{name} declared");
         let mut inferred = m.clone();
         inferred.kind = None;
-        assert_eq!(kind(Some(&inferred)), want_kind, "{name}'s axes agree with its word");
+        // #669: plasma is declared, never inferred - its X/Y/Z reads mill.
+        let axes_say = if want_kind == Kind::Plasma { Kind::Mill } else { want_kind };
+        assert_eq!(kind(Some(&inferred)), axes_say, "{name}'s axes agree with its word");
     }
 }
 
