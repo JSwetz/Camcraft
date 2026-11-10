@@ -25,6 +25,7 @@ mod job;
 mod listen;
 mod live;
 mod pick;
+mod pockets;
 mod render;
 mod setup_tools;
 mod tools;

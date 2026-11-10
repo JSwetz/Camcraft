@@ -39,6 +39,8 @@ pub mod posting;
 pub mod program_entry;
 pub use camcraft_motion::probing;
 pub mod project;
+// #35: pocket and slot recognition on the model's faces.
+pub mod recognize;
 // #182: the CPU rasteriser behind the MCP stock render.
 pub mod raster;
 pub mod recent;
