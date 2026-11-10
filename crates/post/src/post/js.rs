@@ -54,7 +54,13 @@ function writeAddress(letter, value, dp) {
   if (value === undefined || value === null) return;
   write(String(letter) + formatUnit(Number(value), dp));
 }
-function writeComment(s) { writeln("(" + String(s) + ")"); }
+// #594: the default comment is the RS-274 / ISO 6983 `( )` form, so
+// its text loses every parenthesis (one would end or nest the comment)
+// and every control character (one would end the block).
+function writeComment(s) {
+  var t = String(s === null || s === undefined ? "" : s);
+  writeln("(" + t.replace(/[()]/g, " ").replace(/[\x00-\x1F\x7F]/g, " ") + ")");
+}
 function writeBlankLine() { _flushLine(); OUT.push(""); }
 function writeOutput(s) { write(s); }
 function message(s) { MESSAGES.push(String(s)); }
