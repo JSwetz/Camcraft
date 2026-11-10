@@ -383,7 +383,7 @@ drive CamCraft headlessly. A PR that adds a user-facing command also adds its
 MCP tool (and script verb where it fits) in `crates/app/src/mcp/`, or files a
 `source:agent` follow-up issue `MCP: <command>` and names it in the PR body. Every
 MCP issue (an `MCP:` title, or work on `crates/app/src/mcp/` or the camcraft-mcp
-skill) carries `area:mcp` and is `P1` (user, 2026-11-10: "find all MCP tickets
+skill) carries `area:mcp` and is `P1`, unless the maintainer paused it `P?` (user, 2026-11-10: "find all MCP tickets
 and make P1"), so the agent surface keeps up with the GUI. MCP
 tools call the same undoable commands the GUI uses, so undo/redo history and
 invariants hold headlessly.
