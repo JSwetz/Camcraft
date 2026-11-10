@@ -76,6 +76,10 @@ fn planar_check(runs: &[Run], seq: &[(usize, bool)]) -> Result<(), GenError> {
 /// The fork refusal: the runs at the junction `at` (indices into `runs`,
 /// the arriving run and the walk's anchor included) meet at `far`, and
 /// no rule picks a way on.
+///
+/// It names no spot (#677): the stitch runs while the job is collected,
+/// in the walk's (tilted) frame, before `run_job`'s frame map - a spot
+/// from here would be drawn in the wrong frame.
 pub(super) fn fork_refusal(runs: &[Run], at: &[usize], far: (i64, i64)) -> GenError {
     let names = entities_of(runs, at.iter().copied());
     let ways = at.len();

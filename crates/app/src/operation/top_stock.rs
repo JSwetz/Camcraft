@@ -5,6 +5,8 @@
 use super::drill_prior::PriorCell;
 use super::{GenError, Loop, Point2, Region, Triangle, Z_TOL};
 use crate::cl::Toolpath;
+use crate::stock_sim::Columns;
+#[cfg(test)]
 use crate::stock_sim::Dexel;
 
 /// Stored in existing path notes, not a new persisted verifier variant. This is
@@ -33,7 +35,7 @@ pub(super) fn note(
     // prior used by reach/rapid laws. Unknown removal never counts as air.
     let remaining = prior
         .and_then(PriorCell::get)
-        .and_then(|dex| prior_top(region, dex))
+        .and_then(|dex| prior_top(region, &Columns::of_grid(dex)))
         .map_or(raw, |z| raw.min(z));
     if remaining > top + Z_TOL {
         path.notes.push(format!(
@@ -75,22 +77,25 @@ fn raw_top(region: &Region, stock: &[Triangle]) -> Result<Option<f64>, GenError>
 /// Read every prior cell that can meet the region, not just its centre or the
 /// approach point. Padding by a cell diagonal includes boundary cells (and may
 /// conservatively keep a warning at a pocket wall). No sampled cell = unknown.
-fn prior_top(region: &Region, dex: &Dexel) -> Option<f64> {
-    let padded = region.offset(dex.cell * std::f64::consts::SQRT_2).ok()?;
+fn prior_top(region: &Region, dex: &Columns<'_>) -> Option<f64> {
+    // #586 (M7.3): read through the column seam, a rest grid or a field
+    // stock alike - the same lattice formulas as before.
+    let (cell, o) = (dex.cell(), dex.origin());
+    let padded = region.offset(cell * std::f64::consts::SQRT_2).ok()?;
     let (lo, hi) = padded.bounds()?;
-    let ix0 = ((lo.x - dex.x0) / dex.cell).floor().max(0.0) as usize;
-    let iy0 = ((lo.y - dex.y0) / dex.cell).floor().max(0.0) as usize;
-    let ix1 = ((hi.x - dex.x0) / dex.cell)
+    let ix0 = ((lo.x - o.x) / cell).floor().max(0.0) as usize;
+    let iy0 = ((lo.y - o.y) / cell).floor().max(0.0) as usize;
+    let ix1 = ((hi.x - o.x) / cell)
         .ceil()
-        .clamp(0.0, dex.nx as f64) as usize;
-    let iy1 = ((hi.y - dex.y0) / dex.cell)
+        .clamp(0.0, dex.nx() as f64) as usize;
+    let iy1 = ((hi.y - o.y) / cell)
         .ceil()
-        .clamp(0.0, dex.ny as f64) as usize;
+        .clamp(0.0, dex.ny() as f64) as usize;
     let mut top: Option<f64> = None;
     for iy in iy0..iy1 {
         for ix in ix0..ix1 {
             if padded.contains(dex.center(ix, iy)) {
-                let z = dex.top_at(ix + iy * dex.nx);
+                let z = dex.top_at(ix, iy);
                 if z.is_nan() {
                     return None;
                 }
@@ -103,6 +108,10 @@ fn prior_top(region: &Region, dex: &Dexel) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    /// The tests' grids read through the seam, as production does.
+    fn prior_top_grid(region: &crate::geo2d::Region, dex: &super::Dexel) -> Option<f64> {
+        super::prior_top(region, &super::Columns::of_grid(dex))
+    }
     use super::*;
     use crate::geometry::{Point3, cube};
 
@@ -162,9 +171,9 @@ mod tests {
                 }
             }
         }
-        assert_eq!(prior_top(&patch(2.0, 4.0), &dex), Some(5.0));
-        assert_eq!(prior_top(&patch(6.0, 10.0), &dex), Some(10.0));
-        assert_eq!(prior_top(&patch(30.0, 32.0), &dex), None);
+        assert_eq!(prior_top_grid(&patch(2.0, 4.0), &dex), Some(5.0));
+        assert_eq!(prior_top_grid(&patch(6.0, 10.0), &dex), Some(10.0));
+        assert_eq!(prior_top_grid(&patch(30.0, 32.0), &dex), None);
     }
 
     #[test]
@@ -198,6 +207,6 @@ mod tests {
         for k in 0..dex.nx * dex.ny {
             dex.lower(k, f64::NEG_INFINITY);
         }
-        assert_eq!(prior_top(&patch(1.0, 3.0), &dex), None);
+        assert_eq!(prior_top_grid(&patch(1.0, 3.0), &dex), None);
     }
 }

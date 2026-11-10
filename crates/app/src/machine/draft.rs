@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 
 use super::fields::{self, FieldGroup, FieldKind};
 use super::library::{text_of, MachineSource};
+use super::order::{self, KeyOrder};
 use super::store::{self, SaveError};
 use super::validate::{validate_text, Refusal};
 use super::Kind;
@@ -35,12 +36,14 @@ pub struct MachineDraft {
     pub read_only: bool,
     /// Edited since it was opened or last saved.
     pub dirty: bool,
+    /// The key order the file was read in; a save keeps it (#480).
+    pub order: KeyOrder,
 }
 
-fn read(source: &MachineSource) -> Result<Value, Refusal> {
+fn read(source: &MachineSource) -> Result<(Value, KeyOrder), Refusal> {
     let text = text_of(source).map_err(|e| Refusal { key: "file".to_owned(), rule: e })?;
     match serde_json::from_str::<Value>(&text) {
-        Ok(v) if v.is_object() => Ok(v),
+        Ok(v) if v.is_object() => Ok((v, KeyOrder::of_text(&text))),
         Ok(_) => Err(Refusal { key: "file".to_owned(), rule: "must be one machine object { ... }".to_owned() }),
         Err(e) => Err(Refusal { key: "file".to_owned(), rule: format!("not readable JSON ({e})") }),
     }
@@ -57,22 +60,22 @@ impl MachineDraft {
     /// shipped folder) opens read-only. Refused by name when the file
     /// does not read as one JSON object.
     pub fn open(source: &MachineSource) -> Result<Self, Refusal> {
-        let value = read(source)?;
+        let (value, order) = read(source)?;
         let (path, read_only) = match source {
             MachineSource::Builtin(_) => (None, true),
             MachineSource::File(p) => (Some(p.clone()), is_shipped_path(p)),
         };
-        Ok(Self { value, path, read_only, dirty: false })
+        Ok(Self { value, path, read_only, dirty: false, order })
     }
 
     /// A new machine copied from a catalogue entry: every key of the
     /// template, its model marked as a copy, never saved yet.
     pub fn from_template(source: &MachineSource) -> Result<Self, Refusal> {
-        let mut value = read(source)?;
+        let (mut value, order) = read(source)?;
         let model = value.pointer("/general/model").and_then(Value::as_str).unwrap_or("Machine").to_owned();
         // The template read as an object, so this cannot refuse.
         let _ = fields::set(&mut value, "/general/model", FieldKind::Text, &format!("{model} copy"));
-        Ok(Self { value, path: None, read_only: false, dirty: true })
+        Ok(Self { value, path: None, read_only: false, dirty: true, order })
     }
 
     /// A new machine with the keys its kind requires: the model, the
@@ -100,7 +103,7 @@ impl MachineDraft {
                 "parts": [ { "id": "base", "name": "base", "type": "table", "parts": parts } ]
             } }
         });
-        Self { value, path: None, read_only: false, dirty: true }
+        Self { value, path: None, read_only: false, dirty: true, order: KeyOrder::default() }
     }
 
     /// The model the file states (empty when none).
@@ -160,10 +163,11 @@ impl MachineDraft {
         Ok(())
     }
 
-    /// The file as it will be written: pretty JSON, one trailing newline.
+    /// The file as it will be written: pretty JSON in the order it was
+    /// read (new keys last in their object), one trailing newline.
     #[must_use]
     pub fn text(&self) -> String {
-        let mut s = serde_json::to_string_pretty(&self.value).unwrap_or_else(|_| "{}".to_owned());
+        let mut s = order::to_pretty(&self.value, &self.order);
         s.push('\n');
         s
     }

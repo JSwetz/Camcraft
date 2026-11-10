@@ -90,6 +90,10 @@ merge.
      icons from allowed licenses with `assets/ui/LICENSES.md`.
    - Provenance line on new modules; ~400-line files (flag growth of files
      already over, not blocking).
+   - Process files: a PR that changes `AGENTS.md`, `.claude/agents/`,
+     `.claude/skills/` or `scripts/gate.*` must also increment
+     `.claude/PROCESS_VERSION` (AGENTS.md "Process changes bump
+     `PROCESS_VERSION`"); a missing bump is a requested change.
    - Process: body ends `Fixes #N`, has a `Changelog:` line, conventional
      commit subjects; `CHANGELOG.md` edits in the PR conflict with the
      release-time changelog and should be dropped.

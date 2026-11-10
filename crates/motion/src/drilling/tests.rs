@@ -69,6 +69,7 @@ pub(super) fn drill_tool(d: f64) -> Tool {
         feed: 120.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 
@@ -410,9 +411,12 @@ fn depth_override_applies_to_every_hole() {
     p.bottom_z = Some(-1.0);
     let t = drill(&p).unwrap();
     assert!(t.cycles.iter().all(|c| (c.bottom_z + 1.0).abs() < 1e-9));
-    // An override at or above the R plane is nonsense, refused.
+    // An override at or above the R plane is nonsense, refused - and
+    // the refusal points at the first hole's mouth (#261 part 2).
     p.bottom_z = Some(10.0);
-    assert!(matches!(drill(&p), Err(GenError::Invalid(_))));
+    let e = drill(&p).expect_err("refused");
+    assert!(matches!(e, GenError::At { .. }), "{e:?}");
+    assert_eq!(e.location(), Some(crate::geometry::Point3::new(5.0, 5.0, 10.0)));
 }
 
 #[test]

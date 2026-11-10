@@ -308,7 +308,9 @@ function invertedNotes() {
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block([oWord(), "(" + nm + ")"]);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, so `Tormach 770MX (ML)` never nests.
+  block([oWord(), "(" + (clean(nm) || "CAMCRAFT") + ")"]);
   invertedNotes();
 }
 
@@ -542,6 +544,14 @@ function slotOf(word) {  // "G55" -> 1
   var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
   return n >= 0 && n <= 5 ? n : 0;
 }
+// #575: no deviation report is written before the offset write. Fanuc's
+// published custom macro B documentation (also the Haas and Mazak EIA
+// macro conventions this post family follows) gives an operator message
+// only as #3000 (an alarm, which stops) or #3006 (stop with a message);
+// DPRNT/POPEN go to an external I/O device, not the control's screen. No
+// documented message shows a value without stopping, so nothing is
+// emitted - a stop on every good probe is not a report. The measure-only
+// #3006 below stops by intent: there the operator must act on #190.. .
 function onProbeResult() {
   var p = properties;
   var org = [orgX, orgY, orgZ];

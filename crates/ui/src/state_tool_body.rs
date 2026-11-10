@@ -185,7 +185,12 @@ impl State {
             BodyPickMode::Tip => match tool_body_view::tip_offset_at(hit.vertex, d.axis) {
                 Some(o) => {
                     d.offset = o;
-                    self.status = format!("tip picked: offset {o:.3} mm along the axis");
+                    let u = self.units();
+                    self.status = format!(
+                        "tip picked: offset {} {} along the axis",
+                        camcraft_app::units::len(o, u, 3),
+                        u.suffix()
+                    );
                 }
                 None => self.status = "tip not picked: set a usable axis first".into(),
             },

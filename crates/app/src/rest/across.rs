@@ -208,15 +208,17 @@ pub(super) fn carried_body_bounds(
 ) -> Result<Option<(Bounds, Dexel)>, String> {
     let body = carried_body(world, chain, min_r, false)?;
     let dex = &body.dex;
-    let h = dex.cell * 0.5;
+    // #586: the bounds read through the column seam (M7.3).
+    let cols = crate::stock_sim::Columns::of_grid(dex);
+    let h = cols.cell() * 0.5;
     let mut pts = Vec::new();
-    for iy in 0..dex.ny {
-        for ix in 0..dex.nx {
-            let t = dex.top_at(ix + iy * dex.nx);
+    for iy in 0..cols.ny() {
+        for ix in 0..cols.nx() {
+            let t = cols.top_at(ix, iy);
             if !t.is_finite() {
                 continue;
             }
-            let c = dex.center(ix, iy);
+            let c = cols.center(ix, iy);
             pts.push(Point3::new(c.x - h, c.y - h, t));
             pts.push(Point3::new(c.x + h, c.y + h, t));
         }

@@ -478,9 +478,12 @@ fn a_face_job_on_the_built_in_770mx_passes_the_gate_and_posts_inch() {
         .iter()
         .position(|l| l.starts_with("G1 "))
         .expect("a feed");
-    assert_eq!(
-        lines[first_feed - 1],
-        "G0 Z0.9843",
+    // Since #690 the face opens with its own approach rapid, so the line
+    // before the feed restates X Y beside the clearance Z - still a rapid
+    // down to clearance, never a feed from the top of travel.
+    let down = lines[first_feed - 1];
+    assert!(
+        down.starts_with("G0 ") && down.ends_with("Z0.9843"),
         "rapid to clearance before the first feed\n{}",
         posted.program
     );
