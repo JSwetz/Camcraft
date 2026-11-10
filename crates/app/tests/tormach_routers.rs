@@ -6,7 +6,10 @@
 //! Tormach's published documents - 24R: operator's manual UM10564 0826A,
 //! § 2.2 "Machine Specifications"; xsTECH Pro: spec sheet
 //! (xstech_pro_spec_sheet_final, 2026) and the CE operator's manual
-//! UM10859, § 2 (the smaller of the two documents' Y and Z travels).
+//! UM10859, § 2 (the smaller of the two documents' Y and Z travels);
+//! xsTECH (no manual exists): Tormach's spec sheet xstech_spec_sheet_0225,
+//! its product and package pages, and knowledge-base articles (the
+//! narrowest spindle window and smallest power where they disagree).
 //! Gate map (M4.4): covers app::posting (MACHINES registry),
 //! app::machine (check_document spindle window), post::machine.
 
@@ -48,7 +51,7 @@ struct Spec {
     tools: Option<usize>,
 }
 
-const SPECS: [Spec; 2] = [
+const SPECS: [Spec; 3] = [
     // UM10564 § 2.2: 24.75 x 55.75 x 6.7 in, 10000-24000 rpm 2 hp
     // (1.5 kW) electrospindle, 200 IPM on every axis, ATC optional with
     // no pocket count.
@@ -71,6 +74,19 @@ const SPECS: [Spec; 2] = [
         kw: 0.35,
         ipm: None,
         tools: Some(4),
+    },
+    // Spec sheet 02/25 + product page: 8.6 x 6.3 x 2.4 in. Spindle: the
+    // narrowest window and smallest power the Tormach sources state -
+    // 5000 rpm floor (package page; the KB says 3000), 15000 rpm ceiling
+    // (KB; the spec sheet says 20000), 80 W (KB; 120 / 125 W elsewhere).
+    // 120 IPM "maximum speed" (package page). Manual ER11 collet, no ATC.
+    Spec {
+        name: "Tormach xsTECH",
+        travel_in: [8.6, 6.3, 2.4],
+        rpm: (Some(5000.0), 15000.0),
+        kw: 0.08,
+        ipm: Some(120.0),
+        tools: None,
     },
 ];
 
@@ -110,7 +126,7 @@ fn the_xstech_pro_states_no_feed_ceiling() {
     assert_eq!(p["spindleMax"], 20000.0, "{p}");
 }
 
-/// Both routers post through the PathPilot post, clean: the library
+/// Every router posts through the PathPilot post, clean: the library
 /// offers it for them (they are mills by kind, as every Tormach file is).
 #[test]
 fn the_routers_post_through_pathpilot() {
@@ -122,16 +138,16 @@ fn the_routers_post_through_pathpilot() {
     }
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/posts/tormach.cps");
     let cps = std::fs::read_to_string(&p).expect("tormach.cps");
-    let stream = "PARAM SpindleSpeed 18000\nTOOL 1 T1\nSECTION\nRapid X 0 Y 0 Z 5000\nFeed X 1000 Y 0 Z -1000 F 500000\nENDSECTION\n";
+    let stream = "PARAM SpindleSpeed 12000\nTOOL 1 T1\nSECTION\nRapid X 0 Y 0 Z 5000\nFeed X 1000 Y 0 Z -1000 F 500000\nENDSECTION\n";
     for name in SPECS.iter().map(|s| s.name) {
         let out = engine::run(&cps, &machine::mirror(&shipped(name)), stream).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(out.warnings.is_empty(), "{name}: {:?}", out.warnings);
-        assert!(out.program.contains("S18000"), "{name}:\n{}", out.program);
+        assert!(out.program.contains("S12000"), "{name}:\n{}", out.program);
         assert!(out.program.contains("G20"), "{name}: inch\n{}", out.program);
     }
 }
 
-/// A face job whose tool runs `rpm`, inside the 24R's envelope.
+/// A face job whose tool runs `rpm`, inside every router's envelope.
 fn face_job(rpm: f64) -> (flecs_ecs::prelude::World, History) {
     let world = new_world();
     let mut h = History::default();
@@ -180,6 +196,23 @@ fn a_mill_speed_job_is_refused_on_the_24r() {
         c.problems
     );
     let (world, _h) = face_job(18000.0);
+    let c = check_document(&world, &m).expect("checks");
+    assert!(c.is_ok(), "{:?}", c.problems);
+}
+
+/// The xsTECH's window is the narrowest its sources state: an 18000 rpm
+/// job (inside the spec sheet's 20000) is refused against the knowledge
+/// base's 15000, a 4000 rpm job (inside the KB's 3000 floor) against the
+/// package page's 5000, and 12000 rpm passes.
+#[test]
+fn the_xstech_spindle_window_is_the_narrowest_stated() {
+    let m = shipped("Tormach xsTECH");
+    for (rpm, want) in [(18000.0, "18000 rpm, above the machine's 15000"), (4000.0, "4000 rpm, below the machine's 5000")] {
+        let (world, _h) = face_job(rpm);
+        let c = check_document(&world, &m).expect("checks");
+        assert!(c.problems.iter().any(|p| p.starts_with("Face1:") && p.contains(want)), "{rpm}: {:?}", c.problems);
+    }
+    let (world, _h) = face_job(12000.0);
     let c = check_document(&world, &m).expect("checks");
     assert!(c.is_ok(), "{:?}", c.problems);
 }
