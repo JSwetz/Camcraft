@@ -10,10 +10,79 @@
 //! explicit passes remain the truth for verification, display and
 //! simulation (the drilling `Cycle` law); the record is what a post
 //! with a threading cycle writes in their place.
+//!
+//! The hand (issue #629): a helix is right-hand when it advances along
+//! +Z while turning counter-clockwise seen from +Z - and stays so run
+//! backwards (clockwise while falling). The turning frame stands the
+//! free end at +Z and the chuck below, so the standard right-hand
+//! thread cut toward the chuck is a clockwise-falling helix, which is
+//! the tool's motion relative to a part turning M03 (clockwise seen
+//! from the headstock). Screw-thread handedness and the M03 sense as
+//! machine-tool handbooks and RS-274 / ISO 6983 state them.
 
 use crate::geometry::Point3;
 
 use super::moves::Move;
+use super::plane::ArcPlane;
+
+/// Which way a thread winds (issue #629): right-hand, the default every
+/// drawing means unless it says LH, or left-hand.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ThreadHand {
+    #[default]
+    Right,
+    Left,
+}
+
+impl ThreadHand {
+    /// Both hands, the order a picker lists them.
+    pub const ALL: [ThreadHand; 2] = [ThreadHand::Right, ThreadHand::Left];
+
+    /// The hand a helical half-turn lays: an XY arc turning `ccw`
+    /// (seen from +Z) while the tool travels `dz` along the axis.
+    /// Right-hand when it turns counter-clockwise rising or clockwise
+    /// falling; `None` for an arc with no axial travel (no helix).
+    #[must_use]
+    pub fn of_turn(ccw: bool, dz: f64) -> Option<ThreadHand> {
+        if !dz.is_finite() || dz == 0.0 {
+            return None;
+        }
+        Some(if ccw == (dz > 0.0) { ThreadHand::Right } else { ThreadHand::Left })
+    }
+
+    /// The hand one move lays: an XY arc with axial travel, else `None`.
+    #[must_use]
+    pub fn of_move(m: &Move) -> Option<ThreadHand> {
+        let a = m.arc.filter(|a| a.plane == ArcPlane::Xy)?;
+        ThreadHand::of_turn(a.ccw, m.to.z - m.from.z)
+    }
+
+    /// The arc sense (CCW seen from +Z) that lays this hand while the
+    /// tool travels `toward_minus_z` (toward the chuck) or away.
+    #[must_use]
+    pub fn ccw_for(self, toward_minus_z: bool) -> bool {
+        (self == ThreadHand::Right) != toward_minus_z
+    }
+
+    /// The file / stream word: `right` or `left`.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            ThreadHand::Right => "right",
+            ThreadHand::Left => "left",
+        }
+    }
+
+    /// Read a [`Self::word`] back; anything else is `None`.
+    #[must_use]
+    pub fn from_word(w: &str) -> Option<ThreadHand> {
+        match w {
+            "right" => Some(ThreadHand::Right),
+            "left" => Some(ThreadHand::Left),
+            _ => None,
+        }
+    }
+}
 
 /// One thread's machining intent: the passes `moves[first..=last]`
 /// are what the machine does in G32 form; a cycle-capable post writes
@@ -55,6 +124,10 @@ pub struct ThreadCycle {
     /// The passes' last move (the retract after the deepest pass),
     /// inclusive.
     pub last: usize,
+    /// The hand the passes cut (issue #629) - every helical half-turn
+    /// in the span lays it ([`Self::is_sane`] holds them to it), so a
+    /// post never has to infer it.
+    pub hand: ThreadHand,
 }
 
 impl ThreadCycle {
@@ -85,5 +158,36 @@ impl ThreadCycle {
             && nums.iter().all(|v| v.is_finite())
             && self.lead > 0.0
             && self.height > 0.0
+            && self.passes_lay_hand(moves)
+    }
+
+    /// Does every helical half-turn in the span lay the stated hand?
+    /// An XY arc with no axial travel inside a thread span is no helix
+    /// and fails too. A span with no arcs states nothing against it.
+    #[must_use]
+    pub fn passes_lay_hand(&self, moves: &[Move]) -> bool {
+        let Some(span) = moves.get(self.first..=self.last) else {
+            return false;
+        };
+        span.iter()
+            .filter(|m| m.arc.is_some_and(|a| a.plane == ArcPlane::Xy))
+            .all(|m| ThreadHand::of_move(m) == Some(self.hand))
+    }
+
+    /// Whether the cycle feeds toward -Z (toward the chuck, the turning
+    /// frame's law): its end stands below its start.
+    #[must_use]
+    pub fn toward_minus_z(&self) -> bool {
+        self.end.z < self.start.z
+    }
+
+    /// Whether the spindle must run REVERSE (M04) for the tool to lay
+    /// these passes: the passes turn counter-clockwise seen from +Z (the
+    /// free end), and the tool turns that way about the part only when
+    /// the part turns clockwise seen from there - counter-clockwise seen
+    /// from the headstock, which is M04. Clockwise passes are M03.
+    #[must_use]
+    pub fn reverse_spindle(&self) -> bool {
+        self.hand.ccw_for(self.toward_minus_z())
     }
 }

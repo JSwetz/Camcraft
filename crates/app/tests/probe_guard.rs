@@ -66,16 +66,18 @@ fn records(t: &Toolpath) -> Vec<cnc::Record> {
 
 /// Every motion of a probe path is a touch, a back-off, a protected
 /// move or a rapid - never a plain feed - and each mode's positioning
-/// feeds (descent, travel, rise) are exactly the GUARD records. A -Z
-/// face starts its touch at the rapid plane, so only its rise is a feed.
+/// feeds (descent, travel, rise) are exactly the GUARD records. Since
+/// #570 every path opens with a protected descent from the safe plane to
+/// the approach plane; a -Z face then starts its touch there, so its
+/// other feed is its rise.
 #[test]
 fn the_positioning_feeds_of_a_probe_path_are_marked_protected() {
     let modes = [
-        ("face", cycle(ProbeMode::Face, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(10.0, 5.0, 20.0), 0.0), 1),
-        ("edge", cycle(ProbeMode::Edge, ProbeDir::XPos, ProbeDir::YPos, Point3::new(0.0, 5.0, 20.0), 0.0), 2),
-        ("corner", cycle(ProbeMode::Corner, ProbeDir::XPos, ProbeDir::YPos, Point3::new(0.0, 0.0, 20.0), 0.0), 4),
-        ("bore", cycle(ProbeMode::Bore, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0), 2),
-        ("boss", cycle(ProbeMode::Boss, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0), 8),
+        ("face", cycle(ProbeMode::Face, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(10.0, 5.0, 20.0), 0.0), 2),
+        ("edge", cycle(ProbeMode::Edge, ProbeDir::XPos, ProbeDir::YPos, Point3::new(0.0, 5.0, 20.0), 0.0), 3),
+        ("corner", cycle(ProbeMode::Corner, ProbeDir::XPos, ProbeDir::YPos, Point3::new(0.0, 0.0, 20.0), 0.0), 5),
+        ("bore", cycle(ProbeMode::Bore, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0), 3),
+        ("boss", cycle(ProbeMode::Boss, ProbeDir::ZNeg, ProbeDir::YPos, Point3::new(30.0, 30.0, 20.0), 10.0), 9),
     ];
     for (name, p, want) in modes {
         let t = probe_cycle(&p).expect(name);
@@ -146,10 +148,10 @@ fn fanuc_writes_protected_moves_as_g31_with_a_contact_alarm() {
         out.program
     );
     let alarms = lines.iter().filter(|l| l.ends_with("THEN#3000=3(PROBE HIT ON POSITIONING)")).count();
-    assert_eq!(alarms, 4, "a descent and a rise per touch, each a Z test:\n{}", out.program);
-    // The first descent: from the rapid plane to the touch's start.
+    assert_eq!(alarms, 5, "the opening descent (#570), then a descent and a rise per touch, each a Z test:\n{}", out.program);
+    // The first descent (#570): from the safe plane to the approach plane.
     let at = lines.iter().position(|l| l.starts_with("G31 ") && l.contains("F300")).expect("a G31");
-    assert_eq!(lines[at + 1], "IF[ABS[#5063-15]GT0.001]THEN#3000=3(PROBE HIT ON POSITIONING)", "\n{}", out.program);
+    assert_eq!(lines[at + 1], "IF[ABS[#5063-25]GT0.001]THEN#3000=3(PROBE HIT ON POSITIONING)", "\n{}", out.program);
     common::write_golden("nc/fanuc/probe_corner.nc", &out.program);
 }
 
@@ -164,8 +166,8 @@ fn tormach_writes_protected_moves_as_g38_3_with_a_trip_test() {
         .collect();
     let out = engine::run(TORMACH, &serde_json::Value::Null, &cnc::serialize(&recs)).expect("post");
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
-    assert_eq!(out.program.matches("G38.3 ").count(), 4, "\n{}", out.program);
-    assert_eq!(out.program.matches("[#5070 EQ 1]").count(), 4, "\n{}", out.program);
+    assert_eq!(out.program.matches("G38.3 ").count(), 5, "\n{}", out.program);
+    assert_eq!(out.program.matches("[#5070 EQ 1]").count(), 5, "\n{}", out.program);
     assert!(out.program.contains("o5001 if [#5070 EQ 1]\n(MSG, PROBE HIT ON POSITIONING)\nM2\no5001 endif\n"));
     assert!(!out.program.lines().any(|l| l.starts_with("G1 ")), "no plain feed:\n{}", out.program);
     common::write_golden("nc/tormach/probe_guard_moves.nc", &out.program);

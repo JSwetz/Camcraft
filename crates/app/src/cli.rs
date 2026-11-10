@@ -24,7 +24,7 @@ camcraft-cli - CamCraft headless batch lane (clean-room)
 USAGE:
     camcraft-cli script   <job.js>
     camcraft-cli process  <job.camproj> [-o <out.nc>] [--cps <name|file.cps>]
-    camcraft-cli mcp
+    camcraft-cli mcp      [--connect <host:port>]
     camcraft-cli help
     camcraft-cli version
 
@@ -34,7 +34,9 @@ COMMANDS:
     process   headless project processing: load, generate, and - with
               -o - post; verify's verdict is the exit code
     mcp       a Model Context Protocol server on stdio (JSON-RPC 2.0):
-              an AI agent drives one headless document through tools
+              an AI agent drives one headless document through tools;
+              with --connect, a stdio bridge to a running app started
+              with --mcp-port (the agent drives the open window live)
 
 A clean run prints its logs, then the last verb's JSON answer on
 stdout; refusals print on stderr. Exit: 0 stood, 1 refused, 2 usage.
@@ -184,9 +186,22 @@ fn lane_process(args: &[String]) -> i32 {
 /// may print on stdout; a broken pipe or unreadable input ends the
 /// session with exit 1 and the reason on stderr.
 fn lane_mcp(args: &[String]) -> i32 {
-    if !args.is_empty() {
-        eprintln!("camcraft-cli: mcp takes no arguments");
-        return 2;
+    match args {
+        [] => {}
+        // #183: bridge stdio to a running app's live session.
+        [flag, addr] if flag == "--connect" => {
+            return match crate::mcp::bridge(addr, std::io::stdin(), std::io::stdout().lock()) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("camcraft-cli: mcp --connect {addr}: {e}");
+                    1
+                }
+            };
+        }
+        _ => {
+            eprintln!("camcraft-cli: mcp takes no arguments, or --connect <host:port>");
+            return 2;
+        }
     }
     let stdin = std::io::stdin();
     match crate::mcp::serve(stdin.lock(), std::io::stdout().lock()) {

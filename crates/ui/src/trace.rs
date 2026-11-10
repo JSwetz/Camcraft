@@ -6,7 +6,7 @@
 //!
 //! ## The laws here
 //!
-//! - **One march, two eyes.** The kernel walks `PreviewCamera::ray_dir`,
+//! - **One march, two eyes.** The kernel walks `PreviewCamera::ray`,
 //!   the lattice blend, the hit law and the shade exactly as the CPU
 //!   march does; the frame comes back as the sim's own `Preview`, so a
 //!   consumer cannot tell (or care) which eye answered. The parity
@@ -387,7 +387,7 @@ fn uniform_bytes(s: &Scene, cam: &PreviewCamera, w: u32, h: u32, tol: f64) -> Re
     v4(u.x, u.y, u.z, m.cap);
     v4(m.solid.0[0], m.solid.0[1], m.solid.0[2], gate_tol(tol, m.cell));
     v4(m.solid.1[0], m.solid.1[1], m.solid.1[2], if s.t_meta.is_some() { 1.0 } else { 0.0 });
-    v4(world_lo[0], world_lo[1], world_lo[2], 0.0);
+    v4(world_lo[0], world_lo[1], world_lo[2], cam.ortho_half_height.unwrap_or(0.0));
     v4(world_hi[0], world_hi[1], world_hi[2], 0.0);
     let i = |x: u32| i32::try_from(x).map_err(|_| String::from("trace pass: a lattice extent overflows i32"));
     let fw = i(w)?;

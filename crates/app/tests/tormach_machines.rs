@@ -59,7 +59,7 @@ struct Spec {
     rigid: bool,
 }
 
-const SPECS: [Spec; 12] = [
+const SPECS: [Spec; 14] = [
     Spec {
         name: "Tormach 770MX",
         travel_in: [14.0, 7.5, 13.25],
@@ -173,8 +173,47 @@ const SPECS: [Spec; 12] = [
         ipm: (110.0, 90.0),
         ranges: &[(100.0, 2000.0), (250.0, 5140.0)],
         rigid: false,
+    },    // #618: the M+ is an upgrade kit, not a model with its own manual
+    // (Tormach, via the contributor, 2026-11-09): the M's travels,
+    // spindle, belts, power and tapping, with the MX's axis speeds.
+    Spec {
+        name: "Tormach 770M+",
+        travel_in: [14.0, 7.5, 13.25],
+        rpm: (175.0, 10000.0),
+        kw: 1.1,
+        ipm: (300.0, 250.0),
+        ranges: &[(175.0, 3250.0), (525.0, 10000.0)],
+        rigid: false,
+    },
+    Spec {
+        name: "Tormach 1100M+",
+        travel_in: [18.0, 11.0, 16.25],
+        rpm: (70.0, 7500.0),
+        kw: 1.5,
+        ipm: (300.0, 230.0),
+        ranges: &[(70.0, 2000.0), (250.0, 7500.0)],
+        rigid: false,
     },
 ];
+
+/// #618: an M+ is its M in everything but the axis speeds, which are
+/// the matching MX's - so a later fix to either file is caught here.
+#[test]
+fn an_m_plus_is_its_m_with_the_mx_axis_speeds() {
+    for (plus, m, mx) in [
+        ("Tormach 770M+", "Tormach 770M", "Tormach 770MX"),
+        ("Tormach 1100M+", "Tormach 1100M", "Tormach 1100MX"),
+    ] {
+        let (p, m, mx) = (shipped(plus), shipped(m), shipped(mx));
+        assert_eq!((p.spindle_min, p.spindle_max, p.spindle_power), (m.spindle_min, m.spindle_max, m.spindle_power), "{plus} spindle");
+        assert_eq!(p.spindle_ranges, m.spindle_ranges, "{plus} belts");
+        assert_eq!(p.rigid_tapping, m.rigid_tapping, "{plus} tapping");
+        for ((a, b), c) in p.axes.iter().zip(&m.axes).zip(&mx.axes) {
+            assert_eq!(a.travel, b.travel, "{plus} {} travel is the M's", a.name);
+            assert_eq!(a.feed, c.feed, "{plus} {} speed is the MX's", a.name);
+        }
+    }
+}
 
 #[test]
 fn every_tormach_machine_states_its_manuals_figures() {
@@ -348,6 +387,8 @@ fn tap_on(name: &str) -> engine::PostOutput {
 fn a_rigid_tap_is_refused_on_a_machine_that_cannot_rigid_tap() {
     for name in [
         "Tormach 770M",
+        "Tormach 770M+",
+        "Tormach 1100M+",
         "Tormach PCNC 440",
         "Tormach 1100M",
         "Tormach PCNC 770",

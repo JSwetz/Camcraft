@@ -87,6 +87,19 @@ impl State {
             self.status = String::from("ready");
         }
         self.feedback_ctx = None;
+        self.feedback_at = None;
+    }
+
+    /// #261 part 2: the world spot the standing generate refusal names -
+    /// what the viewport marks and the refusal line frames. `None` once
+    /// that refusal is gone or no longer describes the page, so the mark
+    /// can never outlive its sentence.
+    #[must_use]
+    pub fn refusal_focus(&self) -> Option<[f64; 3]> {
+        match &self.feedback {
+            Some((ErrorScope::Operation, _)) if self.feedback_live() => self.feedback_at,
+            _ => None,
+        }
     }
 }
 

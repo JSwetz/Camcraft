@@ -2,23 +2,16 @@
 //! adds the optional G2/G3 row-end reversal blends - provenance in
 //! `blend.rs` (RS-274 / ISO 6983 circular interpolation, path filleting).
 
-use thiserror::Error;
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
-use crate::geo2d::{GeoError, Point2, Region};
+use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
 use super::blend::plan_reversals;
 use super::face_holes::{self, FaceHoles};
 use super::levels::cut_levels;
-#[derive(Error, Debug, PartialEq)]
-pub enum GenError {
-    #[error("invalid machining parameters: {0}")]
-    Invalid(String),
-    #[error("nothing to machine: {0}")]
-    Empty(String),
-    #[error(transparent)]
-    Geo(#[from] GeoError),
-}
+// The enum moved to its own module (#261 part 2); every
+// `super::face::GenError` path keeps working through this re-export.
+pub use super::gen_error::GenError;
 
 /// Facing: clear the top plane of a footprint in straight XY passes.
 ///
@@ -157,10 +150,10 @@ pub fn face_over(
         None => return Err(GenError::Empty("empty footprint".into())),
     };
     let r = p.tool_diameter * 0.5;
-    let ys = band(lo.y, hi.y, r, p.stepover);
+    let ys = band(lo.y, hi.y, r, p.stepover)?;
     let (x_in, x_out) = (lo.x - r, hi.x + r);
     let zs = match (p.top_z, p.stepdown) {
-        (Some(t), Some(s)) => cut_levels(t, p.cut_z, s),
+        (Some(t), Some(s)) => cut_levels(t, p.cut_z, s)?,
         _ => vec![p.cut_z],
     };
 
@@ -193,17 +186,25 @@ pub fn face_over(
     // band a wide stepover leaves - visible, never silent.
     let mut unfaced = None;
     if !forbidden.is_empty() {
-        if let Some((y, gap)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces, p.tool_diameter) {
-            return Err(GenError::Invalid(format!(
-                "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, no wider than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
-                p.tool_diameter
-            )));
+        if let Some((y, gap, x)) = face_holes::narrow_gap(&bridged.holes, &rows, &pieces, p.tool_diameter) {
+            return Err(GenError::invalid_at(
+                format!(
+                    "two holes stand {gap:.2} mm apart on the row at Y={y:.2}, no wider than the {:.3} mm tool: the strip between them would stay standing - use a smaller tool, or cut through the holes",
+                    p.tool_diameter
+                ),
+                Point3::new(x, y, p.cut_z),
+            ));
         }
         unfaced = face_holes::uncut(region, &rows, &pieces, r)?;
     }
     let entry = pieces.iter().flatten().next().map(|&(x, _)| x).unwrap_or(start_x);
 
-    let mut b = PathBuilder::new(Point3::new(entry, ys[0], p.clearance_z));
+    // The approach (#690): every mill op opens with a rapid to its start
+    // on the clearance plane, so the post's first motion after the tool
+    // call is a G00 there - never a feed from wherever the tool change
+    // left the spindle. Facing starts the cursor where the others do.
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
+    b.push(MoveKind::Rapid, Point3::new(entry, ys[0], p.clearance_z), None);
     for n in blend_notes {
         b.note(n);
     }
@@ -290,12 +291,13 @@ fn link(b: &mut PathBuilder, to: Point3, p: &FaceParams) {
 /// coverage center (a stride that would overshoot is replaced by that
 /// snap; a band thinner than one tool diameter gets the single center
 /// row). Never empty, never unsorted.
-pub(super) fn band(a: f64, b: f64, r: f64, step: f64) -> Vec<f64> {
+pub(super) fn band(a: f64, b: f64, r: f64, step: f64) -> Result<Vec<f64>, GenError> {
     let (first, last) = (a + r, b - r);
     let span = last - first;
     if span <= 0.0 {
-        return vec![(a + b) * 0.5];
+        return Ok(vec![(a + b) * 0.5]);
     }
+    pass_budget("stepover", span, step)?;
     let tol = span * 1e-9;
     let mut ys = vec![first];
     let mut y = first;
@@ -306,5 +308,26 @@ pub(super) fn band(a: f64, b: f64, r: f64, step: f64) -> Vec<f64> {
     if last - *ys.last().unwrap_or(&first) > tol {
         ys.push(last);
     }
-    ys
+    Ok(ys)
+}
+
+/// Most passes (rows or levels) one stepping ladder may lay (#691). A
+/// step so small it would need more is refused by name before a single
+/// entry is allocated: a 1e-9 mm stepover once asked for ~10^10 rows and
+/// aborted the process on the failed allocation.
+pub const MAX_PASSES: f64 = 100_000.0;
+
+/// Refuses a `step` that would ladder `span` in more than [`MAX_PASSES`]
+/// passes, or that cannot advance the coordinate at all (not finite, not
+/// positive, or below the span's float resolution, where `y + step == y`
+/// and the ladder would never end).
+pub(super) fn pass_budget(what: &str, span: f64, step: f64) -> Result<(), GenError> {
+    let n = span / step;
+    let stalls = span + step == span;
+    if !(step.is_finite() && step > 0.0) || !n.is_finite() || n > MAX_PASSES || stalls {
+        return Err(GenError::Invalid(format!(
+            "{what} {step} mm over {span:.3} mm needs more than {MAX_PASSES} passes - raise the {what}"
+        )));
+    }
+    Ok(())
 }
