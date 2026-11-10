@@ -78,7 +78,7 @@ use super::theme::Tokens;
 pub(crate) use super::fields::{combo, combo_owned, field, num, num_feed, num_plain};
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 11] = [
+const TOOL_KINDS: [&str; 13] = [
     "End mill",
     "Ball nose",
     "Bull nose",
@@ -90,6 +90,9 @@ const TOOL_KINDS: [&str; 11] = [
     "Threading insert",
     "Form gauge",
     "Chamfer mill",
+    "Touch probe",
+    // #670: the kerf is its diameter; it turns no spindle.
+    "Plasma torch",
 ];
 
 /// The note gray the model page's notes use ([0.62,0.66,0.72]).
@@ -1339,9 +1342,26 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         {
                             state.tool_ui.tip_angle = 90.0;
                         }
+                        // The torch (#670): no spindle, no corner - a
+                        // kerf. Leaving it, a spinning kind needs an rpm.
+                        if state.tool_ui.tool_kind() == tools::ToolKind::Torch {
+                            state.tool_ui.rpm = 0.0;
+                            state.tool_ui.corner_r = 0.0;
+                        } else if before == 12 && (state.tool_ui.rpm.is_nan() || state.tool_ui.rpm <= 0.0) {
+                            state.tool_ui.rpm = 10000.0;
+                        }
                     }
-                    field(ui, "Diameter");
-                    num(ui, u, &mut state.tool_ui.diameter);
+                    let torch = state.tool_ui.tool_kind() == tools::ToolKind::Torch;
+                    if torch {
+                        // The kerf width IS the torch's diameter (#669 /
+                        // #670): every offset reads radius = kerf / 2.
+                        field(ui, "Kerf width");
+                        num(ui, u, &mut state.tool_ui.diameter);
+                        ui.label("the cut's width - about 1.5x the nozzle orifice; confirm it with a test cut");
+                    } else {
+                        field(ui, "Diameter");
+                        num(ui, u, &mut state.tool_ui.diameter);
+                    }
                     // Kind-read fields (the inert-unless-the-kind-reads-them
                     // law): a point angle means nothing on an end mill, a
                     // pitch means nothing on a drill - show each only where
@@ -1399,7 +1419,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Corner radius");
                         ui.label(format!("{} {}", units::len(state.tool_ui.diameter * 0.5, u, 3), u.suffix()));
                         ui.label("half the diameter - a ball nose's whole tip is its ball");
-                    } else if state.tool_ui.tool_kind() != tools::ToolKind::Tap {
+                    } else if !matches!(state.tool_ui.tool_kind(), tools::ToolKind::Tap | tools::ToolKind::Torch) {
                         field(ui, "Corner radius");
                         num(ui, u, &mut state.tool_ui.corner_r);
                     }
@@ -1418,8 +1438,10 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         TextEdit::singleline(&mut state.tool_ui.material_group)
                             .desired_width(140.0),
                     );
-                    field(ui, "Spindle rpm");
-                    num_plain(ui, &mut state.tool_ui.rpm);
+                    if !torch {
+                        field(ui, "Spindle rpm");
+                        num_plain(ui, &mut state.tool_ui.rpm);
+                    }
                     field(ui, &format!("Feed ({})", u.feed_suffix()));
                     num_feed(ui, u, &mut state.tool_ui.feed);
                     // M11.3: an entry may plunge into solid only with a

@@ -99,7 +99,7 @@ fn chain(start: (f64, f64, f64), steps: &[Step]) -> Toolpath {
             m
         })
         .collect();
-    Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() }
+    Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new(), plasma: None }
 }
 
 const R: MoveKind = MoveKind::Rapid;

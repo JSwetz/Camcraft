@@ -183,8 +183,9 @@ fn stamp_follows_every_input() {
     // the bore joins drilling), to its true 37 - M2.5 E's deburr row,
     // seated mid-run again (it closes the 3D mill before the 5-axis
     // contour), to its true 38 - #108's probe row, seated to close
-    // the Drilling run, to its true 39.)
-    assert_eq!(KindInfo::ALL.len(), 39);
+    // the Drilling run, to its true 39 - #670's plasma profile,
+    // appended as the plasma table's own section, to 40.)
+    assert_eq!(KindInfo::ALL.len(), 40);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");

@@ -278,7 +278,12 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         // meets the part tangent, and the protected-move law in
         // `operation::probe_op` already convicted any other meeting -
         // so the probe op carves nothing and stays out of the plan.
-        if tool.kind == crate::tools::ToolKind::Probe {
+        // A plasma torch (#670) cuts THROUGH the plate along a kerf the
+        // dexel column model has no atom for: the plasma verdicts (cut
+        // order, kerf crossings, the through-cut) are #672's laws, and
+        // the generator certified that no lit move's kerf reaches the
+        // part - so the torch carves nothing here, said not silenced.
+        if matches!(tool.kind, crate::tools::ToolKind::Probe | crate::tools::ToolKind::Torch) {
             continue;
         }
         let cache = model::toolpath_of(world, e)

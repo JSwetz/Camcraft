@@ -996,6 +996,8 @@ pub enum ParamsDto {
     },
     /// The probe (#108): an additive variant in the v50 grammar.
     Probe(ProbeDto),
+    /// The plasma profile (#670): additive - no older file names it.
+    PlasmaProfile(PlasmaDto),
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

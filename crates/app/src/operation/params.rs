@@ -1378,6 +1378,27 @@ impl OpParams {
                 }
                 h.write_u8(set_wcs.unwrap_or(0xff));
             }
+            // The plasma profile (#670): every stored number, the
+            // optional ones with a presence byte.
+            OpParams::PlasmaProfile(p) => {
+                wh(h, p.clearance_z);
+                wh(h, p.top_z);
+                wh(h, p.bottom_z);
+                h.write_u8(u8::from(p.comp == super::PlasmaComp::Control));
+                h.write_u8(u8::from(p.reversed));
+                for v in [p.lead_in, p.lead_out, p.small_hole_dia, p.small_hole_feed, p.overburn] {
+                    w(h, v);
+                }
+                for v in [p.kerf, p.feed, p.pierce_height, p.cut_height, p.pierce_delay] {
+                    match v {
+                        Some(x) => {
+                            h.write_u8(1);
+                            w(h, x);
+                        }
+                        None => h.write_u8(0),
+                    }
+                }
+            }
             OpParams::Thread {
                 clearance_z,
                 retract_z,

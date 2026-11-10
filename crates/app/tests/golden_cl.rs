@@ -975,3 +975,48 @@ fn finish3d_project_dome() {
     .unwrap();
     write_golden("finish3d_project_dome.cl", &gen_to_cltext(&t));
 }
+
+/// #670: a plasma plate - a 120x80 outline with a Ø40 hole holding a
+/// 12x12 island part, a Ø10 small hole and a 30x10 slot - cut with a
+/// 1.5 mm kerf in the computer: the torch records (kerf, spans, roles,
+/// parents) pinned with the moves (the `; PLASMA` / `; TORCH` lines,
+/// docs/CNC-INTERMEDIATE.md), the island before its hole, every hole
+/// before the outline, the small hole by the Primer's rule.
+#[test]
+fn plasma_plate_with_holes_matches_golden() {
+    use camcraft_app::plasma::{plasma_profile, PlasmaParams};
+    let loops = vec![
+        rect(0.0, 0.0, 120.0, 80.0).loops()[0].clone(),
+        circle(Point2::new(35.0, 40.0), 20.0, 64),
+        rect(29.0, 34.0, 41.0, 46.0).loops()[0].clone(),
+        circle(Point2::new(80.0, 60.0), 5.0, 32),
+        rect(70.0, 15.0, 100.0, 25.0).loops()[0].clone(),
+    ];
+    let part = Region::new(loops.clone()).unwrap();
+    let p = PlasmaParams {
+        kerf: 1.5,
+        control_comp: false,
+        reversed: false,
+        lead_in: 4.0,
+        lead_out: 3.0,
+        small_hole_dia: 32.0,
+        small_hole_feed: 0.65,
+        overburn: 1.5,
+        thickness: 6.0,
+        feed: Some(2500.0),
+        clearance_z: 15.0,
+        cut_z: 6.0,
+        pierce_height: Some(3.8),
+        cut_height: None,
+        pierce_delay: Some(0.5),
+    };
+    let path = plasma_profile(&loops, &[], &part, &p).unwrap();
+    let text = gen_to_cltext(&path);
+    // The in-app writer and the golden writer agree byte for byte.
+    assert_eq!(camcraft_app::cl::text::to_text(&path).unwrap(), text);
+    assert_eq!(camcraft_app::cl::text::from_text(&text).unwrap().plasma, path.plasma);
+    // The superset law: the post's stream reader takes it (the records
+    // are comment lines to it until the plasma post voices them, #671).
+    assert!(camcraft_app::post::cnc::parse(&text).is_ok());
+    write_golden("plasma_plate_with_holes.cl", &text);
+}

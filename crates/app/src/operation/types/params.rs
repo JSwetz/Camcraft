@@ -1127,6 +1127,11 @@ pub enum OpParams {
         /// before the program stops with a message.
         tolerance: f64,
     },
+    /// Plasma profile (#670): 2D through-cuts of the picked contours
+    /// with a torch - kerf offset, cut direction, leads, the small-hole
+    /// rule and inner-before-outer order (see [`crate::plasma`]). The
+    /// plasma table's only kind (#669's family seam).
+    PlasmaProfile(super::plasma::PlasmaOp),
 }
 
 impl OpParams {
@@ -1172,6 +1177,7 @@ impl OpParams {
             OpParams::Bore { .. } => OpType::Bore,
             OpParams::Thread { .. } => OpType::Thread,
             OpParams::Probe { .. } => OpType::Probe,
+            OpParams::PlasmaProfile(_) => OpType::PlasmaProfile,
         }
     }
 
@@ -1194,8 +1200,9 @@ impl OpParams {
             | OpParams::Circular { tilt, .. }
             | OpParams::Slot { tilt, .. }
             | OpParams::Trace { tilt, .. } => *tilt,
-            // The probe touches along the machine's axes (#108).
-            OpParams::Probe { .. } => None,
+            // The probe touches along the machine's axes (#108); the
+            // torch stands vertical over a flat plate (#670).
+            OpParams::Probe { .. } | OpParams::PlasmaProfile(_) => None,
             // The 5-axis kinds (M5.1 C) are the third answer, not the
             // second: the PART stands still and the TOOL AXIS moves -
             // a 3+2 index inside them would command the machine to
@@ -1265,6 +1272,7 @@ impl OpParams {
     #[must_use]
     pub fn clearance(&self) -> Height {
         match self {
+            OpParams::PlasmaProfile(p) => p.clearance_z,
             OpParams::Face { clearance_z, .. }
             | OpParams::Contour { clearance_z, .. }
             | OpParams::Pocket { clearance_z, .. }
@@ -1317,6 +1325,8 @@ impl OpParams {
             // The probe's region plane is its safe plane (#108): it
             // cuts no section.
             OpParams::Probe { clearance_z, .. } => *clearance_z,
+            // The plasma contours are drawn on the plate's top (#670).
+            OpParams::PlasmaProfile(p) => p.top_z,
             OpParams::Face { top_z, cut_z, .. } => top_z.unwrap_or(*cut_z),
             OpParams::Contour { top_z, .. }
             | OpParams::Pocket { top_z, .. }
@@ -1386,6 +1396,11 @@ impl OpParams {
         }
         match self {
             OpParams::Probe { clearance_z, .. } => f(*clearance_z),
+            OpParams::PlasmaProfile(p) => {
+                f(p.clearance_z);
+                f(p.top_z);
+                f(p.bottom_z);
+            }
             OpParams::Face { clearance_z, cut_z, top_z, .. } => {
                 f(*clearance_z);
                 f(*cut_z);

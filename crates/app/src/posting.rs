@@ -781,7 +781,8 @@ pub fn op_streams(world: &World) -> Result<Vec<(String, Vec<cnc::Record>)>, Stri
             }),
             _ => None,
         };
-        let rpm = if tool.kind == crate::tools::ToolKind::Probe { 0.0 } else { tool.rpm };
+        // A torch states rpm 0 by law (#670): no spindle word either.
+        let rpm = if matches!(tool.kind, crate::tools::ToolKind::Probe | crate::tools::ToolKind::Torch) { 0.0 } else { tool.rpm };
         // Commentary for the program (#257): kinds by their panel
         // labels, the setup by the resolution law (implicit members
         // name the first setup, as the setup sheet does).
@@ -857,6 +858,7 @@ impl HeightRefs for OpParams {
     fn heights(&self) -> Vec<&Height> {
         match self {
             OpParams::Probe { clearance_z, .. } => vec![clearance_z],
+            OpParams::PlasmaProfile(p) => vec![&p.clearance_z, &p.top_z, &p.bottom_z],
             OpParams::Face {
                 clearance_z,
                 cut_z,

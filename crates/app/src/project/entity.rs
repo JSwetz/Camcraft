@@ -121,6 +121,10 @@ pub struct PathDto {
     /// same additive law - absent is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breaks: Vec<super::break_dto::EdgeBreakDto>,
+    /// The plasma record (#670, `crate::cl::PlasmaCut`): the same
+    /// additive law - absent is none, every path but a plasma cut's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plasma: Option<super::plasma_dto::PlasmaCutDto>,
 }
 
 /// One cached control-compensated span: the engage / cancel move
@@ -479,6 +483,7 @@ impl PathDto {
             threads: t.path.threads.iter().map(super::thread_dto::ThreadCycleDto::from_cycle).collect(),
             probes: t.path.probes.iter().map(super::touch_dto::ProbeTouchDto::from_touch).collect(),
             breaks: t.path.breaks.iter().map(super::break_dto::EdgeBreakDto::from_break).collect(),
+            plasma: t.path.plasma.as_ref().map(super::plasma_dto::PlasmaCutDto::from_cut),
         }
     }
 
@@ -503,6 +508,7 @@ impl PathDto {
         path.probes = super::touch_dto::load(&self.probes, &path.moves);
         path.threads = self.threads.iter().filter_map(|t| t.to_cycle(&path.moves)).collect();
         path.breaks = super::break_dto::load(&self.breaks);
+        path.plasma = self.plasma.as_ref().and_then(|p| p.load(&path.moves));
         ToolpathCache::new(path, self.warnings.clone())
     }
 }

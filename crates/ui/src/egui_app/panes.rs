@@ -390,12 +390,12 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
                     .get(i)
                     .is_some_and(|k| !k.admits(machine));
                 if dark {
-                    let (fword, mword) = match camcraft_app::operation::KindInfo::ALL[i].family() {
-                        camcraft_app::operation::Family::Mill => ("milling", "mill"),
-                        camcraft_app::operation::Family::Turn => ("turning", "lathe"),
-                    };
+                    let f = camcraft_app::operation::KindInfo::ALL[i].family();
+                    let (fword, mword) = (f.work(), f.machine());
+                    // #670: plasma work has no mill-turn to fall back on.
+                    let or_mt = if f == camcraft_app::operation::Family::Plasma { "" } else { " or a mill-turn" };
                     format!(
-                        "The document's machine is a {} - {fword} operations do not drive it; mount a {mword} or a mill-turn (Setup > Machine)",
+                        "The document's machine is a {} - {fword} operations do not drive it; mount a {mword}{or_mt} (Setup > Machine)",
                         machine.word()
                     )
                 } else if !has_stock(state) {
@@ -489,12 +489,11 @@ fn gate_note(c: Cmd, state: &State) -> Option<String> {
         .filter(|k| !k.admits(machine));
     match dark {
         Some(k) => {
-            let (fword, mword) = match k.family() {
-                camcraft_app::operation::Family::Mill => ("milling", "mill"),
-                camcraft_app::operation::Family::Turn => ("turning", "lathe"),
-            };
+            let f = k.family();
+            let (fword, mword) = (f.work(), f.machine());
+            let or_mt = if f == camcraft_app::operation::Family::Plasma { "" } else { " or a mill-turn" };
             Some(format!(
-                "cannot add a {} operation: {fword} operations do not drive the document's {} - mount a {mword} or a mill-turn (Setup > Machine)",
+                "cannot add a {} operation: {fword} operations do not drive the document's {} - mount a {mword}{or_mt} (Setup > Machine)",
                 k.label,
                 machine.word(),
             ))
@@ -647,6 +646,9 @@ pub(super) fn icon_of(c: Cmd, state: &State) -> Option<Icon> {
             operation::Section::Drilling => Icon::Drill,
             operation::Section::MultiAxis => Icon::MultiAxisRough,
             operation::Section::Turning => Icon::Face,
+            // #670: the plasma section cuts 2D profiles - the contour's
+            // glyph (the machine door's own choice, no new asset).
+            operation::Section::Plasma => Icon::Contour,
         }),
         // The machine door wears its workspace's glyph (#207), from the
         // existing set: the face mill for Milling, the turned bar for
@@ -704,6 +706,9 @@ pub(super) fn op_icon(kind: OpType) -> Icon {
         OpType::Circular => Icon::Pocket,
         OpType::Drill => Icon::Drill,
         OpType::Probe => Icon::Probe,
+        // The torch rides a profile: the contour's pixels (#670, the
+        // reuse law).
+        OpType::PlasmaProfile => Icon::Contour,
         OpType::Pocket3D => Icon::Pocket,
         OpType::Finish3D => Icon::Finish3D,
         OpType::Contour5D => Icon::Contour5D,

@@ -226,7 +226,7 @@ pub(super) fn clip_path(path: Toolpath, allow: &Region, fp: &Finish3DParams, ram
     {
         out.push(Move { rotary: None, kind: MoveKind::Rapid, from: p, to: Point3::new(p.x, p.y, clearance), feed: None, arc: None, axis: None });
     }
-    Ok(Toolpath { moves: out, cycles: path.cycles, notes: path.notes, comps: path.comps, threads: Vec::new(), probes: path.probes, breaks: path.breaks })
+    Ok(Toolpath { moves: out, cycles: path.cycles, notes: path.notes, comps: path.comps, threads: Vec::new(), probes: path.probes, breaks: path.breaks, plasma: path.plasma })
 }
 
 #[cfg(test)]

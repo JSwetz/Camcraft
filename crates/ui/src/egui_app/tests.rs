@@ -2671,8 +2671,13 @@ fn tips_match_the_imgui_table() {
             &with_tool.world,
             &camcraft_app::operation::KindInfo::ALL[i],
         );
+        let is_plasma = camcraft_app::operation::KindInfo::ALL[i].family()
+            == camcraft_app::operation::Family::Plasma;
         let want = if is_turn {
             "The document's machine is a mill - turning operations do not drive it; mount a lathe or a mill-turn (Setup > Machine)".to_owned()
+        } else if is_plasma {
+            // #670: the torch's work has no mill-turn to fall back on.
+            "The document's machine is a mill - plasma cutting operations do not drive it; mount a plasma table (Setup > Machine)".to_owned()
         } else if let Some(reason) = tool_law {
             // M10.1 B: the demo's one flat end mill cannot cut every
             // mill kind - those cells say which tool kind is missing.

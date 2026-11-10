@@ -23,21 +23,19 @@ use super::{move_extremes, say, slowest_axis, Machine, MachineCheck};
 use crate::model;
 use crate::operation::Family;
 
-/// Is this op one a plasma table cuts? None is yet: the plasma profile
-/// operation is #670, which adds its family here. The match is
-/// exhaustive on purpose - a new family must answer this question.
+/// Is this op one a plasma table cuts? The plasma family's (#670 - the
+/// Plasma Profile). The match is exhaustive on purpose - a new family
+/// must answer this question.
 fn cuts_plasma(op: &crate::schema::Operation) -> bool {
     match op.params.kind().info().family() {
+        Family::Plasma => true,
         Family::Mill | Family::Turn => false,
     }
 }
 
 /// The family's work, in the words the refusal names.
 fn family_word(f: Family) -> &'static str {
-    match f {
-        Family::Mill => "milling",
-        Family::Turn => "turning",
-    }
+    f.work()
 }
 
 /// [`super::check_ops`] for a machine of kind plasma.

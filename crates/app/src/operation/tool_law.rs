@@ -90,3 +90,7 @@ impl KindInfo {
 /// The touch probe (#108): the Probe operation mounts nothing else, and
 /// no cutting kind mounts a probe.
 pub const PROBE: &[ToolKind] = &[ToolKind::Probe];
+
+/// The plasma torch (#670): the plasma operations mount nothing else,
+/// and no cutting kind mounts a torch.
+pub const TORCH: &[ToolKind] = &[ToolKind::Torch];
