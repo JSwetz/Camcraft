@@ -66,6 +66,8 @@ pub mod tool_list;
 // #221: the number a tool posts as, and the clash law.
 pub mod tool_numbers;
 pub use camcraft_tools::tools;
+// #630: the lathe tool orientation code (LinuxCNC 1-9) and its control point.
+pub use camcraft_tools::orientation;
 // #93: the drawn spun profile of a milling holder.
 pub use camcraft_tools::spun;
 // #368: a tool's modelled body and the reads the judging laws take from it.

@@ -1366,6 +1366,8 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         num(ui, u, &mut state.tool_ui.nose_radius);
                         ui.label("the ground tip circle the bar rides the hole wall on (M5.2 F) - inert on drilling cycles, which size by the slide");
                     }
+                    // #630: which point of the nose the lathe posts write.
+                    super::tool_orientation_row::orientation_row(ui, state);
                     if state.tool_ui.kind == 7 {
                         field(ui, "Blade width");
                         num(ui, u, &mut state.tool_ui.width);

@@ -63,6 +63,8 @@ mod tree_glyphs;
 mod pages;
 // #371: the tool editor's Body section and its picking preview.
 mod tool_body_page;
+// #630: the tool editor's lathe orientation row.
+mod tool_orientation_row;
 mod tool_profile_page;
 mod setup_wcs_pick;
 // #343: a setup's own node pages (settings, machine, post, fixtures, tools).

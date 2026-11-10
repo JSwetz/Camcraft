@@ -780,6 +780,9 @@ pub struct ToolUi {
     pub flutes: Option<u32>,
     /// M11.3: may the tool plunge axially into solid?
     pub center_cutting: bool,
+    /// #630: the lathe tool orientation (LinuxCNC 1-9), None = the
+    /// kind's default - carried so an Apply never rewrites it.
+    pub orientation: Option<u8>,
 }
 
 impl Default for ToolUi {
@@ -829,6 +832,7 @@ impl ToolUi {
             tool_material: t.tool_material,
             flutes: t.flutes,
             center_cutting: t.center_cutting,
+            orientation: t.orientation,
         }
     }
 
@@ -877,6 +881,7 @@ impl ToolUi {
             tool_material: self.tool_material,
             flutes: self.flutes,
             center_cutting: self.center_cutting,
+            orientation: self.orientation,
         };
         tool.corner_r = tool.tip_corner_r();
         tool

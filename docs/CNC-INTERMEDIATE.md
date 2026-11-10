@@ -93,6 +93,7 @@ behavior only):
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
 | `OperationKind` `SetupName` `ToolKind` `ToolCornerRadius` | commentary (PARAMs, #257), each written only when stated: the op's kind label (`2D Contour`), its setup's name, the tool's kind label (`flat end mill`) and corner radius in mm (only above 0). Scripts voice them as program comments and nothing else; a script that does not know them ignores them |
+| `ToolOrientation` | the lathe tool orientation (PARAM, #630; LinuxCNC's 1-9 chart, `camcraft_tools::orientation`), written only for a nose-centre turning section (facing, profile, contour, boring): the section's moves are then the tool's CONTROL POINT for that orientation - the nose-centre CL moved by r x the chart's tip offset in the app - so a lathe script posts them as-is under G40. Commentary otherwise; a script that does not know it ignores it |
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |
 | `Advance` | the `PART LOAD` ADVANCE in mm (present only on loads; an unload's properties carry no `Advance` key at all) |
 | `From` `To` | the `PART TRANSFER` stations, 1-based (present only on transfer events) |

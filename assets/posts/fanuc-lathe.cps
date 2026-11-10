@@ -23,9 +23,16 @@ liveTooling = true;  // voices PARAM LiveTool sections (issue #33): the engine r
 //
 // The lathe laws this script states, so a reviewer need not infer them:
 //  - DIAMETER programming: the X word is twice the stream's radius. The
-//    stream speaks world mm with the insert's nose centre on ONE meridian
-//    half-plane of the spindle axis (the turning kernel's frame); the
-//    radius is that plane's signed in-plane coordinate, origin-relative.
+//    stream speaks world mm on ONE meridian half-plane of the spindle
+//    axis (the turning kernel's frame); the radius is that plane's
+//    signed in-plane coordinate, origin-relative.
+//  - G40 throughout, and the stream's point IS the control point (#630):
+//    for a nose-radiused insert the app has already moved the kernel's
+//    nose-centre path to the tool's imaginary tip for its orientation
+//    (PARAM ToolOrientation, LinuxCNC's 1-9 chart) - the point the
+//    operator touches the tool off on. This script never shifts a
+//    point, and writes the orientation in the tool note so the setup
+//    can be checked against it.
 //    A move with BOTH in-plane coordinates off the axis is off every
 //    meridian - milling work - and is refused by name, never projected.
 //  - G97 constant rpm, from the stream's SpindleSpeed; G96 constant
@@ -223,14 +230,14 @@ function oWord() {
 // Program commentary (#257): the setup, the operation and the tool, for
 // the operator reading the program - never a word the control moves on.
 // The stream's PARAMs OperationName / OperationKind / SetupName /
-// ToolDiameter / ToolKind / ToolCornerRadius and the TOOL record's name
+// ToolDiameter / ToolKind / ToolCornerRadius / ToolOrientation (#630) and the TOOL record's name
 // feed it; a stream without them (a legacy .cl) writes none. User text
 // is cleaned for this dialect: a parenthesis would end the comment
 // early, % is the tape's end mark and ; opens a comment on some
 // controls, so all three become spaces; printable ASCII only, capped at
 // 40 characters.
 var setupName = "", setupSaid = "", opName = "", opKind = "";
-var toolName = "", toolKind = "", toolDia = 0, toolCr = 0;
+var toolName = "", toolKind = "", toolDia = 0, toolCr = 0, toolQ = 0;
 function clean(s) {
   var t = String(s === null || s === undefined ? "" : s);
   t = t.replace(/[()%;]/g, " ").replace(/[^\x20-\x7E]/g, "?").replace(/\s+/g, " ").trim();
@@ -249,6 +256,7 @@ function commentParam(name, value) {
   else if (name === "ToolKind") toolKind = clean(value).toUpperCase();
   else if (name === "ToolDiameter" && has(value)) toolDia = Number(value);
   else if (name === "ToolCornerRadius" && has(value)) toolCr = Number(value);
+  else if (name === "ToolOrientation" && has(value)) toolQ = Math.round(Number(value));
 }
 function opNotes() {  // at the section's preamble: the setup once, the op each time
   if (setupName && setupName !== setupSaid) { note("SETUP: " + setupName); setupSaid = setupName; }
@@ -263,8 +271,9 @@ function toolNote() {  // just before the tool change it describes
   if (toolKind) desc.push(toolKind);
   if (toolDia > 0 && BLADE_KINDS.indexOf(toolKind) < 0) desc.push("D" + fu(toolDia));
   if (toolCr > 0) desc.push("R" + fu(toolCr));
+  if (toolQ > 0) desc.push("ORIENTATION " + toolQ);  // #630: the tip the program's points are for
   note(joinDash(["T" + pad2(tNo) + pad2(tNo) + (toolName ? " " + toolName : ""), desc.join(" ")]));
-  toolKind = ""; toolCr = 0;
+  toolKind = ""; toolCr = 0; toolQ = 0;
 }
 
 function onOpen() {
