@@ -17,8 +17,9 @@
 //! - **A square stock stays square (#561 review).** The part write is
 //!   `MoveModel::locating` / `AlignPartToSetup::locating`: a box or
 //!   cylinder stock square to the setup keeps its orientation and its
-//!   allowance on each side round the located part (`crate::stock_follow`)
-//!   - the vise holds the blank square, it does not turn it with the part.
+//!   allowance on each side round the located part (`crate::stock_follow`;
+//!   since #571 every `MoveModel` turn keeps the same rule) - the vise
+//!   holds the blank square, it does not turn it with the part.
 //! - **The part moves as part alignment moves it.** In a setup that holds
 //!   the part as modelled the locate is a `MoveModel` (the document
 //!   placement; the stock follows the part); in a setup that holds the

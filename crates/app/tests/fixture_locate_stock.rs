@@ -4,8 +4,8 @@
 //! on each side (top stays top), instead of turning the block with the
 //! part; a Face op then regenerates at the new stock top; a stock whose
 //! allowance would sink it into the fixture warns by name; undo puts the
-//! block back. A plain `MoveModel` keeps carrying the stock rigidly
-//! (pinned in `commands_undo`).
+//! block back. A plain `MoveModel` turn keeps the same rule since #571
+//! (pinned in `move_model_stock` and `commands_undo`).
 //! Provenance: our own fixtures over plain vise practice (machine-tool
 //! handbooks); no vendor material consulted.
 //!
