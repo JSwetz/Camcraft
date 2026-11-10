@@ -313,7 +313,8 @@ pub fn describe(a: Option<Location>) -> String {
 }
 
 /// The parts' bounds centre in the DOCUMENT frame - the pivot every
-/// preset and numeric turn rotates about. `None` with no part geometry.
+/// preset turns about (typed angles pivot on the WCS origin by default,
+/// #606, [`crate::setup_turn`]). `None` with no part geometry.
 #[must_use]
 pub fn part_centre(world: &World) -> Option<Point3> {
     let tris: Vec<Triangle> = model::model_entities(world)

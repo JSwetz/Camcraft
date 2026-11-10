@@ -778,6 +778,11 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                         corrupt(format!("setup '{}' takes its stock from '{w}', which is no stock source", dto.name))
                     })?),
                 };
+                // #389: an unspellable own thread output is a corrupt file.
+                let post_options = match &sdto.post_options {
+                    None => None,
+                    Some(o) => Some(o.to_options(&dto.name).map_err(corrupt)?),
+                };
                 entity.entity_view(world).set(SetupDef {
                     stock: sdto.stock,
                     // `wcs_one` left exactly one name on every setup.
@@ -794,6 +799,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<Ve
                     post: sdto.post.as_ref().map(SetupPostDto::to_ref),
                     relative_to: sdto.relative_to.clone(),
                     stock_source,
+                    post_options,
                 });
             }
         }

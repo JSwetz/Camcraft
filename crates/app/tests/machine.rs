@@ -744,6 +744,11 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         ("Tormach 24R", Kind::Mill),
         ("Tormach xsTECH Pro", Kind::Mill),
         ("Tormach xsTECH", Kind::Mill),
+        ("Tormach 8L", Kind::Lathe),
+        ("Tormach 15L Slant-PRO", Kind::Lathe),
+        ("Tormach 15LX Slant-PRO", Kind::Lathe),
+        ("Makera Carvera", Kind::Mill),
+        ("Makera Carvera Air", Kind::Mill),
     ];
     assert_eq!(MACHINES.len(), expectations.len(), "the pane offers what the tests pin");
     for ((name, text), (want_name, want_kind)) in MACHINES.iter().zip(expectations) {

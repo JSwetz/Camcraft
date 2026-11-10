@@ -238,3 +238,30 @@ fn a_curved_face_and_a_rim_edge_are_refused_by_name() {
     let picks: Vec<GeoSel> = rims.iter().map(|&id| GeoSel { entity: "block".into(), feature: FeatureSel::Chain(id) }).collect();
     says(&w, &picks, "an edge cannot set a plane");
 }
+
+/// #330 (reopened): the maintainer's case through the command - a block
+/// turned 30 degrees about X, its tilted top laid face down (flip) on each
+/// plane with "face to level": the face's outward normal is the plane's
+/// negative axis, the face lies at level 0 and the whole part stands on
+/// the positive side. The part is TURNED, not only moved; undo restores.
+#[test]
+fn a_tilted_face_is_turned_flat_onto_each_plane_with_the_part_above_it() {
+    let (w, mut h) = block([30.0, 0.0, 0.0]);
+    let top = [face(&w, [10.0, 10.0, 10.0])];
+    let corners: Vec<[f64; 3]> =
+        (0..8).map(|i| [20.0 * f64::from(i & 1), 20.0 * f64::from((i >> 1) & 1), 10.0 * f64::from((i >> 2) & 1)]).collect();
+    for (plane, k) in [(ArcPlane::Xy, 2), (ArcPlane::Xz, 1), (ArcPlane::Yz, 0)] {
+        let cmd = AlignPartToSetup::lay_on_plane(&w, "Setup1", &top, lay(plane, true, true));
+        h.execute(&w, cmd.expect("lays the tilted top"));
+        let a = setup_align::stored(&w, "Setup1").expect("an alignment is held");
+        let mut axis = [0.0; 3];
+        axis[k] = -1.0;
+        assert!(on_axis(laid_dir(&w, a, Z), axis), "{plane:?}: the top faces {axis:?}");
+        for p in [[0.0, 0.0, 10.0], [20.0, 0.0, 10.0], [20.0, 20.0, 10.0], [0.0, 20.0, 10.0]] {
+            assert!(laid_point(&w, a, p)[k].abs() < 1e-7, "{plane:?}: the top lies at level 0");
+        }
+        assert!(corners.iter().all(|&p| laid_point(&w, a, p)[k] > -1e-7), "{plane:?}: the part stands above");
+        assert!(h.undo(&w));
+        assert_eq!(setup_align::stored(&w, "Setup1"), None, "{plane:?}: undo restores as modelled");
+    }
+}

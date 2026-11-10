@@ -116,24 +116,27 @@ fn merge(a: AfterOperation, b: AfterOperation) -> Option<AfterOperation> {
 /// `ops` is the program `posting::program_ops` blessed (suppressed ops
 /// already out). An entry joins the gap after the last posted operation
 /// before it in list order; a suppressed entry is out of the program.
-/// With `skip` ("Skip pauses and homes") every action is muted and no
-/// entry can refuse. Refusals name the entry: one before every posted
+/// `skip` answers "Skip pauses and homes" per operation (#389: each op
+/// reads its own setup's switch): a skipped op ends with nothing, and an
+/// entry folding into a skipped op's gap is muted with it - it cannot
+/// refuse, exactly as the old document-wide switch muted every gap. An
+/// entry ahead of every posted op follows the first posted op's switch. Refusals name the entry: one before every posted
 /// operation (there is no section end to stop after), and a stop and a
 /// trip home asked of the same gap (one word per gap).
 pub fn posted_afters(
     world: &World,
     ops: &[(String, Entity)],
-    skip: bool,
+    skip: impl Fn(&Entity) -> bool,
 ) -> Result<HashMap<String, AfterOperation>, String> {
     let mut out: HashMap<String, AfterOperation> = HashMap::with_capacity(ops.len());
-    if skip {
-        for (name, _) in ops {
-            out.insert(name.clone(), AfterOperation::None);
-        }
-        return Ok(out);
-    }
+    let mut muted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (name, e) in ops {
-        let after = model::operation_of(world, e).map_or(AfterOperation::None, |op| op.after);
+        let after = if skip(e) {
+            muted.insert(name.clone());
+            AfterOperation::None
+        } else {
+            model::operation_of(world, e).map_or(AfterOperation::None, |op| op.after)
+        };
         out.insert(name.clone(), after);
     }
     let mut last: Option<String> = None;
@@ -149,11 +152,20 @@ pub fn posted_afters(
             continue;
         }
         let Some(op) = last.as_ref() else {
+            // Ahead of every posted op: it stands in the first posted op's
+            // program, so that op's switch decides (#389) - muted when its
+            // setup skips pauses and homes, refused by name otherwise.
+            if ops.first().is_some_and(|(n, _)| muted.contains(n)) {
+                continue;
+            }
             return Err(format!(
                 "{name}: a {} entry before the first posted operation has no operation to follow - move it after one, or suppress it",
                 action_label(entry.action)
             ));
         };
+        if muted.contains(op) {
+            continue; // the gap's op skips pauses and homes: the entry is muted
+        }
         let now = out.get(op).copied().unwrap_or_default();
         match merge(now, entry.action) {
             Some(m) => {
