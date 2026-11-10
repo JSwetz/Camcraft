@@ -64,6 +64,7 @@ fn the_shipped_tormach_machines_post_byte_identical() {
         // #611: a Tormach LATHE retracts in X/Z on its own lathe post
         // (#612), not the mill post's Z0 law judged here.
         if camcraft_app::machine::kind(Some(&m)) == camcraft_app::machine::Kind::Lathe {
+            assert_eq!(m.safe_retract_z, None, "{name}: a lathe states no mill Z0 retract");
             continue;
         }
         let tormach = name.starts_with("Tormach");

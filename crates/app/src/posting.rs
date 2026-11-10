@@ -139,7 +139,7 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach PCNC 1100 (Series I)", include_str!("../../../assets/machines/tormach-pcnc1100-s1.mch")),
     ("Tormach PCNC 1100 (Series II)", include_str!("../../../assets/machines/tormach-pcnc1100-s2.mch")),
     ("Tormach PCNC 1100 (Series 3)", include_str!("../../../assets/machines/tormach-pcnc1100-s3.mch")),
-    // #611: Tormach's lathes, from Tormach's public spec sheets.
+    // #611: Tormach's lathes, from their operator manuals (UM10753, UM10225).
     ("Tormach 8L", include_str!("../../../assets/machines/tormach-8l.mch")),
     ("Tormach 15L Slant-PRO", include_str!("../../../assets/machines/tormach-15l-slant-pro.mch")),
     // #619: the 15LX (UM10860 §3.1).

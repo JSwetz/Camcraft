@@ -1,7 +1,7 @@
 //! #611 / #619: the Tormach 8L, 15L Slant-PRO and 15LX Slant-PRO, shipped as lathe machines so
 //! turning programs can be judged against a real Tormach lathe envelope
 //! (and simulated in PathPilot Hub's 8L / 15L). Every figure is from
-//! Tormach's public spec sheets (sources in
+//! Tormach's operator manuals (UM10753, UM10225, UM10860; sources in
 //! docs/decisions/611-tormach-lathes.md); travel is stated as the full
 //! stroke either way of the work zero, the shipped mills' convention.
 //!
