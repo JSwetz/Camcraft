@@ -246,3 +246,68 @@ fn a_smooth_walls_facet_seam_is_no_edge() {
     assert!(matches!(pick.target, PickTarget::Face { .. }), "{pick:?}");
     assert!(matches!(sel, Some(FeatureSel::Patch(_))), "the whole welded wall: {sel:?}");
 }
+
+/// Setup1 (made if missing) with `page` on screen, so its drafts stay
+/// armed (#664 / #673).
+fn show_setup(harness: &mut Harness<'static, ShellUi>, page: crate::state::SetupPage) {
+    if camcraft_app::setup::active(&harness.state().state.world).is_none() {
+        harness.state_mut().state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        harness.run();
+    }
+    crate::actions::target(&mut harness.state_mut().state, UiTarget::SetupNode("Setup1".into(), page));
+    harness.run();
+}
+
+/// #561 / #555 on the one rule: a fixture locate draft (armed in Face
+/// mode) takes a box corner as a point - it accepts faces and points -
+/// and the three-points draft takes three top corners as points 1, 2, 3,
+/// while a face clicked in Face mode still reaches it and is refused by
+/// name.
+#[test]
+fn locate_and_points_drafts_take_box_corners_as_points() {
+    let mut harness = shell_harness();
+    {
+        let st = &mut harness.state_mut().state;
+        let vise = camcraft_app::geometry::cube(Point3::new(200.0, 200.0, -10.0), Point3::new(260.0, 240.0, 0.0));
+        st.history.execute(&st.world, ImportModel::from_mesh("vise", vise));
+        st.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+        st.drain_actions();
+        let tag = camcraft_app::commands::TagFixture::new(&st.world, "vise", Some("Setup1")).expect("the vise is a fixture");
+        st.history.execute(&st.world, tag);
+    }
+    show_setup(&mut harness, crate::state::SetupPage::Fixtures);
+    harness.get_by_label("Locate part…").click();
+    harness.run();
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Face, "the locate draft arms in Face mode");
+    let p = a_corner(harness.state());
+    click_viewport(&mut harness, p);
+    let st = &harness.state().state;
+    let half = st.locate_pick.as_ref().and_then(|d| d.half.clone());
+    assert!(
+        half.as_ref().is_some_and(|g| g.entity == "Block" && matches!(g.feature, FeatureSel::Vertex(_))),
+        "the corner is the part's point: {half:?} ({})",
+        st.status
+    );
+    crate::locate_pick::disarm(&mut harness.state_mut().state);
+
+    show_setup(&mut harness, crate::state::SetupPage::Settings);
+    crate::points_pick::arm(&mut harness.state_mut().state, "Setup1");
+    let geo_before = harness.state().state.op_ui.geo.clone();
+    for c in [[0.0, 0.0, 30.0], [60.0, 0.0, 30.0], [60.0, 60.0, 30.0]] {
+        let p = px_of(harness.state(), c).expect("a top corner on screen");
+        click_viewport(&mut harness, p);
+    }
+    let picks = |h: &Harness<'static, ShellUi>| h.state().state.points_pick.as_ref().map(|d| d.picks.clone()).unwrap_or_default();
+    let got = picks(&harness);
+    assert_eq!(got.len(), 3, "three points: {got:?} ({})", harness.state().state.status);
+    assert!(got.iter().all(|g| g.entity == "Block" && matches!(g.feature, FeatureSel::Vertex(_))), "{got:?}");
+    assert_eq!(harness.state().state.op_ui.geo, geo_before, "nothing joins the open operation");
+
+    // A face in Face mode still reaches the draft, which refuses it by name.
+    crate::points_pick::remove_last(&mut harness.state_mut().state);
+    harness.state_mut().state.geo_pick = GeoPick::Face;
+    let top = over_the_top_diagonal(harness.state());
+    click_viewport(&mut harness, top);
+    assert_eq!(picks(&harness).len(), 2, "the face is not drafted");
+    assert!(harness.state().state.status.contains("is a face"), "{}", harness.state().state.status);
+}

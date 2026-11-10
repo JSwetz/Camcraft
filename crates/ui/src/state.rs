@@ -41,8 +41,12 @@ mod per_op;
 mod tool_library_io;
 #[path = "state_setup_mount.rs"]
 mod setup_mount;
+#[path = "state_setup_post_options.rs"]
+mod setup_post_options;
 #[path = "state_fixture.rs"]
 mod fixture_view;
+#[path = "state_locate.rs"]
+mod locate_ui;
 #[path = "state_fixture_library.rs"]
 mod fixture_library;
 pub use fixture_library::{FixtureLibDialog, InsertFixtureDraft, LibraryRow, SaveFixtureDraft};
@@ -161,6 +165,12 @@ pub enum CommandKind {
         own: bool,
     },
     SetupOwnPost {
+        setup: String,
+        own: bool,
+    },
+    /// #389: a setup takes its own post options (a copy of what it posts
+    /// with now) or follows the document's again (`SetSetupPostOptions`).
+    SetupOwnPostOptions {
         setup: String,
         own: bool,
     },
@@ -317,11 +327,13 @@ pub enum CommandKind {
         slot: Option<usize>,
     },
     /// Turn the part in a setup (#326): about X, then Y, then Z, degrees,
-    /// about the centre of the parts' bounds. All zero is "As modelled".
+    /// about `pivot` (#606: the setup's WCS origin, or the centre of the
+    /// parts' bounds - the presets'). All zero is "As modelled".
     /// Undoable (`AlignPartToSetup`). Never touches the work offset.
     AlignPart {
         setup: String,
         angles: [f64; 3],
+        pivot: camcraft_app::setup_turn::TurnPivot,
     },
     /// Place a setup relative to another (#316): `to` the setup it is a
     /// re-clamp of, turned by `angles` (about X, then Y, then Z, degrees)
@@ -352,6 +364,15 @@ pub enum CommandKind {
     TurnPartInPlane {
         setup: String,
         axes: camcraft_app::pick::InPlaneAxes,
+    },
+    /// Lay the part on a G17 / G18 / G19 plane through three picked
+    /// points (#555), read by the app through the face pick's apply
+    /// path; optionally the 3-2-1 frame. Undoable (`AlignPartToSetup`).
+    /// Never touches the work offset.
+    LayPartOnPoints {
+        setup: String,
+        picks: Vec<camcraft_app::operation::GeoSel>,
+        lay: camcraft_app::pick::PointsLay,
     },
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
@@ -386,6 +407,12 @@ pub enum CommandKind {
     },
     DeleteFixture(String),
     ImportFixtureDialog,
+    /// Locate the part in a fixture, or the fixture on the part, by mates
+    /// (#561): one undoable `Locate` (`LocatePart` / `LocateFixture`).
+    Locate {
+        spec: camcraft_app::fixture_locate::LocateSpec,
+        mover: camcraft_app::fixture_locate::Mover,
+    },
     /// #339 slice 6: open the fixture library's Save / Insert dialog over
     /// a setup's Fixtures node (`""` - the implicit setup). View state;
     /// saving and deleting entries are confirmed file edits, not undo
@@ -428,6 +455,11 @@ pub enum CommandKind {
     /// the save-dialog law; the path arm is what headless tests run.
     SetupSheetDialog,
     SetupSheetFile(PathBuf),
+    /// #389: one setup's tool list (`None` - the implicit setup) as CSV
+    /// or text, the sheet's law: a view, no history. Dialog arm and the
+    /// headless path arm.
+    ToolListExportDialog(Option<String>),
+    ToolListExportFile { setup: Option<String>, path: PathBuf },
     /// M7.2 D: what the program leaves, as binary STL - the traced
     /// stock's field iso-extracted. A view of the document like the
     /// sheet: no command, no history; dialog arm and headless path arm.
@@ -1371,9 +1403,20 @@ pub struct State {
     /// The Setups page's lay-on-a-plane draft (#330); `Some` routes
     /// Face picks into it ahead of the boundary and the selection.
     pub plane_pick: Option<crate::plane_pick::PlanePick>,
+    /// The locate-in-fixture mate draft (#561); `Some` routes Face and
+    /// Vertex picks into it ahead of everything else.
+    pub locate_pick: Option<crate::locate_pick::LocateDraft>,
+    /// Was the locate form drawn this frame? Reset before the dock, set
+    /// by the form; a draft whose form is off screen is dropped after
+    /// the dock (`locate_pick::sweep`) - a kept draft must never capture
+    /// picks with no form to show them (review of #566).
+    pub locate_form_drawn: bool,
     /// The Setups page's axes-in-the-plane draft (#557); while it is
     /// collecting, Edge/Vertex picks land in it ahead of everything else.
     pub axis_pick: Option<crate::axis_pick::AxisDraft>,
+    /// The Setups page's three-points draft (#555); `Some` routes Vertex
+    /// picks into it (and refuses faces and edges by name).
+    pub points_pick: Option<crate::points_pick::PointsPick>,
     /// The axes-in-the-plane rows were drawn this frame (#557): a
     /// feature click with no axis armed says what to do, never falls
     /// through to the operation pick.
@@ -1574,7 +1617,10 @@ impl State {
             geo_pick: GeoPick::Model,
             boundary_pick: None,
             plane_pick: None,
+            locate_pick: None,
+            locate_form_drawn: false,
             axis_pick: None,
+            points_pick: None,
             axis_rows_shown: false,
             setup_pick_rows: Vec::new(),
             boundary_view: Default::default(),
@@ -2606,6 +2652,7 @@ impl State {
             CommandKind::LoadBuiltinMachine(name) => self.mount_builtin(&name),
             CommandKind::SetupOwnMachine { setup, own } => self.own_machine(&setup, own),
             CommandKind::SetupOwnPost { setup, own } => self.own_post(&setup, own),
+            CommandKind::SetupOwnPostOptions { setup, own } => self.own_post_options(&setup, own),
             CommandKind::EditMachineDialog => {
                 let (path, m) = machine::of(&self.world);
                 match m {
@@ -2636,14 +2683,10 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
-            CommandKind::SetPostOptions(next) => match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
-                Ok(command) => {
-                    self.history.execute(&self.world, command);
-                    self.doc_version += 1;
-                    self.status = "post options set".into();
-                }
-                Err(err) => self.refuse(ErrorScope::Setup, format!("post options not set: {err}")),
-            },
+            // #389: routed to the active setup's own options when it has them.
+            CommandKind::SetPostOptions(next) => {
+                self.route_post_options(next, "post options set", "post options not set", ErrorScope::Setup);
+            }
             CommandKind::SelectTheme(next) => self.select_theme(next),
             CommandKind::SelectColorVision(next) => self.select_color_vision(next),
             CommandKind::SelectThemeDialog => {
@@ -2903,18 +2946,8 @@ impl State {
             CommandKind::ProgramEntry(verb) => self.program_entry_verb(verb),
             CommandKind::SetSkipStops(skip) => {
                 let next = camcraft_app::schema::PostOptions { skip_stops: skip, ..posting::post_options(&self.world) };
-                match camcraft_app::commands::SetPostOptions::new(&self.world, next) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = if skip {
-                            "post skips every pause and home".to_owned()
-                        } else {
-                            "post writes the operations' pauses and homes".to_owned()
-                        };
-                    }
-                    Err(err) => self.refuse(ErrorScope::Operation, format!("post options not changed: {err}")),
-                }
+                let done = if skip { "post skips every pause and home" } else { "post writes the operations' pauses and homes" };
+                self.route_post_options(next, done, "post options not changed", ErrorScope::Operation);
             }
             CommandKind::ChangeOperationKind { name, kind } => {
                 match ChangeOperationKind::new(&self.world, &name, kind) {
@@ -3106,8 +3139,8 @@ impl State {
                     }
                 }
             }
-            CommandKind::AlignPart { setup, angles } => {
-                match AlignPartToSetup::angles(&self.world, &setup, angles) {
+            CommandKind::AlignPart { setup, angles, pivot } => {
+                match AlignPartToSetup::turn(&self.world, &setup, angles, pivot) {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
                         self.doc_version += 1;
@@ -3167,6 +3200,23 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("part not laid on the plane: {err}"));
+                    }
+                }
+            }
+            CommandKind::LayPartOnPoints { setup, picks, lay } => {
+                match AlignPartToSetup::lay_on_points(&self.world, &setup, &picks, lay) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.points_pick = None;
+                        self.status = format!(
+                            "{setup} part laid on {} through three points: {}",
+                            camcraft_app::pick::plane_label(lay.lay.plane),
+                            crate::egui_app::align_text(camcraft_app::setup_align::stored(&self.world, &setup))
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("part not laid on the three points: {err}"));
                     }
                 }
             }
@@ -3266,6 +3316,7 @@ impl State {
                     }
                 }
             }
+            CommandKind::Locate { spec, mover } => self.dispatch_locate(&spec, mover),
             CommandKind::DeleteFixture(name) => match DeleteFixture::new(&self.world, &name) {
                 Ok(command) => {
                     self.history.execute(&self.world, command);
@@ -3351,6 +3402,8 @@ impl State {
                 }
             }
             CommandKind::SetupSheetFile(path) => self.setup_sheet_path(path),
+            CommandKind::ToolListExportDialog(setup) => self.tool_list_export_dialog(setup),
+            CommandKind::ToolListExportFile { setup, path } => self.tool_list_export_path(setup.as_deref(), &path),
             CommandKind::ExportStockDialog => {
                 if let Some(path) = save_stl_dialog() {
                     self.export_stock_path(path);

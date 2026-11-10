@@ -660,7 +660,11 @@ pub(crate) fn shell_layout(
     // no frame where a hidden draft takes a click.
     if !layout::is_shown(dock, &Tab::Properties) {
         crate::axis_pick::disarm_all(state);
+        // #673: the locate draft's form is on that pane too - dropped
+        // here, before the dock routes a viewport release to it.
+        crate::locate_pick::disarm(state);
     }
+    state.locate_form_drawn = false;
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
             .style(DockStyle::from_egui(ui.style().as_ref()))
@@ -675,6 +679,8 @@ pub(crate) fn shell_layout(
                 left_press,
             });
     });
+    // A locate draft whose form the dock did not draw is dropped (#566).
+    crate::locate_pick::sweep(state);
     crate::axis_pick::disarm_hidden(state); // #664/#667: undrawn rows' picks stop
     // Last, so it floats over the dock: the M1.4 graphical tool editor.
     // An in-app egui::Window - this is the shell's only kind of extra

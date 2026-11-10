@@ -154,10 +154,36 @@ fn degenerate_input_refuses_cleanly() {
     }
     // A half-built pocket (floor and one wall, no top): nothing to read
     // as a pocket, and no panic on its open rims.
+    // #718: an open shell's inside cannot be told from its outside, so it
+    // is refused by name, never read.
     let mut torn = pocket_block(4.0).facets.to_vec();
     torn.truncate(torn.len() / 3);
     let (world, _h) = world_with(Mesh::from_facets(torn));
-    assert!(recognize::pockets_of(&world, "part").is_ok());
+    let e = recognize::pockets_of(&world, "part").expect_err("an open shell is refused");
+    assert!(e.contains("'part'") && e.contains("open body"), "{e}");
+}
+
+/// Every facet wound the other way: the body's outside is now its inside.
+fn reversed(mesh: &Mesh) -> Mesh {
+    Mesh::from_facets(mesh.facets.iter().map(|t| Triangle::new(t.a, t.c, t.b)).collect())
+}
+
+/// #718 (the review of #512): an inside-out cube's bottom face "faces up"
+/// and its outer walls "lean in", so without the winding verdict its own
+/// outline read as a part-deep closed pocket - a Pocket over the whole
+/// footprint, cut to the base. It is refused by name; so is a reversed
+/// pocketed block.
+#[test]
+fn an_inside_out_mesh_is_refused_never_read_as_a_pocket() {
+    let cube = cube(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
+    for (label, mesh) in [("cube", reversed(&cube)), ("pocket block", reversed(&pocket_block(4.0)))] {
+        let (world, _h) = world_with(mesh);
+        let e = recognize::pockets_of(&world, "part").expect_err(label);
+        assert!(e.contains("'part'") && e.contains("inside-out"), "{label}: {e}");
+    }
+    // The same block wound outward still reads its one pocket.
+    let (world, _h) = world_with(pocket_block(4.0));
+    assert_eq!(recognize::pockets_of(&world, "part").map(|v| v.len()), Ok(1));
 }
 
 fn machine(world: &World, h: &mut History, p: &Pocket, tool: &str, name: &str) -> OpParams {

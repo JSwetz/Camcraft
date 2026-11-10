@@ -11,12 +11,16 @@ pub mod feature_arc;
 pub mod feature_graph;
 pub mod feature_pick;
 pub mod feature_sel;
+// #561: face / point datums for the fixture locate mates.
+pub mod mate;
 pub mod plane;
+pub mod points;
 pub mod winding;
 
 pub use align::{Alignment, align_321};
 pub use axis::{AxisPick, InPlaneAxes, InPlaneAxis, in_plane_turn_deg, pick_coords, turn_in_plane};
 pub use plane::{PlaneLay, lay_on_plane, plane_label, plane_side};
+pub use points::{PointsLay, lay_on_points, points_side};
 pub use face::{FaceOrigin, face_origin, facets_centroid};
 pub use feature_arc::ArcCentre;
 pub use feature_graph::{
@@ -29,6 +33,7 @@ pub use feature_pick::{
 pub use feature_sel::{
     EdgeUnit, check_pickable, feature_chains, graph_of, is_feature_chain, pick_selection, selection_of,
 };
+pub use mate::{MateDatum, mate_datum};
 
 use flecs_ecs::prelude::World;
 

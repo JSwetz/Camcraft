@@ -13,6 +13,14 @@
   raycast face pick, and vertex_pick's `nearest_vertex`, `sight_origin` and
   `vertex_nearest` (its candidates were every endpoint of `Features::edges`).
 - **Kinds per picker:**
+  - Fixture locate draft (#561, merged from main): faces and points
+    together (Face mode), points only in Vertex mode; Edge mode keeps its
+    edges so `locate_pick::take` refuses one by name, as on main. It is
+    routed first, before every other draft (main's order).
+  - Three-points plane draft (#555, merged from main): it arms Vertex
+    mode, so points; the kinds follow the pick mode, so a face or edge
+    picked in another mode still reaches `points_pick::take` and is
+    refused by name. Routed second.
   - Plane row: faces only (#554), whatever the mode.
   - Axis by edge: edges only (a run). Axis by two points: points only.
   - Operation geometry in Face mode: faces. In Edge mode: edges, and the
@@ -69,8 +77,6 @@
   - Edges and points behind the part can no longer be picked: the Edge-mode
     pick had no occlusion test at all before.
 - **Not here:**
-  - Fixture locate (#561) is unmerged, in PR #566. It must call
-    `feature_click`/`pick_selection` when it lands.
   - Round-edge centres are not stored by any page yet, so no `FeatureSel`
     variant was added.
   - The WCS anchor markers stay a screen-space marker pick: they are

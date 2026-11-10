@@ -51,7 +51,9 @@ impl Ask {
     }
 }
 
-/// The kinds the armed tool accepts: the Setups page rows first (the plane
+/// The kinds the armed tool accepts: a fixture locate draft first (faces
+/// and points, #561), then the three-points plane (by pick mode, #555),
+/// then the Setups page rows (the plane
 /// takes faces only, #554; an axis one straight edge or two points, #557),
 /// else the pick mode (Edge falls back to the face between the edges). A
 /// boundary and an axis take one run per edge click; Alt one segment.
@@ -63,7 +65,25 @@ pub(crate) fn ask(state: &State, mods: Mods) -> Ask {
     } else {
         EdgeUnit::Chain
     };
-    let kinds = if crate::plane_pick::collecting(state) {
+    let mode = match state.geo_pick {
+        GeoPick::Edge => PickKinds { faces: true, ..PickKinds::EDGES },
+        GeoPick::Vertex => PickKinds::POINTS,
+        GeoPick::Face | GeoPick::Model => PickKinds::FACES,
+    };
+    let kinds = if state.locate_pick.is_some() {
+        // #561: a mate is a face or a point, whichever is under the
+        // cursor. Edge mode keeps its edges so `locate_pick::take` can
+        // refuse one by name; Vertex mode stays points only.
+        match state.geo_pick {
+            GeoPick::Vertex => PickKinds::POINTS,
+            _ => PickKinds { points: true, ..mode },
+        }
+    } else if state.points_pick.is_some() {
+        // #555: three points (it arms Vertex mode). A face or an edge
+        // picked in another mode still reaches `points_pick::take`,
+        // which refuses it by name.
+        mode
+    } else if crate::plane_pick::collecting(state) {
         PickKinds::FACES
     } else if let Some(by) = state.axis_pick.as_ref().and_then(|d| d.picking.map(|a| d.by(a))) {
         match by {
@@ -71,11 +91,7 @@ pub(crate) fn ask(state: &State, mods: Mods) -> Ask {
             AxisBy::Points => PickKinds::POINTS,
         }
     } else {
-        match state.geo_pick {
-            GeoPick::Edge => PickKinds { faces: true, ..PickKinds::EDGES },
-            GeoPick::Vertex => PickKinds::POINTS,
-            GeoPick::Face | GeoPick::Model => PickKinds::FACES,
-        }
+        mode
     };
     Ask { kinds, unit: chain }
 }
@@ -122,7 +138,8 @@ pub(crate) fn hover(state: &mut State, p: [f32; 2]) {
 }
 
 /// A Face/Edge/Vertex click: resolve it by the one rule, then hand it to
-/// whoever collects - an axis or plane row, the stray-click hint, a
+/// whoever collects - in main's order: a fixture locate draft, the
+/// three-points plane, an axis or plane row, the stray-click hint, a
 /// boundary, or the open operation's geometry (edges through the edge
 /// pick's Ctrl/Shift law, faces and points straight into the list).
 pub(crate) fn click(state: &mut State, p: [f32; 2], mods: Mods) {
@@ -139,6 +156,14 @@ pub(crate) fn click(state: &mut State, p: [f32; 2], mods: Mods) {
         return;
     };
     let pick = GeoSel { entity: found.entity, feature };
+    if state.locate_pick.is_some() {
+        crate::locate_pick::take(state, pick); // #561: the locate mates; refuses an edge by name
+        return;
+    }
+    if state.points_pick.is_some() {
+        crate::points_pick::take(state, pick); // #555: refuses a face or an edge by name
+        return;
+    }
     if crate::axis_pick::collecting(state) {
         crate::axis_pick::take(state, pick); // #557
         return;

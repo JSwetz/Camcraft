@@ -40,7 +40,7 @@ fn another_setups_wcs_triad_rides_the_part_into_the_shown_setup() {
     run(&mut state, CommandKind::SetStock { shape, pos: [0.0; 3], yaw_deg: 0.0 });
     run(&mut state, CommandKind::SetWcs { pos: CORNER, roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 });
     run(&mut state, CommandKind::ActivateSetup(Some("Setup2".into())));
-    run(&mut state, CommandKind::AlignPart { setup: "Setup2".into(), angles: [0.0, 0.0, 90.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup2".into(), angles: [0.0, 0.0, 90.0], pivot: Default::default() });
     let a2 = camcraft_app::setup_align::stored(&state.world, "Setup2").expect("Setup2 holds the part turned");
     let c = transform_point(Point3::new(CORNER[0], CORNER[1], CORNER[2]), a2.pos, a2.rot);
     let want = [c.x, c.y, c.z];
