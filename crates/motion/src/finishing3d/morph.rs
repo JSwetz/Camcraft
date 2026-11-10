@@ -175,7 +175,7 @@ pub fn morph(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenErr
     let sups = build_sups(facets, r);
     let zs = levels(p, r, facets)?;
     let ds = dirs(r, p.tolerance);
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut last = Some(p.clearance_z);
     let mut emitted = emit_rings(&mut b, p, r, facets, &zs, &ds, &mut last)?;
     // The loft family. Grounded like every march: the XY is the

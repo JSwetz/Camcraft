@@ -2,7 +2,7 @@
 //! adds the optional G2/G3 row-end reversal blends - provenance in
 //! `blend.rs` (RS-274 / ISO 6983 circular interpolation, path filleting).
 
-use crate::cl::{Move, MoveKind, PathBuilder, Toolpath};
+use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
@@ -203,7 +203,7 @@ pub fn face_over(
     // on the clearance plane, so the post's first motion after the tool
     // call is a G00 there - never a feed from wherever the tool change
     // left the spindle. Facing starts the cursor where the others do.
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     b.push(MoveKind::Rapid, Point3::new(entry, ys[0], p.clearance_z), None);
     for n in blend_notes {
         b.note(n);
@@ -269,16 +269,7 @@ pub fn face_over(
     let at = b.at();
     b.push(MoveKind::Rapid, Point3::new(at.x, at.y, p.clearance_z), None);
 
-    let mut path = b.finish();
-    // An entry at exactly X0 Y0 is the cursor's own start, and the
-    // builder drops a zero-length move - so the approach is stated
-    // outright there, a rapid that commands the start on the clearance
-    // plane before the plunge (#690). No other face move indexes past
-    // it: facing records no comps, cycles or threads.
-    if path.moves.first().is_some_and(|m| m.kind != MoveKind::Rapid) {
-        let start = Point3::new(entry, ys[0], p.clearance_z);
-        path.moves.insert(0, Move::new(MoveKind::Rapid, start, start, None));
-    }
+    let path = b.finish();
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
