@@ -37,6 +37,7 @@ pub const BUILTINS: &[(&str, &str)] = &[
     ("Heidenhain", include_str!("../../../assets/posts/heidenhain.cps")),
     ("Mazak", include_str!("../../../assets/posts/mazak.cps")),
     ("Tormach PathPilot", include_str!("../../../assets/posts/tormach.cps")),
+    ("Makera Carvera", include_str!("../../../assets/posts/carvera.cps")),
     ("Fanuc Lathe", include_str!("../../../assets/posts/fanuc-lathe.cps")),
 ];
 
@@ -147,6 +148,9 @@ pub const MACHINES: &[(&str, &str)] = &[
     ("Tormach 15L Slant-PRO", include_str!("../../../assets/machines/tormach-15l-slant-pro.mch")),
     // #619: the 15LX (UM10860 §3.1).
     ("Tormach 15LX Slant-PRO", include_str!("../../../assets/machines/tormach-15lx-slant-pro.mch")),
+    // #707: Makera's desktop mills, from Makera's product spec tables.
+    ("Makera Carvera", include_str!("../../../assets/machines/makera-carvera.mch")),
+    ("Makera Carvera Air", include_str!("../../../assets/machines/makera-carvera-air.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the
