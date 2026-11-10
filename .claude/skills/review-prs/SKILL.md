@@ -168,6 +168,18 @@ merge ready").
   verdicts; the next review that ends `merge-ready` sums every run on
   the PR so far (earlier rounds included).
 
+## 2d. Process PRs - version bump and announcement
+
+A PR that changes a process file (`AGENTS.md`, `.claude/agents/`,
+`.claude/skills/`, `scripts/gate.ps1`, `scripts/gate.sh`) must increment
+the integer in `.claude/PROCESS_VERSION` (AGENTS.md "Process changes bump
+`PROCESS_VERSION`"). The reviewer checks this; a missing bump is a
+requested change (`needs-rework`). When such a PR merges, whoever merges
+it comments on the pinned issue #681 (Process changes):
+`PROCESS_VERSION <n>` · PR #M · what changed · what a fork must do (usually
+"pull the process files", the command in the issue body). That comment is
+how fork maintainers subscribed to #681 hear about it.
+
 ## 3. Report
 
 One short line per PR: number, author, verdict, link to the posted review.
