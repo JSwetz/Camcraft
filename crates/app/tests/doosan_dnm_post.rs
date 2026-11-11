@@ -1,11 +1,11 @@
 //! Doosan DNM post processor tests (Issue #614).
 //!
 //! Verifies the Doosan DNM Fanuc 0i/31i-M dialect:
-//! - Through-spindle coolant (TSC) support (M88 or M8)
-//! - 4th-axis rotary table brake clamp/unclamp (M10/M11)
-//! - Fanuc AI Contour Control (AICC) high-speed smoothing (G05.1 Q1 / G05.1 Q0)
+//! - Through-spindle coolant (TSC) support (M88 or M8) and refusal when undeclared
+//! - 4th-axis rotary table brake clamp/unclamp (M10/M11 on separate blocks) and refusal when undeclared
+//! - Fanuc AI Contour Control (AICC) high-speed smoothing (G5.1 Q1 R<n> / G5.1 Q0) and bound enforcement
 //! - Chip conveyor start/stop (M31/M33)
-//! - Probing: standard Fanuc G31 skip and Renishaw Inspection Plus macros
+//! - Probing: standard Fanuc G31 skip and Renishaw Inspection Plus macros (G65 P9832 / P9833)
 //!
 //! Gate map: covers app::post (doosan-dnm.cps), app::posting.
 
@@ -104,7 +104,7 @@ SECTION END
 #[test]
 fn doosan_dnm_rotary_brake_clamp_unclamp() {
     let cps = dnm_post();
-    let mch = default_vmc();
+    let mch = dnm_machine();
 
     // Rotary table 4th-axis indexing move
     let stream_rotary = r#"; HSMW-CL v1 scale=0.001mm moves=4
@@ -118,26 +118,25 @@ Rapid 50000 0 10000 A180000
 Feed 0 0 -1000 F400000
 SECTION END
 "#;
-    let out = engine::run(&cps, &mch, stream_rotary).expect("posts rotary moves");
+    let options = serde_json::json!({ "rotaryBrake": true });
+    let out = engine::run_with(&cps, &mch, stream_rotary, &options).expect("posts rotary moves");
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     let lines: Vec<&str> = out.program.lines().collect();
 
     // Find the A90 move
     let idx_a90 = lines.iter().position(|l| l.contains("A90")).expect("A90 commanded");
-    // Verify unclamp M11 precedes A90 or is on A move
-    let prior_lines = &lines[..idx_a90];
-    assert!(
-        prior_lines.iter().any(|l| l.contains("M11")),
-        "M11 unclamp must precede rotary A positioning:\n{}",
-        out.program
-    );
-    // Verify clamp M10 is commanded after positioning
-    let post_lines = &lines[idx_a90..];
-    assert!(
-        post_lines.iter().any(|l| l.contains("M10")),
-        "M10 clamp must follow rotary A positioning before/with cutting:\n{}",
-        out.program
-    );
+    // Verify unclamp M11 is on its own block immediately preceding A90 motion
+    assert_eq!(lines[idx_a90 - 1].trim(), "M11", "M11 must be on its own line immediately before A90 move");
+    // Motion block must NOT combine with M10/M11
+    assert!(!lines[idx_a90].contains("M10") && !lines[idx_a90].contains("M11"), "Motion block must not contain clamp words");
+    // Verify clamp M10 is on its own block immediately following A90 motion
+    assert_eq!(lines[idx_a90 + 1].trim(), "M10", "M10 must be on its own line immediately after A90 move");
+
+    // Same check for the second index A180
+    let idx_a180 = lines.iter().position(|l| l.contains("A180")).expect("A180 commanded");
+    assert_eq!(lines[idx_a180 - 1].trim(), "M11", "M11 must be on its own line immediately before A180 move");
+    assert!(!lines[idx_a180].contains("M10") && !lines[idx_a180].contains("M11"), "Motion block must not contain clamp words");
+    assert_eq!(lines[idx_a180 + 1].trim(), "M10", "M10 must be on its own line immediately after A180 move");
 }
 
 #[test]
@@ -157,23 +156,30 @@ CYCLE DRILL X20000 Y10000 Z-5000 R2000 F200000
 Feed 30000 10000 -2000 F800000
 SECTION END
 "#;
+    // 1. Default smoothing level R5
     let options = serde_json::json!({ "smoothing": true });
     let out = engine::run_with(&cps, &mch, stream, &options).expect("posts smoothing");
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
 
     let lines: Vec<&str> = out.program.lines().collect();
 
-    // G05.1 Q1 engaged for high-speed cutting
-    assert!(lines.iter().any(|l| l.contains("G05.1 Q1")), "G05.1 Q1 must be armed:\n{}", out.program);
+    // G5.1 Q1 R5 engaged for high-speed cutting (default R5 per Doosan DNM sample)
+    assert!(lines.iter().any(|l| l.contains("G5.1 Q1 R5")), "G5.1 Q1 R5 must be armed:\n{}", out.program);
 
-    // G05.1 Q0 disabled before cycle
+    // G5.1 Q0 disabled before cycle
     let cycle_idx = lines.iter().position(|l| l.contains("G81")).expect("cycle present");
-    let smoothing_off = lines[..cycle_idx].iter().rposition(|l| l.contains("G05.1 Q0"));
+    let smoothing_off = lines[..cycle_idx].iter().rposition(|l| l.contains("G5.1 Q0"));
     assert!(
         smoothing_off.is_some(),
-        "G05.1 Q0 must precede canned drilling cycles:\n{}",
+        "G5.1 Q0 must precede canned drilling cycles:\n{}",
         out.program
     );
+
+    // 2. Custom bounded level R8
+    let options_r8 = serde_json::json!({ "smoothing": true, "smoothingLevel": 8 });
+    let out_r8 = engine::run_with(&cps, &mch, stream, &options_r8).expect("posts smoothing R8");
+    assert!(out_r8.warnings.is_empty(), "{:?}", out_r8.warnings);
+    assert!(out_r8.program.contains("G5.1 Q1 R8"), "G5.1 Q1 R8 must be emitted:\n{}", out_r8.program);
 }
 
 #[test]
@@ -217,11 +223,99 @@ SECTION END
     assert!(out_g31.warnings.is_empty(), "{:?}", out_g31.warnings);
     assert!(out_g31.program.contains("G31"), "standard probing uses G31:\n{}", out_g31.program);
     assert!(out_g31.program.contains("#3000=2(PROBE NO CONTACT)"));
+    assert!(!out_g31.program.contains("P9832"), "standard probing does not emit optical turn-on P9832");
 
-    // 2. Renishaw Inspection Plus macro style
+    // 2. Renishaw Inspection Plus macro style with optical turn-on (P9832) and turn-off (P9833)
     let options_insp = serde_json::json!({ "probingStyle": "inspection-plus" });
     let out_insp = engine::run_with(&cps, &mch, stream_g31, &options_insp).expect("posts inspection plus");
     assert!(out_insp.warnings.is_empty(), "{:?}", out_insp.warnings);
+    assert!(out_insp.program.contains("G65 P9832"), "Inspection Plus uses P9832 for probe optical turn-on:\n{}", out_insp.program);
     assert!(out_insp.program.contains("G65 P9810"), "Inspection Plus uses P9810 for protected positioning:\n{}", out_insp.program);
     assert!(out_insp.program.contains("G65 P9811"), "Inspection Plus uses P9811 for surface measurement:\n{}", out_insp.program);
+    assert!(out_insp.program.contains("G65 P9833"), "Inspection Plus uses P9833 for probe optical turn-off:\n{}", out_insp.program);
+
+    // Verify ordering: P9832 comes before P9810, and P9833 comes after P9811 before M5
+    let lines: Vec<&str> = out_insp.program.lines().collect();
+    let idx_turn_on = lines.iter().position(|l| l.contains("G65 P9832")).expect("P9832 present");
+    let idx_guard = lines.iter().position(|l| l.contains("G65 P9810")).expect("P9810 present");
+    let idx_touch = lines.iter().position(|l| l.contains("G65 P9811")).expect("P9811 present");
+    let idx_turn_off = lines.iter().position(|l| l.contains("G65 P9833")).expect("P9833 present");
+
+    assert!(idx_turn_on < idx_guard, "P9832 probe turn-on must precede P9810 positioning");
+    assert!(idx_guard < idx_touch, "P9810 positioning must precede P9811 touch");
+    assert!(idx_touch < idx_turn_off, "P9811 touch must precede P9833 probe turn-off");
+}
+
+#[test]
+fn doosan_dnm_refuses_undeclared_codes_by_name() {
+    let cps = dnm_post();
+    let vmc = default_vmc(); // lacks through-tool coolant and rotary A brake
+
+    // 1. Refusal when through-tool coolant is requested on machine without TSC declaration
+    let stream_tsc = r#"; HSMW-CL v1 scale=0.001mm moves=2
+PARAM Coolant through-tool
+PARAM WorkOffset G54
+TOOL 1 "10mm Flat Endmill"
+PARAM SpindleSpeed 6000
+SECTION FaceTSC
+Rapid 0 0 10000
+Feed 50000 0 -1000 F500000
+SECTION END
+"#;
+    let out_tsc = engine::run(&cps, &vmc, stream_tsc).expect("runs engine");
+    assert!(
+        out_tsc.warnings.iter().any(|w| w.contains("the machine states no through-tool coolant code")),
+        "must refuse undeclared through-tool coolant by name: {:?}",
+        out_tsc.warnings
+    );
+
+    // 2. Refusal when rotary table positioning is commanded without declared rotary brake codes
+    let stream_rotary = r#"; HSMW-CL v1 scale=0.001mm moves=2
+PARAM WorkOffset G54
+TOOL 1 "10mm Endmill"
+PARAM SpindleSpeed 5000
+SECTION RotaryIndex
+Rapid 0 0 10000 A90000
+SECTION END
+"#;
+    let out_rotary = engine::run(&cps, &vmc, stream_rotary).expect("runs engine");
+    assert!(
+        out_rotary.warnings.iter().any(|w| w.contains("rotary clamp/unclamp codes not declared")),
+        "must refuse undeclared rotary clamp by name: {:?}",
+        out_rotary.warnings
+    );
+
+    // 3. Refusal when probing style is unknown
+    let stream_probe = r#"; HSMW-CL v1 scale=0.001mm moves=2
+PARAM WorkOffset G54
+TOOL 99 "Touch Probe"
+SECTION ProbeTouch
+GUARD 0 0 5000 F 300000
+SECTION END
+"#;
+    let options_probe = serde_json::json!({ "probingStyle": "unknown-probe-macro" });
+    let out_probe = engine::run_with(&cps, &dnm_machine(), stream_probe, &options_probe).expect("runs engine");
+    assert!(
+        out_probe.warnings.iter().any(|w| w.contains("unknown probing style unknown-probe-macro")),
+        "must refuse unknown probing style by name: {:?}",
+        out_probe.warnings
+    );
+
+    // 4. Refusal when smoothing level is out of bounds (R1 to R10 required)
+    let stream_smooth = r#"; HSMW-CL v1 scale=0.001mm moves=2
+PARAM WorkOffset G54
+TOOL 1 "10mm Ball Endmill"
+PARAM SpindleSpeed 8000
+SECTION Finish
+Rapid 0 0 10000
+Feed 10000 10000 -2000 F800000
+SECTION END
+"#;
+    let options_smooth = serde_json::json!({ "smoothing": true, "smoothingLevel": 15 });
+    let out_smooth = engine::run_with(&cps, &dnm_machine(), stream_smooth, &options_smooth).expect("runs engine");
+    assert!(
+        out_smooth.warnings.iter().any(|w| w.contains("smoothing R level must be between 1 and 10")),
+        "must refuse out-of-range smoothing level by name: {:?}",
+        out_smooth.warnings
+    );
 }

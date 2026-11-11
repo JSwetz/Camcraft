@@ -1,13 +1,26 @@
-// Doosan DNM milling post (Fanuc 0i / 31i-M). Provenance: the G-code
-// dialect and Fanuc command structure from public ISO 6983 / RS-274
-// standards and published Fanuc 0i / 31i series operator manuals; Doosan
-// DNM machine conventions (Through-Spindle Coolant M8/M88, 4th-axis A
-// rotary clamp M10 / unclamp M11, Fanuc AICC AI contour control / high-speed
-// smoothing G05.1 Q1 / G05.1 Q0, chip conveyor M31 / M33) specced from
-// published Doosan Infracore / DN Solutions DNM series programming &
-// instruction manuals (behavior only, per this repo's Clean-Room Protocol).
-// No vendor script text; original work.
-description = "Doosan DNM (Fanuc 0i/31i-M, 3/4-axis mill, TSC, G05.1 AICC, rotary brake, G73/G81-G89, G2/G3, G98)";
+// Doosan DNM milling post (Fanuc 0i / 31i-M).
+// Provenance:
+// - Fanuc Series 0i-MODEL F Operator's Manual (B-64604EN-2/01):
+//   * Section 3.3 (p. 19/33, p. 20/34), Section 14.1 (p. 377-386): Machining Condition Selecting Function
+//     G5.1 Q1 Rx (R1 to R10), G5.1 Q0 (cancel). Requires Fanuc AICC I (A02B-0340-S603) or AICC II (A02B-0340-S605).
+//   * Section 3.3.2 (p. 22/36): Canned cycle cancel (G80) required, G5.1 Q0 required before drilling cycles (G73-G89).
+//   * G-code dialect and Fanuc command structure from public ISO 6983 / RS-274.
+// - Renishaw MP700 Probe System Installation and User's Guide (H-2000-5142-02-A):
+//   * Chapter 4 (p. 4-2 to 4-17): Optical machine start / turn on sequence G65 P9832 (probe on) and G65 P9833 (probe off).
+//   * Chapter 5: Renishaw Inspection Plus macros G65 P9810 (protected positioning) and G65 P9811 (surface measurement).
+// - Doosan DNM 4500/5700/6700 Instruction / Operation Manual & Specification:
+//   * Table 4-1 M-Code List:
+//     - M10: 4th-axis (A-axis) brake clamp
+//     - M11: 4th-axis (A-axis) brake unclamp
+//     - M88: High-Pressure Through-Spindle Coolant (TSC) ON
+//     - M89: High-Pressure Through-Spindle Coolant (TSC) OFF
+//     - M31: Chip conveyor forward
+//     - M33: Chip conveyor stop
+//     - M08: Flood coolant ON
+//     - M09: Coolant OFF
+// Clean-Room Protocol: Original clean-room work; behavior specced only from public manuals.
+// No vendor script text.
+description = "Doosan DNM (Fanuc 0i/31i-M, 3/4-axis mill, TSC, G5.1 AICC, rotary brake, G73/G81-G89, G2/G3, G98)";
 vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public Doosan DNM & Fanuc documentation only";
 certificationLevel = 1;
@@ -17,8 +30,6 @@ setCodePage = "utf-8";
 capabilities = 1; // reference contract: integer feature mask (bit 1 = milling)
 coolantModes = true; // reads PARAM Coolant (#112/#150): the engine refuses non-Flood ops for a post without it
 afterModes = true; // reads PARAM AfterOperation (#110): the engine refuses a stop or home ask for a post without it
-axisInversion = true; // verified on the engine's mirrored stream for an inverted X/Y (#374): goldens + equivalence test
-probeAxisInversion = true; // probing blocks verified on the mirrored stream (#392): macro interpreter on a simulated inverted machine
 
 // Determinism law: no timestamps, no randomness - the same stream
 // always posts to the same text (golden files depend on it).
@@ -49,8 +60,13 @@ var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs)
 
 // Doosan DNM specific features:
 var rotaryAClamped = true;       // A-axis rotary brake state: true = M10 clamped, false = M11 unclamped
-var smoothingArmed = false;      // G05.1 Q1 requested for this section
-var smoothingActive = false;     // G05.1 Q1 actively engaged in output
+var rotaryRefused = false;       // counted warning once for undeclared rotary clamp codes
+var smoothingArmed = false;      // G5.1 Q1 requested for this section
+var smoothingActive = false;     // G5.1 Q1 actively engaged in output
+var smoothingLevel = 5;          // Machining condition selection R1..R10 (default R5 per DNM sample)
+var smoothingRefused = false;    // counted warning once for out-of-range smoothing level
+var probeTurnedOn = false;       // G65 P9832 optical turn-on state for Inspection Plus
+var probeStyleRefused = false;   // counted warning once for unknown probing style
 var chipConveyorStarted = false; // M31 chip conveyor running
 
 // ------------------------------------------------------------ helpers
@@ -85,69 +101,132 @@ function msg(s) {  // counted warning where the host offers message()
 
 // ------------------------------------------------ Rotary Brake (M10/M11)
 // Doosan DNM 4th-axis rotary table brake control:
+// Manual reference: Doosan DNM Series Instruction Manual Table 4-1
 // M11 = Unclamp A-axis brake before rotating
-// M10 = Clamp A-axis brake before cutting
-function ensureRotaryUnclamped() {
-  if (rotaryAClamped) {
-    block(["M11"]);
-    rotaryAClamped = false;
+// M10 = Clamp A-axis brake before cutting / after positioning
+function getRotaryCodes() {
+  var clamp = "", unclamp = "";
+  if (typeof postOptions !== "undefined") {
+    if (postOptions.rotaryClamp) clamp = String(postOptions.rotaryClamp);
+    if (postOptions.rotaryUnclamp) unclamp = String(postOptions.rotaryUnclamp);
+    if (!clamp && !unclamp && postOptions.rotaryBrake) {
+      clamp = "M10";
+      unclamp = "M11";
+    }
   }
-}
-function ensureRotaryClamped() {
-  if (!rotaryAClamped) {
-    block(["M10"]);
-    rotaryAClamped = true;
+  if (typeof properties !== "undefined") {
+    if (properties.rotaryClamp) clamp = String(properties.rotaryClamp);
+    if (properties.rotaryUnclamp) unclamp = String(properties.rotaryUnclamp);
+    if (!clamp && !unclamp && properties.rotaryBrake) {
+      clamp = "M10";
+      unclamp = "M11";
+    }
   }
+  return { clamp: clamp, unclamp: unclamp };
 }
 
-// --------------------------------------- High-Speed Smoothing (G05.1 Q1)
-// Fanuc AI Contour Control (AICC) on Doosan DNM:
-// G05.1 Q1 enables lookahead and contour smoothing.
-// G05.1 Q0 disables smoothing before cycles, tool changes, probing, or M30.
-function isSmoothingRequested() {
-  if (typeof postOptions !== "undefined") {
-    if (postOptions.smoothing === true || postOptions.Smoothing === true) return true;
-    if (postOptions.smoothing === false || postOptions.Smoothing === false) return false;
+function ensureRotaryUnclamped() {
+  if (!rotaryAClamped) return;
+  var rc = getRotaryCodes();
+  if (!rc.unclamp) {
+    if (!rotaryRefused) {
+      rotaryRefused = true;
+      msg("rotary clamp/unclamp codes not declared for this machine or post options");
+    }
+    return;
   }
-  if (typeof properties !== "undefined" && properties.smoothing !== undefined) {
-    return Boolean(properties.smoothing);
-  }
-  // Enabled by default on 3D finishing or when explicitly requested
-  return false;
+  block([rc.unclamp]);
+  rotaryAClamped = false;
 }
+
+function ensureRotaryClamped() {
+  if (rotaryAClamped) return;
+  var rc = getRotaryCodes();
+  if (!rc.clamp) {
+    if (!rotaryRefused) {
+      rotaryRefused = true;
+      msg("rotary clamp/unclamp codes not declared for this machine or post options");
+    }
+    return;
+  }
+  block([rc.clamp]);
+  rotaryAClamped = true;
+}
+
+// --------------------------------------- High-Speed Smoothing (G5.1 Q1 Rx)
+// Fanuc AI Contour Control (AICC / Nano Smoothing) on Doosan DNM:
+// Manual reference: FANUC Series 0i-MODEL F Operator's Manual (B-64604EN-2/01)
+// - Section 3.3 (p. 19/33, p. 20/34), Section 14.1 (p. 377-386):
+//   G5.1 Q1 Rx enables AICC with machining condition selection (R1 to R10).
+//   Level 1 = roughing / high-speed, Level 10 = fine finishing / high-precision.
+//   Default R5 per Doosan DNM sample program.
+//   G5.1 Q0 cancels the mode.
+// - Section 3.3.2 (p. 22/36): Canned drilling cycles (G73-G89) cannot execute
+//   with AICC active; G5.1 Q0 must precede them.
+function checkSmoothing() {
+  var want = false;
+  var lvl = null;
+  if (typeof postOptions !== "undefined") {
+    if (postOptions.smoothing === true || postOptions.Smoothing === true) want = true;
+    if (postOptions.smoothing === false || postOptions.Smoothing === false) want = false;
+    if (has(postOptions.smoothingLevel)) lvl = Number(postOptions.smoothingLevel);
+    else if (has(postOptions.SmoothingLevel)) lvl = Number(postOptions.SmoothingLevel);
+  }
+  if (typeof properties !== "undefined") {
+    if (properties.smoothing === true || properties.Smoothing === true) want = true;
+    if (has(properties.smoothingLevel)) lvl = Number(properties.smoothingLevel);
+  }
+  if (typeof smoothTol !== "undefined" && smoothTol > 0) want = true;
+
+  if (lvl !== null) {
+    if (lvl < 1 || lvl > 10 || !isFinite(lvl) || Math.floor(lvl) !== lvl) {
+      if (!smoothingRefused) {
+        smoothingRefused = true;
+        msg("smoothing R level must be between 1 and 10, got " + lvl);
+      }
+      return false;
+    }
+    smoothingLevel = lvl;
+  } else {
+    smoothingLevel = 5;
+  }
+  return want;
+}
+
 function enableSmoothing() {
   if (smoothingArmed && !smoothingActive) {
-    block(["G05.1", "Q1"]);
+    block(["G5.1", "Q1", "R" + smoothingLevel]);
     smoothingActive = true;
   }
 }
+
 function disableSmoothing() {
   if (smoothingActive) {
-    block(["G05.1", "Q0"]);
+    block(["G5.1", "Q0"]);
     smoothingActive = false;
   }
 }
 
 // ------------------------------------------------------ RTCP & 4th Axis
-function tilt(p, isRapid) {  // words to append, [] if none, null if refused
+function tilt(p) {  // words to append, [] if none, null if refused
   if (!has(p.A)) return [];
   if (typeof machine === "undefined" || machine.rtcp !== true) {
-    // 4th-axis rotary positioning on Doosan DNM (M11 unclamp, A position, M10 clamp)
-    var rotWords = [];
-    var aChanged = !has(lastA) || p.A !== lastA;
-    if (aChanged) {
-      ensureRotaryUnclamped();
-      rotWords.push("A" + fu(p.A));
-      lastA = p.A;
-      if (isRapid) {
-        // Clamp immediately after rapid positioning for 3-axis machining
-        rotWords.push("M10");
-        rotaryAClamped = true;
+    var rc = getRotaryCodes();
+    if (!rc.clamp || !rc.unclamp) {
+      if (!rotaryRefused) {
+        rotaryRefused = true;
+        msg("rotary clamp/unclamp codes not declared for this machine or post options");
       }
+      return null;
     }
     if (has(p.B) && p.B !== 0) {
       if (!tiltRefused) { tiltRefused = true; msg("tilted move on a machine without a tilting rotary"); }
       return null;
+    }
+    var rotWords = [];
+    var aChanged = !has(lastA) || p.A !== lastA;
+    if (aChanged) {
+      rotWords.push("A" + fu(p.A));
     }
     return rotWords;
   }
@@ -232,7 +311,9 @@ function coolantFor(ask) {
     var useM8 = false;
     if (typeof postOptions !== "undefined" && postOptions.useM8ForTSC) useM8 = true;
     if (typeof properties !== "undefined" && properties.useM8ForTSC) useM8 = true;
-    return useM8 ? "M8" : "M88";
+    if (useM8) return "M8";
+    msg(coolantWho() + "the machine states no through-tool coolant code - pick another coolant for the operation or add it to the machine");
+    return "";
   }
   msg(coolantWho() + "the machine states no " + ask + " coolant code - pick another coolant for the operation or add it to the machine");
   return "";
@@ -324,6 +405,8 @@ function onOpen() {
 }
 
 function onParameter(name, value) {
+  if (name === "Smoothing") { smoothTol = Number(value) || 0; return; }
+  if (name === "SmoothingLevel") { smoothingLevel = Number(value) || 5; return; }
   commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
@@ -378,8 +461,8 @@ function startPreamble() {
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
 
-  // High-speed smoothing arm
-  smoothingArmed = isSmoothingRequested();
+  // High-speed smoothing arm (Fanuc AICC G5.1 Q1 Rx)
+  smoothingArmed = checkSmoothing();
   if (smoothingArmed) enableSmoothing();
 }
 
@@ -403,6 +486,7 @@ function afterOp() {
 function endPreamble() {
   if (!sectionOpen) return;
   restorePlane();
+  ensureProbeOff();
   disableSmoothing();
   ensureRotaryClamped();
   sectionOpen = false;
@@ -414,7 +498,7 @@ function endPreamble() {
   }
   wearNoted = false;
   if (coolant) {
-    if (coolant === "M88") block(["M89"]); // TSC pump off
+    if (coolant === "M88") block(["M89"]); // TSC pump off (Doosan DNM manual Table 4-1)
     block(["M9"]);                         // Main coolant off
   }
   coolant = "";
@@ -432,15 +516,28 @@ function onSectionEnd() { endPreamble(); }
 function onRapid() {
   startPreamble();
   compRefuse("a rapid");
-  var tw = tilt(properties, true);
+  var aChanged = has(properties.A) && (!has(lastA) || properties.A !== lastA);
+  var tw = tilt(properties);
   if (tw === null || inCycle) return;
+  if (aChanged) {
+    ensureRotaryUnclamped();
+  }
   block(["G00"].concat(xyz(properties), tw));
+  if (aChanged) {
+    lastA = properties.A;
+    ensureRotaryClamped();
+  }
 }
 function onLinear() {
   startPreamble();
   enableSmoothing();
-  var tw = tilt(properties, false);
+  var aChanged = has(properties.A) && (!has(lastA) || properties.A !== lastA);
+  var tw = tilt(properties);
   if (tw === null || inCycle) return;
+  if (aChanged) {
+    ensureRotaryUnclamped();
+    lastA = properties.A;
+  }
   var cg = compG, cd = compD;
   compG = ""; compD = "";
   block([compPlaneWord(cg), "G01", cg].concat(xyz(properties), [cd], tw, [fw(properties.FeedRate)]));
@@ -449,8 +546,13 @@ function onCircular() {
   startPreamble();
   compRefuse("an arc");
   enableSmoothing();
-  var tw = tilt(properties, false);
+  var aChanged = has(properties.A) && (!has(lastA) || properties.A !== lastA);
+  var tw = tilt(properties);
   if (tw === null || inCycle) return;
+  if (aChanged) {
+    ensureRotaryUnclamped();
+    lastA = properties.A;
+  }
   var p = properties;
   if (compPlaneRefuse(planeOf(p))) return;
   block([
@@ -463,7 +565,7 @@ function onCircular() {
 // ------------------------------------------------------- canned cycles
 function onCycle() {
   startPreamble();
-  disableSmoothing(); // Fanuc requires G05.1 Q0 before canned drilling cycles
+  disableSmoothing(); // Fanuc requires G5.1 Q0 before canned drilling cycles (B-64604EN-2/01 p. 22)
   restorePlane();
   var p = properties;
   var ms = has(p.P) ? Math.round(p.P * 1000) : 0;
@@ -494,15 +596,50 @@ function onCycle() {
 
 // ------------------------------------------------------------ probing
 // Standard Fanuc G31 macro-B skip and Renishaw Inspection Plus support
+// Manual reference: Renishaw MP700 Guide (H-2000-5142-02-A) Chapter 4 & 5:
+// - G65 P9832: Probe On (optical transmission start)
+// - G65 P9833: Probe Off (optical transmission stop / sleep)
+// - G65 P9810: Protected positioning
+// - G65 P9811: Surface touch measurement
 var probeBase = 100;
+
+function isInspectionPlus() {
+  var style = "";
+  if (typeof postOptions !== "undefined" && postOptions.probingStyle !== undefined) {
+    style = String(postOptions.probingStyle);
+  } else if (typeof properties !== "undefined" && properties.probingStyle !== undefined) {
+    style = String(properties.probingStyle);
+  }
+  if (!style || style === "standard" || style === "g31") return false;
+  if (style === "inspection-plus") return true;
+  if (!probeStyleRefused) {
+    probeStyleRefused = true;
+    msg("unknown probing style " + style);
+  }
+  return false;
+}
+
+function ensureProbeOn() {
+  if (isInspectionPlus() && !probeTurnedOn) {
+    block(["G65", "P9832"]);
+    probeTurnedOn = true;
+  }
+}
+
+function ensureProbeOff() {
+  if (probeTurnedOn) {
+    block(["G65", "P9833"]);
+    probeTurnedOn = false;
+  }
+}
+
 function onProbeMove() {
   startPreamble();
   disableSmoothing();
   compRefuse("a probing move");
   var p = properties;
-  var useInspectionPlus = (typeof postOptions !== "undefined" && postOptions.probingStyle === "inspection-plus") ||
-                          (typeof properties !== "undefined" && properties.probingStyle === "inspection-plus");
-  if (useInspectionPlus) {
+  if (isInspectionPlus()) {
+    ensureProbeOn();
     // Renishaw Inspection Plus single surface touch macro
     var d = [Math.abs(p.X - p.ExpectX), Math.abs(p.Y - p.ExpectY), Math.abs(p.Z - p.ExpectZ)];
     var ai = d[0] >= d[1] && d[0] >= d[2] ? 0 : (d[1] >= d[2] ? 1 : 2);
@@ -533,9 +670,8 @@ function onProbeGuard() {
   disableSmoothing();
   compRefuse("a protected probe move");
   var p = properties;
-  var useInspectionPlus = (typeof postOptions !== "undefined" && postOptions.probingStyle === "inspection-plus") ||
-                          (typeof properties !== "undefined" && properties.probingStyle === "inspection-plus");
-  if (useInspectionPlus) {
+  if (isInspectionPlus()) {
+    ensureProbeOn();
     block(["G65", "P9810", wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ), fw(p.Feed)]);
     return;
   }
