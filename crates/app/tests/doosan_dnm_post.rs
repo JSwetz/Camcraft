@@ -9,7 +9,8 @@
 //!
 //! Gate map: covers app::post (doosan-dnm.cps), app::posting.
 
-use camcraft_app::post::engine;
+use camcraft_app::machine::parse_mch;
+use camcraft_app::post::{engine, machine};
 use std::path::{Path, PathBuf};
 
 fn repo(rel: &str) -> PathBuf {
@@ -27,7 +28,8 @@ fn dnm_post() -> String {
 }
 
 fn dnm_machine() -> serde_json::Value {
-    serde_json::from_str(&read("assets/machines/doosan-dnm.mch")).expect("dnm machine json")
+    let text = read("assets/machines/doosan-dnm.mch");
+    machine::mirror(&parse_mch(&text).expect("dnm machine parses"))
 }
 
 fn default_vmc() -> serde_json::Value {
@@ -196,7 +198,11 @@ Rapid 0 0 10000
 Feed 50000 0 -2000 F600000
 SECTION END
 "#;
-    let options = serde_json::json!({ "chipConveyor": true });
+    let options = serde_json::json!({
+        "chipConveyor": true,
+        "chipConveyorStart": "M31",
+        "chipConveyorStop": "M33"
+    });
     let out = engine::run_with(&cps, &mch, stream, &options).expect("posts conveyor");
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
 
@@ -317,5 +323,23 @@ SECTION END
         out_smooth.warnings.iter().any(|w| w.contains("smoothing R level must be between 1 and 10")),
         "must refuse out-of-range smoothing level by name: {:?}",
         out_smooth.warnings
+    );
+
+    // 5. Refusal when chip conveyor is commanded without declared codes
+    let stream_cc = r#"; HSMW-CL v1 scale=0.001mm moves=2
+PARAM WorkOffset G54
+TOOL 1 "10mm Endmill"
+PARAM SpindleSpeed 5000
+SECTION Cut
+Rapid 0 0 10000
+Feed 10000 0 0 F500000
+SECTION END
+"#;
+    let options_cc = serde_json::json!({ "chipConveyor": true });
+    let out_cc = engine::run_with(&cps, &dnm_machine(), stream_cc, &options_cc).expect("runs engine");
+    assert!(
+        out_cc.warnings.iter().any(|w| w.contains("chip conveyor codes not declared for this machine or post options")),
+        "must refuse undeclared chip conveyor codes by name: {:?}",
+        out_cc.warnings
     );
 }

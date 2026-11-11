@@ -122,7 +122,42 @@ function getRotaryCodes() {
       unclamp = "M11";
     }
   }
+  // If the machine declares an A rotary and is a Doosan DNM machine:
+  if (!clamp && !unclamp && typeof machine !== "undefined") {
+    var nm = (machine.name || machine.model || "").toLowerCase();
+    var hasA = false;
+    if (machine.rotaries && machine.rotaries.length > 0) {
+      for (var i = 0; i < machine.rotaries.length; i++) {
+        if (machine.rotaries[i].name === "A") hasA = true;
+      }
+    }
+    if (hasA && (nm.indexOf("doosan") >= 0 || nm.indexOf("dnm") >= 0)) {
+      clamp = "M10";
+      unclamp = "M11";
+    }
+  }
   return { clamp: clamp, unclamp: unclamp };
+}
+
+// --------------------------------------------- Chip Conveyor (M31/M33)
+// Manual reference: Doosan DNM Series Instruction Manual Table 4-1
+// chipConveyorStart (e.g. M31) / chipConveyorStop (e.g. M33)
+var conveyorRefused = false;
+function getChipConveyorCodes() {
+  var start = "", stop = "";
+  if (typeof postOptions !== "undefined") {
+    if (postOptions.chipConveyorStart) start = String(postOptions.chipConveyorStart);
+    if (postOptions.chipConveyorStop) stop = String(postOptions.chipConveyorStop);
+  }
+  if (typeof properties !== "undefined") {
+    if (properties.chipConveyorStart) start = String(properties.chipConveyorStart);
+    if (properties.chipConveyorStop) stop = String(properties.chipConveyorStop);
+  }
+  if (typeof machine !== "undefined") {
+    if (machine.chipConveyorStart) start = String(machine.chipConveyorStart);
+    if (machine.chipConveyorStop) stop = String(machine.chipConveyorStop);
+  }
+  return { start: start, stop: stop };
 }
 
 function ensureRotaryUnclamped() {
@@ -450,13 +485,22 @@ function startPreamble() {
     block(["S" + ff(sRpm), "M3"]);
     spindleWait = false;
   }
-  // Chip conveyor start (M31) if requested
+
+  // Chip conveyor start if requested
   var wantConveyor = false;
   if (typeof postOptions !== "undefined" && postOptions.chipConveyor) wantConveyor = true;
   if (typeof properties !== "undefined" && properties.chipConveyor) wantConveyor = true;
-  if (wantConveyor && !chipConveyorStarted) {
-    block(["M31"]);
-    chipConveyorStarted = true;
+  if (wantConveyor) {
+    var cc = getChipConveyorCodes();
+    if (!cc.start || !cc.stop) {
+      if (!conveyorRefused) {
+        conveyorRefused = true;
+        msg("chip conveyor codes not declared for this machine or post options");
+      }
+    } else if (!chipConveyorStarted) {
+      block([cc.start]);
+      chipConveyorStarted = true;
+    }
   }
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
@@ -717,7 +761,10 @@ function onProbeResult() {
 function onClose() {
   endPreamble();
   if (chipConveyorStarted) {
-    block(["M33"]); // Stop chip conveyor
+    var cc = getChipConveyorCodes();
+    if (cc.stop) {
+      block([cc.stop]);
+    }
     chipConveyorStarted = false;
   }
   if (linesWritten() !== homedAt) {

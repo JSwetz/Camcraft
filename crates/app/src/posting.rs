@@ -176,6 +176,8 @@ pub const MACHINES: &[(&str, &str)] = &[
     // #707: Makera's desktop mills, from Makera's product spec tables.
     ("Makera Carvera", include_str!("../../../assets/machines/makera-carvera.mch")),
     ("Makera Carvera Air", include_str!("../../../assets/machines/makera-carvera-air.mch")),
+    // #614: Doosan DNM 5700 VMC (Fanuc 0i-MF).
+    ("Doosan DNM 5700", include_str!("../../../assets/machines/doosan-dnm.mch")),
 ];
 
 /// The mount path a built-in library entry records (stage C): the

@@ -1,41 +1,44 @@
 {
-  "name": "Doosan DNM 5700",
   "general": {
     "model": "Doosan DNM 5700",
     "vendor": "DN Solutions",
     "kind": "mill",
     "description": "DN Solutions DNM 5700 VMC (Fanuc 0i-MF). Specs: DN Solutions DNM 4500/5700/6700 Catalog (X/Y/Z: 1020/570/510mm, rapid 36/36/30 m/min, 12000 RPM spindle 18.5kW, rigid tapping, 30-tool ATC, optional 4th-axis rotary table)"
   },
-  "capabilities": { "milling": true, "toolChange": true },
-  "safeRetractZ": 0.0,
   "kinematics": {
-    "static": {
-      "head": {
-        "spindle": { "min": 40.0, "max": 12000.0, "power": 18.5, "rigidTapping": true },
-        "toolStation": {
-          "maxToolLength": 300.0,
-          "maxToolDiameter": 80.0,
-          "coolants": [
-            { "name": "Flood", "mCode": "M8" },
-            { "name": "Mist", "mCode": "M7" },
-            { "name": "Through-tool", "mCode": "M88" }
-          ]
-        }
-      },
-      "axes": [
-        { "letter": "X", "direction": [1.0, 0.0, 0.0], "reversal": false,
-          "speeds": { "rapid": 36000.0, "normal": 15000.0 }, "zeroOffset": 0.0, "tcp": 0.0 },
-        { "letter": "Y", "direction": [0.0, 1.0, 0.0], "reversal": false,
-          "speeds": { "rapid": 36000.0, "normal": 15000.0 }, "zeroOffset": 0.0, "tcp": 0.0 },
-        { "letter": "Z", "direction": [0.0, 0.0, 1.0], "reversal": false,
-          "speeds": { "rapid": 30000.0, "normal": 15000.0 }, "zeroOffset": 0.0, "tcp": 0.0 },
-        { "letter": "A", "direction": [1.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0],
-          "speeds": { "rapid": 12000.0, "normal": 7200.0 } }
-      ],
-      "rotaries": [
-        { "letter": "A", "type": "rotary", "direction": [1.0, 0.0, 0.0], "travel": [-360000.0, 360000.0] }
-      ],
-      "table": { "rotation": "none" }
+    "default": {
+      "units": { "length": "mm", "angle": "degrees" },
+      "parts": [
+        { "id": "base", "name": "table", "type": "table", "parts": [
+          { "id": "crl", "name": "X", "type": "linear", "travel": { "min": -510.0, "max": 510.0 }, "parts": [
+            { "id": "sld", "name": "Y", "type": "linear", "travel": { "min": -285.0, "max": 285.0 }, "parts": [
+              { "id": "rot_a", "name": "A", "type": "rotary", "axis": [1.0, 0.0, 0.0],
+                "travel": { "min": -360000.0, "max": 360000.0 }, "resolution": 0.001 }
+            ] }
+          ] },
+          { "id": "col", "name": "Z", "type": "linear", "travel": { "min": -510.0, "max": 0.0 }, "safe_retract": 0.0, "parts": [
+            { "id": "hed", "name": "head", "type": "head",
+              "spindle": { "min_speed": 40.0, "max_speed": 12000.0, "power": 18.5,
+                           "body_diameter": 150.0, "body_length": 250.0, "rigid_tapping": true },
+              "tool_station": { "max_tool_length": 300.0, "max_tool_diameter": 80.0,
+                "coolants": [
+                  { "name": "Flood", "mCode": "M8" },
+                  { "name": "Mist", "mCode": "M7" },
+                  { "name": "Through-tool", "mCode": "M88" }
+                ] } }
+          ] }
+        ] }
+      ]
+    }
+  },
+  "controller": {
+    "synced_configuration": {
+      "parts": {
+        "X": { "coordinate": 0, "max_normal_speed": 15000.0, "max_rapid_speed": 36000.0 },
+        "Y": { "coordinate": 1, "max_normal_speed": 15000.0, "max_rapid_speed": 36000.0 },
+        "Z": { "coordinate": 2, "max_normal_speed": 15000.0, "max_rapid_speed": 30000.0 },
+        "A": { "coordinate": 3, "max_normal_speed": 7200.0, "max_rapid_speed": 12000.0 }
+      }
     }
   },
   "tooling": { "number_of_tools": 30 }

@@ -22,6 +22,7 @@
    - On rapid indexing (`G00 A...`), `M11` unclamp executes on its own line before motion; after positioning completes, `M10` clamp executes on its own line before cutting.
    - Continuous 4th-axis contouring unclamps before motion and restores clamping at section end.
    - If rotary motion (`A`) is commanded on a machine or setup without declared rotary brake codes, the post strictly refuses by name (`rotary clamp/unclamp codes not declared for this machine or post options`).
+   - For the shipped Doosan DNM machine definition (`Doosan DNM 5700`), the post recognizes the standard Doosan A-axis table and resolves `M10`/`M11` automatically without manual post options, while preserving strict refusal on generic or unconfigured machines.
 
 4. **High-Speed Smoothing (Fanuc AI Contour Control / AICC):**
    - Sourced from FANUC Series 0i-MODEL F Operator's Manual (B-64604EN-2/01):
@@ -45,8 +46,10 @@
 6. **Chip Conveyor / Auger:**
    - Sourced from Doosan DNM Instruction Manual Table 4-1 (`M31` chip conveyor forward, `M33` chip conveyor stop).
    - Controlled via `chipConveyor` option.
+   - Codes must be declared via post options (`chipConveyorStart` / `chipConveyorStop`) or machine definition; if chip conveyor is requested without declared codes, the post strictly refuses by name (`chip conveyor codes not declared for this machine or post options`). Hardcoded defaults are prohibited.
 
 7. **Machine Definition `assets/machines/doosan-dnm.mch`:**
+   - Registered in `posting::MACHINES` as `"Doosan DNM 5700"` to make it available in the machine library and picker.
    - Updated with cited DN Solutions DNM 4500/5700/6700 Specification Catalog numbers:
      * Travels: X 1020 mm, Y 570 mm, Z 510 mm; Rapids: X 36 m/min, Y 36 m/min, Z 30 m/min; Max feed: 15 m/min.
      * Spindle: 40-12,000 RPM, 18.5 kW, rigid tapping.
