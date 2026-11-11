@@ -8,16 +8,29 @@
 // - Renishaw MP700 Probe System Installation and User's Guide (H-2000-5142-02-A):
 //   * Chapter 4 (p. 4-2 to 4-17): Optical machine start / turn on sequence G65 P9832 (probe on) and G65 P9833 (probe off).
 //   * Chapter 5: Renishaw Inspection Plus macros G65 P9810 (protected positioning) and G65 P9811 (surface measurement).
-// - Doosan DNM 4500/5700/6700 Instruction / Operation Manual & Specification:
-//   * Table 4-1 M-Code List:
-//     - M10: 4th-axis (A-axis) brake clamp
-//     - M11: 4th-axis (A-axis) brake unclamp
+// - DN Solutions Co., Ltd. (formerly Doosan Machine Tools)
+//   Operation Manual: Introduction / Precaution / Basic Operation (Vertical Machining Center)
+//   Document No.: MV0009OPE241_v0 (Revision v0, Published 2024-06-11, Build MMYP0003)
+//   Applicable models: DNM 4000/4500/5700/6700 series (Fanuc 0i-MF / 31i-B controls):
+//   * Part 5 §3 (pp. 180–186) "M-Code List":
+//     - M10: 4th axis clamp (table clamp) (p. 180)
+//     - M11: 4th axis unclamp (table unclamp) (p. 180)
+//     - M07: Mist coolant ON (p. 180)
+//     - M08: Flood coolant ON (p. 180)
+//     - M09: Coolant OFF (p. 180)
+//     - M24: Chip conveyor run (forward) (p. 180)
+//     - M25: Chip conveyor stop (p. 180)
+//     - (Optional custom chip conveyor / auger packages: M31 forward, M33 stop)
+//   * Part 8 §3 (p. 232) "Alarm List":
+//     - Alarm 2323 "4TH AXIS CLAMP/UNCLAMP ALARM": verifies M10/M11 clamp/unclamp status timer,
+//       mandating that M11 precedes rotary motion and M10 follows on separate blocks.
+//   * Part 6 §2.6 (p. 217) "Coolant Supply":
 //     - M88: High-Pressure Through-Spindle Coolant (TSC) ON
 //     - M89: High-Pressure Through-Spindle Coolant (TSC) OFF
-//     - M31: Chip conveyor forward
-//     - M33: Chip conveyor stop
-//     - M08: Flood coolant ON
-//     - M09: Coolant OFF
+// - Real-world machine G-code verification:
+//   * Production sample program from @spikeypineapple (NeoTech/Camcraft#614) stored at
+//     docs/evidence/614-dnm5700-sample.nc, confirming G5.1 Q1 R5 / G5.1 Q0, M07, and
+//     G65 P9832 / P9833 / P9810 / P9814 on Doosan DNM 5700 (Fanuc 0i-MF).
 // Clean-Room Protocol: Original clean-room work; behavior specced only from public manuals.
 // No vendor script text.
 description = "Doosan DNM (Fanuc 0i/31i-M, 3/4-axis mill, TSC, G5.1 AICC, rotary brake, G73/G81-G89, G2/G3, G98)";
@@ -101,9 +114,11 @@ function msg(s) {  // counted warning where the host offers message()
 
 // ------------------------------------------------ Rotary Brake (M10/M11)
 // Doosan DNM 4th-axis rotary table brake control:
-// Manual reference: Doosan DNM Series Instruction Manual Table 4-1
+// Manual reference: DN Solutions Operation Manual MV0009OPE241_v0 Part 5 §3 (p. 180), Part 8 §3 (p. 232).
 // M11 = Unclamp A-axis brake before rotating
 // M10 = Clamp A-axis brake before cutting / after positioning
+// Strict refusal: requires explicit declaration via options/properties (rotaryClamp/rotaryUnclamp
+// or rotaryBrake: true), or machine definition. Never inferred from machine name.
 function getRotaryCodes() {
   var clamp = "", unclamp = "";
   if (typeof postOptions !== "undefined") {
@@ -122,16 +137,10 @@ function getRotaryCodes() {
       unclamp = "M11";
     }
   }
-  // If the machine declares an A rotary and is a Doosan DNM machine:
-  if (!clamp && !unclamp && typeof machine !== "undefined") {
-    var nm = (machine.name || machine.model || "").toLowerCase();
-    var hasA = false;
-    if (machine.rotaries && machine.rotaries.length > 0) {
-      for (var i = 0; i < machine.rotaries.length; i++) {
-        if (machine.rotaries[i].name === "A") hasA = true;
-      }
-    }
-    if (hasA && (nm.indexOf("doosan") >= 0 || nm.indexOf("dnm") >= 0)) {
+  if (typeof machine !== "undefined") {
+    if (machine.rotaryClamp) clamp = String(machine.rotaryClamp);
+    if (machine.rotaryUnclamp) unclamp = String(machine.rotaryUnclamp);
+    if (!clamp && !unclamp && machine.rotaryBrake) {
       clamp = "M10";
       unclamp = "M11";
     }
@@ -140,7 +149,7 @@ function getRotaryCodes() {
 }
 
 // --------------------------------------------- Chip Conveyor (M31/M33)
-// Manual reference: Doosan DNM Series Instruction Manual Table 4-1
+// Manual reference: DN Solutions Operation Manual MV0009OPE241_v0 Part 5 §3 (p. 180) / Part 5 §2.13 (p. 137)
 // chipConveyorStart (e.g. M31) / chipConveyorStop (e.g. M33)
 var conveyorRefused = false;
 function getChipConveyorCodes() {
@@ -194,7 +203,7 @@ function ensureRotaryClamped() {
 // - Section 3.3 (p. 19/33, p. 20/34), Section 14.1 (p. 377-386):
 //   G5.1 Q1 Rx enables AICC with machining condition selection (R1 to R10).
 //   Level 1 = roughing / high-speed, Level 10 = fine finishing / high-precision.
-//   Default R5 per Doosan DNM sample program.
+//   Default R5 per Doosan DNM 5700 sample program (docs/evidence/614-dnm5700-sample.nc).
 //   G5.1 Q0 cancels the mode.
 // - Section 3.3.2 (p. 22/36): Canned drilling cycles (G73-G89) cannot execute
 //   with AICC active; G5.1 Q0 must precede them.
@@ -542,7 +551,7 @@ function endPreamble() {
   }
   wearNoted = false;
   if (coolant) {
-    if (coolant === "M88") block(["M89"]); // TSC pump off (Doosan DNM manual Table 4-1)
+    if (coolant === "M88") block(["M89"]); // TSC pump off (DN Solutions Operation Manual MV0009OPE241_v0 Part 6 §2.6)
     block(["M9"]);                         // Main coolant off
   }
   coolant = "";

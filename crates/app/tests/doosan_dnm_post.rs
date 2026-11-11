@@ -276,6 +276,7 @@ SECTION END
     );
 
     // 2. Refusal when rotary table positioning is commanded without declared rotary brake codes
+    // (verified on both generic VMC and Doosan DNM machine definition to ensure no machine-name sniffing)
     let stream_rotary = r#"; HSMW-CL v1 scale=0.001mm moves=2
 PARAM WorkOffset G54
 TOOL 1 "10mm Endmill"
@@ -284,11 +285,18 @@ SECTION RotaryIndex
 Rapid 0 0 10000 A90000
 SECTION END
 "#;
-    let out_rotary = engine::run(&cps, &vmc, stream_rotary).expect("runs engine");
+    let out_rotary_vmc = engine::run(&cps, &vmc, stream_rotary).expect("runs engine");
     assert!(
-        out_rotary.warnings.iter().any(|w| w.contains("rotary clamp/unclamp codes not declared")),
-        "must refuse undeclared rotary clamp by name: {:?}",
-        out_rotary.warnings
+        out_rotary_vmc.warnings.iter().any(|w| w.contains("rotary clamp/unclamp codes not declared")),
+        "must refuse undeclared rotary clamp on generic vmc: {:?}",
+        out_rotary_vmc.warnings
+    );
+
+    let out_rotary_dnm = engine::run(&cps, &dnm_machine(), stream_rotary).expect("runs engine");
+    assert!(
+        out_rotary_dnm.warnings.iter().any(|w| w.contains("rotary clamp/unclamp codes not declared")),
+        "must refuse undeclared rotary clamp on dnm without explicit declaration: {:?}",
+        out_rotary_dnm.warnings
     );
 
     // 3. Refusal when probing style is unknown
