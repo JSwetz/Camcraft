@@ -146,7 +146,7 @@ pub fn groups(raw: &Value) -> Vec<FieldGroup> {
     let mut g = Grid::new(raw, "General");
     g.add(s("Model"), s("general.model"), s("/general/model"), T, &[s("general.model")]);
     g.add(s("Vendor"), s("general.vendor"), s("/general/vendor"), T, &[]);
-    g.add(s("Kind"), s("general.kind (mill, lathe or mill-turn)"), s("/general/kind"), T, &[s("general.kind")]);
+    g.add(s("Kind"), s("general.kind (mill, lathe, mill-turn or plasma)"), s("/general/kind"), T, &[s("general.kind")]);
     out.push(g.group);
 
     let axes = axes_with_pointers(raw);

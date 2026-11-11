@@ -6593,6 +6593,7 @@ fn stub_tool() -> Tool {
         feed: 800.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 

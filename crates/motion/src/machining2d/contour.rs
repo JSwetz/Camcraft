@@ -110,7 +110,7 @@ fn contour_impl(
     // The contour the post programs under G41/G42 (M13.11): the part
     // at the stock to leave; `None` for every path cut in computer.
     let prog = contour_comp::programmed_region(region, p)?;
-    let flat = p.levels();
+    let flat = p.levels()?;
     let mut loops: Vec<&Loop> = center.loops().iter().collect();
     loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
 
@@ -171,7 +171,7 @@ fn contour_impl(
 
     let eng = Engage { p, center: &center, cert: &cert, plan: &plan, m: &m, legal: &legal };
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
     let mut lifted = LinkTally::default();

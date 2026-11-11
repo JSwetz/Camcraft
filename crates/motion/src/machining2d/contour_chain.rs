@@ -50,7 +50,7 @@ pub fn contour_along_chain(
         v.reverse();
         v
     };
-    let zs = p.levels();
+    let zs = p.levels()?;
     let walk = fit_arcs(&poly, p.tolerance);
     let t0 = walk_tangent(&walk, &poly, true);
     let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p.lead);
@@ -62,7 +62,7 @@ pub fn contour_along_chain(
     // them - held to no room law, since an open run's ends are air.
     let (entry, lead, out) = super::lead_ext::extend_open(entry, lead, out, &walk, &poly, &p.links.approach);
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     if p.blend_turns {
         // No region, no side: nothing a fillet could be proved against.
         b.note("turn blends: an open centerline run bounds no area to prove a fillet against - its corners kept sharp");

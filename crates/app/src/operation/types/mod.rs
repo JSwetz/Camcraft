@@ -16,6 +16,7 @@ mod area;
 mod height;
 mod links;
 mod params;
+mod plasma;
 mod sane;
 mod sel;
 
@@ -30,4 +31,5 @@ pub use camcraft_post::post::CoolantMode;
 pub use camcraft_post::post::AfterOperation;
 pub use height::{Height, HeightReference};
 pub use params::{OpParams, Tilt};
+pub use plasma::{PlasmaComp, PlasmaOp};
 pub use sel::{FeatureSel, GenStamp, GeoSel, OpStatus, OpType, SrcRef, WCS_SLOTS};

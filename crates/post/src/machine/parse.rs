@@ -182,10 +182,17 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
         None | Some(serde_json::Value::Null) => {}
         Some(serde_json::Value::String(w)) if w.is_empty() => {}
         Some(serde_json::Value::String(w)) => {
-            if Kind::from_word(w).is_none() {
+            let Some(k) = Kind::from_word(w) else {
                 return Err(format!(
-                    "machine file: kind {w:?} is not mill, lathe or mill-turn"
+                    "machine file: kind {w:?} is not mill, lathe, mill-turn or plasma"
                 ));
+            };
+            // #669: a declared plasma table keeps the plasma rules at
+            // the door - the first one broken names its key.
+            if k == Kind::Plasma
+                && let Some((key, rule)) = super::plasma::plasma_refusals(&v).into_iter().next()
+            {
+                return Err(format!("machine file: {key}: {rule}"));
             }
             m.kind = Some(w.clone());
         }

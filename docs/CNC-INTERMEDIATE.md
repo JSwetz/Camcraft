@@ -34,7 +34,7 @@ committed golden is a legal post input.
 | `PART LOAD [ADVANCE <µm>]` / `PART UNLOAD` | a part lifecycle event: `dump` brackets each section with them; ADVANCE rides the LOAD alone (the bar's next bite, µm) |
 | `PART TRANSFER <from> <to>` | the handoff step of the same family: station `from` (1-based, the order the machine file states its spindles) hands the part to station `to`; both operands required, a missing or zero-station number refuses by name |
 | `COMP LEFT <µm> [WEAR]` / `COMP RIGHT <µm> [WEAR]` / `COMP OFF` | cutter radius compensation in the control (M13.11): engage (G41 / G42, the register holding this radius) on the next motion record, or cancel (G40) on it. The motion records between an engage and its cancel are the PART contour the control offsets, not the cutter centre - except under `WEAR` (#38), where they are the cutter-centre path walked at this radius and the register holds only the wear delta (`properties.CompensationType` `"wear"`, else `"control"`) - a script that cannot say the words refuses by name |
-| `THREAD X.. Y.. Z.. EX.. EY.. EZ.. MAJOR.. MINOR.. LEAD.. HEIGHT.. FIRST.. MIN.. FINISH.. ANGLE.. SPRING.. PULLOUT..` / `THREAD END` | a threading cycle (issue #34): opens / closes the span of explicit thread passes it stands for. X Y Z the cycle's start point (clearance radius, first station), EX EY EZ its end at the root, MAJOR / MINOR diameters, HEIGHT / FIRST / MIN / FINISH radial lengths and PULLOUT axial, all µm; LEAD (mm) and ANGLE (the compound infeed's included angle, degrees, 0 = radial) 6-decimal reals; SPRING the spring-pass count. Every word required, once. The passes between are ordinary motion records - a script without `onThreadCycle` posts them unchanged |
+| `THREAD X.. Y.. Z.. EX.. EY.. EZ.. MAJOR.. MINOR.. LEAD.. HEIGHT.. FIRST.. MIN.. FINISH.. ANGLE.. SPRING.. PULLOUT.. HAND..` / `THREAD END` | a threading cycle (issue #34): opens / closes the span of explicit thread passes it stands for. X Y Z the cycle's start point (clearance radius, first station), EX EY EZ its end at the root, MAJOR / MINOR diameters, HEIGHT / FIRST / MIN / FINISH radial lengths and PULLOUT axial, all µm; LEAD (mm) and ANGLE (the compound infeed's included angle, degrees, 0 = radial) 6-decimal reals; SPRING the spring-pass count; HAND `right` or `left`, the hand the passes cut (#629: every helical half-turn in the span lays it). Every word required, once. The passes between are ordinary motion records - a script without `onThreadCycle` posts them unchanged |
 | `PROBE <µm>` | the measurement ask (M5.3 D): the deviation budget, in µm, that the finished part is to be probed to after this section's last cut. The number is the switch - no word when no ask - and the verdict it deserves (whether the program's own cuts can measure to it, and which pass owes a re-run) is the app post gate's, never the streams |
 | `GUARD <x> <y> <z> F <feed>` | a protected positioning move of a probe path (#174), µm: feed to the point, stop on contact and ALARM if the stylus trips on the way. Every non-rapid motion of a path carrying probing touches that is neither a touch nor its back-off posts as one (the descent to a touch's start, the travel between touches, the rise). Hook `onProbeGuard` (properties `X Y Z Feed`, `StartX/Y/Z`); a script without it is refused by name, once per operation - a plain feed would drive the stylus into an unexpected obstacle |
 | `START X <i> Y <i> Z <i>` / `END` | legacy `.cl` position lines: consumed silently (END ends the record span) |
@@ -89,10 +89,12 @@ behavior only):
 | `StockXYLeft/Right/Front/Back` `StockZTop` | stock bounds (PARAMs) |
 | `Coolant` | `off` / `mist` / `through-tool` (PARAM, #112) - absent means flood; the post picks the machine's code of that family, refusing by operation name when it states none; a script without `coolantModes = true` is refused any non-flood ask (#150) |
 | `AfterOperation` | `optional-stop` / `stop` / `home` (PARAM, #110) - absent means carry on; the post writes its dialect's M1 / M0 / home move after the section's spindle stop, or refuses by name; a script without `afterModes = true` is refused any stop or home ask by operation name |
+| `SpindleDirection` | `reverse` (PARAM, #629): the section's thread passes turn counter-clockwise seen from +Z (the turning frame's free end), which the tool does about the part only under M04 - a right-hand thread cut away from the chuck, or a left-hand one toward it. Absent means forward (M03). A script without `threadHands = true` is refused the section by name |
 | `LiveTool` | `radial` (PARAM, issue #33): the section is C-axis live-tool work - every move carries `A 0 B 0 C <c>` with C the stated spindle angle (unwrapped) that turns the part-frame tip onto the live tool's +X station; a script without `liveTooling = true` is refused the section by name |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
 | `OperationKind` `SetupName` `ToolKind` `ToolCornerRadius` | commentary (PARAMs, #257), each written only when stated: the op's kind label (`2D Contour`), its setup's name, the tool's kind label (`flat end mill`) and corner radius in mm (only above 0). Scripts voice them as program comments and nothing else; a script that does not know them ignores them |
+| `ToolOrientation` | the lathe tool orientation (PARAM, #630; LinuxCNC's 1-9 chart, `camcraft_tools::orientation`), written only for a nose-centre turning section (facing, profile, contour, boring): the section's moves are then the tool's CONTROL POINT for that orientation - the nose-centre CL moved by r x the chart's tip offset in the app - so a lathe script posts them as-is under G40. Commentary otherwise; a script that does not know it ignores it |
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |
 | `Advance` | the `PART LOAD` ADVANCE in mm (present only on loads; an unload's properties carry no `Advance` key at all) |
 | `From` `To` | the `PART TRANSFER` stations, 1-based (present only on transfer events) |
@@ -205,3 +207,39 @@ reads as the program, not as the stream echoed back. `post --trace
 <file>` writes the excerpt (each block as a `; [record N] label`
 header over its lines) and the viewer shows the same blocks beside
 the listing; clicking a block centers its first line.
+
+## Plasma records (`.cl` v5, #670)
+
+A plasma profile's path (`OpType::PlasmaProfile`, the torch on a
+plasma table) carries `Toolpath::plasma` ([`cl::PlasmaCut`]): the kerf
+the moves were offset by, the torch on / off per contour, each
+contour's role and the contour it lies in. The `.cl` dump writes it as
+comment-prefixed records (`cl::text::to_text` / `from_text`, and the
+golden writer `common::gen_to_cltext`, byte for byte), so the header
+reads `; HSMW-CL v5` and a reader that knows only the legacy grammar -
+the post's stream parser included - skips them. The moves stay the
+torch-centre truth (every lit move stands kerf / 2 off the part on the
+waste side, or on the centre line of an open run); the records say
+what the moves alone cannot. Pinned by
+`crates/app/tests/golden/plasma_plate_with_holes.cl`.
+
+| line | meaning |
+|---|---|
+| `; PLASMA KERF<µm> [CONTROL] [PIERCE<µm>] [CUTH<µm>] [DELAY<ms>] [AUTOFEED] [REVERSED]` | the header, once, right after `START`. `KERF` the kerf width (the torch tool's diameter or the op's override) - required. `CONTROL`: the control compensates (the G41/G42 spans ride the path's comps - see `COMP` above - with straight engage / cancel leads at least the kerf radius long, Tormach's PathPilot rule); absent: the offset is in the moves. `PIERCE` / `CUTH` the pierce and cut heights above the plate, `DELAY` the pierce delay - each present only when the op states it (absent = the controller's AutoFS decides). `AUTOFEED`: the op states no feed - the lit moves carry no `F`, the controller's material table feeds. `REVERSED`: the cut direction was overridden (outer contours counter-clockwise, holes clockwise; the default is outer CW / holes CCW, Hypertherm's square edge on the part) |
+| `; TORCH ON C<id> OUTER\|INNER\|OPEN [PARENT<id>] [SMALL<f×1000>]` | the torch is struck before the next motion record (the pierce: the tool already stands at the cut plane over the pierce point; the controller's G15/G16 own the Z). `C<id>` the contour's id - ids run in CUT ORDER from 0. `OUTER` a part's outer edge (waste outside), `INNER` a hole (waste inside), `OPEN` an open run cut on its centre line. `PARENT<id>` the closed contour it lies inside (a hole names its part's outline; an island part inside a hole names the hole; absent = none). `SMALL<f>` the small-hole rule cut it (LinuxCNC Plasma Primer §13): a straight lead-in from near the centre, no lead-out, an optional overburn, the cut feed times `f/1000` (650 = 65 %) |
+| `; TORCH OFF C<id>` | the torch goes out after the previous motion record (the lead-out's end, or a small hole's overburn end); names the same id as its `ON` |
+
+Laws (the reader refuses by line, `PlasmaCut::is_sane`): one header
+before any `TORCH`; spans never nest or overlap and appear in cut
+order; every lit record is a feed or arc, never a rapid; ids are
+unique and every `PARENT` names a contour of the path; a torch never
+put out is an error. Cut order is the generator's law and the
+records make it checkable: every contour's `OFF` comes before its
+parent's `ON` - an island before its hole, a hole before the outline
+that frees the part.
+
+For the post (#671) and the plasma verification laws (#672): the
+`.cnc` stream does not carry these records yet - posting a plasma
+table is refused until the plasma post ships (`posting::PLASMA_POSTS`
+is empty), and the post owns voicing them (`M200`/`M207..M211`,
+`G15`/`G16`, `M205`, `G30`; [UM] §7).

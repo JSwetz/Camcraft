@@ -192,6 +192,9 @@ impl ToolBody {
 /// file before v57, reads as #317's implicit rule
 /// ([`crate::setup_stock::implicit`]). Written only by
 /// `SetSetupStockSource` and the project loader.
+/// `post_options` (#389) is the setup's own post options; `None`, the
+/// default and every earlier file, follows the document's `PostOptions`.
+/// Written only by `SetSetupPostOptions` and the project loader.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct SetupDef {
     pub stock: String,
@@ -203,6 +206,7 @@ pub struct SetupDef {
     pub post: Option<PostRef>,
     pub relative_to: Option<String>,
     pub stock_source: Option<crate::setup_stock::StockSource>,
+    pub post_options: Option<PostOptions>,
 }
 
 /// The M3.2 stage B marker turning a model entity into a FIXTURE: the
@@ -380,6 +384,32 @@ pub struct PostOptions {
     pub skip_stops: bool,
     /// One standalone program per operation (#111).
     pub per_op: bool,
+    /// Per-operation smoothing (#616): off (the default) posts no
+    /// smoothing words; on, each op asks its tolerance and the dialect
+    /// writes its control's mode (G64 P, G5.1, G187, CYCLE832, CYCL
+    /// DEF 32), reset at the op's end. Opt-in because several controls
+    /// need an option for it (Fanuc's AI contour control).
+    pub smoothing: bool,
+    /// The length unit the control is left in after the program (#596).
+    pub end_units: EndUnits,
+}
+
+/// The end-units choice of [`PostOptions`] (#596). LinuxCNC's M2 / M30
+/// reset list (linuxcnc.org/docs, M-codes, "M2, M30 Program End") names
+/// offsets, plane, distance and feed modes, overrides, comp, spindle,
+/// motion mode and coolant - never G20 / G21 - so a program posted in mm
+/// for a control the operator runs in inches leaves it in mm. A post
+/// that knows the option (Tormach PathPilot) writes the target's unit
+/// word before its program end when it differs from the program's unit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EndUnits {
+    /// The program's own unit stays modal (every older document).
+    #[default]
+    Leave,
+    /// End in inches: a mm program writes G20 before M30.
+    Inch,
+    /// End in millimetres: an inch program writes G21 before M30.
+    Millimeters,
 }
 
 /// The thread-output choice of [`PostOptions`].

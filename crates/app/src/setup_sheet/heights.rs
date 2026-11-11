@@ -10,6 +10,12 @@ use crate::operation::{Height, OpParams};
 /// the sheet reads the machinery, never a copy of its rules.
 pub(super) fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Height>); 4] {
     match params {
+        OpParams::PlasmaProfile(p) => [
+            ("CLR", "Clearance Z", Some(p.clearance_z)),
+            ("RET", "Retract Z", None),
+            ("TOP", "Top of Plate Z", Some(p.top_z)),
+            ("BOT", "Bottom of Plate Z", Some(p.bottom_z)),
+        ],
         OpParams::Probe { clearance_z, .. } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", None),

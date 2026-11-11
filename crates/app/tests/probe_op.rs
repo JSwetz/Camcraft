@@ -32,6 +32,7 @@ use camcraft_app::{posting, project};
 
 const FANUC: &str = include_str!("../../../assets/posts/fanuc.cps");
 const HEIDENHAIN: &str = include_str!("../../../assets/posts/heidenhain.cps");
+const TORMACH: &str = include_str!("../../../assets/posts/tormach.cps");
 
 fn cycle(mode: ProbeMode, dir: ProbeDir, dir_y: ProbeDir, target: Point3, radius: f64) -> ProbeParams {
     ProbeParams {
@@ -279,6 +280,27 @@ fn a_dialect_without_probing_refuses_the_op_by_name() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// #362: the Tormach PathPilot post probes too (G38.2), so the same
+/// document posts on it instead of being refused; no spindle and no
+/// coolant on the default machine's flood entry.
+#[test]
+fn the_tormach_post_probes_the_op_with_g38_2() {
+    let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
+    let top = stock_top(&world);
+    set_target(&world, &mut h, top);
+    generate(&world, &mut h);
+    let path = std::env::temp_dir().join(format!("camcraft_probe_tormach_{}.nc", std::process::id()));
+    let ok = posting::post_script(&world, &path, TORMACH).expect("tormach probes");
+    assert!(ok.program.contains("G38.2 "), "{}", ok.program);
+    assert!(ok.program.contains("G10 L20 P1 Z[#5422-#190]"), "the result sets G54 Z: {}", ok.program);
+    assert!(
+        !ok.program.lines().any(|l| l.split_whitespace().any(|w| w == "M3" || w == "M8")),
+        "a touch probe starts no spindle and no coolant: {}",
+        ok.program
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 fn the_probe_round_trips_through_the_project_file() {
     let (world, mut h) = probe_world(Height::of(HeightReference::TopOfStock, 0.0));
@@ -327,7 +349,9 @@ fn the_probe_row_appends_and_lists_in_drilling() {
     use camcraft_app::operation::{KindInfo, Section};
     // Appended: stored kind ids never move; the menu lists it under
     // Drilling by display order.
-    assert_eq!(KindInfo::ALL.last().map(|k| k.ty), Some(OpType::Probe));
+    assert_eq!(KindInfo::ALL[38].ty, OpType::Probe);
+    // #670 appended the plasma profile behind it - the probe's id held.
+    assert_eq!(KindInfo::ALL.last().map(|k| k.ty), Some(OpType::PlasmaProfile));
     assert_eq!(KindInfo::ALL[13].ty, OpType::Pocket3D);
     assert_eq!(OpType::Probe.info().section, Section::Drilling);
     assert_eq!(OpType::Probe.info().tool_kinds, &[camcraft_app::tools::ToolKind::Probe]);

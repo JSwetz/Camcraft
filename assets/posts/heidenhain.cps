@@ -36,6 +36,9 @@ var coolantAsk = "flood";  // the section's PARAM Coolant (#112), flood when uns
 var afterAsk = "";         // the section's PARAM AfterOperation (#110), none when unstated
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;
+var smoothTol = 0;          // #616: the section's PARAM Smoothing, mm (0: none asked)
+var smoothMode = "";        // #616: "finish" or "rough"
+var smoothActive = false;   // #616: this section wrote its smoothing words
 var modalWait = false;  // G40 G90 rides the section's first motion block
 var pendingDwell = null; // {z, s}: the open hole's dwell, owed at its bottom
 var orgX = 0, orgY = 0, orgZ = 0;
@@ -224,6 +227,8 @@ function onRadiusCompensation() {
 // (preset selection is cycle G247, whose parameters this post was
 // not specced from), never posted as a word the TNC reads otherwise.
 function onParameter(name, value) {
+  if (name === "Smoothing") { smoothTol = Number(value) || 0; return; }
+  if (name === "SmoothingMode") { smoothMode = String(value || ""); return; }
   commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
@@ -261,6 +266,22 @@ function onToolChange(number, name) {
 // 201). G40 G90 ride the first positioning block. The old preamble
 // words are gone: G54 (datum shift), G80 (WORKING PLANE, p. 756) are
 // not what a TNC reads them as.
+// #616: per-operation smoothing, only when the document turned it on
+// (the stream then carries PARAM Smoothing / SmoothingMode). Heidenhain ISO G62 (the ISO form of the tolerance cycle): T the path deviation.
+// Written after the preamble, undone at the section's end so no
+// tolerance leaks into the next operation.
+function smoothOn() {
+  if (!(smoothTol > 0)) return;
+  block(["G62", "T" + fu(smoothTol)]);
+  smoothActive = true;
+}
+function smoothOff() {
+  if (smoothActive) block(["G62"]);  // tolerance cycle with no T: the default again
+  smoothActive = false;
+  smoothTol = 0;
+  smoothMode = "";
+}
+
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
@@ -268,17 +289,18 @@ function startPreamble() {
   modalWait = true;
   if (toolWait) {
     toolNote();
-    block(["T" + ni(tNo), "G17", spindleWait ? "S" + ff(sRpm) : ""]);
+    block(["T" + ni(tNo), "G17", spindleWait && sRpm > 0 ? "S" + ff(sRpm) : ""]);
     toolWait = false;
-  } else if (spindleWait) {
+  } else if (spindleWait && sRpm > 0) {
     block(["S" + ff(sRpm)]);
   }
-  if (spindleWait) {
+  if (spindleWait && sRpm > 0) {   // a touch probe (#523) states no spindle
     block(["M3"]);
-    spindleWait = false;
   }
+  spindleWait = false;
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
+  smoothOn();
 }
 
 // The op's after-action (#110), written once its spindle has stopped:
@@ -304,6 +326,7 @@ function afterOp() {
 function endPreamble() {
   if (!sectionOpen) return;
   sectionOpen = false;
+  smoothOff();
   owedDwell();
   if (coolant) block(["M9"]);
   coolant = "";
@@ -447,6 +470,16 @@ function owedDwell() {
   pendingDwell = null;
   msg("drilling dwell without a feed move to the hole bottom - refused, not dropped");
 }
+
+// ------------------------------------------------------------ probing
+// #173: deliberately no onProbeMove / onProbeRetreat / onProbeResult.
+// The ISO user's manual this post is specced from documents no free
+// skip/measuring move and no variable holding a trip position; TNC
+// probing is the touch-probe cycles, whose call form and result Q
+// parameters live in the separate touch-probe cycle manual, not the
+// source of this post. Rather than guess a cycle number or a Q
+// parameter, the engine refuses a Probe operation by name for this
+// post (crates/app/tests/probe_dialects.rs pins it).
 
 // ------------------------------------------------------------ footer
 // #50: the program ends M2 (p. 66: `G00 Z+250 M2*`), then the end

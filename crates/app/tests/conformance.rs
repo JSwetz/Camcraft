@@ -55,13 +55,18 @@ const POSTS: &[(&str, &str, &str)] = &[
     ("Mazak", "mazak", "mazak"),
     ("Tormach PathPilot", "tormach", "tormach"),
     ("Doosan DNM", "doosan-dnm", "doosan-dnm"),
+    ("Makera Carvera", "carvera", "carvera"),
 ];
 
 /// (post stem, golden, named reason): a golden a dialect must REFUSE
 /// rather than post, so it has no `.nc` there. #50: the Heidenhain
 /// DIN/ISO post has no tapping form (G206/G207 are not specced) and a
 /// tap cannot be plain moves.
-const REFUSED: &[(&str, &str, &str)] = &[("heidenhain", "tap_plate", "tapping")];
+const REFUSED: &[(&str, &str, &str)] = &[
+    ("heidenhain", "tap_plate", "tapping"),
+    // #707: no canned cycles and no spindle reverse on the Carvera.
+    ("carvera", "tap_plate", "tapping"),
+];
 
 /// The TURNING dialects (M13.5): their goldens are the lathe
 /// documents' own streams (`lathe_post.rs`); on a mill golden they
@@ -273,7 +278,13 @@ fn the_synthesized_stream_locks_the_tool_and_spindle_words() {
     for (name, cps_stem, _) in POSTS {
         // #50: Heidenhain refuses a G55 offset and a tap by name, so
         // its golden locks the same stream without those two records.
-        let stream = if *cps_stem == "heidenhain" { synth_stream_with("G54", false) } else { synth_stream() };
+        // #707: the Carvera refuses the tap the same way (no canned
+        // cycles, no spindle reverse); its G55 stands.
+        let stream = match *cps_stem {
+            "heidenhain" => synth_stream_with("G54", false),
+            "carvera" => synth_stream_with("G55", false),
+            _ => synth_stream(),
+        };
         let cps = read(&format!("assets/posts/{cps_stem}.cps"));
         let out = engine::run(&cps, &mch, &stream)
             .unwrap_or_else(|e| panic!("{name} on the synth stream: must post: {e}"));
@@ -354,6 +365,7 @@ const EXTENSIONS: &[(&str, &str)] = &[
     ("mazak", "nc"),
     ("tormach", "nc"),
     ("doosan-dnm", "nc"),
+    ("carvera", "nc"),
     ("fanuc-lathe", "nc"),
 ];
 

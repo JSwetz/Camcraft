@@ -329,7 +329,7 @@ pub fn translate_with(records: Vec<Record>, f: Flip, probing: bool) -> Result<Ve
 
 /// The refusal for probing through a script not verified for it (#392).
 const NO_PROBING: &str =
-    "probing with a post script that does not declare probeAxisInversion = true (Fanuc does)";
+    "probing with a post script that does not declare probeAxisInversion = true (Fanuc and Haas do)";
 
 /// A point or increment in the controller's frame: negated on each
 /// inverted axis.

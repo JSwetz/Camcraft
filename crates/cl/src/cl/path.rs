@@ -8,10 +8,14 @@ use crate::geometry::units::Unit;
 use super::comp::CompSpan;
 use super::edge_break::EdgeBreak;
 use super::thread::ThreadCycle;
+use super::torch::PlasmaCut;
 use super::touch::ProbeTouch;
 use super::moves::{lattice, Move, MoveKind};
 use super::plane::{z_extrema, ArcPlane};
 use super::cycle::Cycle;
+
+#[path = "path_approach.rs"]
+mod approach;
 use super::pose::{is_vertical, normalize_axis};
 
 /// A generated path: linked moves, plus — for drilling paths only — the
@@ -47,6 +51,10 @@ pub struct Toolpath {
     /// judges the moves against the part WITH these bevels, so the
     /// break the op exists to cut is not a gouge and nothing past it is.
     pub breaks: Vec<EdgeBreak>,
+    /// The plasma statement (#670, [`PlasmaCut`]): `None` for every
+    /// path but a plasma profile's - the kerf, the torch on / off per
+    /// contour and the contours' nesting, in cut order.
+    pub plasma: Option<PlasmaCut>,
 }
 
 impl Toolpath {
@@ -59,6 +67,7 @@ impl Toolpath {
             threads: Vec::new(),
             probes: Vec::new(),
             breaks: Vec::new(),
+            plasma: None,
         }
     }
 
@@ -185,6 +194,9 @@ pub struct PathBuilder {
     cycles: Vec<Cycle>,
     notes: Vec<String>,
     comps: Vec<CompSpan>,
+    /// Set by [`approached`](Self::approached) until the first move: the
+    /// seed is on the clearance plane and the path must open with a rapid.
+    approach: bool,
 }
 
 impl PathBuilder {
@@ -197,6 +209,7 @@ impl PathBuilder {
             cycles: Vec::new(),
             notes: Vec::new(),
             comps: Vec::new(),
+            approach: false,
         }
     }
 
@@ -284,6 +297,7 @@ impl PathBuilder {
         if to.x == self.at.x && to.y == self.at.y && to.z == self.at.z && self.axis == self.at_pose {
             return;
         }
+        self.open(kind);
         self.moves.push(Move::new(kind, self.at, to, feed).attach_axis(self.axis));
         self.at = to;
         self.at_pose = self.axis;
@@ -318,6 +332,7 @@ impl PathBuilder {
             self.push(kind, to, feed);
             return;
         }
+        self.open(kind);
         self.moves
             .push(Move::new(kind, self.at, to, feed).with_arc(center, ccw).attach_axis(self.axis));
         self.at = to;
@@ -359,6 +374,7 @@ impl PathBuilder {
             self.push(kind, to, feed);
             return;
         };
+        self.open(kind);
         let from = self.at;
         for f in z_extrema(&arc, from, to) {
             if let Some(p) = arc.point_at(from, to, f) {
@@ -391,6 +407,7 @@ impl PathBuilder {
             threads: Vec::new(),
             probes: Vec::new(),
             breaks: Vec::new(),
+            plasma: None,
         }
     }
 }

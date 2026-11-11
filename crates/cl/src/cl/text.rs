@@ -60,6 +60,8 @@ pub fn to_text(t: &Toolpath) -> Result<String, String> {
     }
     let version = if !t.is_prismatic() {
         4
+    } else if t.plasma.is_some() {
+        5
     } else if !t.cycles.is_empty() {
         3
     } else if t.has_arcs() {
@@ -72,7 +74,24 @@ pub fn to_text(t: &Toolpath) -> Result<String, String> {
         Some(p) => s.push_str(&format!("START {} {} {}\n", q(p.x), q(p.y), q(p.z))),
         None => s.push_str("START\n"),
     }
-    for m in &t.moves {
+    // The plasma records (#670): the header, then each torch span's ON
+    // before its first lit move and OFF after its last - interleaved,
+    // so the file reads as the torch runs. A span set that does not sit
+    // on the moves is refused, never written half-true.
+    let plasma = match &t.plasma {
+        Some(p) if !p.is_sane(&t.moves) => return Err("plasma torch spans do not sit on the moves".into()),
+        Some(p) => {
+            s.push_str(&p.header_line());
+            s.push('\n');
+            Some(p)
+        }
+        None => None,
+    };
+    for (i, m) in t.moves.iter().enumerate() {
+        for span in plasma.iter().flat_map(|p| p.torches.iter()).filter(|sp| sp.on == i) {
+            s.push_str(&span.on_line());
+            s.push('\n');
+        }
         let mut k = match m.kind {
             MoveKind::Rapid => "Rapid",
             MoveKind::Feed => "Feed",
@@ -101,6 +120,10 @@ pub fn to_text(t: &Toolpath) -> Result<String, String> {
             s.push_str(&format!(" {SPINDLE_C_WORD}{}", (c * 1000.0).round() as i64));
         }
         s.push('\n');
+        for span in plasma.iter().flat_map(|p| p.torches.iter()).filter(|sp| sp.off == i) {
+            s.push_str(&span.off_line());
+            s.push('\n');
+        }
     }
     for c in &t.cycles {
         let kind = CYCLE_KINDS.iter().find(|(_, k)| *k == c.kind).map_or("Drill", |(w, _)| *w);
@@ -177,6 +200,8 @@ pub fn from_text(text: &str) -> Result<Toolpath, TextError> {
     let mut moves: Vec<Move> = Vec::new();
     let mut cycles = Vec::new();
     let mut at: Option<Point3> = None;
+    let mut plasma: Option<super::torch::PlasmaCut> = None;
+    let mut lit: Option<super::torch::TorchSpan> = None;
     for (i, raw) in text.lines().enumerate() {
         let fail = |why: String| TextError { line: i + 1, why };
         let line = raw.trim();
@@ -184,8 +209,29 @@ pub fn from_text(text: &str) -> Result<Toolpath, TextError> {
             continue;
         }
         if let Some(rest) = line.strip_prefix(';') {
-            if let Some(c) = rest.trim_start().strip_prefix("CYCLE") {
+            let rest = rest.trim_start();
+            if let Some(c) = rest.strip_prefix("CYCLE") {
                 cycles.push(cycle(c, moves.len()).map_err(fail)?);
+            } else if let Some(w) = rest.strip_prefix("PLASMA") {
+                if plasma.is_some() {
+                    return Err(fail("a second PLASMA header".into()));
+                }
+                plasma = Some(super::torch::parse_header(w).map_err(fail)?);
+            } else if let Some(w) = rest.strip_prefix("TORCH ON") {
+                if plasma.is_none() || lit.is_some() {
+                    return Err(fail("TORCH ON before the PLASMA header or inside a lit span".into()));
+                }
+                lit = Some(super::torch::parse_on(w, moves.len()).map_err(fail)?);
+            } else if let Some(w) = rest.strip_prefix("TORCH OFF") {
+                let id = super::torch::parse_off(w).map_err(fail)?;
+                let (Some(mut span), Some(p)) = (lit.take(), plasma.as_mut()) else {
+                    return Err(fail("TORCH OFF with no torch lit".into()));
+                };
+                if span.contour != id || moves.len() <= span.on {
+                    return Err(fail(format!("TORCH OFF C{id} does not close the lit C{} over a move", span.contour)));
+                }
+                span.off = moves.len() - 1;
+                p.torches.push(span);
             }
             continue;
         }
@@ -257,5 +303,14 @@ pub fn from_text(text: &str) -> Result<Toolpath, TextError> {
     }
     let mut t = Toolpath::new(moves);
     t.cycles = cycles;
+    if let Some(span) = lit {
+        return Err(TextError { line: text.lines().count(), why: format!("torch C{} is never put out", span.contour) });
+    }
+    if let Some(p) = plasma {
+        if !p.is_sane(&t.moves) {
+            return Err(TextError { line: text.lines().count(), why: "plasma torch spans do not sit on the moves".into() });
+        }
+        t.plasma = Some(p);
+    }
     Ok(t)
 }

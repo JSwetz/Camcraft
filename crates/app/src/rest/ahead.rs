@@ -95,7 +95,9 @@ fn collect(world: &World, name: &str, with_moves: bool, keep: impl Fn(&Option<St
         // contributes no mask.
         // A probe cuts nothing (#108): it contributes no mask, and no
         // path signature - it is a never-cutting operation here.
-        let probe = tool.as_ref().is_some_and(|t| t.kind == crate::tools::ToolKind::Probe);
+        // A torch (#670) cuts through along a kerf no mask models: the
+        // plasma table runs no milling rest after it.
+        let probe = tool.as_ref().is_some_and(|t| matches!(t.kind, crate::tools::ToolKind::Probe | crate::tools::ToolKind::Torch));
         let (cut, sig, moves) = if probe {
             (false, 0, Vec::new())
         } else {

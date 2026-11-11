@@ -141,7 +141,10 @@ fn raw_cross_op() -> Operation {
 fn a_short_flute_cross_drill_on_raw_stock_wider_than_the_part_is_refused_by_name() {
     for word in ["lathe", "mill-turn"] {
         let (world, _h) = turret_world(word, true, |_| {});
-        let e = operation::generate(&world, &raw_cross_op(), "").err().map(|e| e.to_string());
+        let err = operation::generate(&world, &raw_cross_op(), "").err();
+        // #677: the refusal marks the modelled mouth, in world.
+        assert_eq!(err.as_ref().and_then(|e| e.location()), Some(Point3::new(10.0, 0.0, 0.0)), "{word}: {err:?}");
+        let e = err.map(|e| e.to_string());
         let e = e.unwrap_or_else(|| panic!("{word}: a 16 mm hole drilled on a 12 mm flute"));
         for s in ["cross hole 0 at (10.000, 0.000, 0.000)", "16.000 mm deep from the stock surface", "DR-0400", "12.000 mm"] {
             assert!(e.contains(s), "{word}: the refusal names '{s}': {e}");

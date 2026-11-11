@@ -1,8 +1,9 @@
 # Full gate, run BY HAND only (no schedule - a daily run would spend the
-# monthly Actions budget in under two weeks). The release gate tier - every
-# debug suite including the script's SLOW_BINARIES, the ui suites from
-# crates/ui, clippy, then the --ignored heavy lanes of camcraft-motion and
-# camcraft-app in release. Push / PR CI runs only the batch tier (ci.yml).
+# monthly Actions budget in under two weeks). The release gate tier
+# (cargo xtask gate release) - every debug suite including xtask's
+# SLOW_BINARIES, the ui suites from crates/ui, clippy, then the --ignored
+# heavy lanes of camcraft-motion and camcraft-app in release. The batch
+# tier is ci.yml's, also run by hand only.
 # Provenance: our own build law; mirrors the AGENTS.md testing layout.
 name: Nightly
 on:
@@ -20,8 +21,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Release gate tier
-        shell: pwsh
-        run: ./scripts/gate.ps1 -Tier release
+        shell: bash
+        run: cargo xtask gate release
       - name: Gate logs
         if: always()
         uses: actions/upload-artifact@v4

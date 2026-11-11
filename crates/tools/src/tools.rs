@@ -80,6 +80,14 @@ pub enum ToolKind {
     /// radius by law (a probe tip is a sphere). It turns no spindle and
     /// removes no stock: only the Probe operation mounts it.
     Probe,
+    /// Plasma torch (#670): the arc cuts a kerf through the plate.
+    /// `diameter` IS the kerf width (≈ 1.5x the nozzle orifice, set by
+    /// the consumables, amperage and material - confirm by a test cut;
+    /// Tormach's 1300PL guidance), so every offset reads radius =
+    /// kerf / 2. It turns no spindle: `rpm` must be 0 (a stated rpm is
+    /// refused by name, [`Tool::torch_refusal`]). Only the plasma
+    /// operations mount it.
+    Torch,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -97,6 +105,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Form => "form gauge",
             ToolKind::Taper => "chamfer mill",
             ToolKind::Probe => "touch probe",
+            ToolKind::Torch => "plasma torch",
         };
         f.write_str(s)
     }
@@ -183,9 +192,24 @@ pub struct Tool {
     /// cutter with a center hole is not, and its entries may then only
     /// helix or ramp into solid (or the op is refused by name).
     pub center_cutting: bool,
+    /// Lathe tool orientation (#630, [`crate::orientation`]): the
+    /// LinuxCNC 1-9 code that says where the control point the
+    /// operator touches off stands on the nose circle. `None` = not
+    /// stated, read as the kind's default
+    /// ([`crate::orientation::default_for`]). On a grooving blade it
+    /// names the touched-off corner of the tip edge (#641,
+    /// [`crate::orientation::blade_corner`]); inert on every other kind.
+    pub orientation: Option<u8>,
 }
 
 impl Tool {
+    /// The orientation the posts read: the stated code, else the
+    /// kind's default; None for a kind that has none.
+    #[must_use]
+    pub fn lathe_orientation(&self) -> Option<u8> {
+        self.orientation.or_else(|| crate::orientation::default_for(self.kind))
+    }
+
     /// Finite, positive where it must be, and geometrically consistent:
     /// a corner radius cannot exceed half the diameter, lengths cannot be
     /// negative. The gate every tool command runs before writing.
@@ -221,9 +245,12 @@ impl Tool {
             && self.shank_len >= 0.0
             && self.holder_d >= 0.0
             && self.holder_len >= 0.0
-            && self.rpm > 0.0
+            // A torch turns no spindle (#670): its rpm is 0 by law, and
+            // every spinning kind states a positive one.
+            && (if self.kind == ToolKind::Torch { self.rpm == 0.0 } else { self.rpm > 0.0 })
             && self.feed > 0.0
             && self.flutes.is_none_or(|z| (1..=32).contains(&z))
+            && self.orientation.is_none_or(crate::orientation::is_valid)
             && match self.kind {
                 // A point that cannot self-center is not a drill, and a
                 // tap with no thread pitch has no feed the cycle could
@@ -283,8 +310,24 @@ impl Tool {
                     (self.corner_r - self.diameter * 0.5).abs() < 1e-9
                         && self.flute_len >= self.diameter
                 }
+                // A torch's kerf is a cut width, never a corner: no
+                // corner radius rides it (#670).
+                ToolKind::Torch => self.corner_r == 0.0,
                 _ => true,
             }
+    }
+
+    /// The torch's own refusal, by name (#670): a plasma torch stating a
+    /// spindle speed asks the program for an S word a torch has not.
+    /// `None` for every other kind and for a torch at rpm 0.
+    #[must_use]
+    pub fn torch_refusal(&self) -> Option<String> {
+        (self.kind == ToolKind::Torch && self.rpm != 0.0).then(|| {
+            format!(
+                "a plasma torch turns no spindle - its rpm must be 0 (it states {}); the kerf width is the torch's diameter",
+                self.rpm
+            )
+        })
     }
 
     /// The corner radius the tip really has (#263). A ball nose's or a
@@ -382,7 +425,7 @@ impl Tool {
             // meridian, which the turning verdicts read off `Tool`,
             // not off this cylinder.
             ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning
-            | ToolKind::Groove | ToolKind::Thread | ToolKind::Form => add_pt(&mut p, 0.0, r),
+            | ToolKind::Groove | ToolKind::Thread | ToolKind::Form | ToolKind::Torch => add_pt(&mut p, 0.0, r),
             // The chamfer mill's cone is the same picture read the
             // other way in purpose - apex at the tip center opening
             // upward to the full radius - so it shares the drill's
@@ -455,13 +498,13 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         rpm,
         feed,
         tool_material: None,
-        flutes: None, center_cutting: true,
+        flutes: None, center_cutting: true, orientation: None,
     };
     // Cycle tools: straight-shank bodies (a jobber drill's shank is its
     // own diameter), no corner radius, 118-degree points, ISO coarse
     // pitches; a tap's feed number is the rpm x pitch starting value.
     let cy = |kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| {
-        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, width: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true }
+        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, width: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true, orientation: None }
     };
     // Turning (M5.2 A): the facing insert - a plain toolholder shank,
     // no holder stack (the turret IS the holder), an 0.8 nose like the
@@ -470,7 +513,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let tn = |diameter: f64, nose_radius: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Turning, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
         nose_radius, width: 0.0, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true, orientation: None,
     };
     // Grooving (M5.2 C): the blade insert on the same toolholder body -
     // the ground WIDTH is the tool, the nose and the taper are not
@@ -480,7 +523,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let gt = |diameter: f64, width: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Groove, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
         nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true, orientation: None,
     };
     // Threading (M5.2 D): the V-form insert on the same toolholder
     // body - the GROUND PROFILE (width across the crest, the flanks'
@@ -491,7 +534,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let td = |diameter: f64, width: f64, form_angle: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Thread, diameter, corner_r: 0.0, tip_angle: form_angle, pitch: 0.0,
         nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true, orientation: None,
     };
     // Form gauges (M5.2 E2): the crown radius lives in `nose_radius`
     // (the arc of the ground edge in the work's meridian - the
@@ -502,7 +545,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let fg = |diameter: f64, crown_r: f64, width: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Form, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
         nose_radius: crown_r, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None, center_cutting: true, orientation: None,
     };
     let mut v = vec![
         ("EM-0200-2FL", em(2.0, 0.0, ToolKind::EndMill, 6.0, 4.0, 18000.0, 600.0)),
@@ -549,6 +592,10 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         // The touch probe (#108): a 4 mm ruby ball on a 30 mm stylus, the
         // everyday starter size - the Probe kind's catalog hint.
         ("PRB-0400", probe_tool(4.0, 30.0)),
+        // The plasma torch (#670): a 1.5 mm kerf, the order of a 45 A
+        // nozzle's cut in mild steel - a starting value the test cut
+        // corrects, never a promise.
+        ("PT-KERF-150", torch_tool(1.5)),
     ];
     // Cutting data (M13.2): the rotating mills state their edge
     // material and flute count - carbide, as the speeds above were
@@ -600,6 +647,36 @@ pub fn probe_tool(ball_d: f64, stylus_len: f64) -> Tool {
         tool_material: None,
         flutes: None,
         center_cutting: false,
+        orientation: None,
+    }
+}
+
+/// A plasma torch of kerf width `kerf` mm (#670): the kerf rides as the
+/// diameter, no corner, no spindle (rpm 0), the torch body as a plain
+/// shank. `feed` is a nominal starting value - the plasma op states its
+/// own (or leaves it to the controller's material table).
+#[must_use]
+pub fn torch_tool(kerf: f64) -> Tool {
+    Tool {
+        kind: ToolKind::Torch,
+        diameter: kerf,
+        corner_r: 0.0,
+        tip_angle: 0.0,
+        pitch: 0.0,
+        nose_radius: 0.0,
+        width: 0.0,
+        flute_len: 10.0,
+        shank_d: 30.0,
+        shank_len: 100.0,
+        holder_d: 0.0,
+        holder_len: 0.0,
+        material_group: "mild steel".into(),
+        rpm: 0.0,
+        feed: 2500.0,
+        tool_material: None,
+        flutes: None,
+        center_cutting: false,
+        orientation: None,
     }
 }
 

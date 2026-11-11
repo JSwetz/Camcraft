@@ -47,7 +47,7 @@ fn convicted_in(moves: Vec<crate::cl::Move>, bar_top: f64) -> Vec<Warning> {
         feed: 150.0,
         plunge_feed: 80.0,
     };
-    let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new() };
+    let path = Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new(), threads: Vec::new(), probes: Vec::new(), breaks: Vec::new(), plasma: None };
     let (part, stock) = (cylinder(6.0, -16.0, 16.0), cylinder(10.0, -16.0, bar_top));
     let cx = Meridian { part: &part, stock: Some(&stock), nose: 0.8, margin: 0.01, z_tol: 1e-6, drills: &[], band: 0.0, body: None, ahead: &[], outward: None };
     let mut warns = Vec::new();
@@ -102,6 +102,7 @@ fn a_single_groove_at_the_bars_end_is_judged_across_its_band() {
         threads: Vec::new(),
         probes: Vec::new(),
         breaks: Vec::new(),
+        plasma: None,
     };
     let (part, stock) = (cylinder(11.0, -60.0, 10.0), cylinder(12.5, -60.0, 12.0));
     let judge = |band: f64| {
@@ -163,6 +164,7 @@ fn a_ten_mm_bar_with_its_nose_on_the_axis_in_an_eleven_mm_pilot_is_convicted() {
             threads: Vec::new(),
             probes: Vec::new(),
             breaks: Vec::new(),
+            plasma: None,
         };
         let cx = Meridian {
             part: &part,
@@ -212,6 +214,7 @@ fn stepped_bar(r: f64, wall: f64, pilot: f64) -> Vec<Warning> {
         threads: Vec::new(),
         probes: Vec::new(),
         breaks: Vec::new(),
+        plasma: None,
     };
     let cx = Meridian {
         part: &part,
@@ -278,6 +281,7 @@ fn a_banded_rapid_just_under_an_earlier_face_cut_is_convicted() {
             threads: Vec::new(),
             probes: Vec::new(),
             breaks: Vec::new(),
+            plasma: None,
         };
         let cx = Meridian {
             part: &part,

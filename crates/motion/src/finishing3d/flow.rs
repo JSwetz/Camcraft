@@ -84,7 +84,7 @@ pub fn flow(
         (x1, y1) = (x1.max(s.xmax), y1.max(s.ymax));
         mz_min = mz_min.min(s.m.z);
     }
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::approached(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = false;
     if x0 <= x1 {
         let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz_min);

@@ -14,9 +14,9 @@ use camcraft_app::{model, operation};
 
 use crate::egui_app::world;
 use crate::interact::{
-    CLEARANCE_RGB, CUT_RGB, FEED_RGB, MAX_OVERLAY_VERTICES, PICK_EDGE_PX, PLUNGE_RGB, RAPID_RGB,
+    CLEARANCE_RGB, CUT_RGB, FEED_RGB, MAX_OVERLAY_VERTICES, PLUNGE_RGB, RAPID_RGB,
     REGION_RGB, RETRACT_RGB, anchor_hit, anchor_points, anchor_reference, capped, chevrons,
-    collect_overlay, edge_nearest, feature_of_facet, ftoz, height_plane_lines, height_planes,
+    collect_overlay, ftoz, height_plane_lines, height_planes,
     gizmo_segments, hover_features, is_axis_label, overlay_labels, plane_corner, plane_rect, project_uv, queue_feature_pick,
     region_lines, selection_feature_lines, shown_regions, toolpath_lines,
 };
@@ -970,9 +970,9 @@ mod feature_pick_tests {
     //! The Face/Edge click path as it lands on State: a plain click
     //! replaces the open operation's geometry list, Ctrl/Shift adds to it,
     //! a repeat is refused as a no-op, and with no operation open nothing
-    //! queues. The screen-space edge search - the half `pick_edge` reads
-    //! but headless tests cannot drive through a window - is pinned here
-    //! too, at the same projection the gizmo and anchor tests use.
+    //! queues. The edge pick - the one pick rule (#692) as the viewport
+    //! asks it, `feature_click::feature_at` - is pinned here too, at the
+    //! same projection the gizmo and anchor tests use.
 
     use super::*;
     use camcraft_app::commands::{AddTool, CreateOperation, ImportModel};
@@ -980,6 +980,25 @@ mod feature_pick_tests {
     use camcraft_app::operation::{GeoSel, Height, OpParams, SrcRef};
     use camcraft_app::stock::StockShape;
     use camcraft_app::tools::catalog;
+
+    /// The welded face a facet belongs to, by the one pick rule's graph
+    /// (what a Face click on that facet stores).
+    fn feature_of_facet(state: &State, entity: &str, facet: usize) -> Option<FeatureSel> {
+        camcraft_app::pick::graph_of(&state.world, entity)?.face_of(facet)?.sel
+    }
+
+    /// The feature edge an Edge-only pick takes at `p`: (entity, edge).
+    fn edge_nearest(state: &State, p: [f32; 2]) -> Option<(String, u32)> {
+        let ask = crate::feature_click::Ask {
+            kinds: camcraft_app::pick::PickKinds::EDGES,
+            unit: camcraft_app::pick::EdgeUnit::Chain,
+        };
+        let (pick, _) = crate::feature_click::feature_at(state, p, ask)?;
+        match pick.target {
+            camcraft_app::pick::PickTarget::Edge { edge } => Some((pick.entity, edge)),
+            _ => None,
+        }
+    }
 
     fn state_with_op() -> State {
         let mut state = State::new();
@@ -1188,14 +1207,14 @@ mod feature_pick_tests {
         let (edge, mid) = rim_mid_px(&state, &mvp, "part", 4.9, 800.0, 600.0)
             .expect("a part rim edge visible from the default camera");
         let (name, hit) =
-            edge_nearest(&state, mid, PICK_EDGE_PX).expect("an edge under its own midpoint");
+            edge_nearest(&state, mid).expect("an edge under its own midpoint");
         assert_eq!(name, "part", "the part draws over the stock here");
         assert_eq!(hit, edge, "and it is the edge that drew there");
 
         // The browser eye closes the geometry off the screen too.
         state.hidden_models.push("part".into());
         assert!(
-            edge_nearest(&state, mid, 4.0 * PICK_EDGE_PX).is_none_or(|(n, _)| n != "part"),
+            edge_nearest(&state, mid).is_none_or(|(n, _)| n != "part"),
             "a hidden model's edges are not on screen, even nearby"
         );
     }
@@ -1210,14 +1229,14 @@ mod feature_pick_tests {
         });
         state.drain_actions();
         assert!(
-            edge_nearest(&state, [10.0, 10.0], 50.0).is_none(),
+            edge_nearest(&state, [10.0, 10.0]).is_none(),
             "pre-layout there is no image to project into - no phantom picks"
         );
         state.viewport_rect = ([0.0, 0.0], [800.0, 600.0]);
         let mvp = state.cam.mvp(800.0 / 600.0);
         let (_, mid) = rim_mid_px(&state, &mvp, STOCK_NAME, 19.9, 800.0, 600.0)
             .expect("a stock rim edge visible from the default camera");
-        let (name, _) = edge_nearest(&state, mid, PICK_EDGE_PX).expect("the stock's own edge");
+        let (name, _) = edge_nearest(&state, mid).expect("the stock's own edge");
         assert_eq!(name, STOCK_NAME, "the stock's top is pickable geometry, no tree needed");
     }
 }
@@ -1735,7 +1754,22 @@ mod view_cube_tests {
         let top = cam.toward([0.0, 0.0, 1.0]);
         assert_eq!((top.target, top.dist), (cam.target, cam.dist));
         assert!((top.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
-        assert!(top.yaw.abs() < 1e-12, "atan2(0, 0) must read 0, not NaN");
+        // At a pole the vanishing atan2 takes the roll from the pre-click
+        // yaw snapped to the nearest quarter turn (#622), never NaN. This
+        // start yaw (0.7) is nearer 0 than pi/2, so it still reads 0.
+        assert!(top.yaw.abs() < 1e-12);
+        let top = cam.oriented(2.0, 0.2).toward([0.0, 0.0, 1.0]);
+        assert!(
+            (top.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+            "a pole click keeps the pre-click yaw's quarter turn: {}",
+            top.yaw
+        );
+        let bottom = cam.oriented(-2.3, 0.2).toward([0.0, 0.0, -1.0]);
+        assert!(
+            (bottom.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+            "the south pole snaps the same way: {}",
+            bottom.yaw
+        );
         let front = cam.toward([0.0, -1.0, 0.0]);
         assert!((front.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12);
         assert!(front.pitch.abs() < 1e-12);
@@ -1751,9 +1785,12 @@ mod view_cube_tests {
 
     #[test]
     fn pole_views_hold_a_stable_roll() {
-        // Straight up and straight down are the basis degeneracies; the
-        // zero-guard in basis_right pins screen-right to +X and
-        // basis_up follows, whatever the yaw atan2 picked.
+        // Straight up and straight down are the basis degeneracies; there
+        // the quarter turn `toward` snapped the yaw to (#622) decides the
+        // roll: screen-right rides the guard frame (-sin y, cos y, 0) that
+        // is continuous with every near-pole view, and basis_up follows.
+        // Views whose pre-click yaw shared a quarter turn roll alike.
+        let snap = |y: f64| (y / std::f64::consts::FRAC_PI_2).round() * std::f64::consts::FRAC_PI_2;
         for d in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
             for yaw0 in [0.0, 0.9, -2.3] {
                 let cam = Camera {
@@ -1766,13 +1803,60 @@ mod view_cube_tests {
                 .toward(d);
                 let (r, u, _) = cam.view_basis();
                 let (r, u): ([f64; 3], [f64; 3]) = (r.into(), u.into());
-                assert!(near(r, [1.0, 0.0, 0.0]), "screen right at the {d:?} pole: {r:?}");
-                assert!(
-                    u[0].abs() < 1e-9 && u[2].abs() < 1e-9,
-                    "screen up must ride a world axis at the {d:?} pole: {u:?}"
-                );
+                let (rs, cs) = (snap(yaw0).sin(), snap(yaw0).cos());
+                let want_r = [-rs, cs, 0.0];
+                let want_u = if d[2] > 0.0 { [-cs, -rs, 0.0] } else { [cs, rs, 0.0] };
+                assert!(near(r, want_r), "screen right at the {d:?} pole: {r:?}");
+                assert!(near(u, want_u), "screen up at the {d:?} pole: {u:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_pole_click_keeps_the_roll_the_view_had() {
+        // The #622 complaint: a TOP click from a near-top view swung the
+        // screen frame up to half a turn (the old +X pin ignored the yaw
+        // the orbit had put there). The snap law bounds the swing to a
+        // half-quarter - 45 degrees.
+        let cam = Camera {
+            yaw: 1.0,
+            pitch: 1.5,
+            dist: 80.0,
+            ..Camera::default()
+        };
+        let (_, u0, _) = cam.view_basis();
+        let u0: [f64; 3] = u0.into();
+        let top = cam.toward([0.0, 0.0, 1.0]);
+        let (_, u1, _) = top.view_basis();
+        let u1: [f64; 3] = u1.into();
+        let dot: f64 = (0..3).map(|i| u0[i] * u1[i]).sum();
+        assert!(
+            dot > std::f64::consts::FRAC_1_SQRT_2,
+            "a pole click may not turn the screen up more than 45 degrees: {u0:?} -> {u1:?}"
+        );
+    }
+
+    #[test]
+    fn a_second_pole_click_lands_the_same_view() {
+        // The reported repro was clicking TOP twice and watching the model
+        // twitch: under the snap law the second click's yaw is already a
+        // quarter turn, so it changes nothing.
+        let cam = Camera {
+            yaw: 1.0,
+            pitch: 1.5,
+            dist: 80.0,
+            ..Camera::default()
+        };
+        let once = cam.toward([0.0, 0.0, 1.0]);
+        let twice = once.toward([0.0, 0.0, 1.0]);
+        assert_eq!(twice.target, once.target);
+        assert_eq!(twice.dist, once.dist);
+        assert!(
+            (twice.yaw - once.yaw).abs() < 1e-12 && (twice.pitch - once.pitch).abs() < 1e-12,
+            "the second click moved the camera: {:?} -> {:?}",
+            (once.yaw, once.pitch),
+            (twice.yaw, twice.pitch)
+        );
     }
 
     #[test]
@@ -1909,6 +1993,58 @@ mod projection_tests {
 
     fn shifted(p: [f64; 3], d: (f64, f64, f64), k: f64) -> [f64; 3] {
         [p[0] + k * d.0, p[1] + k * d.1, p[2] + k * d.2]
+    }
+
+    /// clip z over clip w - the depth the rasterizer compares, which
+    /// WebGPU requires inside [0, 1] alongside -1 <= x, y <= 1 (#600).
+    fn z_ndc(m: &[[f32; 4]; 4], p: [f64; 3]) -> f32 {
+        let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+        let mut z = 0.0f32;
+        let mut w = 0.0f32;
+        for c in 0..4 {
+            z += v[c] * m[c][2];
+            w += v[c] * m[c][3];
+        }
+        z / w
+    }
+
+    #[test]
+    fn the_ortho_depth_spans_zero_to_one_between_the_planes() {
+        // The OpenGL ortho convention spans NDC z over [-1, +1], but
+        // WebGPU clips on 0 <= z <= w, and ortho keeps clip.w at 1 -
+        // so every point nearer than (near + far) / 2 was clipped away
+        // and the viewport went blank (#600). The planes themselves
+        // must land on 0 and 1, and depth must climb between them.
+        let cam = ortho();
+        let m = cam.mvp(ASPECT);
+        let eye = cam.eye();
+        let look = [
+            cam.target[0] - eye[0],
+            cam.target[1] - eye[1],
+            cam.target[2] - eye[2],
+        ];
+        let len = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        let at = |d: f64| {
+            z_ndc(
+                &m,
+                [
+                    eye[0] + look[0] / len * d,
+                    eye[1] + look[1] / len * d,
+                    eye[2] + look[2] / len * d,
+                ],
+            )
+        };
+        let near = 0.1f64;
+        let far = (cam.dist * 40.0).max(1000.0);
+        assert!((at(near) - 0.0).abs() < 1e-3, "the near plane sits at {}", at(near));
+        assert!((at(far) - 1.0).abs() < 1e-3, "the far plane sits at {}", at(far));
+        let mut last = at(near);
+        for d in [cam.dist, (near + far) / 2.0, far * 0.9] {
+            let z = at(d);
+            assert!(z > 0.0 && z < 1.0, "depth at {d} mm is {z}, outside the clip volume");
+            assert!(z > last, "depth at {d} mm is {z}, not deeper than {last}");
+            last = z;
+        }
     }
 
     #[test]

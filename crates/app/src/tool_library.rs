@@ -107,6 +107,9 @@ pub fn parse_tool_library(text: &str) -> Result<Vec<LibraryTool>, String> {
         }
         let def = row.get("definition").ok_or_else(|| format!("tool '{name}' has no definition"))?;
         let tool = project::tool_from_json(def).map_err(|e| format!("tool '{name}': {e}"))?;
+        if let Some(why) = tool.torch_refusal() {
+            return Err(format!("tool '{name}' is refused: {why}"));
+        }
         if !tool.is_sane() {
             return Err(format!(
                 "tool '{name}' is refused: its sizes must be finite and positive, corner radius within the diameter"

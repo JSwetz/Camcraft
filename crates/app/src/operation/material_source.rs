@@ -112,6 +112,11 @@ fn source_region(
         }
         // The probe bounds no area (#108): its generation never asks.
         OpParams::Probe { .. } => Err(GenError::Invalid("a probe has no machining region".into())),
+        // The plasma cut goes THROUGH the plate (#670): what it can cut
+        // is the through-silhouette - a blind pocket is no torch's work.
+        OpParams::PlasmaProfile(_) => {
+            slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
+        }
         // The 3D pocket's machine area is a silhouette, not a section:
         // columns whose surface sits below the first level are still
         // cut, down to that surface - a section would miss them. The

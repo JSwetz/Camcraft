@@ -110,6 +110,7 @@ fn th(top_z: f64, bottom_z: f64) -> ThreadParams {
         plunge_feed: 40.0,
         insert_width: WIDTH,
         form_angle: 60.0,
+        hand: camcraft_motion::cl::ThreadHand::Right,
     }
 }
 
@@ -235,7 +236,8 @@ fn the_ladder_ends_at_the_root_and_the_arcs_land_every_half_pitch() {
     assert_eq!(t.arc_count(), 18);
     assert!(feeds[0].arc.is_none(), "a pass opens with the radial plunge");
     let (s0, r0) = sr(&f, feeds[0].to);
-    assert!((s0 - 8.0).abs() < 1e-9 && (r0 - (MAJOR - 0.4)).abs() < 1e-9, "first rung: {r0} at {s0}");
+    // #629: toward the chuck - the pass opens on the TOP centre.
+    assert!((s0 - 14.0).abs() < 1e-9 && (r0 - (MAJOR - 0.4)).abs() < 1e-9, "first rung: {r0} at {s0}");
     for m in &feeds[1..=6] {
         assert!(m.arc.is_some(), "the threading chain is arcs");
         let (s, r) = sr(&f, m.to);
@@ -245,12 +247,12 @@ fn the_ladder_ends_at_the_root_and_the_arcs_land_every_half_pitch() {
     for w in feeds[1..=6].windows(2) {
         let (sa, _) = sr(&f, w[0].to);
         let (sb, _) = sr(&f, w[1].to);
-        assert!((sb - sa - PITCH * 0.5).abs() < 1e-6, "the half-pitch walk: {sb} after {sa}");
+        assert!((sa - sb - PITCH * 0.5).abs() < 1e-6, "the half-pitch walk down: {sb} after {sa}");
     }
     // The final feed move is the last pass's last arc, at the root.
     let (s_end, r_end) = sr(&f, feeds[feeds.len() - 1].to);
     assert!((r_end - ROOT).abs() < 1e-9, "the last rung is the root: {r_end}");
-    assert!((s_end - 14.0).abs() < 1e-6, "the run ends on a center: {s_end}");
+    assert!((s_end - 8.0).abs() < 1e-6, "the run ends on the bottom center: {s_end}");
     assert!(t.is_chained(), "arcs and all, the chain holds");
 }
 

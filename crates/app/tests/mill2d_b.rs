@@ -308,6 +308,7 @@ fn taper(diameter: f64, tip_angle: f64, flute_len: f64) -> Tool {
         feed: 1500.0,
         tool_material: None,
         flutes: None,
+        orientation: None,
     }
 }
 

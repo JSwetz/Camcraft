@@ -90,3 +90,29 @@ impl KindInfo {
 /// The touch probe (#108): the Probe operation mounts nothing else, and
 /// no cutting kind mounts a probe.
 pub const PROBE: &[ToolKind] = &[ToolKind::Probe];
+
+/// The plasma torch (#670): the plasma operations mount nothing else,
+/// and no cutting kind mounts a torch.
+pub const TORCH: &[ToolKind] = &[ToolKind::Torch];
+
+/// The radius a mill tool removes with certainty (#266): half its
+/// diameter, except a Tap-kind tool (tap or thread mill), whose sure
+/// removal is its thread's MINOR cylinder, `d / 2 - THREAD_DEPTH_PER_PITCH
+/// x pitch` (ISO 724, the depth `machining2d::thread_mill` reads). CAD
+/// models a tapped hole at that minor size and the thread band outside
+/// it is meant to be cut, so judging a tap at its full diameter called
+/// every such hole a gouge. Into solid metal the core still gouges.
+/// The program sim sweeps this radius (`stock_sim::plan_program`); the
+/// generator's verify still judges a tap at its full diameter. A pitch
+/// too coarse to leave a core is refused by name.
+pub fn cutting_radius(tool: &crate::tools::Tool) -> Result<f64, String> {
+    let radius = tool.diameter * 0.5;
+    if tool.kind != ToolKind::Tap {
+        return Ok(radius);
+    }
+    let core = radius - crate::machining2d::THREAD_DEPTH_PER_PITCH * tool.pitch;
+    if !(core.is_finite() && core > 0.0) {
+        return Err(format!("tap leaves no thread core (diameter {}, pitch {})", tool.diameter, tool.pitch));
+    }
+    Ok(core)
+}

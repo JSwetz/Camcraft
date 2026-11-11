@@ -170,6 +170,8 @@ pub fn region_z(
         | OpParams::Deburr { top_z, .. } => resolve_height(world, setup, src, *top_z),
         // The probe's station is its expected contact (#108).
         OpParams::Probe { target, .. } => Some(target[2]),
+        // The plasma cut rides the plate's top (#670).
+        OpParams::PlasmaProfile(p) => resolve_height(world, setup, src, p.top_z),
     }
 }
 
@@ -377,6 +379,15 @@ pub fn resolve_params(
         // The probe states one height: the safe plane it travels at
         // between touches (#108); the touches ride the target.
         OpParams::Probe { clearance_z, .. } => (req("Clearance Z", *clearance_z)?, None, None, None, None),
+        // The plasma cut (#670): the torch-off plane, the plate's top
+        // (the cut plane) and bottom (its thickness) - no hop plane.
+        OpParams::PlasmaProfile(p) => (
+            req("Clearance Z", p.clearance_z)?,
+            Some(req("Top of Plate Z", p.top_z)?),
+            Some(req("Bottom of Plate Z", p.bottom_z)?),
+            None,
+            None,
+        ),
     };
     Ok(ResolvedHeights { clearance, top, bottom, face_top, retract })
 }

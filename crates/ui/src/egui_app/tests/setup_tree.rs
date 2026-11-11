@@ -164,3 +164,20 @@ fn machine_and_post_verbs_land_on_the_active_setups_own_mount() {
     assert_eq!(camcraft_app::setup_mount::own_post(&state.world, Some("Setup2")), None);
     assert_eq!(camcraft_app::setup_mount::own_machine(&state.world, Some("Setup2")), None);
 }
+
+/// #745: the Machine page shows the overview as a label | value grid,
+/// one row per fact, no `?` for an unstated minimum speed.
+#[test]
+fn the_machine_page_shows_a_property_grid() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.pending.push_back(CommandKind::CreateSetup { name: None, datum_from: None });
+    harness.state_mut().state.pending.push_back(CommandKind::LoadBuiltinMachine("VMC 3-axis".into()));
+    harness.run_steps(2);
+    crate::actions::target(&mut harness.state_mut().state, UiTarget::SetupNode("Setup1".into(), SetupPage::Machine));
+    harness.run_steps(3);
+    for label in ["Kind", "Machine", "Spindle", "Axes", "Tool changer", "Coolant", "Workspace", "Source"] {
+        assert!(harness.query_all_by_label(label).next().is_some(), "row label {label}");
+    }
+    assert!(harness.query_by_label("Built-in: VMC 3-axis").is_some());
+    assert!(harness.query_by_label_contains("?").is_none(), "no bare question mark");
+}

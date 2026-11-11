@@ -210,7 +210,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         // answer.
         (params, SrcRef::Selection(items))
             if selection_drives_region(params)
-                && !matches!(params, OpParams::Contour { .. }) =>
+                && !matches!(params, OpParams::Contour { .. } | OpParams::PlasmaProfile(_)) =>
         {
             Some(selection_region(world, setup, items, params, &op.area))
         }
@@ -219,7 +219,9 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         (params, src) => whole_model_pocket(world, setup, src, params, frame.as_ref()),
     };
     let contour_sel = match (&op.params, &op.src) {
-        (OpParams::Contour { .. }, SrcRef::Selection(items)) => {
+        // The plasma cut reads its picks the contour's way (#670):
+        // closed rings AND open runs, each cut as picked.
+        (OpParams::Contour { .. } | OpParams::PlasmaProfile(_), SrcRef::Selection(items)) => {
             Some(selection_geometry_impl(world, setup, items, &op.params, None))
         }
         _ => None,

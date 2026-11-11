@@ -1192,6 +1192,7 @@ impl OpParams {
                 infeed,
                 feed,
                 plunge_feed,
+                hand,
             } => {
                 w(h, *tolerance);
                 wh(h, *clearance_z);
@@ -1200,6 +1201,14 @@ impl OpParams {
                 for v in [*pitch, *depth, *infeed, *feed, *plunge_feed] {
                     w(h, v);
                 }
+                // #629: the hand sets the helix's sense, and the passes
+                // now run toward the chuck - written for BOTH hands, so
+                // every thread cached before the fix goes stale once and
+                // regenerates the new way, saying so.
+                h.write_u8(match hand {
+                    crate::cl::ThreadHand::Right => 0xA1,
+                    crate::cl::ThreadHand::Left => 0xA2,
+                });
             }
             // The contour rides (M5.2 stage E, tags 25-27): each
             // promise-number MOVES the verdict's window or the ride
@@ -1377,6 +1386,27 @@ impl OpParams {
                     w(h, v);
                 }
                 h.write_u8(set_wcs.unwrap_or(0xff));
+            }
+            // The plasma profile (#670): every stored number, the
+            // optional ones with a presence byte.
+            OpParams::PlasmaProfile(p) => {
+                wh(h, p.clearance_z);
+                wh(h, p.top_z);
+                wh(h, p.bottom_z);
+                h.write_u8(u8::from(p.comp == super::PlasmaComp::Control));
+                h.write_u8(u8::from(p.reversed));
+                for v in [p.lead_in, p.lead_out, p.small_hole_dia, p.small_hole_feed, p.overburn] {
+                    w(h, v);
+                }
+                for v in [p.kerf, p.feed, p.pierce_height, p.cut_height, p.pierce_delay] {
+                    match v {
+                        Some(x) => {
+                            h.write_u8(1);
+                            w(h, x);
+                        }
+                        None => h.write_u8(0),
+                    }
+                }
             }
             OpParams::Thread {
                 clearance_z,

@@ -807,13 +807,14 @@ fn moving_one_part_carries_existing_stock_and_undo_restores_both() {
         rot: quat_from_euler(0.0, 0.0, FRAC_PI_2),
     };
     history.execute(&world, MoveModel::new(&world, "part", part_after).expect("move"));
+    // #571: the square box stock follows the turned part but stays square
+    // to the machine, re-fitted with the allowance it had on each side
+    // (-X 0, +X 3, -Y 2, +Y 2, under 0, top 1): part x 9..10, y 0..1.
     let stock = model::find_by_name(&world, STOCK_NAME).expect("stock remains");
     let moved = model::transform_of(&world, &stock).expect("placement");
-    assert!((moved.pos.x - 10.0).abs() < 1e-12);
-    assert!((moved.pos.y - 2.0).abs() < 1e-12);
-    for (actual, expected) in moved.rot.iter().zip(part_after.rot) {
-        assert!((*actual - expected).abs() < 1e-12);
-    }
+    assert!((moved.pos.x - 11.0).abs() < 1e-9 && moved.pos.y.abs() < 1e-9 && moved.pos.z.abs() < 1e-9, "{:?}", moved.pos);
+    assert_eq!(moved.rot, stock_before.rot, "the block keeps its orientation");
+    assert_eq!(model::stock_def_of(&world, &stock), Some(StockShape::Box { dx: 4.0, dy: 4.0, dz: 2.0 }));
 
     assert!(history.undo(&world));
     assert_eq!(model::transform_of(&world, &stock), Some(stock_before));
