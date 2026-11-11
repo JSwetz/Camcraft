@@ -139,6 +139,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::FormTurning { feed, .. } => *feed,
         // The seek feed is the probe's travel pace (#108).
         OpParams::Probe { fast_feed, .. } => *fast_feed,
+        // A blank plasma feed is the controller's (#670): no number.
+        OpParams::PlasmaProfile(p) => p.feed.unwrap_or(0.0),
     }
 }
 
@@ -207,6 +209,9 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::FormTurning { plunge_feed, .. } => *plunge_feed,
         // The measuring re-probe is the slow number (#108).
         OpParams::Probe { slow_feed, .. } => *slow_feed,
+        // The torch never plunges into solid: it pierces at the
+        // controller's height and delay (#670).
+        OpParams::PlasmaProfile(p) => p.feed.unwrap_or(0.0),
     }
 }
 
@@ -279,7 +284,7 @@ fn climb_of(p: &OpParams) -> bool {
         // The wall ride and the helix choose their flank: the climb
         // number says which way the circle runs (M2.4 C).
         OpParams::Bore { climb, .. } | OpParams::Thread { climb, .. } => *climb,
-        OpParams::Probe { .. } => false,
+        OpParams::Probe { .. } | OpParams::PlasmaProfile(_) => false,
     }
 }
 
@@ -360,7 +365,7 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // One ride per exposed edge is the deburr answer: the model's
         // own edges are the pattern, nothing tiles (M2.5 E B).
         | OpParams::Deburr { .. } => None,
-        OpParams::Probe { .. } => None,
+        OpParams::Probe { .. } | OpParams::PlasmaProfile(_) => None,
     }
 }
 
@@ -436,7 +441,7 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // between the clearance plane and the edge there is no
         // infeed ladder to step (M2.5 E B).
         OpParams::Deburr { .. } => None,
-        OpParams::Probe { .. } => None,
+        OpParams::Probe { .. } | OpParams::PlasmaProfile(_) => None,
     }
 }
 
@@ -501,6 +506,8 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Deburr { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
         OpParams::Probe { .. } => None,
+        // The plasma cut rides the plate's top (#670).
+        OpParams::PlasmaProfile(p) => Some(p.top_z),
     }
 }
 
@@ -574,6 +581,8 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         OpParams::Chamfer2D { .. } => None,
         OpParams::Face { .. } => None,
         OpParams::Probe { .. } => None,
+        // The plate's bottom: the thickness the small-hole rule reads.
+        OpParams::PlasmaProfile(p) => Some(p.bottom_z),
     }
 }
 
@@ -649,7 +658,7 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         // The deburr ride hops every run to the clearance plane -
         // the kernel's own word, no between-run plane authored (M2.5 E B).
         | OpParams::Deburr { .. } => None,
-        OpParams::Probe { .. } => None,
+        OpParams::Probe { .. } | OpParams::PlasmaProfile(_) => None,
     }
 }
 
@@ -958,7 +967,10 @@ fn seed_probe(c: &Carried) -> OpParams {
         target: [0.0, 0.0, 0.0],
         radius: 10.0,
         approach: 5.0,
-        overtravel: 5.0,
+        // #570: a search limit, not a destination - twice the 0.5 mm
+        // tolerance below, so a face inside tolerance always trips well
+        // before it, and a missing one alarms 1 mm past, not 5.
+        overtravel: crate::operation::probe_op::default_overtravel(0.5),
         backoff: 1.0,
         fast_feed: 300.0,
         slow_feed: 30.0,
@@ -1277,6 +1289,7 @@ fn seed_threading(c: &Carried) -> OpParams {
         infeed: 0.4,
         feed: c.feed,
         plunge_feed: c.plunge,
+        hand: crate::cl::ThreadHand::Right,
     }
 }
 
@@ -1550,18 +1563,21 @@ pub enum Section {
     Drilling,
     MultiAxis,
     Turning,
+    /// The plasma table's work (#670): the torch's 2D through-cuts.
+    Plasma,
 }
 
 impl Section {
     /// The catalog's order, which is the ribbon's: the sections appear
     /// left to right in exactly this sequence, each one's kinds in the
     /// registry's own order (the row order is the product order).
-    pub const ORDER: [Section; 5] = [
+    pub const ORDER: [Section; 6] = [
         Section::Mill2D,
         Section::Mill3D,
         Section::Drilling,
         Section::MultiAxis,
         Section::Turning,
+        Section::Plasma,
     ];
 
     #[must_use]
@@ -1572,6 +1588,7 @@ impl Section {
             Section::Drilling => "Drilling",
             Section::MultiAxis => "Multi-axis",
             Section::Turning => "Turning",
+            Section::Plasma => "Plasma",
         }
     }
 
@@ -1582,6 +1599,7 @@ impl Section {
     pub fn family(self) -> Family {
         match self {
             Section::Turning => Family::Turn,
+            Section::Plasma => Family::Plasma,
             _ => Family::Mill,
         }
     }
@@ -1637,6 +1655,9 @@ pub fn shown_for(machine: crate::machine::Kind) -> Vec<Section> {
 pub enum Family {
     Mill,
     Turn,
+    /// The plasma table's torch work (#670): admitted on a plasma
+    /// table only - a mill-turn spins steel, it strikes no arc.
+    Plasma,
 }
 
 impl Family {
@@ -1649,8 +1670,31 @@ impl Family {
         use crate::machine::Kind;
         matches!(
             (self, machine),
-            (_, Kind::MillTurn) | (Family::Mill, Kind::Mill) | (Family::Turn, Kind::Lathe)
+            (Family::Mill | Family::Turn, Kind::MillTurn)
+                | (Family::Mill, Kind::Mill)
+                | (Family::Turn, Kind::Lathe)
+                | (Family::Plasma, Kind::Plasma)
         )
+    }
+
+    /// The family's work, in the words a refusal names ("milling work").
+    #[must_use]
+    pub fn work(self) -> &'static str {
+        match self {
+            Family::Mill => "milling",
+            Family::Turn => "turning",
+            Family::Plasma => "plasma cutting",
+        }
+    }
+
+    /// The machine the family's work needs, as a refusal names it.
+    #[must_use]
+    pub fn machine(self) -> &'static str {
+        match self {
+            Family::Mill => "mill",
+            Family::Turn => "lathe",
+            Family::Plasma => "plasma table",
+        }
     }
 }
 
@@ -2204,6 +2248,21 @@ impl KindInfo {
             seed: seed_probe,
             tool_kinds: tk::PROBE,
         },
+        KindInfo {
+            ty: OpType::PlasmaProfile,
+            label: "Plasma Profile",
+            caption: "Plasma Profile",
+            tag: 39,
+            // The torch cuts a kerf through the plate: the milling laws
+            // (tangency, reach, depth) have no torch to judge, so they
+            // stand down as for the centre-line ride; the plasma
+            // generator certifies its own kerf law (no lit move's kerf
+            // reaches the part) and #672 owns the plasma verdicts.
+            mode: Mode::Engrave,
+            section: Section::Plasma,
+            seed: super::plasma_op::seed_plasma_profile,
+            tool_kinds: tk::TORCH,
+        },
     ];
 
     /// Whose machine this kind drives - read off the row's section
@@ -2276,6 +2335,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[36].label,
     KindInfo::ALL[37].label,
     KindInfo::ALL[38].label,
+    KindInfo::ALL[39].label,
 ];
 
 impl OpType {
@@ -2334,6 +2394,9 @@ impl OpType {
             // in the Drilling section: a section's kinds are read by
             // `Section::kinds` in table order, not as a contiguous run.
             OpType::Probe => 38,
+            // #670: the plasma profile appends - the plasma table's
+            // section, its own run at the tail.
+            OpType::PlasmaProfile => 39,
         }
     }
 

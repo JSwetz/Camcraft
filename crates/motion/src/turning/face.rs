@@ -12,11 +12,14 @@
 //!
 //! The passes all run INWARD, from the outer band to the axis: the
 //! spun work presents its fresh face to the tool only on the cut
-//! move, and the retract slides the ball tangentially off the flat
-//! it just made - the way a facing cut is actually taken. Rapids
+//! move. At the axis the nose first LIFTS off the flat it just made
+//! ([`LIFT`] along the axis, #632) and only then rapids out, so the
+//! retract never drags the nose back across the fresh face. Rapids
 //! travel at `r_max + stepdown + nose`, the rotary rough's own
 //! clearance law read radially, where convexity of the distance-to-
-//! axis makes `r_max` an exact bound from the vertices alone.
+//! axis makes `r_max` an exact bound from the vertices alone. The
+//! program opens with a rapid to that radius on the clearance plane
+//! (#632) - a commanded, judged approach - before the first plunge.
 //!
 //! Provenance: lathe facing as radial passes at axial stations -
 //! standard turning practice from machine-tool handbooks and the
@@ -52,6 +55,15 @@ pub struct FacingParams {
 /// 20 nanometres of 32-bit float is nobody's facing - refuse the
 /// hang before it starts.
 const MAX_RUNGS: f64 = 100_000.0;
+
+/// How far the nose lifts off a just-cut face, along the axis, before
+/// it rapids out (#632): 0.2 mm, held to half the stepdown. The cap is
+/// what keeps the lifted rapid in air the ladder already cleared - the
+/// pass above swept the band `[s + stepdown, s + stepdown + 2 nose]`,
+/// and a lift no taller than the stepdown leaves the lifted ball inside
+/// what this pass and the one above removed (the reach sweep's rung
+/// windows say the same for anything wider).
+const LIFT: f64 = 0.2;
 
 /// Face the work: fit the axis, ladder the stations, walk them top
 /// down. Refusals are by name; a clean pass-set is a Toolpath in
@@ -202,7 +214,15 @@ pub fn facing(
 
     let rho_clear = r_max + p.stepdown + p.nose_radius;
     let center = |s: f64| s + p.nose_radius;
-    let mut b = PathBuilder::new(f.point(rho_clear, center(f.station_of(p.clearance_z))));
+    let lift = LIFT.min(0.5 * p.stepdown);
+    let c_clear = center(f.station_of(p.clearance_z));
+    // The approach (#632): the path opens on the axis on the clearance
+    // plane - the lathe's reading of the mill kernels' origin start -
+    // so its first move is a RAPID out to the clearance point, a
+    // commanded traverse the meridian rapid law (#103) judges against
+    // the revolved stock, never a feed from wherever the turret parked.
+    let mut b = PathBuilder::new(f.point(0.0, c_clear));
+    b.push(MoveKind::Rapid, f.point(rho_clear, c_clear), None);
     for k in (0..n).rev() {
         let s = s_face + (k as f64) * p.stepdown;
         // The controlled axial stationing, outside the whole work.
@@ -216,20 +236,13 @@ pub fn facing(
         b.push(MoveKind::Feed, f.point(r_band + p.nose_radius, center(s)), Some(p.feed));
         // The pass itself: inward, tangent to the station, to the axis.
         b.push(MoveKind::Feed, f.point(0.0, center(s)), Some(p.feed));
-        if k > 0 {
-            b.push(MoveKind::Rapid, f.point(rho_clear, center(s)), None);
-        }
+        // Off the face first (#632), then out at the lifted station:
+        // the nose never slides back across the face it just made.
+        b.push(MoveKind::Rapid, f.point(0.0, center(s) + lift), None);
+        b.push(MoveKind::Rapid, f.point(rho_clear, center(s) + lift), None);
     }
-    // Off the finished face and home to the rapids plane.
-    b.push(MoveKind::Rapid, f.point(rho_clear, center(s_face)), None);
-    b.push(
-        MoveKind::Rapid,
-        f.point(
-            rho_clear,
-            center(f.station_of(p.clearance_z)),
-        ),
-        None,
-    );
+    // Home to the rapids plane, outside the whole work.
+    b.push(MoveKind::Rapid, f.point(rho_clear, c_clear), None);
     Ok(b.finish())
 }
 

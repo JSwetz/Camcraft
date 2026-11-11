@@ -206,24 +206,15 @@ impl ToolCsysReport {
     /// the cutting point toward the spindle) and the model origin's height
     /// above the tip.
     ///
-    /// If CIP (or CSIF) is present, the cutting point is its origin and the
-    /// axis is its unit z. If absent, ambiguous or degenerate, returns `Err`
-    /// with the named reason to fall back to numeric placement.
+    /// Requires a valid, unambiguous CIP (coordinate system in process, at
+    /// the cutting part - ISO/TS 13399-303 §3.3); its origin is the cutting
+    /// point and its unit z is the tool axis. When CIP is absent, ambiguous,
+    /// or degenerate, returns `Err` with the named reason to fall back to
+    /// numeric placement.
     pub fn align_tool_body(&self) -> Result<([f64; 3], f64), String> {
-        let csys = match self.find(CsysRole::InProcess) {
-            Ok(cip) => cip,
-            Err(e_cip) => match self.find(CsysRole::Interface) {
-                Ok(csif) => csif,
-                Err(_) => {
-                    if let Some(reason) = self.none_found() {
-                        return Err(reason);
-                    }
-                    return Err(e_cip);
-                }
-            },
-        };
-        let axis = csys.z;
-        let offset = -dot(csys.origin, axis);
+        let cip = self.find(CsysRole::InProcess).map_err(|e| self.none_found().unwrap_or(e))?;
+        let axis = cip.z;
+        let offset = -dot(cip.origin, axis);
         if !offset.is_finite() {
             return Err("calculated tip offset is not finite".into());
         }

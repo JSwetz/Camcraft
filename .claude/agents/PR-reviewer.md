@@ -67,7 +67,9 @@ merge.
    user.name=review -c user.email=review@local`) - never pushed. A conflict in
    code: report it and review the PR head without merging.
 4. **Build and test what it touches** (gate law: test the change, not
-   everything): `cargo test -p <touched crates> --no-run`; then the test
+   everything): `cargo xtask gate quick --base <main ref> --dry-run` shows the
+   suites and test fns the diff maps to (it is the same plan on every OS);
+   `cargo test -p <touched crates> --no-run`; then the test
    binaries the diff touches or that cover the touched modules (each suite
    header names its gate map), one by one; `cargo test -p camcraft-ui --lib`
    from `crates/ui` if UI changed; `cargo clippy -p <touched crates>
@@ -90,6 +92,11 @@ merge.
      icons from allowed licenses with `assets/ui/LICENSES.md`.
    - Provenance line on new modules; ~400-line files (flag growth of files
      already over, not blocking).
+   - Process files: a PR that changes `AGENTS.md`, `.claude/agents/`,
+     `.claude/skills/`, `xtask/`, `.cargo/config.toml` or `scripts/gate.*`
+     must also increment
+     `.claude/PROCESS_VERSION` (AGENTS.md "Process changes bump
+     `PROCESS_VERSION`"); a missing bump is a requested change.
    - Process: body ends `Fixes #N`, has a `Changelog:` line, conventional
      commit subjects; `CHANGELOG.md` edits in the PR conflict with the
      release-time changelog and should be dropped.

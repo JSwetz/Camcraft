@@ -12,6 +12,7 @@ use egui_kittest::Harness;
 use camcraft_app::commands::ImportModel;
 use camcraft_app::geometry::{Point3, cube, transform_point};
 use camcraft_app::setup_align::{self, AlignPreset};
+use camcraft_app::setup_turn::TurnPivot;
 
 use crate::state::{CommandKind, State};
 
@@ -74,13 +75,13 @@ fn the_alignment_control_turns_the_part_through_the_command() {
 #[test]
 fn typed_angles_reach_the_same_command_and_a_refusal_says_why() {
     let mut state = with_part();
-    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [0.0, 0.0, 90.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [0.0, 0.0, 90.0], pivot: TurnPivot::PartCentre });
     assert_eq!(held(&state), AlignPreset::TurnZ90.label());
-    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [30.0, 0.0, 0.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [30.0, 0.0, 0.0], pivot: TurnPivot::PartCentre });
     assert_eq!(held(&state), "turned X 30°, Y 0°, Z 0°");
-    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [30.0, 0.0, 0.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [30.0, 0.0, 0.0], pivot: TurnPivot::PartCentre });
     assert!(state.status.contains("part alignment not changed"), "{}", state.status);
-    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [f64::NAN, 0.0, 0.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [f64::NAN, 0.0, 0.0], pivot: TurnPivot::PartCentre });
     assert!(state.status.contains("finite"), "{}", state.status);
     // Two turns landed, the refusals pushed nothing.
     run(&mut state, CommandKind::Undo);
@@ -136,7 +137,7 @@ fn model_bounds_anchors_follow_the_aligned_part() {
     assert!(near(plain[2], [0.0, 0.0, 0.0]), "{plain:?}");
 
     // Flipped over X about its centre: the box keeps its footprint.
-    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [180.0, 0.0, 0.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [180.0, 0.0, 0.0], pivot: TurnPivot::PartCentre });
     let flipped = model_anchors(&mut state);
     let (lo, hi) = aligned_corner_box(&state);
     assert!(near(flipped[0], [lo[0], lo[1], lo[2]]) && near(flipped[1], [hi[0], hi[1], lo[2]]), "{flipped:?}");
@@ -144,7 +145,7 @@ fn model_bounds_anchors_follow_the_aligned_part() {
 
     // Flipped AND quarter-turned: the part now runs 20 along X, 40 along Y.
     for angles in [[0.0, 0.0, 90.0], [180.0, 0.0, 90.0]] {
-        run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles });
+        run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles, pivot: TurnPivot::PartCentre });
         let turned = model_anchors(&mut state);
         let (lo, hi) = aligned_corner_box(&state);
         assert!(near(turned[0], [lo[0], lo[1], lo[2]]), "{angles:?} SW {turned:?} vs {lo:?}");
@@ -163,6 +164,64 @@ fn model_bounds_anchors_follow_the_aligned_part() {
     assert!(g54.is_some_and(|p| near(p, [-10.0, -20.0, 0.0])), "G54 at {g54:?}");
 
     // Back to as modelled: the anchors are the untouched ones again.
-    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [0.0, 0.0, 0.0] });
+    run(&mut state, CommandKind::AlignPart { setup: "Setup1".into(), angles: [0.0, 0.0, 0.0], pivot: TurnPivot::PartCentre });
     assert_eq!(model_anchors(&mut state), plain);
+}
+
+/// A document point as Setup1 holds it.
+fn held_at(state: &State, p: [f64; 3]) -> [f64; 3] {
+    let a = setup_align::stored(&state.world, "Setup1").unwrap_or_default();
+    let q = transform_point(Point3::new(p[0], p[1], p[2]), a.pos, a.rot);
+    [q.x, q.y, q.z]
+}
+
+/// #606 by real clicks: Z typed as 90 and the row's Apply clicked turns
+/// the part about the WCS origin (the row's default, named on it), so the
+/// part's corner on the origin stays there; "part centre" chosen in the
+/// row's pivot combo turns it about the bounds centre instead. Ctrl+Z /
+/// Ctrl+Y walk each turn as one undo unit.
+#[test]
+fn the_typed_turn_pivots_on_the_wcs_origin_by_real_clicks_and_undoes() {
+    let mut state = with_part();
+    let o = [-20.0, -10.0, 0.0];
+    run(&mut state, CommandKind::SetWcs { pos: o, roll_deg: 0.0, pitch_deg: 0.0, yaw_deg: 0.0 });
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(600.0, 400.0))
+        .build_ui_state(frame, state);
+    h.run();
+    let pivot = |h: &Harness<'static, State>, v: &str| {
+        h.query_by(|n| n.role() == Role::ComboBox && n.value().as_deref() == Some(v)).is_some()
+    };
+    assert!(pivot(&h, "WCS origin"), "the row names its pivot: the WCS origin by default");
+    // Z is the row's third angle: click it, type 90, then Apply.
+    let z = h.get_all_by_role(Role::SpinButton).nth(2).expect("the Z angle").rect();
+    h.get_all_by_role(Role::SpinButton).find(|n| n.rect() == z).expect("Z").click();
+    h.run();
+    h.get_all_by_role(Role::SpinButton)
+        .find(|n| (n.rect().top() - z.top()).abs() < 1.0 && n.rect().left() >= z.left() - 1.0)
+        .expect("Z, editing")
+        .type_text("90");
+    h.run();
+    h.get_by_label("Apply").click();
+    h.run();
+    assert_eq!(held(h.state()), AlignPreset::TurnZ90.label(), "{}", h.state().status);
+    assert!(near(held_at(h.state(), o), o), "the corner on the origin stays: {:?}", held_at(h.state(), o));
+    assert!(!near(held_at(h.state(), [0.0, 0.0, 4.0]), [0.0, 0.0, 4.0]), "not about the centre");
+    let by_origin = setup_align::stored(&h.state().world, "Setup1");
+    key(&mut h, Key::Z);
+    assert_eq!(held(h.state()), "As modelled", "undo restores as modelled");
+    key(&mut h, Key::Y);
+    assert_eq!(setup_align::stored(&h.state().world, "Setup1"), by_origin, "redo turns it again");
+    key(&mut h, Key::Z);
+    // The other pivot, by the row's own combo.
+    h.get_by(|n| n.role() == Role::ComboBox && n.value().as_deref() == Some("WCS origin")).click();
+    h.run();
+    h.get_by_label("part centre").click();
+    h.run();
+    assert!(pivot(&h, "part centre"), "the row now names the centre");
+    h.get_by_label("Apply").click();
+    h.run();
+    assert_eq!(held(h.state()), AlignPreset::TurnZ90.label());
+    assert!(near(held_at(h.state(), [0.0, 0.0, 4.0]), [0.0, 0.0, 4.0]), "the centre stays put");
+    assert_eq!(camcraft_app::setup::work_offset(&h.state().world, "Setup1"), None, "the work offset is untouched");
 }

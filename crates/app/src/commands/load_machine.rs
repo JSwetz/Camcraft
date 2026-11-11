@@ -69,6 +69,19 @@ impl LoadMachine {
         };
         Self::new(world, crate::posting::builtin_path(name), Some(m))
     }
+
+    /// Mount a machine picked in the Machines pane's catalogue (#384)
+    /// onto the DOCUMENT: read and validated again here
+    /// (`library::read_for_assign`), so a refused file is refused at the
+    /// front door by its first refusal. The ui routes the same read
+    /// through the active setup's own machine when it owns one.
+    pub fn from_catalogue(
+        world: &World,
+        source: &crate::machine::library::MachineSource,
+    ) -> Result<Self, CommandError> {
+        let (path, m) = crate::machine::library::read_for_assign(source).map_err(CommandError::Invalid)?;
+        Self::new(world, path, Some(m))
+    }
 }
 
 impl Command for LoadMachine {

@@ -12,14 +12,21 @@ pub mod boundary_draft;
 pub mod boundary_viz;
 pub mod boundary_summary;
 pub mod edge_pick;
+pub mod feature_click;
 pub mod egui_app;
 pub mod feedback;
+pub mod incoming_view;
+pub mod headless_gpu;
 pub mod interact;
+pub mod locate_pick;
 pub mod machined;
+pub mod mcp_host;
 pub mod operations;
 pub mod path_lines;
 pub mod post_file;
 pub mod plane_pick;
+pub mod axis_pick;
+pub mod points_pick;
 pub mod state;
 pub mod theme_dir;
 pub mod trace;
@@ -29,6 +36,8 @@ pub mod viewport;
 
 #[cfg(test)]
 mod law_tests;
+#[cfg(test)]
+mod refusal_focus_tests;
 #[cfg(test)]
 mod helix_view_tests;
 #[cfg(test)]
@@ -41,6 +50,8 @@ mod play_bench_tests;
 mod vertex_pick_tests;
 #[cfg(test)]
 mod setup_chip_tests;
+#[cfg(test)]
+mod wcs_gizmo_tests;
 #[cfg(test)]
 mod axis_note_tests;
 

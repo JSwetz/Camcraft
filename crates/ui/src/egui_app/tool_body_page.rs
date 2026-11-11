@@ -79,10 +79,15 @@ pub(super) fn body_section(ui: &mut Ui, state: &mut State, exists: bool, u: Unit
     if state.tool_body_ui.facets.is_empty() {
         return;
     }
+    let old_axis = state.tool_body_ui.axis;
+    let old_offset = state.tool_body_ui.offset;
     field(ui, "Tool axis (model direction, tip to spindle)");
     axis_combo(ui, &mut state.tool_body_ui.axis);
     field(ui, "Tip offset (model origin above the tip)");
     num(ui, u, &mut state.tool_body_ui.offset);
+    if state.tool_body_ui.axis != old_axis || (state.tool_body_ui.offset - old_offset).abs() > 1e-9 {
+        state.tool_body_ui.align_note = None;
+    }
     if let Some(ref note) = state.tool_body_ui.align_note {
         ui.label(note);
     }

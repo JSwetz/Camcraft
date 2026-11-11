@@ -61,6 +61,18 @@ fn mounted(text: &str) -> Value {
 fn the_shipped_tormach_machines_post_byte_identical() {
     for (name, text) in MACHINES {
         let m = parse_mch(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // #669: the plasma table retracts with G30 under its own post
+        // (#671), never the mill post's G53 - it states no safe_retract.
+        if camcraft_app::machine::kind(Some(&m)) == camcraft_app::machine::Kind::Plasma {
+            assert_eq!(m.safe_retract_z, None, "{name}: a plasma table states no G53 retract");
+            continue;
+        }
+        // #611: a Tormach LATHE retracts in X/Z on its own lathe post
+        // (#612), not the mill post's Z0 law judged here.
+        if camcraft_app::machine::kind(Some(&m)) == camcraft_app::machine::Kind::Lathe {
+            assert_eq!(m.safe_retract_z, None, "{name}: a lathe states no mill Z0 retract");
+            continue;
+        }
         let tormach = name.starts_with("Tormach");
         if tormach || ["VMC 3-axis", "Tilt-head 5-axis"].contains(name) {
             assert_eq!(m.safe_retract_z, Some(0.0), "{name} states Z0 as its safe retract");

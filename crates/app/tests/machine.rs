@@ -739,6 +739,17 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         ("Tormach PCNC 1100 (Series I)", Kind::Mill),
         ("Tormach PCNC 1100 (Series II)", Kind::Mill),
         ("Tormach PCNC 1100 (Series 3)", Kind::Mill),
+        ("Tormach 770M+", Kind::Mill),
+        ("Tormach 1100M+", Kind::Mill),
+        ("Tormach 24R", Kind::Mill),
+        ("Tormach xsTECH Pro", Kind::Mill),
+        ("Tormach xsTECH", Kind::Mill),
+        ("Tormach 1300PL", Kind::Plasma),
+        ("Tormach 8L", Kind::Lathe),
+        ("Tormach 15L Slant-PRO", Kind::Lathe),
+        ("Tormach 15LX Slant-PRO", Kind::Lathe),
+        ("Makera Carvera", Kind::Mill),
+        ("Makera Carvera Air", Kind::Mill),
     ];
     assert_eq!(MACHINES.len(), expectations.len(), "the pane offers what the tests pin");
     for ((name, text), (want_name, want_kind)) in MACHINES.iter().zip(expectations) {
@@ -748,7 +759,9 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         assert_eq!(kind(Some(&m)), want_kind, "{name} declared");
         let mut inferred = m.clone();
         inferred.kind = None;
-        assert_eq!(kind(Some(&inferred)), want_kind, "{name}'s axes agree with its word");
+        // #669: plasma is declared, never inferred - its X/Y/Z reads mill.
+        let axes_say = if want_kind == Kind::Plasma { Kind::Mill } else { want_kind };
+        assert_eq!(kind(Some(&inferred)), axes_say, "{name}'s axes agree with its word");
     }
 }
 
@@ -1000,4 +1013,31 @@ fn an_unstated_rotary_tilts_nothing_a_post_may_promise() {
     let r = camcraft_app::post::machine::script_props(&raw);
     assert_eq!(r["rtcp"], serde_json::json!(true), "the raw door reads geometry too");
     assert_eq!(r["rapidRate"], 5000.0, "the rotary letter never joins the ceiling");
+}
+
+#[test]
+fn rows_state_each_fact_and_never_a_bare_question_mark() {
+    use camcraft_app::units::Unit;
+    let m = Machine {
+        vendor: "Acme".into(),
+        model: "Mill".into(),
+        spindle_max: Some(15000.0),
+        axes: vec![
+            AxisLimits { name: "X".into(), travel: Some((0.0, 300.0)), ..Default::default() },
+            AxisLimits { name: "Y".into(), ..Default::default() },
+        ],
+        tool_count: Some(6),
+        ..Default::default()
+    };
+    let rows = m.rows(Unit::Millimeters);
+    let get = |k: &str| rows.iter().find(|(l, _)| *l == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    assert_eq!(get("Machine"), "Acme Mill");
+    assert_eq!(get("Spindle"), "up to 15000 rpm (min not stated)");
+    assert_eq!(get("Axes"), "X 0 \u{2026} 300 mm \u{b7} Y stroke not stated");
+    assert_eq!(get("Tool changer"), "6 slots");
+    assert_eq!(get("Coolant"), "not stated");
+    assert_eq!(get("Kind"), "not stated");
+    assert!(rows.iter().all(|(_, v)| !v.contains('?')), "{rows:?}");
+    let inch = m.rows(Unit::Inches);
+    assert!(inch.iter().any(|(l, v)| *l == "Axes" && v.contains("11.8") && v.contains("in")), "{inch:?}");
 }

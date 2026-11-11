@@ -8,6 +8,7 @@
 //! path with no warnings). No vendor material consulted.
 
 use camcraft_app::cl::MoveKind;
+use camcraft_app::geometry::Point3;
 use camcraft_app::schema::Toolpath;
 use camcraft_app::warned_moves::{move_focus, warned_mask};
 
@@ -81,21 +82,45 @@ pub(crate) fn cache_lines(out: &mut Vec<[f32; 6]>, cache: &Toolpath, pal: &Seman
     let r = arm * MARK_ARMS;
     for at in fold_warnings_located(&cache.warnings).into_iter().filter_map(|(_, at)| at) {
         let Some(q) = move_focus(moves, at) else { continue };
-        if out.len() + 6 > MAX_OVERLAY_VERTICES {
-            over_budget(out);
+        if !push_cross(out, q, r, c) {
             return false;
-        }
-        for axis in 0..3 {
-            let (mut a, mut b) = (q, q);
-            match axis {
-                0 => (a.x, b.x) = (q.x - r, q.x + r),
-                1 => (a.y, b.y) = (q.y - r, q.y + r),
-                _ => (a.z, b.z) = (q.z - r, q.z + r),
-            }
-            push_line(out, a, b, c);
         }
     }
     true
+}
+
+/// A 3-axis cross of half-arm `r` at `q`. False (logged) when the
+/// vertex budget is spent.
+fn push_cross(out: &mut Vec<[f32; 6]>, q: Point3, r: f64, c: [f32; 3]) -> bool {
+    if out.len() + 6 > MAX_OVERLAY_VERTICES {
+        over_budget(out);
+        return false;
+    }
+    for axis in 0..3 {
+        let (mut a, mut b) = (q, q);
+        match axis {
+            0 => (a.x, b.x) = (q.x - r, q.x + r),
+            1 => (a.y, b.y) = (q.y - r, q.y + r),
+            _ => (a.z, b.z) = (q.z - r, q.z + r),
+        }
+        push_line(out, a, b, c);
+    }
+    true
+}
+
+/// The refusal mark's half-arm, in chevron arms: twice a warned move's,
+/// so "refused here" never reads as "this move is warned" (#261 part 2).
+const REFUSAL_ARMS: f64 = 3.0;
+
+/// #261 part 2: the spot a refused generation names, as a cross in the
+/// gouge colour. Nothing was generated, so this is the only thing the
+/// refusal draws - no path, nothing that could post. A non-finite spot
+/// draws nothing.
+pub(crate) fn refusal_mark(out: &mut Vec<[f32; 6]>, at: [f64; 3], pal: &Semantic, arm: f64) -> bool {
+    if !at.iter().all(|v| v.is_finite()) {
+        return true;
+    }
+    push_cross(out, Point3::new(at[0], at[1], at[2]), arm * REFUSAL_ARMS, pal.gouge)
 }
 
 /// Where each folded warning line of `cache` looks (#261), aligned with
@@ -114,7 +139,6 @@ pub fn warning_focus(cache: &Toolpath) -> Vec<Option<[f64; 3]>> {
 mod tests {
     use super::*;
     use camcraft_app::cl::{Move, Toolpath as ClPath};
-    use camcraft_app::geometry::Point3;
     use camcraft_app::verify::Warning;
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -177,6 +201,21 @@ mod tests {
         ];
         let f = warning_focus(&Toolpath::new(path(), w));
         assert_eq!(f, vec![Some([30.0, 15.0, -1.0]), Some([0.0, 0.0, 6.0]), None, None]);
+    }
+
+    #[test]
+    fn a_refused_spot_draws_one_wide_gouge_cross_and_nothing_when_non_finite() {
+        let pal = &Semantic::RED_GREEN;
+        let mut out = Vec::new();
+        assert!(refusal_mark(&mut out, [10.0, -55.5, 0.0], pal, 0.6));
+        assert_eq!(out.len(), 6, "three arms, two vertices each");
+        assert!(out.iter().all(|v| v[3..6] == pal.gouge), "the palette's gouge colour");
+        // The X arm spans 3 chevron arms each way (1.8 at arm 0.6):
+        // twice a warned move's cross, so the two never read alike.
+        assert_eq!(colours_at(&out, p(10.0 - 1.8, -55.5, 0.0)), vec![pal.gouge]);
+        let mut none = Vec::new();
+        assert!(refusal_mark(&mut none, [f64::NAN, 0.0, 0.0], pal, 0.6));
+        assert!(none.is_empty(), "a non-finite spot draws nothing");
     }
 
     #[test]

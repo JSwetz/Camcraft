@@ -30,7 +30,7 @@ pub struct MachineEditor {
     pub machine: Machine,
 }
 
-const KIND_WORDS: [&str; 4] = ["auto (axis inventory)", "mill", "lathe", "mill-turn"];
+const KIND_WORDS: [&str; 5] = ["auto (axis inventory)", "mill", "lathe", "mill-turn", "plasma"];
 
 pub(crate) fn window(ctx: &egui::Context, state: &mut State) {
     // Take the draft out for the frame: the draw wants `&mut` on it
@@ -63,6 +63,7 @@ pub(crate) fn window(ctx: &egui::Context, state: &mut State) {
             draw_tooling(ui, u, &mut ed.machine);
             draw_coolants(ui, &mut ed.machine);
             ui.separator();
+            super::machine_grid::machine_grid(ui, "machine_editor_overview", &ed.machine, u, &[]);
             ui.horizontal(|ui| {
                 if ui.button("Apply").clicked() {
                     apply = true;
@@ -70,8 +71,6 @@ pub(crate) fn window(ctx: &egui::Context, state: &mut State) {
                 if ui.button("Revert to mounted").clicked() {
                     revert = true;
                 }
-                ui.label(machine::kind(Some(&ed.machine)).label());
-                ui.label(ed.machine.summary());
             });
         });
     if apply {
@@ -95,7 +94,7 @@ pub(crate) fn window(ctx: &egui::Context, state: &mut State) {
 
 fn draw_kind(ui: &mut Ui, m: &mut Machine) {
     pages::field(ui, "Kind");
-    // The `_ => 0` is load-bearing honesty: an unreadable word was
+    // The `None => 0` is load-bearing honesty: an unreadable word was
     // refused at load and cannot exist on a mounted machine, but if a
     // draft somehow carries one, the combo says "auto" and the
     // summary below still reports what the axes say - never a lie
@@ -104,11 +103,12 @@ fn draw_kind(ui: &mut Ui, m: &mut Machine) {
         Some(Kind::Mill) => 1,
         Some(Kind::Lathe) => 2,
         Some(Kind::MillTurn) => 3,
-        _ => 0,
+        Some(Kind::Plasma) => 4,
+        None => 0,
     };
     let before = idx;
     ComboBox::from_id_salt("machine_kind")
-        .selected_text(KIND_WORDS[idx.min(3)])
+        .selected_text(KIND_WORDS[idx.min(KIND_WORDS.len() - 1)])
         .show_ui(ui, |ui| {
             for (i, w) in KIND_WORDS.iter().enumerate() {
                 ui.selectable_value(&mut idx, i, *w);
@@ -117,7 +117,7 @@ fn draw_kind(ui: &mut Ui, m: &mut Machine) {
     if idx != before {
         m.kind = match idx {
             0 => None,
-            i => Kind::from_word(KIND_WORDS[i.min(3)])
+            i => Kind::from_word(KIND_WORDS[i.min(KIND_WORDS.len() - 1)])
                 .map(|k| k.word().to_owned())
                 .or_else(|| Some(String::new())),
         };
@@ -125,7 +125,7 @@ fn draw_kind(ui: &mut Ui, m: &mut Machine) {
     if idx == 0 && m.kind.is_some() {
         m.kind = None;
     }
-    ui.label("auto follows the axes below: X/Y/Z is a mill, X/Z is a lathe, Y plus a rotary is a mill-turn");
+    ui.label("auto follows the axes below: X/Y/Z is a mill, X/Z is a lathe, Y plus a rotary is a mill-turn; a plasma table must say plasma");
 }
 
 fn draw_spindle(ui: &mut Ui, u: Unit, m: &mut Machine) {

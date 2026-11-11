@@ -10,6 +10,7 @@ use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 use crate::links::Links;
 
+use super::GenError;
 use super::arcs::{Seg, fit_arcs, push_segs};
 use super::ladder_links::{LevelWalk, LinkState, descend, level_link, pass_link};
 use super::slots::chord_clears;
@@ -69,11 +70,12 @@ fn dist_to_seg(p: Point2, a: Point2, b: Point2) -> f64 {
 }
 /// Cut levels from `top` down to `bottom`, snapped so the last level is
 /// `bottom` exactly. Shared by depth-stepping operations.
-pub(crate) fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
+pub(crate) fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Result<Vec<f64>, GenError> {
     let span = top - bottom;
     if span <= 0.0 {
-        return vec![bottom];
+        return Ok(vec![bottom]);
     }
+    super::face::pass_budget("stepdown", span, stepdown)?;
     let tol = span * 1e-9;
     let mut zs = Vec::new();
     let mut z = top;
@@ -82,7 +84,7 @@ pub(crate) fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
         z -= stepdown;
     }
     zs.push(bottom);
-    zs
+    Ok(zs)
 }
 
 /// The motion envelope a depth-stepping generator shares with

@@ -201,7 +201,7 @@ fn contacts(p: &ProbeParams) -> Vec<Contact> {
 }
 
 /// Build the probing path. Every touch: travel at the safe plane, feed
-/// down to the approach point, seek fast to the expected trip, back
+/// down to the approach point (never a rapid below the safe plane, #570), seek fast to the expected trip, back
 /// off, re-probe slow, return to the approach point and rise. A bore
 /// is entered once at its centre and left from there.
 pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
@@ -227,10 +227,14 @@ pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
     let home = |q: Point3| Point3::new(q.x, q.y, p.clearance_z + r);
     let tip = |c: Point3| Point3::new(c.x, c.y, c.z - r);
     let entry = if bore { centre } else { first_start };
-    // The rapid plane: the ball the approach clearance over the probed
-    // feature's top. The safe plane must stand above it, so the path
-    // always opens with a rapid down to it - the positioning block a
-    // post writes first - before any feed or touch.
+    // The approach plane: the ball the approach clearance over the probed
+    // feature's top. The safe plane must stand above it. Below the safe
+    // plane a probe never rapids (#570, the protected move of touch-probe
+    // practice): the path opens at the safe plane over its first start
+    // and FEEDS down to the approach plane at the seek feed, so a stylus
+    // meeting something on the way down trips at a feed the probe can
+    // take, never at full rapid. The posts position X Y, then Z down to
+    // the safe plane, before a first feed (tormach.cps `startXY`).
     let rapid_z = p.target.z + r + p.approach;
     if p.clearance_z <= rapid_z {
         return Err(GenError::Invalid(format!(
@@ -247,7 +251,12 @@ pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
             at = to;
         }
     };
-    go(MoveKind::Rapid, Point3::new(entry.x, entry.y, rapid_z), None, &mut moves);
+    // The positioning block every post writes first: a rapid that ends
+    // at the safe plane over the first start (the path's own start, so it
+    // runs nowhere in the path's frame - what it positions FROM is the
+    // tool change, which no path knows). Then the protected feed down.
+    moves.push(Move::new(MoveKind::Rapid, tip(home(entry)), tip(home(entry)), None));
+    go(MoveKind::Feed, Point3::new(entry.x, entry.y, rapid_z), Some(p.fast_feed), &mut moves);
     if bore {
         go(MoveKind::Feed, centre, Some(p.fast_feed), &mut moves);
     }
@@ -257,7 +266,7 @@ pub fn probe_cycle(p: &ProbeParams) -> Result<Toolpath, GenError> {
         let back = add(expect, c.dir, -p.backoff);
         let target = add(expect, c.dir, p.overtravel);
         if !bore {
-            // The first touch is already over its start at the rapid
+            // The first touch is already over its start at the approach
             // plane; later ones travel over at the safe plane.
             if k > 0 {
                 go(MoveKind::Rapid, home(start), None, &mut moves);

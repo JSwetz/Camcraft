@@ -894,6 +894,12 @@ pub enum ParamsDto {
         infeed: f64,
         feed: f64,
         plunge_feed: f64,
+        /// #629: the thread's hand, always written. Absent (every file
+        /// before the key) reads right-hand - the hand the drawing
+        /// meant; those files posted left-hand by the old bug, and
+        /// load as the right-hand thread they modeled.
+        #[serde(default)]
+        hand: ThreadHandDto,
     },
     /// Declared at v37 with the contour kinds (M5.2 stage E): the
     /// ride trio of heights and the kind's own promise-numbers -
@@ -996,6 +1002,8 @@ pub enum ParamsDto {
     },
     /// The probe (#108): an additive variant in the v50 grammar.
     Probe(ProbeDto),
+    /// The plasma profile (#670): additive - no older file names it.
+    PlasmaProfile(PlasmaDto),
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

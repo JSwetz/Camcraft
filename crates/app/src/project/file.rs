@@ -174,6 +174,10 @@ pub struct ProjectFile {
     /// `skip_stops`: an absent key is one combined program.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub per_op_files: bool,
+    /// Per-operation smoothing at post (#616), additive like
+    /// `skip_stops`: an absent key is off - no smoothing words.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smoothing: bool,
     pub entities: Vec<EntityDto>,
 }
 
@@ -195,6 +199,10 @@ pub struct PostOptionsDto {
     /// `"g76"` for the cycle; absent is the G32 passes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threading: Option<String>,
+    /// `"inch"` / `"mm"`: the unit the program ends in (#596), additive
+    /// (no version step); absent leaves the program's unit modal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_units: Option<String>,
 }
 
 /// The file mirror of the `PostRef` singleton (M3.3): exactly the two
@@ -330,6 +338,14 @@ pub struct ToolDto {
     /// holder cylinder, what every older tool judged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<super::tool_body_wire::ToolBodyDto>,
+    /// #630 addition, additive (no version step): the lathe tool
+    /// orientation (LinuxCNC 1-9). Absent from every older file and
+    /// written only when stated; absent reads as the kind's default
+    /// (`orientation::default_for`) - 2 for a turning insert, 3 for a
+    /// boring bar. An out-of-range code is refused at read by the
+    /// tool sanity law (`validate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<u8>,
 }
 
 fn centre_cutting() -> bool {
@@ -385,6 +401,9 @@ pub enum ToolKindDto {
     /// The touch probe (#108): an additive word in the v50 grammar - no
     /// older file names it, so no rung is needed to read one.
     Probe,
+    /// The plasma torch (#670): additive in the same way - no older
+    /// file names it.
+    Torch,
 }
 
 impl ToolDto {
@@ -403,6 +422,7 @@ impl ToolDto {
                 ToolKind::Form => ToolKindDto::Form,
                 ToolKind::Taper => ToolKindDto::Taper,
                 ToolKind::Probe => ToolKindDto::Probe,
+                ToolKind::Torch => ToolKindDto::Torch,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -426,6 +446,7 @@ impl ToolDto {
             center_cutting: t.center_cutting,
             number: None,
             body: None,
+            orientation: t.orientation,
         }
     }
 
@@ -444,6 +465,7 @@ impl ToolDto {
                 ToolKindDto::Form => ToolKind::Form,
                 ToolKindDto::Taper => ToolKind::Taper,
                 ToolKindDto::Probe => ToolKind::Probe,
+                ToolKindDto::Torch => ToolKind::Torch,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
@@ -465,6 +487,7 @@ impl ToolDto {
             }),
             flutes: self.flutes,
             center_cutting: self.center_cutting,
+            orientation: self.orientation,
         }
     }
 }

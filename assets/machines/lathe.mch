@@ -4,7 +4,7 @@
     "units": { "length": "mm", "angle": "degrees" },
     "parts": [
       { "id": "base", "name": "bed", "type": "table", "parts": [
-        { "id": "turret", "name": "X", "type": "linear", "travel": { "min": 0.0, "max": 320.0 }, "parts": [
+        { "id": "turret", "name": "X", "type": "linear", "travel": { "min": -2.5, "max": 320.0 }, "parts": [
           { "id": "car", "name": "Z", "type": "linear", "travel": { "min": -615.0, "max": 615.0 } }
         ] },
         { "id": "ms", "name": "head", "type": "head",

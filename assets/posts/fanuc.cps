@@ -37,6 +37,9 @@ var afterAsk = "";         // the section's PARAM AfterOperation (#110), none wh
 var homedAt = -1;          // linesWritten() just after a trip home (#504): onClose skips its own home when nothing followed
 var coolantOp = "";        // the section's OperationName, for refusals (#150)
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
+var smoothTol = 0;          // #616: the section's PARAM Smoothing, mm (0: none asked)
+var smoothMode = "";        // #616: "finish" or "rough"
+var smoothActive = false;   // #616: this section wrote its smoothing words
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
 var lastA = 0, lastB = 0, lastC = 0; // angle words the last block commanded (deg)
 var tiltRefused = false;   // a refusal the gate counts once, not per line
@@ -308,11 +311,15 @@ function invertedNotes() {
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
-  block([oWord(), "(" + nm + ")"]);
+  // #594: the name is user text from the machine file - cleaned like
+  // every other comment text, so `Tormach 770MX (ML)` never nests.
+  block([oWord(), "(" + (clean(nm) || "CAMCRAFT") + ")"]);
   invertedNotes();
 }
 
 function onParameter(name, value) {
+  if (name === "Smoothing") { smoothTol = Number(value) || 0; return; }
+  if (name === "SmoothingMode") { smoothMode = String(value || ""); return; }
   commentParam(name, value);
   if (name === "OperationName") coolantOp = String(value || "");
   if (name === "Coolant") { coolantAsk = String(value || "flood"); return; }
@@ -344,6 +351,23 @@ function onToolChange(number, name) {
 // it at onSection; a legacy .cl (no records at all) gets it at its
 // first motion - a posted program without an offset or a spindle is
 // not a posted program.
+// #616: per-operation smoothing. Fanuc's G5.1 Q1 (AI contour control)
+// states no tolerance - the deviation is the control's own parameter, so
+// a word written here could not be held to the op's ask (review of
+// #635). The ask is named once and nothing is written until a bounded
+// form is stated per control (#614's Doosan DNM).
+var smoothNamed = false;
+function smoothOn() {
+  if (!(smoothTol > 0) || smoothNamed) return;
+  note("SMOOTHING NOT WRITTEN - G5.1 STATES NO TOLERANCE");
+  smoothNamed = true;
+}
+function smoothOff() {
+  smoothActive = false;
+  smoothTol = 0;
+  smoothMode = "";
+}
+
 function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
@@ -361,6 +385,7 @@ function startPreamble() {
   }
   coolant = coolantFor(coolantAsk);
   if (coolant) block([coolant]);
+  smoothOn();
 }
 
 // The op's after-action (#110), written once its spindle has stopped:
@@ -391,6 +416,7 @@ function endPreamble() {
   if (!sectionOpen) return;
   restorePlane();            // M11.2 A: the plane never leaks past its section
   sectionOpen = false;
+  smoothOff();
   if (inCycle) block(["G80"]);
   inCycle = false;
   if (compOn || compG) {
@@ -542,6 +568,14 @@ function slotOf(word) {  // "G55" -> 1
   var n = Number(String(word).replace(/[^0-9]/g, "")) - 54;
   return n >= 0 && n <= 5 ? n : 0;
 }
+// #575: no deviation report is written before the offset write. Fanuc's
+// published custom macro B documentation (also the Haas and Mazak EIA
+// macro conventions this post family follows) gives an operator message
+// only as #3000 (an alarm, which stops) or #3006 (stop with a message);
+// DPRNT/POPEN go to an external I/O device, not the control's screen. No
+// documented message shows a value without stopping, so nothing is
+// emitted - a stop on every good probe is not a report. The measure-only
+// #3006 below stops by intent: there the operator must act on #190.. .
 function onProbeResult() {
   var p = properties;
   var org = [orgX, orgY, orgZ];

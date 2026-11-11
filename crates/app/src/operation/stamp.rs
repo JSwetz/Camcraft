@@ -53,6 +53,7 @@ pub fn current_stamp(
         crate::tools::ToolKind::Form => 9,
         crate::tools::ToolKind::Taper => 10,
         crate::tools::ToolKind::Probe => 11,
+        crate::tools::ToolKind::Torch => 12,
     });
     for v in [
         tool.diameter,

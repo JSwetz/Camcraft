@@ -265,6 +265,15 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             }
         }
     }
+    // #406: the stock a carried setup starts from, while its settings
+    // page is open - a stock-slot part painted teal (`INCOMING_CLASS`),
+    // apart from the setup's own Stock node.
+    if let Some(mesh) = crate::incoming_view::mesh(state) {
+        let verts: Vec<[f32; 3]> =
+            mesh.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect();
+        let classes = vec![crate::incoming_view::INCOMING_CLASS; verts.len()];
+        parts.push(GpuPart { verts, selected: false, stock: true, fill: false, classes });
+    }
     for (z, region) in crate::interact::shown_regions(state) {
         let Some(region) = region else { continue };
         let Ok(tris) = region.triangles() else { continue };

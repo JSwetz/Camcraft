@@ -141,7 +141,8 @@ pub(crate) fn toggle_deviate(state: &mut State) {
     }
     match camcraft_app::stock_sim::simulate_document(&state.world) {
         Ok(sim) => {
-            state.status = deviate_readout(&sim.dev);
+            let u = state.units();
+            state.status = deviate_readout(&sim.dev, u);
             // The machine's vote joins the verdict when a machine is
             // mounted (stage C) - the clause law lives in `machine_vote`.
             if let Some(vote) = machine_vote(&state.world) {
@@ -250,19 +251,24 @@ pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
         return None;
     }
     let (mut problems, mut more) = (0usize, 0usize);
+    let mut notes: Vec<String> = Vec::new();
     for (_, check) in checks {
         match check {
             Ok(c) => {
                 problems += c.problems.len();
                 more += c.more;
+                notes.extend(c.notes);
             }
             Err(err) => return Some(format!("; machine: {err}")),
         }
     }
+    // #669: what the machine's kind put outside the check is said, never
+    // silently read as "within limits" (a plasma table's Z and rpm).
+    let skipped = if notes.is_empty() { String::new() } else { format!(" - not judged: {}", notes.join("; ")) };
     Some(if problems == 0 {
-        String::from("; machine: within limits")
+        format!("; machine: within limits{skipped}")
     } else {
-        format!("; machine: {problems} limit problem(s){}", if more > 0 { format!(" (+{more})") } else { String::new() })
+        format!("; machine: {problems} limit problem(s){}{skipped}", if more > 0 { format!(" (+{more})") } else { String::new() })
     })
 }
 
@@ -272,33 +278,38 @@ pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
 /// and the test-pinned string law (`sim_readout`'s sibling). Pure, so
 /// the ui tests keep its shape without a window.
 #[must_use]
-pub fn deviate_readout(dev: &camcraft_app::stock_sim::Deviation) -> String {
+pub fn deviate_readout(dev: &camcraft_app::stock_sim::Deviation, unit: camcraft_app::units::Unit) -> String {
     use camcraft_app::geometry::Point3;
+    use camcraft_app::units::{len, vol};
     if dev.is_clean() {
         return String::from("deviate: clean - the program meets the model everywhere");
     }
     let at = |p: Option<Point3>| -> String {
         p.map_or_else(
             || "?".to_owned(),
-            |q| format!(" at ({:.2}, {:.2}, z {:.2})", q.x, q.y, q.z),
+            |q| format!(" at ({}, {}, z {})", len(q.x, unit, 2), len(q.y, unit, 2), len(q.z, unit, 2)),
         )
     };
     let mut s = String::from("deviate:");
     if dev.rest_cells > 0 {
         s += &format!(
-            " REST {} cells ({:.2} mm³, worst {:.2} mm{})",
+            " REST {} cells ({} {}, worst {} {}{})",
             dev.rest_cells,
-            dev.rest_volume,
-            dev.max_rest,
+            vol(dev.rest_volume, unit, 2),
+            unit.vol_suffix(),
+            len(dev.max_rest, unit, 2),
+            unit.suffix(),
             at(dev.max_rest_at)
         );
     }
     if dev.gouge_cells > 0 {
         s += &format!(
-            " GOUGE {} cells ({:.2} mm³, worst {:.2} mm{})",
+            " GOUGE {} cells ({} {}, worst {} {}{})",
             dev.gouge_cells,
-            dev.gouge_volume,
-            dev.max_gouge,
+            vol(dev.gouge_volume, unit, 2),
+            unit.vol_suffix(),
+            len(dev.max_gouge, unit, 2),
+            unit.suffix(),
             at(dev.max_gouge_at)
         );
     }

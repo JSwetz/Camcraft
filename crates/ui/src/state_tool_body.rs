@@ -206,7 +206,12 @@ impl State {
                 Some(o) => {
                     d.offset = o;
                     d.align_note = Some("manual placement".into());
-                    self.status = format!("tip picked: offset {o:.3} mm along the axis");
+                    let u = self.units();
+                    self.status = format!(
+                        "tip picked: offset {} {} along the axis",
+                        camcraft_app::units::len(o, u, 3),
+                        u.suffix()
+                    );
                 }
                 None => self.status = "tip not picked: set a usable axis first".into(),
             },
